@@ -103,7 +103,7 @@ public sealed class MiddlewareProxyService : IMiddlewareService
             };
             if (req.ContentType != null) forward.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(req.ContentType);
 
-            using var client = new HttpClient();
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             var response = await client.SendAsync(forward);
             var bytes = await response.Content.ReadAsByteArrayAsync();
 
