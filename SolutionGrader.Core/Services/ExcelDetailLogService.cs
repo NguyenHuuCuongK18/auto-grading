@@ -3,6 +3,9 @@ using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Errors;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace SolutionGrader.Core.Services
@@ -16,6 +19,8 @@ namespace SolutionGrader.Core.Services
         private string? _overallSummaryPath;
         private double _totalMark;
         private int _totalCompareSteps;
+        private double _caseTotalPoints;
+        private readonly List<StepGradeRecord> _records = new();
 
         // Summary data for overall report
         private readonly List<TestCaseSummary> _caseSummaries = new();
@@ -24,6 +29,7 @@ namespace SolutionGrader.Core.Services
         private const string SheetInput = "InputClients";
         private const string SheetOutClients = "OutputClients";
         private const string SheetOutServers = "OutputServers";
+        private const string SheetSummary = "Summary";
 
         // Columns from Detail.xlsx (as per your file)
         private static readonly string[] BaseColumns = new[] { "Stage", "Input", "DataType", "Action" };
@@ -37,11 +43,13 @@ namespace SolutionGrader.Core.Services
 
         public ExcelDetailLogService(IFileService files) => _files = files;
 
-        public void BeginCase(string outFolder, string questionCode, string detailTemplatePath)
+        public void BeginCase(string outFolder, string questionCode, string detailTemplatePath, double pointsPossible)
         {
             _files.EnsureDirectory(outFolder);
             _questionCode = questionCode;
             _outPath = Path.Combine(outFolder, "GradeDetail.xlsx");
+            _caseTotalPoints = pointsPossible;
+            _records.Clear();
 
             // Set overall summary path (one level up from test case folder)
             var resultRoot = Path.GetDirectoryName(outFolder);
