@@ -24,6 +24,11 @@ public sealed class ReportService : IReportService
             ws.Cell(1,5).Value = "Message";
             ws.Cell(1,6).Value = "DurationMs";
 
+            // Format header
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
             var r = 2;
             foreach (var s in steps)
             {
@@ -34,21 +39,29 @@ public sealed class ReportService : IReportService
                 ws.Cell(r,4).Value = s.Passed;
                 ws.Cell(r,5).Value = s.Message;
                 ws.Cell(r,6).Value = s.DurationMs;
+
+                // Color code Passed column
+                if (s.Passed)
+                    ws.Cell(r, 4).Style.Font.FontColor = XLColor.Green;
+                else
+                    ws.Cell(r, 4).Style.Font.FontColor = XLColor.Red;
+
                 r++;
             }
+
+            // Enable wrap text for message column and auto-fit
+            ws.Column(5).Style.Alignment.WrapText = true;
+            ws.Column(5).Width = 60;
+            
+            // Auto-fit other columns
+            for (int c = 1; c <= 6; c++)
+            {
+                if (c != 5) // Skip message column
+                    ws.Column(c).AdjustToContents();
+            }
+
             using var fs = _files.OpenWrite(xlsxPath, overwrite:true);
             wb.SaveAs(fs);
-        }
-
-        var csvPath = System.IO.Path.Combine(outFolder, $"{questionCode}_Result.csv");
-        using (var sw = new System.IO.StreamWriter(_files.OpenWrite(csvPath, overwrite:true)))
-        {
-            sw.WriteLine("StepId,Stage,Action,Passed,Message,DurationMs");
-            foreach (var s in steps)
-            {
-                var msg = (s.Message ?? "").Replace("\"","\"\"");
-                sw.WriteLine($"{s.Step.Id},{s.Step.Stage},{s.Step.Action},{s.Passed},\"{msg}\",{s.DurationMs:0}");
-            }
         }
 
         return System.Threading.Tasks.Task.FromResult(xlsxPath);

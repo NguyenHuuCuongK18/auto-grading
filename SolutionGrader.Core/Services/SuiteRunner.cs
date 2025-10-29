@@ -63,7 +63,7 @@ namespace SolutionGrader.Core.Services
                 _run.ResultRoot = outDir;
 
                 // NEW: Begin Excel case log; pass the case's Detail.xlsx template path and mark
-                _log.BeginCase(outDir, q.Name, q.DetailPath);
+                _log.BeginCase(outDir, q.Name, q.DetailPath, q.Mark);
                 _log.SetTestCaseMark(q.Mark);
 
                 var results = new List<StepResult>();

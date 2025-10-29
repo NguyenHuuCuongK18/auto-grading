@@ -21,6 +21,8 @@ namespace SolutionGrader.Core.Services
         private int _totalCompareSteps;
         private double _caseTotalPoints;
         private readonly List<StepGradeRecord> _records = new();
+        private bool _allStepsPassed = true; // Track if all steps passed
+        private string? _failedTestDetailPath; // Path to FailedTestDetail.xlsx
 
         // Summary data for overall report
         private readonly List<TestCaseSummary> _caseSummaries = new();
@@ -50,6 +52,8 @@ namespace SolutionGrader.Core.Services
             _outPath = Path.Combine(outFolder, "GradeDetail.xlsx");
             _caseTotalPoints = pointsPossible;
             _records.Clear();
+            _allStepsPassed = true; // Reset for new test case
+            _failedTestDetailPath = Path.Combine(outFolder, "FailedTestDetail.xlsx");
 
             // Set overall summary path (one level up from test case folder)
             var resultRoot = Path.GetDirectoryName(outFolder);
@@ -119,9 +123,36 @@ namespace SolutionGrader.Core.Services
             { 
                 if (_wb != null && _outPath != null)
                 {
+                    // Update points awarded based on whether ALL steps passed
+                    // Only award points if _allStepsPassed is true
+                    foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
+                    {
+                        if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
+                        var hdr = GetHeaderIndex(ws);
+                        
+                        if (!hdr.TryGetValue("PointsAwarded", out var awardedCol) || 
+                            !hdr.TryGetValue("PointsPossible", out var possibleCol)) 
+                            continue;
+
+                        var rng = ws.RangeUsed();
+                        if (rng == null) continue;
+
+                        foreach (var row in rng.RowsUsed().Skip(1))
+                        {
+                            var possibleStr = row.Cell(possibleCol).GetString();
+                            if (double.TryParse(possibleStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var p) && p > 0)
+                            {
+                                // Award points only if all steps passed
+                                double awarded = _allStepsPassed ? p : 0;
+                                SetCell(ws, row.RowNumber(), hdr, "PointsAwarded", Math.Round(awarded, 2));
+                            }
+                        }
+                    }
+
                     // Calculate summary for this case
                     double totalPoints = 0, totalPossible = 0;
-                    bool allPassed = true;
+                    bool allPassed = _allStepsPassed;
+                    var failedSteps = new List<(string Sheet, int Row, string Stage, string Result, string Message, string DetailPath)>();
 
                     foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
                     {
@@ -146,9 +177,30 @@ namespace SolutionGrader.Core.Services
                                 totalPoints += a;
                             if (double.TryParse(possible, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var p)) 
                                 totalPossible += p;
+                            
+                            // Track failed steps for FailedTestDetail.xlsx
                             if (!string.IsNullOrEmpty(result) && !result.Equals("PASS", StringComparison.OrdinalIgnoreCase))
-                                allPassed = false;
+                            {
+                                var stageCol = hdr.TryGetValue("Stage", out var sc) ? sc : 0;
+                                var messageCol = hdr.TryGetValue("Message", out var mc) ? mc : 0;
+                                var detailCol = hdr.TryGetValue("DetailPath", out var dc) ? dc : 0;
+                                
+                                failedSteps.Add((
+                                    sheetName,
+                                    row.RowNumber(),
+                                    stageCol > 0 ? row.Cell(stageCol).GetString() : "",
+                                    result,
+                                    messageCol > 0 ? row.Cell(messageCol).GetString() : "",
+                                    detailCol > 0 ? row.Cell(detailCol).GetString() : ""
+                                ));
+                            }
                         }
+                    }
+
+                    // Create FailedTestDetail.xlsx if there are failures
+                    if (failedSteps.Count > 0 && _failedTestDetailPath != null)
+                    {
+                        CreateFailedTestDetailReport(failedSteps);
                     }
 
                     // Format all worksheets
@@ -178,6 +230,8 @@ namespace SolutionGrader.Core.Services
             _questionCode = null;
             _totalMark = 0;
             _totalCompareSteps = 0;
+            _allStepsPassed = true;
+            _failedTestDetailPath = null;
         }
 
         public void SetTestCaseMark(double mark)
@@ -189,14 +243,20 @@ namespace SolutionGrader.Core.Services
             Step step,
             bool passed,
             string message,
-            int pointsAwarded,
-            int pointsPossible,
+            double pointsAwarded,
+            double pointsPossible,
             double durationMs,
             string errorCode,
             string? detailPath = null,
             string? actualPath = null)
         {
             if (_wb == null || _outPath == null) return;
+
+            // Track if any step failed
+            if (!passed && pointsPossible > 0)
+            {
+                _allStepsPassed = false;
+            }
 
             var sheet = ResolveSheet(step, actualPath);
             if (!_wb.Worksheets.TryGetWorksheet(sheet, out var ws))
@@ -211,9 +271,11 @@ namespace SolutionGrader.Core.Services
                 row = AppendStageRow(ws, hdr, stage);
 
             // Calculate points per step based on total mark
+            // IMPORTANT: We'll update awarded points in EndCase based on _allStepsPassed
             double pointsPerStep = _totalCompareSteps > 0 ? _totalMark / _totalCompareSteps : 0;
-            double actualPointsAwarded = passed && pointsPossible > 0 ? pointsPerStep : 0;
             double actualPointsPossible = pointsPossible > 0 ? pointsPerStep : 0;
+            // For now, store 0 for awarded - will be updated in EndCase if all pass
+            double actualPointsAwarded = 0;
 
             // Write result columns
             SetCell(ws, row.Value, hdr, "Result", passed ? "PASS" : "FAIL");
@@ -262,6 +324,12 @@ namespace SolutionGrader.Core.Services
         public void LogSkip(Step step, string reason, string errorCode)
         {
             LogStepGrade(step, true, $"SKIP: {reason}", 0, 0, 0, errorCode, null, null);
+        }
+
+        public void LogCaseSummary(string questionCode, bool passed, double pointsAwarded, double pointsPossible, string message)
+        {
+            // This is handled in EndCase for ExcelDetailLogService
+            // No need to do anything here as summary is calculated from all steps
         }
 
         public void WriteOverallSummary()
@@ -413,6 +481,58 @@ namespace SolutionGrader.Core.Services
             }
         }
 
+        private void CreateFailedTestDetailReport(List<(string Sheet, int Row, string Stage, string Result, string Message, string DetailPath)> failedSteps)
+        {
+            if (_failedTestDetailPath == null || _wb == null) return;
+
+            try
+            {
+                using var failedWb = new XLWorkbook();
+                var ws = failedWb.AddWorksheet("FailedTests");
+
+                // Headers
+                ws.Cell(1, 1).Value = XLCellValue.FromObject("Sheet");
+                ws.Cell(1, 2).Value = XLCellValue.FromObject("Stage");
+                ws.Cell(1, 3).Value = XLCellValue.FromObject("Result");
+                ws.Cell(1, 4).Value = XLCellValue.FromObject("Message");
+                ws.Cell(1, 5).Value = XLCellValue.FromObject("DetailPath");
+
+                // Format header
+                ws.Row(1).Style.Font.Bold = true;
+                ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightCoral;
+                ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+                // Data rows
+                int row = 2;
+                foreach (var failed in failedSteps)
+                {
+                    ws.Cell(row, 1).Value = XLCellValue.FromObject(failed.Sheet);
+                    ws.Cell(row, 2).Value = XLCellValue.FromObject(failed.Stage);
+                    ws.Cell(row, 3).Value = XLCellValue.FromObject(failed.Result);
+                    ws.Cell(row, 4).Value = XLCellValue.FromObject(failed.Message);
+                    ws.Cell(row, 5).Value = XLCellValue.FromObject(failed.DetailPath);
+
+                    // Color code result column
+                    ws.Cell(row, 3).Style.Font.FontColor = XLColor.Red;
+
+                    row++;
+                }
+
+                // Auto-fit columns and enable wrap text
+                ws.Columns().AdjustToContents();
+                ws.Column(4).Style.Alignment.WrapText = true;
+                ws.Column(4).Width = 60; // Message column
+                ws.Column(5).Style.Alignment.WrapText = true;
+                ws.Column(5).Width = 50; // DetailPath column
+
+                failedWb.SaveAs(_failedTestDetailPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARNING] Failed to create FailedTestDetail.xlsx: {ex.Message}");
+            }
+        }
+
         private static string ResolveSheet(Step step, string? actualPath)
         {
             // INPUT sheet
@@ -443,27 +563,50 @@ namespace SolutionGrader.Core.Services
             {
                 if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
 
-                // Auto-fit all columns
-                ws.Columns().AdjustToContents();
-
-                // Enable wrap text for specific columns that might have long content
+                // Get header index
                 var hdr = GetHeaderIndex(ws);
+
+                // Enable wrap text for columns that might have long content
                 if (hdr.TryGetValue("Message", out var msgCol))
                 {
                     ws.Column(msgCol).Style.Alignment.WrapText = true;
-                    ws.Column(msgCol).Width = 50; // Set a reasonable width
+                    ws.Column(msgCol).Width = 60; // Set a reasonable width
                 }
 
                 if (hdr.TryGetValue("DetailPath", out var detailCol))
                 {
                     ws.Column(detailCol).Style.Alignment.WrapText = true;
-                    ws.Column(detailCol).Width = 40;
+                    ws.Column(detailCol).Width = 50;
                 }
 
                 if (hdr.TryGetValue("ActualPath", out var actualCol))
                 {
                     ws.Column(actualCol).Style.Alignment.WrapText = true;
-                    ws.Column(actualCol).Width = 40;
+                    ws.Column(actualCol).Width = 50;
+                }
+
+                if (hdr.TryGetValue("Output", out var outputCol))
+                {
+                    ws.Column(outputCol).Style.Alignment.WrapText = true;
+                    ws.Column(outputCol).Width = 60;
+                }
+
+                if (hdr.TryGetValue("DataResponse", out var dataResponseCol))
+                {
+                    ws.Column(dataResponseCol).Style.Alignment.WrapText = true;
+                    ws.Column(dataResponseCol).Width = 60;
+                }
+
+                // Auto-fit other columns
+                foreach (var col in hdr.Keys)
+                {
+                    if (col != "Message" && col != "DetailPath" && col != "ActualPath" && col != "Output" && col != "DataResponse")
+                    {
+                        if (hdr.TryGetValue(col, out var colIdx))
+                        {
+                            ws.Column(colIdx).AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1);
+                        }
+                    }
                 }
 
                 // Format header row
@@ -471,6 +614,13 @@ namespace SolutionGrader.Core.Services
                 headerRow.Style.Font.Bold = true;
                 headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
                 headerRow.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                headerRow.Style.Alignment.WrapText = true;
+                
+                // Set minimum height for rows with wrapped text
+                for (int r = 2; r <= (ws.LastRowUsed()?.RowNumber() ?? 1); r++)
+                {
+                    ws.Row(r).Height = 15; // Minimum height, will expand with content
+                }
             }
         }
 

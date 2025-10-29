@@ -62,6 +62,31 @@ dotnet run --project SolutionGrader.Cli -- ExecuteSuite \
 
 ## Recent Improvements
 
+### Grading Logic Update (v2.0)
+
+The grading system has been significantly improved to meet academic grading requirements:
+
+1. **All-or-Nothing Grading**: Points are now awarded only if ALL test steps in a test case pass. If any step fails, no points are awarded for that test case.
+2. **Global Header Marks**: Test case marks are now read from the global `Header.xlsx` file's `QuestionMark` sheet, supporting arbitrary double values (e.g., 1.0, 2.5, 10.0).
+3. **Excel-Only Output**: Removed CSV output files. All results are now saved in Excel format for better readability and formatting.
+4. **Failed Test Detail Report**: Added `FailedTestDetail.xlsx` file that provides detailed information about failed test steps, including:
+   - Sheet name where the failure occurred
+   - Stage number
+   - Result status
+   - Detailed error message
+   - Path to diff files (for mismatch details)
+5. **Improved Cell Formatting**: Excel cells now properly wrap text and auto-fit content, with specific width settings for long columns like Message, DetailPath, and Output.
+
+#### Output Files
+
+For each test case, the following files are generated:
+- `GradeDetail.xlsx` - Detailed step-by-step results with pass/fail status and points
+- `FailedTestDetail.xlsx` - Only created if there are failures; shows detailed failure information
+- `<TestCase>_Result.xlsx` - Summary of step execution results
+
+Overall summary:
+- `OverallSummary.xlsx` - Aggregated results across all test cases with total points
+
 ### Fixed Hanging Issue (v1.1)
 
 The CLI version previously hung during execution. The following fixes were implemented:
