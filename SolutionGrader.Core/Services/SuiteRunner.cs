@@ -30,14 +30,19 @@ public sealed class SuiteRunner
 
     public async Task<int> ExecuteSuiteAsync(ExecuteSuiteArgs args, CancellationToken ct = default)
     {
+        Console.WriteLine($"[Suite] Loading test suite from: {args.SuitePath}");
         var def = _suite.Load(args.SuitePath);
         args.Protocol = def.Protocol;
+        Console.WriteLine($"[Suite] Protocol: {args.Protocol}");
+        Console.WriteLine($"[Suite] Found {def.Cases.Count} test case(s)");
         _files.EnsureDirectory(args.ResultRoot);
 
         foreach (var q in def.Cases)
         {
             ct.ThrowIfCancellationRequested();
 
+            Console.WriteLine($"\n[TestCase] Starting: {q.Name}");
+            
             _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
             await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, ct);
 
@@ -49,6 +54,7 @@ public sealed class SuiteRunner
 
             var steps = _parser.ParseDetail(q.DetailPath, q.Name);
             if (steps.Count == 0) throw new InvalidOperationException("Test case does not contain any steps.");
+            Console.WriteLine($"[TestCase] Loaded {steps.Count} step(s)");
 
             var results = new List<StepResult>();
             foreach (var step in steps)
@@ -60,14 +66,19 @@ public sealed class SuiteRunner
                 var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);
                 sw.Stop();
                 results.Add(new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds });
+                Console.WriteLine($"[Step] Result: {(ok ? "PASS" : "FAIL")} - {msg} ({sw.Elapsed.TotalMilliseconds:F0}ms)");
             }
 
+            Console.WriteLine($"[TestCase] Writing results to: {outDir}");
             await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
 
+            Console.WriteLine($"[TestCase] Cleaning up processes...");
             try { await _proc.StopAllAsync(); } catch { }
             try { await _mw.StopAsync(); } catch { }
+            Console.WriteLine($"[TestCase] Completed: {q.Name}\n");
         }
 
+        Console.WriteLine("[Suite] All test cases completed successfully");
         return 1;
     }
 }

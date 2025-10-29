@@ -15,6 +15,7 @@ public sealed class Executor : IExecutor
 
     private const int ServerReadyTimeoutSeconds = 5;
     private const int ServerReadyPollIntervalMs = 100;
+    private const int RealServerPort = 5001;
 
     public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp)
     {
@@ -25,6 +26,8 @@ public sealed class Executor : IExecutor
 
     public async Task<(bool ok, string message)> ExecuteAsync(Step step, ExecuteSuiteArgs args, CancellationToken ct)
     {
+        Console.WriteLine($"[Step] Executing: {step.Action} (Stage: {step.Stage}, ID: {step.Id})");
+        
         var useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
 
         // hard ceiling so sockets/connect/read don't hang forever
@@ -33,29 +36,37 @@ public sealed class Executor : IExecutor
         switch (step.Action)
         {
             case var a when a == ActionKeywords.ClientStart:
+                Console.WriteLine("[Action] ClientStart: Ensuring server is running...");
                 if (!_proc.IsServerRunning) _proc.StartServer();
                 await WaitForServerReadyAsync(ct);
+                Console.WriteLine("[Action] ClientStart: Starting middleware proxy...");
                 await _mw.StartAsync(useHttp, ct);
+                Console.WriteLine("[Action] ClientStart: Starting client application...");
                 _proc.StartClient();
                 return (true, "Client started (with server & middleware)");
 
             case var a when a == ActionKeywords.ServerStart:
+                Console.WriteLine("[Action] ServerStart: Starting server application...");
                 _proc.StartServer();
                 await WaitForServerReadyAsync(ct);
+                Console.WriteLine("[Action] ServerStart: Starting middleware proxy...");
                 await _mw.StartAsync(useHttp, ct);
                 return (true, "Server started (middleware ensured)");
 
             case var a when a == ActionKeywords.ClientClose:
+                Console.WriteLine("[Action] ClientClose: Stopping client and middleware...");
                 await _proc.StopClientAsync();
                 await _mw.StopAsync();
                 return (true, "Client stopped (middleware stopped)");
 
             case var a when a == ActionKeywords.ServerClose:
+                Console.WriteLine("[Action] ServerClose: Stopping server and middleware...");
                 await _proc.StopServerAsync();
                 await _mw.StopAsync();
                 return (true, "Server stopped (middleware stopped)");
 
             case var a when a == ActionKeywords.KillAll:
+                Console.WriteLine("[Action] KillAll: Stopping all processes and middleware...");
                 await _proc.StopAllAsync();
                 await _mw.StopAsync();
                 return (true, "All processes + middleware stopped");
@@ -136,9 +147,38 @@ public sealed class Executor : IExecutor
         while (sw.Elapsed < TimeSpan.FromSeconds(ServerReadyTimeoutSeconds))
         {
             ct.ThrowIfCancellationRequested();
-            if (_proc.IsServerRunning) return;
+            
+            // Check if process is running
+            if (!_proc.IsServerRunning)
+            {
+                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                continue;
+            }
+            
+            // Check if server is actually listening on the port by attempting a connection
+            if (await IsPortListeningAsync(RealServerPort, ct))
+            {
+                return;
+            }
+            
             await Task.Delay(ServerReadyPollIntervalMs, ct);
         }
         Console.WriteLine($"[WARNING] Server not fully initialized after {ServerReadyTimeoutSeconds}s wait. Continuing anyway.");
+    }
+
+    private static async Task<bool> IsPortListeningAsync(int port, CancellationToken ct)
+    {
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(200); // Quick check with 200ms timeout
+            await client.ConnectAsync(System.Net.IPAddress.Loopback, port, cts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
