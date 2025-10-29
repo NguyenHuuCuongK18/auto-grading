@@ -329,20 +329,15 @@ namespace SolutionGrader.Core.Services
 
         private void UpsertOverallSummaryRow(string summaryPath, string testCase, bool passed, double pointsAwarded, double pointsPossible)
         {
-            XLWorkbook wb;
+            using XLWorkbook wb = File.Exists(summaryPath) ? LoadExistingWorkbook(summaryPath) : new XLWorkbook();
             IXLWorksheet ws;
 
             if (File.Exists(summaryPath))
             {
-                using (var sr = _files.OpenRead(summaryPath))
-                {
-                    wb = new XLWorkbook(sr);
-                }
                 ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet("Summary");
             }
             else
             {
-                wb = new XLWorkbook();
                 ws = wb.AddWorksheet("Summary");
                 ws.Cell(1, 1).Value = "TestCase";
                 ws.Cell(1, 2).Value = "Passed";
@@ -379,7 +374,12 @@ namespace SolutionGrader.Core.Services
             {
                 wb.SaveAs(sw);
             }
-            wb.Dispose();
+        }
+
+        private XLWorkbook LoadExistingWorkbook(string path)
+        {
+            using var sr = _files.OpenRead(path);
+            return new XLWorkbook(sr);
         }
 
         private static string ResolveSheet(Step step, string? actualPath)
