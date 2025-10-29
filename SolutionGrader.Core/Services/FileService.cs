@@ -12,7 +12,7 @@ public sealed class FileService : IFileService
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(dir)) EnsureDirectory(dir!);
         var mode = overwrite ? FileMode.Create : FileMode.CreateNew;
-        return File.Open(path, mode, FileAccess.Write, FileShare.None);
+        return File.Open(path, mode, FileAccess.ReadWrite, FileShare.None);
     }
 
     public bool Exists(string path) => File.Exists(path);
