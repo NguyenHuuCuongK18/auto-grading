@@ -13,6 +13,9 @@ public sealed class Executor : IExecutor
     private readonly IMiddlewareService _mw;
     private readonly IDataComparisonService _cmp;
 
+    private const int ServerReadyTimeoutSeconds = 2;
+    private const int ServerReadyPollIntervalMs = 100;
+
     public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp)
     {
         _proc = proc;
@@ -128,11 +131,15 @@ public sealed class Executor : IExecutor
     private async Task WaitForServerReadyAsync(CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(2))
+        while (sw.Elapsed < TimeSpan.FromSeconds(ServerReadyTimeoutSeconds))
         {
             ct.ThrowIfCancellationRequested();
-            if (_proc.IsServerRunning) break;
-            await Task.Delay(100, ct);
+            if (_proc.IsServerRunning) return;
+            await Task.Delay(ServerReadyPollIntervalMs, ct);
         }
+
+        // Server didn't become ready within timeout - log warning but continue
+        // The subsequent middleware/client start may still work if server is starting up
+        Console.WriteLine($"[WARNING] Server not fully initialized after {ServerReadyTimeoutSeconds}s wait. Continuing anyway.");
     }
 }
