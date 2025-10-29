@@ -3,6 +3,7 @@ namespace SolutionGrader.Core.Services;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
+using System.Diagnostics;
 using System.Net.Http;
 
 public sealed class Executor : IExecutor
@@ -11,6 +12,9 @@ public sealed class Executor : IExecutor
     private readonly IExecutableManager _proc;
     private readonly IMiddlewareService _mw;
     private readonly IDataComparisonService _cmp;
+
+    private const int ServerReadyTimeoutSeconds = 2;
+    private const int ServerReadyPollIntervalMs = 100;
 
     public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp)
     {
@@ -27,12 +31,14 @@ public sealed class Executor : IExecutor
         {
             case var a when a == ActionKeywords.ClientStart:
                 if (!_proc.IsServerRunning) _proc.StartServer();
+                await WaitForServerReadyAsync(ct);
                 await _mw.StartAsync(useHttp, ct);
                 _proc.StartClient();
                 return (true, "Client started (with server & middleware)");
 
             case var a when a == ActionKeywords.ServerStart:
                 _proc.StartServer();
+                await WaitForServerReadyAsync(ct);
                 await _mw.StartAsync(useHttp, ct);
                 return (true, "Server started (middleware ensured)");
 
@@ -53,12 +59,14 @@ public sealed class Executor : IExecutor
 
             case var a when a == ActionKeywords.RunClient:
                 if (!_proc.IsServerRunning) _proc.StartServer();
+                await WaitForServerReadyAsync(ct);
                 await _mw.StartAsync(useHttp, ct);
                 _proc.StartClient();
                 return (true, "RunClient OK");
 
             case var a when a == ActionKeywords.RunServer:
                 _proc.StartServer();
+                await WaitForServerReadyAsync(ct);
                 await _mw.StartAsync(useHttp, ct);
                 return (true, "RunServer OK");
 
@@ -118,5 +126,20 @@ public sealed class Executor : IExecutor
             default:
                 return (false, $"Unsupported action: {step.Action}");
         }
+    }
+
+    private async Task WaitForServerReadyAsync(CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < TimeSpan.FromSeconds(ServerReadyTimeoutSeconds))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_proc.IsServerRunning) return;
+            await Task.Delay(ServerReadyPollIntervalMs, ct);
+        }
+
+        // Server didn't become ready within timeout - log warning but continue
+        // The subsequent middleware/client start may still work if server is starting up
+        Console.WriteLine($"[WARNING] Server not fully initialized after {ServerReadyTimeoutSeconds}s wait. Continuing anyway.");
     }
 }

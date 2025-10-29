@@ -50,9 +50,6 @@ public sealed class SuiteRunner
             var steps = _parser.ParseDetail(q.DetailPath, q.Name);
             if (steps.Count == 0) throw new InvalidOperationException("Test case does not contain any steps.");
 
-            // Bootstrap first-step flow: Server -> MW -> Client
-            await StartProcessesAsync(args, ct);
-
             var results = new List<StepResult>();
             foreach (var step in steps)
             {
@@ -69,22 +66,5 @@ public sealed class SuiteRunner
         }
 
         return 1;
-    }
-
-    private async Task StartProcessesAsync(ExecuteSuiteArgs args, CancellationToken ct)
-    {
-        _proc.StartServer();
-
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < TimeSpan.FromSeconds(2))
-        {
-            ct.ThrowIfCancellationRequested();
-            if (_proc.IsServerRunning) break;
-            await Task.Delay(100, ct);
-        }
-
-        bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
-        await _mw.StartAsync(useHttp, ct);
-        _proc.StartClient();
     }
 }
