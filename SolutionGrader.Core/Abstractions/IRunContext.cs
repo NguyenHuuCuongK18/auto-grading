@@ -5,5 +5,8 @@
         string ResultRoot { get; set; }
         string? CurrentQuestionCode { get; set; }
         int? CurrentStage { get; set; }
+        
+        string? ResolveServerExecutable();
+        string ResolveActualClientText(string questionCode, string stage);
     }
 }

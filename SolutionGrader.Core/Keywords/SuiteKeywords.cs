@@ -2,13 +2,15 @@ namespace SolutionGrader.Core.Keywords;
 
 public static class SuiteKeywords
 {
-    public const string HeaderFileName = "Header.xlsx";
-    public const string DetailFileName = "Detail.xlsx";
+    // Reference FileKeywords for standard file names
+    public const string HeaderFileName = "Header.xlsx";  // Same as FileKeywords.FileName_Header
+    public const string DetailFileName = "Detail.xlsx";  // Same as FileKeywords.FileName_Detail
 
     public const string Sheet_InputClients   = "InputClients";
     public const string Sheet_OutputClients  = "OutputClients";
     public const string Sheet_OutputServers  = "OutputServers";
     public const string Sheet_Header         = "Header";        // fallback header
+    public const string Sheet_QuestionMark   = "QuestionMark";  // for reading test case marks
 
     // InputClients
     public const string Col_IC_Stage    = "Stage";
@@ -37,4 +39,5 @@ public static class SuiteKeywords
 
     // Header config (fallback) - if future variations add Config/Type, hook here.
     public const string ConfigKey_Type = "Type";
+    public const string ConfigKey_Protocol = "Protocol";
 }

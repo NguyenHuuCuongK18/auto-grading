@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
 {
@@ -40,6 +41,20 @@ namespace SolutionGrader.Core.Services
         }
 
         public Task StopAsync(CancellationToken ct = default) => StopCoreAsync();
+
+        public async Task<bool> ProxyAsync(IRunContext context, CancellationToken ct = default)
+        {
+            try
+            {
+                // Start the proxy if not already running
+                await StartAsync(_httpMode, ct);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         private async Task StopCoreAsync()
         {
@@ -178,11 +193,11 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                var q = _run.CurrentQuestionCode ?? "Unknown";
+                var q = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
                 var s = _run.CurrentStage ?? 0;
-                var folder = Path.Combine(_run.ResultRoot, "actual", "servers", q);
+                var folder = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, FileKeywords.Folder_Servers, q);
                 Directory.CreateDirectory(folder);
-                var path = Path.Combine(folder, $"{s}.txt");
+                var path = Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, s));
 
                 var sb = new StringBuilder();
                 sb.AppendLine("=== REQUEST ===");

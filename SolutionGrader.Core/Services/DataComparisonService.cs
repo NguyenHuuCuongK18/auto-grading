@@ -1,5 +1,7 @@
 ﻿using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Domain.Errors;
+using SolutionGrader.Core.Keywords;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,119 +16,132 @@ namespace SolutionGrader.Core.Services
         public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
             if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected missing");
+            {
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: {infoExpected.Description}");
+            }
 
             if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual file missing: {actualPath}");
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual output file not found at {actualPath}");
+            }
 
-            using var e = File.OpenRead(expectedPath!);
-            using var a = File.OpenRead(actualPath!);
+            using var e = File.OpenText(expectedPath!);
+            using var a = File.OpenText(actualPath!);
+            var exp = Normalize(e.ReadToEnd(), false);
+            var act = Normalize(a.ReadToEnd(), false);
 
-            if (e.Length != a.Length) return (false, $"Size differs: {e.Length} vs {a.Length}");
+            if (exp == act) return (true, "Files match exactly");
 
-            using var he = SHA256.Create();
-            using var ha = SHA256.Create();
-            var h1 = Convert.ToHexString(he.ComputeHash(e));
-            var h2 = Convert.ToHexString(ha.ComputeHash(a));
-            return (h1 == h2, h1 == h2 ? "Equal" : "Hash differs");
+            var (idx, _, _, eCtx, aCtx) = FirstDiff(exp, act);
+            return (false, idx >= 0 ? $"Content differs (first diff at idx {idx})" : "Content differs");
         }
 
         public (bool, string) CompareText(string? expectedPath, string? actualPath, bool caseInsensitive = true)
         {
+            // Determine if this is client or server output based on path
+            var isClientOutput = actualPath?.Contains($"\\{FileKeywords.Folder_Clients}\\") ?? false;
+            var isServerOutput = actualPath?.Contains($"\\{FileKeywords.Folder_Servers}\\") ?? false;
+
             if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected missing");
+            {
+                string errorCode = isClientOutput ? ErrorCodes.EXPECTED_CLIENT_OUTPUT_MISSING
+                                 : isServerOutput ? ErrorCodes.EXPECTED_SERVER_OUTPUT_MISSING
+                                 : ErrorCodes.EXPECTED_FILE_MISSING;
+                var infoExpected = ErrorCodes.GetInfo(errorCode);
+                return (true, $"{infoExpected.Title}: {infoExpected.Description}");
+            }
 
             if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual file missing: {actualPath}");
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                string outputType = isClientOutput ? "client console output"
+                                  : isServerOutput ? "server console output"
+                                  : "actual output";
+                return (false, $"{infoActual.Title}: Expected {outputType} at {actualPath} was not generated");
+            }
 
             var exp = Normalize(File.ReadAllText(expectedPath!), caseInsensitive);
             var act = Normalize(File.ReadAllText(actualPath!), caseInsensitive);
 
-            return (exp == act, exp == act ? "Equal" : "Content differs");
+            if (exp == act)
+            {
+                string outputType = isClientOutput ? "client output"
+                                  : isServerOutput ? "server output"
+                                  : "text content";
+                return (true, $"Text comparison passed: {outputType} matches expected");
+            }
+
+            var (idx, _, _, eCtx, aCtx) = FirstDiff(exp, act);
+            var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.TEXT_MISMATCH);
+            return (false, idx >= 0 
+                ? $"{infoMismatch.Title}: Content differs at position {idx}" 
+                : $"{infoMismatch.Title}: {infoMismatch.Description}");
         }
 
         public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
         {
             if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected missing");
+            {
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: Expected JSON file is missing (test ignored)");
+            }
 
             if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual file missing: {actualPath}");
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual JSON output at {actualPath} was not generated");
+            }
 
-            var eDoc = JsonDocument.Parse(File.ReadAllText(expectedPath!));
-            var aDoc = JsonDocument.Parse(File.ReadAllText(actualPath!));
-            var eNorm = JsonNormalize(eDoc.RootElement, ignoreOrder);
-            var aNorm = JsonNormalize(aDoc.RootElement, ignoreOrder);
-            return (eNorm == aNorm, eNorm == aNorm ? "Equal" : "JSON differs");
+            try
+            {
+                var eDoc = JsonDocument.Parse(File.ReadAllText(expectedPath!));
+                var aDoc = JsonDocument.Parse(File.ReadAllText(actualPath!));
+                var eNorm = JsonNormalize(eDoc.RootElement, ignoreOrder);
+                var aNorm = JsonNormalize(aDoc.RootElement, ignoreOrder);
+
+                if (eNorm == aNorm) return (true, "JSON comparison passed: structure and content match");
+
+                var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.JSON_MISMATCH);
+                return (false, $"{infoMismatch.Title}: {infoMismatch.Description}");
+            }
+            catch (JsonException ex)
+            {
+                return (false, $"JSON Parse Error: {ex.Message}");
+            }
         }
 
         public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
         {
             if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected missing");
-
-            if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual file missing: {actualPath}");
-
-            var e = File.ReadAllLines(expectedPath!).Select(l => l.Trim()).ToList();
-            var a = File.ReadAllLines(actualPath!).Select(l => l.Trim()).ToList();
-
-            if (ignoreOrder)
             {
-                e.Sort(StringComparer.OrdinalIgnoreCase);
-                a.Sort(StringComparer.OrdinalIgnoreCase);
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: Expected CSV file is missing (test ignored)");
             }
 
-            var eJoined = string.Join("\n", e);
-            var aJoined = string.Join("\n", a);
-            return (eJoined.Equals(aJoined, StringComparison.OrdinalIgnoreCase), eJoined == aJoined ? "Equal" : "CSV differs");
-        }
-
-        // ---- Helpers used by the logger to create a detailed diff ----
-        public DetailedCompareResult CompareTextDetailed(string expectedPath, string actualPath, bool caseInsensitive = true)
-        {
-            if (IsMissing(expectedPath) || !File.Exists(expectedPath))
-                return new DetailedCompareResult { AreEqual = true, Message = "Ignored: expected missing" };
-
-            if (IsMissing(actualPath) || !File.Exists(actualPath))
-                return new DetailedCompareResult { AreEqual = false, Message = $"Actual file missing: {actualPath}" };
-
-            var expRaw = File.ReadAllText(expectedPath);
-            var actRaw = File.ReadAllText(actualPath);
-
-            var exp = Normalize(expRaw, caseInsensitive);
-            var act = Normalize(actRaw, caseInsensitive);
-
-            if (exp == act)
-                return new DetailedCompareResult
-                {
-                    AreEqual = true,
-                    Message = "Equal",
-                    NormalizedExpected = exp,
-                    NormalizedActual = act
-                };
-
-            var (idx, eCh, aCh, eCtx, aCtx) = FirstDiff(exp, act);
-
-            return new DetailedCompareResult
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
             {
-                AreEqual = false,
-                Message = "Content differs",
-                FirstDiffIndex = idx,
-                ExpectedChar = eCh,
-                ActualChar = aCh,
-                ExpectedContext = eCtx,
-                ActualContext = aCtx,
-                NormalizedExpected = exp,
-                NormalizedActual = act
-            };
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual CSV output at {actualPath} was not generated");
+            }
+
+            var exp = Normalize(File.ReadAllText(expectedPath!), true);
+            var act = Normalize(File.ReadAllText(actualPath!), true);
+
+            if (exp == act) return (true, "CSV comparison passed: content matches");
+
+            var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.CSV_MISMATCH);
+            return (false, $"{infoMismatch.Title}: {infoMismatch.Description}");
         }
 
-        private static bool IsMissing(string? p) => string.IsNullOrWhiteSpace(p);
+        private static bool IsMissing(string? p) => string.IsNullOrWhiteSpace(p) || p == FileKeywords.Value_MissingPlaceholder;
 
         private static string Normalize(string s, bool ci)
         {
-            s = s.Replace("\r", "").Trim();
+            // Normalize newlines and collapse all whitespace runs to a single space
+            s = s.Replace("\r", "").Replace("\n", " ");
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
             return ci ? s.ToLowerInvariant() : s;
         }
 
@@ -141,10 +156,10 @@ namespace SolutionGrader.Core.Services
             char? ec = i < e.Length ? e[i] : null;
             char? ac = i < a.Length ? a[i] : null;
 
-            string Slice(string s) =>
-                s.Substring(Math.Max(0, i - context), Math.Min(context * 2 + 1, Math.Max(0, s.Length - Math.Max(0, i - context))));
-
-            return (i, ec, ac, Slice(e), Slice(a));
+            int s = Math.Max(0, i - context);
+            int le = Math.Min(context * 2, Math.Max(0, e.Length - s));
+            int la = Math.Min(context * 2, Math.Max(0, a.Length - s));
+            return (i, ec, ac, e.Substring(s, le), a.Substring(s, la));
         }
 
         private static string JsonNormalize(JsonElement el, bool ignoreOrder)
@@ -152,13 +167,15 @@ namespace SolutionGrader.Core.Services
             switch (el.ValueKind)
             {
                 case JsonValueKind.Object:
-                    var props = el.EnumerateObject().ToList();
-                    if (ignoreOrder) props.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-                    var b1 = new StringBuilder().Append('{');
+                    var props = new List<(string, string)>();
+                    foreach (var p in el.EnumerateObject())
+                        props.Add((p.Name, JsonNormalize(p.Value, ignoreOrder)));
+                    props.Sort((x, y) => string.CompareOrdinal(x.Item1, y.Item1));
+                    var b1 = new StringBuilder("{");
                     for (int i = 0; i < props.Count; i++)
                     {
                         if (i > 0) b1.Append(',');
-                        b1.Append(props[i].Name).Append(':').Append(JsonNormalize(props[i].Value, ignoreOrder));
+                        b1.Append('\"').Append(props[i].Item1).Append("\":").Append(props[i].Item2);
                     }
                     return b1.Append('}').ToString();
                 case JsonValueKind.Array:

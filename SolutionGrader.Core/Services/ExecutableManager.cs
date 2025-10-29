@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
 {
@@ -33,7 +34,7 @@ namespace SolutionGrader.Core.Services
 
             _server = Create(_serverPath);
             _server.Start();
-            _ = PumpAsync(_server, "server.log", appendServer: true);
+            _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
         }
 
         public void StartClient()
@@ -44,7 +45,35 @@ namespace SolutionGrader.Core.Services
 
             _client = Create(_clientPath);
             _client.Start();
-            _ = PumpAsync(_client, "client.log", appendServer: false);
+            _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
+        }
+
+        public async Task<Process?> StartAsync(string executablePath, string arguments, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+                return null;
+
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                },
+                EnableRaisingEvents = true
+            };
+
+            process.Start();
+            _ = PumpAsync(process, FileKeywords.FileName_ServerLog, appendServer: true);
+            
+            return await Task.FromResult(process);
         }
 
         public Task StopServerAsync() { TryKill(_server); _server = null; return Task.CompletedTask; }
@@ -80,7 +109,7 @@ namespace SolutionGrader.Core.Services
                     while ((line = await reader.ReadLineAsync()) != null)
                     {
                         await sw.WriteLineAsync(line);
-                        AppendActual(appendServer ? "servers" : "clients", line);
+                        AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, line);
                     }
                 }
 
@@ -93,9 +122,9 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                var q = _run.CurrentQuestionCode ?? "Unknown";
+                var q = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
                 var s = _run.CurrentStage ?? 0;
-                var path = Path.Combine(_run.ResultRoot, "actual", scope, q, $"{s}.txt");
+                var path = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, q, string.Format(FileKeywords.Pattern_StageOutput, s));
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 File.AppendAllText(path, line + Environment.NewLine, Encoding.UTF8);
             }

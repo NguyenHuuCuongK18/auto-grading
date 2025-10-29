@@ -21,12 +21,13 @@ public static class ActionKeywords
     public const string CompareText     = "COMPARE_TEXT";
     public const string CompareJson     = "COMPARE_JSON";
     public const string CompareCsv      = "COMPARE_CSV";
+    public const string TcpRelay        = "TCP_RELAY";
 
     public static readonly string[] All =
     [
         ClientStart, ServerStart, ClientClose, ServerClose, KillAll,
         RunClient, RunServer,
         Wait, HttpRequest, AssertText, AssertFileExists,
-        CaptureFile, CompareFile, CompareText, CompareJson, CompareCsv
+        CaptureFile, CompareFile, CompareText, CompareJson, CompareCsv, TcpRelay
     ];
 }

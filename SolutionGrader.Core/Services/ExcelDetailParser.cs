@@ -29,18 +29,20 @@ public sealed class ExcelDetailParser : ITestCaseParser
             {
                 var stage = Get(row, map, SuiteKeywords.Col_IC_Stage);
                 var input = Get(row, map, SuiteKeywords.Col_IC_Input);
-                var action = Get(row, map, SuiteKeywords.Col_IC_Action) ?? string.Empty;
+                var dataType = Get(row, map, SuiteKeywords.Col_IC_DataType);
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
-                if (action.Equals("Connect", StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(input))
                 {
-                    steps.Add(new Step { Id = $"IC-SERVER-{stage}", QuestionCode = qcode, Stage = "SETUP", Action = ActionKeywords.ServerStart });
-                    steps.Add(new Step { Id = $"IC-CLIENT-{stage}", QuestionCode = qcode, Stage = "SETUP", Action = ActionKeywords.ClientStart });
-                }
-                else if (action.Equals("Client Input", StringComparison.OrdinalIgnoreCase) || action.Equals("Input", StringComparison.OrdinalIgnoreCase))
-                {
-                    steps.Add(new Step { Id = $"IC-IN-{stage}", QuestionCode = qcode, Stage = "INPUT", Action = ActionKeywords.AssertText, Target = input, Value = input });
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.Wait,
+                        Value = input
+                    });
                 }
             }
         });
@@ -54,6 +56,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 var stage = Get(row, map, SuiteKeywords.Col_OC_Stage);
                 var method = Get(row, map, SuiteKeywords.Col_OC_Method);
                 var status = Get(row, map, SuiteKeywords.Col_OC_StatusCode);
+                var dataResponse = Get(row, map, SuiteKeywords.Col_OC_DataResponse);
                 var output = Get(row, map, SuiteKeywords.Col_OC_Output);
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
@@ -66,11 +69,11 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.HttpRequest,
-                        Value = $"{method}|http://127.0.0.1:5000{output}|{status}"
+                        // METHOD|URL|STATUS|EXPECTED_BODY (last two optional)
+                        Value = $"{method}|http://127.0.0.1:5000{output}|{status}|{dataResponse}"
                     });
                 }
-
-                if (!string.IsNullOrWhiteSpace(output))
+                else if (!string.IsNullOrWhiteSpace(output))
                 {
                     steps.Add(new Step
                     {
@@ -78,8 +81,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.CompareText,
-                        Target = $"expected\\clients\\{qcode}\\{stage}.txt",
-                        Value = $"actual\\clients\\{qcode}\\{stage}.txt"
+                        Target = string.Format(FileKeywords.PathTemplate_ExpectedClient, qcode, stage),
+                        Value = string.Format(FileKeywords.PathTemplate_ActualClient, qcode, stage)
                     });
                 }
             }
@@ -92,6 +95,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
                 var stage = Get(row, map, SuiteKeywords.Col_OS_Stage);
+                var method = Get(row, map, SuiteKeywords.Col_OS_Method);
+                var req = Get(row, map, SuiteKeywords.Col_OS_DataRequest);
                 var output = Get(row, map, SuiteKeywords.Col_OS_Output);
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
@@ -104,15 +109,12 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.CompareText,
-                        Target = $"expected\\servers\\{qcode}\\{stage}.txt",
-                        Value = $"actual\\servers\\{qcode}\\{stage}.txt"
+                        Target = string.Format(FileKeywords.PathTemplate_ExpectedServer, qcode, stage),
+                        Value = string.Format(FileKeywords.PathTemplate_ActualServer, qcode, stage)
                     });
                 }
             }
         });
-
-        // Cleanup
-        steps.Add(new Step { Id = "CLEANUP-KILL", QuestionCode = questionCode, Stage = "CLEANUP", Action = ActionKeywords.KillAll });
 
         return steps;
     }
@@ -120,19 +122,15 @@ public sealed class ExcelDetailParser : ITestCaseParser
     private static Dictionary<string, int> Header(IXLWorksheet ws)
     {
         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var header = ws.FirstRowUsed();
-        if (header == null) return map;
-        foreach (var c in header.CellsUsed())
+        var last = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+        for (int c = 1; c <= last; c++)
         {
-            var name = c.GetString().Trim();
-            if (!string.IsNullOrWhiteSpace(name)) map[name] = c.Address.ColumnNumber;
+            var k = ws.Cell(1, c).GetString();
+            if (!string.IsNullOrWhiteSpace(k)) map[k] = c;
         }
         return map;
     }
 
-    private static string? Get(IXLRangeRow row, Dictionary<string, int> map, string colName)
-    {
-        if (!map.TryGetValue(colName, out var col)) return null;
-        return row.Cell(col).GetString();
-    }
+    private static string Get(IXLRangeRow row, Dictionary<string, int> map, string key)
+        => map.TryGetValue(key, out var c) ? row.Cell(c).GetString() : "";
 }

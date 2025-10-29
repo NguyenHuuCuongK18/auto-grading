@@ -8,6 +8,7 @@ public interface IExecutableManager
     void Init(string? clientPath, string? serverPath);
     void StartServer();
     void StartClient();
+    System.Threading.Tasks.Task<System.Diagnostics.Process?> StartAsync(string executablePath, string arguments, System.Threading.CancellationToken ct);
 
     System.Threading.Tasks.Task StopServerAsync();
     System.Threading.Tasks.Task StopClientAsync();

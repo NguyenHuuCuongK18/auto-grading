@@ -3,6 +3,7 @@ namespace SolutionGrader.Core.Services;
 using ClosedXML.Excel;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 public sealed class ReportService : IReportService
 {
@@ -12,7 +13,7 @@ public sealed class ReportService : IReportService
     public async System.Threading.Tasks.Task<string> WriteQuestionResultAsync(string outFolder, string questionCode, System.Collections.Generic.IReadOnlyList<StepResult> steps, System.Threading.CancellationToken ct)
     {
         _files.EnsureDirectory(outFolder);
-        var xlsxPath = System.IO.Path.Combine(outFolder, $"{questionCode}_Result.xlsx");
+        var xlsxPath = System.IO.Path.Combine(outFolder, string.Format(FileKeywords.Pattern_Result, questionCode));
 
         using (var wb = new XLWorkbook())
         {

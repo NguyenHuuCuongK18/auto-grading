@@ -1,6 +1,7 @@
 ﻿using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Services;
+using SolutionGrader.Core.Keywords;
 
 public class Program
 {
@@ -30,7 +31,7 @@ public class Program
 
         // Create timestamped results folder
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var timestampedResultRoot = System.IO.Path.Combine(a["out"], $"GradeResult_{timestamp}");
+        var timestampedResultRoot = System.IO.Path.Combine(a["out"], string.Format(FileKeywords.Pattern_GradeResult, timestamp));
 
         var run = new ExecuteSuiteArgs
         {

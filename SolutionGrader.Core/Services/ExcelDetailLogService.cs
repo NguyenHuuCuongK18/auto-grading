@@ -56,12 +56,12 @@ namespace SolutionGrader.Core.Services
             _files.EnsureDirectory(outFolder);
 
             _questionCode = questionCode;
-            _outPath = Path.Combine(outFolder, "GradeDetail.xlsx");
-            _failedTestDetailPath = Path.Combine(outFolder, "FailedTestDetail.xlsx");
+            _outPath = Path.Combine(outFolder, FileKeywords.FileName_GradeDetail);
+            _failedTestDetailPath = Path.Combine(outFolder, FileKeywords.FileName_FailedTestDetail);
 
-            // result root is parent of the case folder; that’s where OverallSummary.xlsx lives
+            // result root is parent of the case folder; that's where OverallSummary.xlsx lives
             var resultRoot = Path.GetDirectoryName(outFolder);
-            _overallSummaryPath = string.IsNullOrEmpty(resultRoot) ? null : Path.Combine(resultRoot!, "OverallSummary.xlsx");
+            _overallSummaryPath = string.IsNullOrEmpty(resultRoot) ? null : Path.Combine(resultRoot!, FileKeywords.FileName_OverallSummary);
 
             _totalMark = 0;
             _totalCompareSteps = 0;
@@ -225,9 +225,9 @@ namespace SolutionGrader.Core.Services
 
         public string WriteTextMismatchDiff(string questionCode, int stage, string expectedPath, string actualPath, DetailedCompareResult detail)
         {
-            var mismRoot = Path.Combine(Path.GetDirectoryName(_outPath!)!, "mismatches", questionCode);
+            var mismRoot = Path.Combine(Path.GetDirectoryName(_outPath!)!, FileKeywords.Folder_Mismatches, questionCode);
             _files.EnsureDirectory(mismRoot);
-            var outPath = Path.Combine(mismRoot, $"stage_{stage}.diff.txt");
+            var outPath = Path.Combine(mismRoot, string.Format(FileKeywords.Pattern_StageDiff, stage));
 
             var sb = new StringBuilder();
             sb.AppendLine($"Question: {questionCode} | Stage: {stage}");
@@ -296,7 +296,7 @@ namespace SolutionGrader.Core.Services
             {
                 if (string.IsNullOrEmpty(detailPath) || !File.Exists(detailPath)) return;
 
-                // Diff index if it’s in the message
+                // Diff index if it's in the message
                 var idx = FirstDiffIndexFromMessage(message ?? "");
                 if (idx >= 0) SetCell(ws, rowNum, hdr, "DiffIndex", idx);
 
@@ -320,10 +320,10 @@ namespace SolutionGrader.Core.Services
 
         private (bool casePassed, double awarded, double possible) ComputeCaseTotals()
         {
-            bool anyFail = _records.Any(r => r.PointsPossible > 0 && !r.Passed);
-            bool passed = !anyFail;
-            double possible = Math.Round(_records.Sum(r => r.PointsPossible), 2);
-            double awarded = passed ? possible : 0;
+            // All-or-nothing policy based on the case's declared mark from Header.xlsx
+            var passed = _allStepsPassed;
+            var possible = Math.Round(_totalMark, 2);
+            var awarded = passed ? possible : 0;
             return (passed, awarded, possible);
         }
 
@@ -387,8 +387,8 @@ namespace SolutionGrader.Core.Services
         {
             // prefer actual path hint to decide client/server
             var lower = (actualPath ?? string.Empty).Replace('\\', '/').ToLowerInvariant();
-            if (lower.Contains("/actual/clients/")) return SheetOutClients;
-            if (lower.Contains("/actual/servers/")) return SheetOutServers;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Clients}/")) return SheetOutClients;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/")) return SheetOutServers;
 
             // fallback by action
             var action = (step.Action ?? "").ToLowerInvariant();
@@ -473,7 +473,8 @@ namespace SolutionGrader.Core.Services
 
         private void WriteFailedTestDetailIfAny()
         {
-            if (_wb == null || string.IsNullOrEmpty(_failedTestDetailPath)) return;
+            // Only create the file if the test case actually failed
+            if (_wb == null || string.IsNullOrEmpty(_failedTestDetailPath) || _allStepsPassed) return;
 
             var failed = new List<(string Sheet, int Row, string Stage, string Result, string Message, string DetailPath)>();
 
