@@ -365,7 +365,10 @@ namespace SolutionGrader.Core.Services
         private XLWorkbook LoadExistingWorkbook(string path)
         {
             using var sr = _files.OpenRead(path);
-            return new XLWorkbook(sr);
+            var ms = new MemoryStream();
+            sr.CopyTo(ms);
+            ms.Position = 0;
+            return new XLWorkbook(ms);
         }
 
         private static XLWorkbook CreateNewWorkbook()
