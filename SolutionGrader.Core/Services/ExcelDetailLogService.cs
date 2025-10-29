@@ -334,8 +334,10 @@ namespace SolutionGrader.Core.Services
 
             if (File.Exists(summaryPath))
             {
-                using var sr = _files.OpenRead(summaryPath);
-                wb = new XLWorkbook(sr);
+                using (var sr = _files.OpenRead(summaryPath))
+                {
+                    wb = new XLWorkbook(sr);
+                }
                 ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet("Summary");
             }
             else
@@ -373,8 +375,11 @@ namespace SolutionGrader.Core.Services
                 ws.Column(c).AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 60);
             }
 
-            using var sw = _files.OpenWrite(summaryPath);
-            wb.SaveAs(sw);
+            using (var sw = _files.OpenWrite(summaryPath))
+            {
+                wb.SaveAs(sw);
+            }
+            wb.Dispose();
         }
 
         private static string ResolveSheet(Step step, string? actualPath)
