@@ -15,6 +15,7 @@ public sealed class Executor : IExecutor
 
     private const int ServerReadyTimeoutSeconds = 5;
     private const int ServerReadyPollIntervalMs = 100;
+    private const int RealServerPort = 5001;
 
     public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp)
     {
@@ -136,9 +137,38 @@ public sealed class Executor : IExecutor
         while (sw.Elapsed < TimeSpan.FromSeconds(ServerReadyTimeoutSeconds))
         {
             ct.ThrowIfCancellationRequested();
-            if (_proc.IsServerRunning) return;
+            
+            // Check if process is running
+            if (!_proc.IsServerRunning)
+            {
+                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                continue;
+            }
+            
+            // Check if server is actually listening on the port by attempting a connection
+            if (await IsPortListeningAsync(RealServerPort, ct))
+            {
+                return;
+            }
+            
             await Task.Delay(ServerReadyPollIntervalMs, ct);
         }
         Console.WriteLine($"[WARNING] Server not fully initialized after {ServerReadyTimeoutSeconds}s wait. Continuing anyway.");
+    }
+
+    private static async Task<bool> IsPortListeningAsync(int port, CancellationToken ct)
+    {
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(200); // Quick check with 200ms timeout
+            await client.ConnectAsync(System.Net.IPAddress.Loopback, port, cts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
