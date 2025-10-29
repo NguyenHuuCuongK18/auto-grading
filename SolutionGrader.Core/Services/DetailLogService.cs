@@ -19,18 +19,17 @@ namespace SolutionGrader.Core.Services
 
         public void BeginCase(string outFolder, string questionCode, string detailTemplatePath, double pointsPossible)
         {
-            _caseOutFolder = outFolder;
-            _questionCode = questionCode;
-            _detailTemplatePath = detailTemplatePath;
-
+            _caseOutFolder = outFolder; _questionCode = questionCode; _detailTemplatePath = detailTemplatePath;
             _files.EnsureDirectory(outFolder);
-            _gradesCsvPath = Path.Combine(outFolder, "grades.csv");
-            _jsonlPath = Path.Combine(outFolder, "detailed_log.jsonl");
+
+            _gradesCsvPath = System.IO.Path.Combine(outFolder, "grades.csv");
+            _jsonlPath = System.IO.Path.Combine(outFolder, "detailed_log.jsonl");
 
             if (!File.Exists(_gradesCsvPath))
             {
+                // No ActualPath column here on purpose
                 File.WriteAllText(_gradesCsvPath,
-                    "Question,StepId,Stage,Action,Passed,PointsAwarded,PointsPossible,ErrorCode,ErrorCategory,DurationMs,DetailPath,ActualPath,Message\n",
+                    "Question,StepId,Stage,Action,Passed,PointsAwarded,PointsPossible,ErrorCode,ErrorCategory,DurationMs,DetailPath,Message\n",
                     Encoding.UTF8);
             }
             if (!File.Exists(_jsonlPath))
@@ -39,19 +38,10 @@ namespace SolutionGrader.Core.Services
             }
         }
 
-        public void SetTestCaseMark(double mark)
-        {
-            // No-op for this implementation - it doesn't use marks
-        }
+        public void EndCase() { }
 
-        public void EndCase()
-        {
-            _caseOutFolder = null;
-            _questionCode = null;
-            _detailTemplatePath = null;
-            _gradesCsvPath = null;
-            _jsonlPath = null;
-        }
+        public void SetTestCaseMark(double mark) { }
+        public void SetTotalCompareSteps(int count) { }
 
         public void LogStepGrade(
             Step step,
@@ -64,11 +54,28 @@ namespace SolutionGrader.Core.Services
             string? detailPath = null,
             string? actualPath = null)
         {
-            if (_caseOutFolder == null || _gradesCsvPath == null || _jsonlPath == null) return;
+            var errorCategory = ErrorCodes.CategoryOf(errorCode).ToString();
+            
+            var csv = string.Join(',',
+                Escape(_questionCode),
+                Escape(step.Id),
+                Escape(step.Stage),
+                Escape(step.Action),
+                passed ? "true" : "false",
+                pointsAwarded.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                pointsPossible.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Escape(errorCode),
+                Escape(errorCategory),
+                durationMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Escape(detailPath ?? ""),
+                Escape(message ?? "")
+            ) + "\n";
 
-            var rec = new StepGradeRecord
+            File.AppendAllText(_gradesCsvPath!, csv, Encoding.UTF8);
+
+            var json = JsonSerializer.Serialize(new
             {
-                QuestionCode = _questionCode ?? step.QuestionCode,
+                Question = _questionCode,
                 StepId = step.Id,
                 Stage = step.Stage,
                 Action = step.Action,
@@ -76,82 +83,61 @@ namespace SolutionGrader.Core.Services
                 PointsAwarded = pointsAwarded,
                 PointsPossible = pointsPossible,
                 ErrorCode = errorCode,
-                ErrorCategory = ErrorCodes.CategoryOf(errorCode),
+                ErrorCategory = errorCategory,
+                DurationMs = durationMs,
                 DetailPath = detailPath,
-                ActualPath = actualPath,
-                Message = message,
-                DurationMs = durationMs
-            };
-
-            var csvMsg = (rec.Message ?? "").Replace("\"", "\"\"");
-            var csvDetail = (rec.DetailPath ?? "").Replace("\"", "\"\"");
-            var csvActual = (rec.ActualPath ?? "").Replace("\"", "\"\"");
-            var line = $"{rec.QuestionCode},{rec.StepId},{rec.Stage},{rec.Action},{rec.Passed},{rec.PointsAwarded},{rec.PointsPossible},{rec.ErrorCode},{rec.ErrorCategory},{rec.DurationMs:0},\"{csvDetail}\",\"{csvActual}\",\"{csvMsg}\"\n";
-            File.AppendAllText(_gradesCsvPath, line, Encoding.UTF8);
-
-            var json = JsonSerializer.Serialize(rec);
-            File.AppendAllText(_jsonlPath, json + "\n", Encoding.UTF8);
+                Message = message
+            });
+            File.AppendAllText(_jsonlPath!, json + "\n", Encoding.UTF8);
         }
 
         public void LogCaseSummary(string questionCode, bool passed, double pointsAwarded, double pointsPossible, string message)
         {
-            if (_gradesCsvPath == null || _jsonlPath == null) return;
-
-            var rec = new StepGradeRecord
+            var p = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_caseOutFolder!)!, "OverallSummary.csv");
+            if (!File.Exists(p))
             {
-                QuestionCode = questionCode,
-                StepId = "SUMMARY",
-                Stage = "SUMMARY",
-                Action = "SUMMARY",
-                Passed = passed,
-                PointsAwarded = pointsAwarded,
-                PointsPossible = pointsPossible,
-                ErrorCode = passed ? ErrorCodes.OK : ErrorCodes.UNKNOWN_EXCEPTION,
-                ErrorCategory = ErrorCodes.CategoryOf(passed ? ErrorCodes.OK : ErrorCodes.UNKNOWN_EXCEPTION),
-                DetailPath = null,
-                ActualPath = null,
-                Message = message,
-                DurationMs = 0
-            };
-
-            var csvMsg = (rec.Message ?? "").Replace("\"", "\"\"");
-            var line = $"{rec.QuestionCode},{rec.StepId},{rec.Stage},{rec.Action},{rec.Passed},{rec.PointsAwarded},{rec.PointsPossible},{rec.ErrorCode},{rec.ErrorCategory},{rec.DurationMs:0},\"\",\"\",\"{csvMsg}\"\n"; File.AppendAllText(_gradesCsvPath, line, Encoding.UTF8);
-
-            var json = JsonSerializer.Serialize(rec);
-            File.AppendAllText(_jsonlPath, json + "\n", Encoding.UTF8);
+                File.WriteAllText(p, "TestCase,Passed,PointsAwarded,PointsPossible,Message\n", Encoding.UTF8);
+            }
+            File.AppendAllText(p, string.Join(',',
+                Escape(questionCode),
+                passed ? "true" : "false",
+                pointsAwarded.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                pointsPossible.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Escape(message ?? "")) + "\n", Encoding.UTF8);
         }
 
         public string WriteTextMismatchDiff(string questionCode, int stage, string expectedPath, string actualPath, DetailedCompareResult detail)
         {
-            if (_caseOutFolder == null) return string.Empty;
-            var folder = Path.Combine(_caseOutFolder, "mismatches", questionCode);
-            Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, $"{stage}.diff.txt");
+            var mismRoot = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_caseOutFolder!)!, "mismatches", questionCode);
+            _files.EnsureDirectory(mismRoot);
+            var outPath = System.IO.Path.Combine(mismRoot, $"stage_{stage}.diff.txt");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"Step: {questionCode}-{stage}");
-            sb.AppendLine($"Expected: {expectedPath}");
-            sb.AppendLine($"Actual  : {actualPath}");
-            sb.AppendLine($"First diff at index: {detail.FirstDiffIndex}");
+            sb.AppendLine($"Question: {questionCode} | Stage: {stage}");
+            sb.AppendLine($"FirstDiffIndex: {detail.FirstDiffIndex}");
+            sb.AppendLine();
+            sb.AppendLine("From test case (expected):");
+            sb.AppendLine(detail.ExpectedContext ?? "");
+            sb.AppendLine();
+            sb.AppendLine("Got:");
+            sb.AppendLine(detail.ActualContext ?? "");
             sb.AppendLine();
 
-            sb.AppendLine("[Expected]");
-            sb.AppendLine(detail.ExpectedContext);
-            sb.AppendLine();
-
-            sb.AppendLine("[Actual]");
-            sb.AppendLine(detail.ActualContext);
-            sb.AppendLine();
-
-            sb.AppendLine(detail.Message);
-
-            File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
-            return path;
+            File.WriteAllText(outPath, sb.ToString(), Encoding.UTF8);
+            return outPath;
         }
 
         public void LogSkip(Step step, string reason, string errorCode)
         {
-            LogStepGrade(step, passed: true, message: $"SKIP: {reason}", pointsAwarded: 0, pointsPossible: 0, durationMs: 0, errorCode: errorCode);
+            LogStepGrade(step, false, reason, 0, 0, 0, errorCode, null, null);
+        }
+
+        private static string Escape(string? s)
+        {
+            s ??= "";
+            return s.Contains(',') || s.Contains('"') || s.Contains('\n')
+                ? "\"" + s.Replace("\"", "\"\"") + "\""
+                : s;
         }
     }
 }

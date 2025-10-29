@@ -10,6 +10,7 @@ namespace SolutionGrader.Core.Abstractions
         void EndCase();
 
         void SetTestCaseMark(double mark);
+        void SetTotalCompareSteps(int count);
 
         void LogStepGrade(
             Step step,

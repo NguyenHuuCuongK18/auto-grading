@@ -66,6 +66,18 @@ namespace SolutionGrader.Core.Services
                 _log.BeginCase(outDir, q.Name, q.DetailPath, q.Mark);
                 _log.SetTestCaseMark(q.Mark);
 
+                // Inform the log service how many compare steps will be executed so it can
+                // calculate per-step points even if the Detail.xlsx template contains no data rows.
+                var compareCount = steps.Count(s =>
+                    s.Action != null && (
+                        string.Equals(s.Action, "CompareFile", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, "CompareText", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, "CompareJson", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, "CompareCsv", StringComparison.OrdinalIgnoreCase)
+                    ) && !string.Equals(s.Stage, "INPUT", StringComparison.OrdinalIgnoreCase)
+                );
+                _log.SetTotalCompareSteps(compareCount);
+
                 var results = new List<StepResult>();
                 foreach (var step in steps)
                 {
@@ -91,13 +103,6 @@ namespace SolutionGrader.Core.Services
                 try { await _proc.StopAllAsync(); } catch { }
                 try { await _mw.StopAsync(); } catch { }
                 Console.WriteLine($"[TestCase] Completed: {q.Name}\n");
-            }
-
-            // Write overall summary after all test cases complete
-            Console.WriteLine("[Suite] Writing overall summary...");
-            if (_log is ExcelDetailLogService excelLog)
-            {
-                excelLog.WriteOverallSummary();
             }
 
             Console.WriteLine("[Suite] All test cases completed successfully");

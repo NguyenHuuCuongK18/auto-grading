@@ -3,7 +3,6 @@ namespace SolutionGrader.Core.Services;
 using ClosedXML.Excel;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
-using SolutionGrader.Core.Keywords;
 using System.Globalization;
 using System.IO;
 
@@ -12,34 +11,29 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
     public SuiteDefinition Load(string suitePathOrHeaderXlsx)
     {
         var headerPath = ResolveHeaderPath(suitePathOrHeaderXlsx);
-        // Protocol: try Header sheet cell Type if present; default HTTP
         var protocol = ReadProtocolFromHeader(headerPath);
-
-        // Read test case marks from Header.xlsx
-        var marksMap = ReadMarksFromHeader(headerPath);
-
-        var cases = ReadCasesFromDirectory(System.IO.Path.GetDirectoryName(headerPath)!, marksMap);
-
+        var marks = ReadMarksFromHeader(headerPath);
+        var cases = BuildCasesFromDirectory(Path.GetDirectoryName(headerPath)!, marks);
         return new SuiteDefinition
         {
             HeaderPath = headerPath,
-            Protocol   = protocol,
-            Cases      = cases
+            Protocol = protocol,
+            Cases = cases
         };
     }
 
-    private static string ResolveHeaderPath(string suitePath)
+    private static string ResolveHeaderPath(string input)
     {
-        if (System.IO.File.Exists(suitePath)) return suitePath;
-        if (!System.IO.Directory.Exists(suitePath)) throw new System.IO.DirectoryNotFoundException($"Suite directory not found: {suitePath}");
+        if (File.Exists(input) && Path.GetFileName(input).Equals("Header.xlsx", StringComparison.OrdinalIgnoreCase))
+            return Path.GetFullPath(input);
 
-        var candidate = System.IO.Path.Combine(suitePath, SuiteKeywords.HeaderFileName);
-        if (System.IO.File.Exists(candidate)) return candidate;
+        if (Directory.Exists(input))
+        {
+            var candidate = Path.Combine(input, "Header.xlsx");
+            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+        }
 
-        var header = System.IO.Directory.GetFiles(suitePath, "*.xlsx", System.IO.SearchOption.TopDirectoryOnly)
-            .FirstOrDefault(f => System.IO.Path.GetFileNameWithoutExtension(f).Contains("header", System.StringComparison.OrdinalIgnoreCase));
-        if (header is null) throw new System.IO.FileNotFoundException($"Header.xlsx not found in {suitePath}");
-        return header;
+        throw new FileNotFoundException("Could not find Header.xlsx from: " + input);
     }
 
     private static string ReadProtocolFromHeader(string headerPath)
@@ -47,93 +41,95 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         try
         {
             using var wb = new XLWorkbook(headerPath);
-            var ws = wb.Worksheets.FirstOrDefault(w => string.Equals(w.Name, SuiteKeywords.Sheet_Header, StringComparison.OrdinalIgnoreCase))
-                  ?? wb.Worksheets.First();
-            var used = ws.RangeUsed();
-            if (used is null) return "HTTP";
-            foreach (var row in used.Rows().Skip(1))
-            {
-                var key = row.Cell(1).GetString().Trim();
-                if (!string.Equals(key, SuiteKeywords.ConfigKey_Type, StringComparison.OrdinalIgnoreCase)) continue;
-                var val = row.Cell(2).GetString().Trim();
-                return val.Equals("TCP", StringComparison.OrdinalIgnoreCase) ? "TCP" : "HTTP";
-            }
-        }
-        catch { }
-        return "HTTP";
-    }
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheet(1);
 
-    private static Dictionary<string, double> ReadMarksFromHeader(string headerPath)
-    {
-        var marks = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            using var wb = new XLWorkbook(headerPath);
-            var ws = wb.Worksheets.FirstOrDefault(w => string.Equals(w.Name, SuiteKeywords.Sheet_Header, StringComparison.OrdinalIgnoreCase))
-                  ?? wb.Worksheets.First();
-            
-            var used = ws.RangeUsed();
-            if (used is null) return marks;
-
-            // Find TestCase and Mark columns
-            var headerRow = ws.Row(1);
-            int? testCaseCol = null, markCol = null;
-            
-            foreach (var cell in headerRow.CellsUsed())
+            // Look for a cell in the first column named "Type" or "Protocol"
+            for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
             {
-                var colName = cell.GetString().Trim();
-                if (string.Equals(colName, "TestCase", StringComparison.OrdinalIgnoreCase))
-                    testCaseCol = cell.Address.ColumnNumber;
-                else if (string.Equals(colName, "Mark", StringComparison.OrdinalIgnoreCase))
-                    markCol = cell.Address.ColumnNumber;
-            }
-
-            if (testCaseCol.HasValue && markCol.HasValue)
-            {
-                foreach (var row in used.Rows().Skip(1))
+                var key = ws.Cell(r, 1).GetString().Trim();
+                if (key.Equals("Type", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("Protocol", StringComparison.OrdinalIgnoreCase))
                 {
-                    var testCase = row.Cell(testCaseCol.Value).GetString().Trim();
-                    var markStr = row.Cell(markCol.Value).GetString().Trim();
-                    
-                    if (!string.IsNullOrWhiteSpace(testCase) && double.TryParse(markStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var mark))
-                    {
-                        marks[testCase] = mark;
-                    }
+                    var val = ws.Cell(r, 2).GetString().Trim();
+                    if (!string.IsNullOrEmpty(val)) return val.ToUpperInvariant();
                 }
             }
         }
         catch { }
-        return marks;
+
+        return "HTTP"; // default
     }
 
-    private static System.Collections.Generic.IReadOnlyList<TestCaseDefinition> ReadCasesFromDirectory(string root, Dictionary<string, double> marksMap)
+    private static Dictionary<string, double> ReadMarksFromHeader(string headerPath)
     {
-        var list = new System.Collections.Generic.List<TestCaseDefinition>();
-        foreach (var dir in System.IO.Directory.GetDirectories(root))
+        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+        using var wb = new XLWorkbook(headerPath);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+                 ?? wb.Worksheet(1);
+
+        // Find the row that contains "TestCase" and "Mark" headers
+        int headerRow = -1, tcCol = -1, markCol = -1;
+        for (int r = 1; r <= Math.Min(100, ws.RowCount()); r++)
         {
-            var name = System.IO.Path.GetFileName(dir);
-            var detail = System.IO.Path.Combine(dir, SuiteKeywords.DetailFileName);
-            if (!System.IO.File.Exists(detail))
+            var row = ws.Row(r);
+            var cells = row.CellsUsed().ToList();
+            if (cells.Count == 0) continue;
+
+            for (int c = 1; c <= Math.Min(50, ws.ColumnCount()); c++)
             {
-                // fallback: anything "detail*.xlsx"
-                detail = System.IO.Directory.GetFiles(dir, "*detail*.xlsx", System.IO.SearchOption.TopDirectoryOnly)
-                          .FirstOrDefault() ?? detail;
+                var text = ws.Cell(r, c).GetString().Trim();
+                if (text.Equals("TestCase", StringComparison.OrdinalIgnoreCase)) tcCol = c;
+                if (text.Equals("Mark", StringComparison.OrdinalIgnoreCase)) markCol = c;
             }
-            if (!System.IO.File.Exists(detail)) continue; // skip folders without detail
 
-            // Get mark from marksMap, default to 0 if not found
-            var mark = marksMap.TryGetValue(name, out var m) ? m : 0;
+            if (tcCol > 0 && markCol > 0) { headerRow = r; break; }
+            tcCol = markCol = -1;
+        }
 
+        if (headerRow < 0) return result; // none found; marks default to 0
+
+        // Read until a blank TestCase cell
+        for (int r = headerRow + 1; r <= ws.RowCount(); r++)
+        {
+            var tc = ws.Cell(r, tcCol).GetString().Trim();
+            if (string.IsNullOrEmpty(tc)) break;
+
+            var markStr = ws.Cell(r, markCol).GetString().Trim();
+            if (!double.TryParse(markStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var mark))
+                mark = 0;
+
+            result[tc] = mark;
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks)
+    {
+        var list = new List<TestCaseDefinition>();
+
+        foreach (var dir in Directory.EnumerateDirectories(root)
+                     .Where(p => !Path.GetFileName(p).Equals("mismatches", StringComparison.OrdinalIgnoreCase)))
+        {
+            var name = Path.GetFileName(dir);
+            var detail = Path.Combine(dir, "Detail.xlsx");
+            if (!File.Exists(detail)) continue;
+
+            marks.TryGetValue(name, out var mark);
             list.Add(new TestCaseDefinition
             {
                 Name = name,
                 Mark = mark,
                 DirectoryPath = dir,
-                DetailPath = detail,
-                InnerHeaderPath = null
+                DetailPath = detail
             });
         }
-        if (list.Count == 0) throw new InvalidDataException("No test cases found in suite root.");
+
+        if (list.Count == 0)
+            throw new InvalidDataException("No test cases found under: " + root);
+
         return list;
     }
 }

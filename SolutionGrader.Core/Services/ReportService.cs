@@ -9,7 +9,7 @@ public sealed class ReportService : IReportService
     private readonly IFileService _files;
     public ReportService(IFileService files) => _files = files;
 
-    public System.Threading.Tasks.Task<string> WriteQuestionResultAsync(string outFolder, string questionCode, System.Collections.Generic.IReadOnlyList<StepResult> steps, System.Threading.CancellationToken ct)
+    public async System.Threading.Tasks.Task<string> WriteQuestionResultAsync(string outFolder, string questionCode, System.Collections.Generic.IReadOnlyList<StepResult> steps, System.Threading.CancellationToken ct)
     {
         _files.EnsureDirectory(outFolder);
         var xlsxPath = System.IO.Path.Combine(outFolder, $"{questionCode}_Result.xlsx");
@@ -17,53 +17,44 @@ public sealed class ReportService : IReportService
         using (var wb = new XLWorkbook())
         {
             var ws = wb.AddWorksheet("Result");
-            ws.Cell(1,1).Value = "StepId";
-            ws.Cell(1,2).Value = "Stage";
-            ws.Cell(1,3).Value = "Action";
-            ws.Cell(1,4).Value = "Passed";
-            ws.Cell(1,5).Value = "Message";
-            ws.Cell(1,6).Value = "DurationMs";
 
-            // Format header
+            ws.Cell(1, 1).Value = "StepId";
+            ws.Cell(1, 2).Value = "Stage";
+            ws.Cell(1, 3).Value = "Action";
+            ws.Cell(1, 4).Value = "Passed";
+            ws.Cell(1, 5).Value = "Message";
+            ws.Cell(1, 6).Value = "DurationMs";
+
+            // Header style
             ws.Row(1).Style.Font.Bold = true;
             ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
-            ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            ws.Row(1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
             var r = 2;
             foreach (var s in steps)
             {
-                ct.ThrowIfCancellationRequested();
-                ws.Cell(r,1).Value = s.Step.Id;
-                ws.Cell(r,2).Value = s.Step.Stage;
-                ws.Cell(r,3).Value = s.Step.Action;
-                ws.Cell(r,4).Value = s.Passed;
-                ws.Cell(r,5).Value = s.Message;
-                ws.Cell(r,6).Value = s.DurationMs;
-
-                // Color code Passed column
-                if (s.Passed)
-                    ws.Cell(r, 4).Style.Font.FontColor = XLColor.Green;
-                else
-                    ws.Cell(r, 4).Style.Font.FontColor = XLColor.Red;
-
+                ws.Cell(r, 1).Value = s.Step.Id;
+                ws.Cell(r, 2).Value = s.Step.Stage;
+                ws.Cell(r, 3).Value = s.Step.Action;
+                ws.Cell(r, 4).Value = s.Passed;
+                ws.Cell(r, 5).Value = s.Message;
+                ws.Cell(r, 6).Value = s.DurationMs;
                 r++;
             }
 
-            // Enable wrap text for message column and auto-fit
+            // Make message readable
             ws.Column(5).Style.Alignment.WrapText = true;
-            ws.Column(5).Width = 60;
-            
-            // Auto-fit other columns
+
+            // Auto-fit but keep columns reasonably wide
             for (int c = 1; c <= 6; c++)
             {
-                if (c != 5) // Skip message column
-                    ws.Column(c).AdjustToContents();
+                ws.Column(c).AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 60);
             }
 
-            using var fs = _files.OpenWrite(xlsxPath, overwrite:true);
-            wb.SaveAs(fs);
+            using var stream = _files.OpenWrite(xlsxPath);
+            wb.SaveAs(stream);
         }
 
-        return System.Threading.Tasks.Task.FromResult(xlsxPath);
+        return await System.Threading.Tasks.Task.FromResult(xlsxPath);
     }
 }
