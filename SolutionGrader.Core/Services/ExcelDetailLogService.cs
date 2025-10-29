@@ -2,6 +2,7 @@
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Errors;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 using System.Text;
 
 namespace SolutionGrader.Core.Services
@@ -12,6 +13,12 @@ namespace SolutionGrader.Core.Services
         private XLWorkbook? _wb;
         private string? _outPath;
         private string? _questionCode;
+        private string? _overallSummaryPath;
+        private double _totalMark;
+        private int _totalCompareSteps;
+
+        // Summary data for overall report
+        private readonly List<TestCaseSummary> _caseSummaries = new();
 
         // Sheets matching Detail.xlsx
         private const string SheetInput = "InputClients";
@@ -34,10 +41,21 @@ namespace SolutionGrader.Core.Services
         {
             _files.EnsureDirectory(outFolder);
             _questionCode = questionCode;
-            _outPath = Path.Combine(outFolder, "DetailResult.xlsx");
+            _outPath = Path.Combine(outFolder, "GradeDetail.xlsx");
+
+            // Set overall summary path (one level up from test case folder)
+            var resultRoot = Path.GetDirectoryName(outFolder);
+            if (!string.IsNullOrEmpty(resultRoot))
+            {
+                _overallSummaryPath = Path.Combine(resultRoot, "OverallSummary.xlsx");
+            }
 
             // Load template Detail.xlsx if available, then append result columns to each sheet
             _wb = new XLWorkbook(detailTemplatePath);
+
+            // Count total compare steps (rows with Output filled) and read mark
+            _totalCompareSteps = 0;
+            _totalMark = 0;
 
             foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
             {
@@ -46,18 +64,117 @@ namespace SolutionGrader.Core.Services
                 // Ensure base columns are present; then add result columns if missing
                 EnsureColumns(ws, BaseColumns);
                 EnsureColumns(ws, ResultColumns);
+
+                // Count compare steps (rows with data, excluding INPUT sheet)
+                if (!sheetName.Equals(SheetInput, StringComparison.OrdinalIgnoreCase))
+                {
+                    var rng = ws.RangeUsed();
+                    if (rng != null)
+                    {
+                        _totalCompareSteps += rng.RowsUsed().Skip(1).Count();
+                    }
+                }
             }
 
-            _wb.SaveAs(_outPath);
+            // Read Mark from Header sheet in the template if it exists
+            if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Header, out var headerSheet))
+            {
+                var hdr = GetHeaderIndex(headerSheet);
+                if (hdr.TryGetValue("TestCase", out var tcCol) && hdr.TryGetValue("Mark", out var markCol))
+                {
+                    var rng = headerSheet.RangeUsed();
+                    if (rng != null)
+                    {
+                        foreach (var row in rng.RowsUsed().Skip(1))
+                        {
+                            var tc = row.Cell(tcCol).GetString().Trim();
+                            if (string.Equals(tc, questionCode, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var markStr = row.Cell(markCol).GetString().Trim();
+                                double.TryParse(markStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _totalMark);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback: if mark not found in Detail template, we'll use the total from the suite
+            if (_totalMark == 0) _totalMark = 1; // Default to 1 if no mark specified
+
+            // Don't save yet - accumulate changes in memory
         }
 
         public void EndCase()
         {
-            try { _wb?.SaveAs(_outPath); } catch { }
+            try 
+            { 
+                if (_wb != null && _outPath != null)
+                {
+                    // Calculate summary for this case
+                    double totalPoints = 0, totalPossible = 0;
+                    bool allPassed = true;
+
+                    foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
+                    {
+                        if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
+                        var hdr = GetHeaderIndex(ws);
+                        
+                        if (!hdr.TryGetValue("PointsAwarded", out var awardedCol) || 
+                            !hdr.TryGetValue("PointsPossible", out var possibleCol) ||
+                            !hdr.TryGetValue("Result", out var resultCol)) 
+                            continue;
+
+                        var rng = ws.RangeUsed();
+                        if (rng == null) continue;
+
+                        foreach (var row in rng.RowsUsed().Skip(1))
+                        {
+                            var awarded = row.Cell(awardedCol).GetString();
+                            var possible = row.Cell(possibleCol).GetString();
+                            var result = row.Cell(resultCol).GetString();
+
+                            if (double.TryParse(awarded, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var a)) 
+                                totalPoints += a;
+                            if (double.TryParse(possible, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var p)) 
+                                totalPossible += p;
+                            if (!string.IsNullOrEmpty(result) && !result.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+                                allPassed = false;
+                        }
+                    }
+
+                    // Format all worksheets
+                    FormatWorksheets();
+
+                    // Add to summary list
+                    if (_questionCode != null)
+                    {
+                        _caseSummaries.Add(new TestCaseSummary
+                        {
+                            TestCase = _questionCode,
+                            Passed = allPassed,
+                            PointsAwarded = Math.Round(totalPoints, 2),
+                            PointsPossible = Math.Round(totalPossible, 2)
+                        });
+                    }
+
+                    // Save the detailed grade file for this case
+                    _wb.SaveAs(_outPath);
+                }
+            } 
+            catch { }
+
             _wb?.Dispose();
             _wb = null;
             _outPath = null;
             _questionCode = null;
+            _totalMark = 0;
+            _totalCompareSteps = 0;
+        }
+
+        public void SetTestCaseMark(double mark)
+        {
+            _totalMark = mark > 0 ? mark : 1;
         }
 
         public void LogStepGrade(
@@ -85,12 +202,17 @@ namespace SolutionGrader.Core.Services
             if (row == null)
                 row = AppendStageRow(ws, hdr, stage);
 
+            // Calculate points per step based on total mark
+            double pointsPerStep = _totalCompareSteps > 0 ? _totalMark / _totalCompareSteps : 0;
+            double actualPointsAwarded = passed && pointsPossible > 0 ? pointsPerStep : 0;
+            double actualPointsPossible = pointsPossible > 0 ? pointsPerStep : 0;
+
             // Write result columns
             SetCell(ws, row.Value, hdr, "Result", passed ? "PASS" : "FAIL");
             SetCell(ws, row.Value, hdr, "ErrorCode", errorCode);
             SetCell(ws, row.Value, hdr, "ErrorCategory", ErrorCodes.CategoryOf(errorCode).ToString());
-            SetCell(ws, row.Value, hdr, "PointsAwarded", pointsAwarded);
-            SetCell(ws, row.Value, hdr, "PointsPossible", pointsPossible);
+            SetCell(ws, row.Value, hdr, "PointsAwarded", Math.Round(actualPointsAwarded, 2));
+            SetCell(ws, row.Value, hdr, "PointsPossible", Math.Round(actualPointsPossible, 2));
             SetCell(ws, row.Value, hdr, "DurationMs", (int)Math.Round(durationMs));
             SetCell(ws, row.Value, hdr, "DetailPath", detailPath ?? "");
             SetCell(ws, row.Value, hdr, "Message", message ?? "");
@@ -99,9 +221,9 @@ namespace SolutionGrader.Core.Services
             // Also make sure the Action column is set (if empty), to mirror template
             var actionCell = hdr.TryGetValue("Action", out var aCol) ? ws.Cell(row.Value, aCol) : null;
             if (actionCell != null && string.IsNullOrWhiteSpace(actionCell.GetString()))
-                actionCell.Value = step.Action;
+                actionCell.Value = XLCellValue.FromObject(step.Action ?? string.Empty);
 
-            _wb.SaveAs(_outPath);
+            // DON'T save here - accumulate changes in memory
         }
 
         public string WriteTextMismatchDiff(string questionCode, int stage, string expectedPath, string actualPath, DetailedCompareResult detail)
@@ -134,6 +256,63 @@ namespace SolutionGrader.Core.Services
             LogStepGrade(step, true, $"SKIP: {reason}", 0, 0, 0, errorCode, null, null);
         }
 
+        public void WriteOverallSummary()
+        {
+            if (string.IsNullOrEmpty(_overallSummaryPath) || _caseSummaries.Count == 0) return;
+
+            try
+            {
+                using var wb = new XLWorkbook();
+                var ws = wb.AddWorksheet("Summary");
+
+                // Headers
+                ws.Cell(1, 1).Value = XLCellValue.FromObject("TestCase");
+                ws.Cell(1, 2).Value = XLCellValue.FromObject("Pass/Fail");
+                ws.Cell(1, 3).Value = XLCellValue.FromObject("PointsAwarded");
+                ws.Cell(1, 4).Value = XLCellValue.FromObject("PointsPossible");
+
+                // Format header row
+                ws.Row(1).Style.Font.Bold = true;
+                ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
+                ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+                // Data rows
+                int row = 2;
+                foreach (var summary in _caseSummaries)
+                {
+                    ws.Cell(row, 1).Value = XLCellValue.FromObject(summary.TestCase);
+                    ws.Cell(row, 2).Value = XLCellValue.FromObject(summary.Passed ? "PASS" : "FAIL");
+                    ws.Cell(row, 3).Value = XLCellValue.FromObject(summary.PointsAwarded);
+                    ws.Cell(row, 4).Value = XLCellValue.FromObject(summary.PointsPossible);
+                    
+                    // Color code Pass/Fail
+                    if (summary.Passed)
+                        ws.Cell(row, 2).Style.Font.FontColor = XLColor.Green;
+                    else
+                        ws.Cell(row, 2).Style.Font.FontColor = XLColor.Red;
+                    
+                    row++;
+                }
+
+                // Totals row
+                ws.Cell(row, 1).Value = XLCellValue.FromObject("TOTAL");
+                ws.Cell(row, 1).Style.Font.Bold = true;
+                ws.Cell(row, 3).Value = XLCellValue.FromObject(Math.Round(_caseSummaries.Sum(s => s.PointsAwarded), 2));
+                ws.Cell(row, 3).Style.Font.Bold = true;
+                ws.Cell(row, 4).Value = XLCellValue.FromObject(Math.Round(_caseSummaries.Sum(s => s.PointsPossible), 2));
+                ws.Cell(row, 4).Style.Font.Bold = true;
+
+                // Auto-fit columns
+                ws.Columns().AdjustToContents();
+
+                wb.SaveAs(_overallSummaryPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARNING] Failed to write overall summary: {ex.Message}");
+            }
+        }
+
         private static int ParseStage(string id)
         {
             var lastDash = id?.LastIndexOf('-') ?? -1;
@@ -160,7 +339,7 @@ namespace SolutionGrader.Core.Services
             var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
             var newRow = lastRow + 1;
             if (hdr.TryGetValue("Stage", out var c))
-                ws.Cell(newRow, c).Value = stage;
+                ws.Cell(newRow, c).Value = XLCellValue.FromObject(stage);
             return newRow;
         }
 
@@ -185,7 +364,7 @@ namespace SolutionGrader.Core.Services
             {
                 if (!hdr.ContainsKey(name))
                 {
-                    ws.Cell(1, nextCol).Value = name;
+                    ws.Cell(1, nextCol).Value = XLCellValue.FromObject(name);
                     hdr[name] = nextCol;
                     nextCol++;
                 }
@@ -195,7 +374,35 @@ namespace SolutionGrader.Core.Services
         private static void SetCell(IXLWorksheet ws, int row, Dictionary<string, int> hdr, string colName, object? value)
         {
             if (!hdr.TryGetValue(colName, out var col)) return;
-            ws.Cell(row, col).Value = (XLCellValue)(value ?? "");
+
+            var cell = ws.Cell(row, col);
+            if (value is null)
+            {
+                cell.Value = XLCellValue.FromObject(string.Empty);
+                return;
+            }
+
+            // Handle different types explicitly
+            switch (value)
+            {
+                case string s:
+                    cell.Value = XLCellValue.FromObject(s);
+                    break;
+                case int i:
+                    cell.Value = XLCellValue.FromObject(i);
+                    break;
+                case double d:
+                    cell.Value = XLCellValue.FromObject(d);
+                    // Format as number with 2 decimal places
+                    cell.Style.NumberFormat.Format = "0.00";
+                    break;
+                case bool b:
+                    cell.Value = XLCellValue.FromObject(b);
+                    break;
+                default:
+                    cell.Value = XLCellValue.FromObject(value.ToString() ?? string.Empty);
+                    break;
+            }
         }
 
         private static string ResolveSheet(Step step, string? actualPath)
@@ -218,6 +425,45 @@ namespace SolutionGrader.Core.Services
                 return SheetOutClients;
 
             return SheetOutServers;
+        }
+
+        private void FormatWorksheets()
+        {
+            if (_wb == null) return;
+
+            foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
+            {
+                if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
+
+                // Auto-fit all columns
+                ws.Columns().AdjustToContents();
+
+                // Enable wrap text for specific columns that might have long content
+                var hdr = GetHeaderIndex(ws);
+                if (hdr.TryGetValue("Message", out var msgCol))
+                {
+                    ws.Column(msgCol).Style.Alignment.WrapText = true;
+                    ws.Column(msgCol).Width = 50; // Set a reasonable width
+                }
+
+                if (hdr.TryGetValue("DetailPath", out var detailCol))
+                {
+                    ws.Column(detailCol).Style.Alignment.WrapText = true;
+                    ws.Column(detailCol).Width = 40;
+                }
+
+                if (hdr.TryGetValue("ActualPath", out var actualCol))
+                {
+                    ws.Column(actualCol).Style.Alignment.WrapText = true;
+                    ws.Column(actualCol).Width = 40;
+                }
+
+                // Format header row
+                var headerRow = ws.Row(1);
+                headerRow.Style.Font.Bold = true;
+                headerRow.Style.Fill.BackgroundColor = XLColor.LightGray;
+                headerRow.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            }
         }
 
         public void Dispose()

@@ -6,10 +6,19 @@ using System.Text.Json;
 
 namespace SolutionGrader.Core.Services
 {
+    /// <summary>
+    /// Text/JSON/CSV/file comparers used by Executor.
+    /// - Provides CompareTextDetailed required by Executor (for diffs) 
+    /// - Logs expected/actual paths & normalized previews BEFORE comparison.
+    /// - Keeps messages compatible with Executor's error-code mapping.
+    /// </summary>
     public sealed class DataComparisonService : IDataComparisonService
     {
         private static bool IsMissing(string? s) => string.IsNullOrWhiteSpace(s);
         private static string Norm(string s) => (s ?? string.Empty).Replace("\r", "").Replace("\n", "").Trim();
+
+        private const int PreviewLimit = 600;
+        private static string Preview(string s) => s.Length <= PreviewLimit ? s : s[..PreviewLimit] + $"... [truncated {s.Length - PreviewLimit} chars]";
 
         public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
@@ -20,6 +29,9 @@ namespace SolutionGrader.Core.Services
 
             using var e = File.OpenRead(expectedPath!);
             using var a = File.OpenRead(actualPath!);
+
+            Console.WriteLine($"[CompareFile] Expected: {expectedPath} ({e.Length} bytes)");
+            Console.WriteLine($"[CompareFile]   Actual: {actualPath} ({a.Length} bytes)");
 
             if (e.Length != a.Length) return (false, $"Size differs: {e.Length} vs {a.Length}");
 
@@ -34,45 +46,6 @@ namespace SolutionGrader.Core.Services
             return (d.AreEqual, d.Message);
         }
 
-        public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
-        {
-            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected JSON missing");
-            if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual JSON missing: {actualPath}");
-
-            try
-            {
-                using var je = JsonDocument.Parse(File.ReadAllText(expectedPath!));
-                using var ja = JsonDocument.Parse(File.ReadAllText(actualPath!));
-                var ok = JsonEquals(je.RootElement, ja.RootElement, ignoreOrder);
-                return ok ? (true, "JSON equal") : (false, "JSON differs");
-            }
-            catch (Exception ex) { return (false, "JSON compare error: " + ex.Message); }
-        }
-
-        public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
-        {
-            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-                return (true, "Ignored: expected CSV missing");
-            if (IsMissing(actualPath) || !File.Exists(actualPath!))
-                return (false, $"Actual CSV missing: {actualPath}");
-
-            var eLines = File.ReadAllLines(expectedPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
-            var aLines = File.ReadAllLines(actualPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
-            if (ignoreOrder)
-            {
-                var eSet = new HashSet<string>(eLines, StringComparer.OrdinalIgnoreCase);
-                var aSet = new HashSet<string>(aLines, StringComparer.OrdinalIgnoreCase);
-                return eSet.SetEquals(aSet) ? (true, "CSV equal (unordered)") : (false, "CSV differs");
-            }
-            else
-            {
-                return eLines.SequenceEqual(aLines, StringComparer.OrdinalIgnoreCase) ? (true, "CSV equal (ordered)") : (false, "CSV differs");
-            }
-        }
-
-        // ===== Detailed text compare (for diff files / first-diff marker) =====
         public DetailedCompareResult CompareTextDetailed(string? expectedPath, string? actualPath, bool caseInsensitive = true)
         {
             if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
@@ -84,12 +57,28 @@ namespace SolutionGrader.Core.Services
             var eRaw = File.ReadAllText(expectedPath!);
             var aRaw = File.ReadAllText(actualPath!);
 
+            // Log BEFORE compare so you can see actual output even on PASS
+            Console.WriteLine($"[CompareText] Expected path: {expectedPath}");
+            Console.WriteLine($"[CompareText] Actual   path: {actualPath}");
+            Console.WriteLine($"[CompareText] --- Expected (normalized preview) ---");
+            Console.WriteLine(Preview(Norm(eRaw)));
+            Console.WriteLine($"[CompareText] --- Actual   (normalized preview) ---");
+            Console.WriteLine(Preview(Norm(aRaw)));
+
             var e = Norm(eRaw);
             var a = Norm(aRaw);
 
             var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             if (string.Equals(e, a, comparison))
-                return new DetailedCompareResult { AreEqual = true, Message = "Text equal (normalized)", NormalizedExpected = e, NormalizedActual = a };
+            {
+                return new DetailedCompareResult
+                {
+                    AreEqual = true,
+                    Message = "Text equal (normalized)",
+                    NormalizedExpected = e,
+                    NormalizedActual = a
+                };
+            }
 
             int idx = FirstDiff(e, a, caseInsensitive);
             var eChar = CharAt(e, idx);
@@ -110,6 +99,50 @@ namespace SolutionGrader.Core.Services
                 NormalizedExpected = e,
                 NormalizedActual = a
             };
+        }
+
+        public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
+        {
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return (true, "Ignored: expected JSON missing");
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return (false, $"Actual JSON missing: {actualPath}");
+
+            Console.WriteLine($"[CompareJson] Expected path: {expectedPath}");
+            Console.WriteLine($"[CompareJson] Actual   path: {actualPath}");
+
+            try
+            {
+                using var je = JsonDocument.Parse(File.ReadAllText(expectedPath!));
+                using var ja = JsonDocument.Parse(File.ReadAllText(actualPath!));
+                var ok = JsonEquals(je.RootElement, ja.RootElement, ignoreOrder);
+                return ok ? (true, "JSON equal") : (false, "JSON differs");
+            }
+            catch (Exception ex) { return (false, "JSON compare error: " + ex.Message); }
+        }
+
+        public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
+        {
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return (true, "Ignored: expected CSV missing");
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return (false, $"Actual CSV missing: {actualPath}");
+
+            Console.WriteLine($"[CompareCsv] Expected path: {expectedPath}");
+            Console.WriteLine($"[CompareCsv] Actual   path: {actualPath}");
+
+            var eLines = File.ReadAllLines(expectedPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
+            var aLines = File.ReadAllLines(actualPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
+            if (ignoreOrder)
+            {
+                var eSet = new HashSet<string>(eLines, StringComparer.OrdinalIgnoreCase);
+                var aSet = new HashSet<string>(aLines, StringComparer.OrdinalIgnoreCase);
+                return eSet.SetEquals(aSet) ? (true, "CSV equal (unordered)") : (false, "CSV differs");
+            }
+            else
+            {
+                return eLines.SequenceEqual(aLines, StringComparer.OrdinalIgnoreCase) ? (true, "CSV equal (ordered)") : (false, "CSV differs");
+            }
         }
 
         private static int FirstDiff(string s1, string s2, bool ci)

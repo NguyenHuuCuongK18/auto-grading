@@ -15,7 +15,10 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         // Protocol: try Header sheet cell Type if present; default HTTP
         var protocol = ReadProtocolFromHeader(headerPath);
 
-        var cases = ReadCasesFromDirectory(System.IO.Path.GetDirectoryName(headerPath)!);
+        // Read test case marks from Header.xlsx
+        var marksMap = ReadMarksFromHeader(headerPath);
+
+        var cases = ReadCasesFromDirectory(System.IO.Path.GetDirectoryName(headerPath)!, marksMap);
 
         return new SuiteDefinition
         {
@@ -60,7 +63,50 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         return "HTTP";
     }
 
-    private static System.Collections.Generic.IReadOnlyList<TestCaseDefinition> ReadCasesFromDirectory(string root)
+    private static Dictionary<string, double> ReadMarksFromHeader(string headerPath)
+    {
+        var marks = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var wb = new XLWorkbook(headerPath);
+            var ws = wb.Worksheets.FirstOrDefault(w => string.Equals(w.Name, SuiteKeywords.Sheet_Header, StringComparison.OrdinalIgnoreCase))
+                  ?? wb.Worksheets.First();
+            
+            var used = ws.RangeUsed();
+            if (used is null) return marks;
+
+            // Find TestCase and Mark columns
+            var headerRow = ws.Row(1);
+            int? testCaseCol = null, markCol = null;
+            
+            foreach (var cell in headerRow.CellsUsed())
+            {
+                var colName = cell.GetString().Trim();
+                if (string.Equals(colName, "TestCase", StringComparison.OrdinalIgnoreCase))
+                    testCaseCol = cell.Address.ColumnNumber;
+                else if (string.Equals(colName, "Mark", StringComparison.OrdinalIgnoreCase))
+                    markCol = cell.Address.ColumnNumber;
+            }
+
+            if (testCaseCol.HasValue && markCol.HasValue)
+            {
+                foreach (var row in used.Rows().Skip(1))
+                {
+                    var testCase = row.Cell(testCaseCol.Value).GetString().Trim();
+                    var markStr = row.Cell(markCol.Value).GetString().Trim();
+                    
+                    if (!string.IsNullOrWhiteSpace(testCase) && double.TryParse(markStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var mark))
+                    {
+                        marks[testCase] = mark;
+                    }
+                }
+            }
+        }
+        catch { }
+        return marks;
+    }
+
+    private static System.Collections.Generic.IReadOnlyList<TestCaseDefinition> ReadCasesFromDirectory(string root, Dictionary<string, double> marksMap)
     {
         var list = new System.Collections.Generic.List<TestCaseDefinition>();
         foreach (var dir in System.IO.Directory.GetDirectories(root))
@@ -75,10 +121,13 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             }
             if (!System.IO.File.Exists(detail)) continue; // skip folders without detail
 
+            // Get mark from marksMap, default to 0 if not found
+            var mark = marksMap.TryGetValue(name, out var m) ? m : 0;
+
             list.Add(new TestCaseDefinition
             {
                 Name = name,
-                Mark = 0,
+                Mark = mark,
                 DirectoryPath = dir,
                 DetailPath = detail,
                 InnerHeaderPath = null

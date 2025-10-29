@@ -39,6 +39,11 @@ namespace SolutionGrader.Core.Services
             }
         }
 
+        public void SetTestCaseMark(double mark)
+        {
+            // No-op for this implementation - it doesn't use marks
+        }
+
         public void EndCase()
         {
             _caseOutFolder = null;

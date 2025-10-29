@@ -28,10 +28,14 @@ public class Program
     {
         if (!Need(a, "suite", "out")) return PrintUsage();
 
+        // Create timestamped results folder
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestampedResultRoot = System.IO.Path.Combine(a["out"], $"GradeResult_{timestamp}");
+
         var run = new ExecuteSuiteArgs
         {
             SuitePath = a["suite"],
-            ResultRoot = a["out"],
+            ResultRoot = timestampedResultRoot,
             ClientExePath = a.GetValueOrDefault("client"),
             ServerExePath = a.GetValueOrDefault("server"),
             ClientAppSettingsTemplate = a.GetValueOrDefault("client-appsettings"),
@@ -56,6 +60,9 @@ public class Program
         IReportService rep = new ReportService(files);
 
         var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx);
+        
+        Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
+        
         return await flow.ExecuteSuiteAsync(run);
     }
 

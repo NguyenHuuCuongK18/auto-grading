@@ -9,6 +9,8 @@ namespace SolutionGrader.Core.Abstractions
         void BeginCase(string outFolder, string questionCode, string detailTemplatePath);
         void EndCase();
 
+        void SetTestCaseMark(double mark);
+
         void LogStepGrade(
             Step step,
             bool passed,

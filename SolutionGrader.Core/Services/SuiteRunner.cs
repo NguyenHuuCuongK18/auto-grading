@@ -45,7 +45,7 @@ namespace SolutionGrader.Core.Services
             {
                 ct.ThrowIfCancellationRequested();
 
-                Console.WriteLine($"\n[TestCase] Starting: {q.Name}");
+                Console.WriteLine($"\n[TestCase] Starting: {q.Name} (Mark: {q.Mark})");
 
                 _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
                 await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, ct);
@@ -62,8 +62,9 @@ namespace SolutionGrader.Core.Services
 
                 _run.ResultRoot = outDir;
 
-                // NEW: Begin Excel case log; pass the case's Detail.xlsx template path
+                // NEW: Begin Excel case log; pass the case's Detail.xlsx template path and mark
                 _log.BeginCase(outDir, q.Name, q.DetailPath);
+                _log.SetTestCaseMark(q.Mark);
 
                 var results = new List<StepResult>();
                 foreach (var step in steps)
@@ -90,6 +91,13 @@ namespace SolutionGrader.Core.Services
                 try { await _proc.StopAllAsync(); } catch { }
                 try { await _mw.StopAsync(); } catch { }
                 Console.WriteLine($"[TestCase] Completed: {q.Name}\n");
+            }
+
+            // Write overall summary after all test cases complete
+            Console.WriteLine("[Suite] Writing overall summary...");
+            if (_log is ExcelDetailLogService excelLog)
+            {
+                excelLog.WriteOverallSummary();
             }
 
             Console.WriteLine("[Suite] All test cases completed successfully");
