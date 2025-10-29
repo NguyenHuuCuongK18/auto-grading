@@ -244,7 +244,7 @@ namespace SolutionGrader.Core.Services
             sw.Stop();
             
             // If expected output is missing, don't count this step toward grading
-            if (result.message.Contains("Ignored: expected missing", StringComparison.OrdinalIgnoreCase))
+            if (result.message.StartsWith("Ignored:", StringComparison.OrdinalIgnoreCase))
             {
                 pointsPossible = 0;
             }
