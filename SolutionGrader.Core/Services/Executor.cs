@@ -31,7 +31,7 @@ namespace SolutionGrader.Core.Services
             var useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
             try { _http.Timeout = TimeSpan.FromSeconds(Math.Max(1, args.StageTimeoutSeconds)); } catch { }
 
-            int pointsPossible = IsCompare(step.Action) ? 1 : 0;
+            double pointsPossible = 0;
             string errCode = ErrorCodes.OK;
             string? detailPath = null;
             string? actualPath = null;
@@ -242,7 +242,7 @@ namespace SolutionGrader.Core.Services
             }
 
             sw.Stop();
-            var awarded = (result.ok && pointsPossible > 0) ? pointsPossible : 0;
+            const double awarded = 0;
 
             _log.LogStepGrade(step, result.ok, result.message, awarded, pointsPossible, sw.Elapsed.TotalMilliseconds, errCode, detailPath, actualPath);
 
@@ -274,12 +274,6 @@ namespace SolutionGrader.Core.Services
             }
             catch { return false; }
         }
-
-        private static bool IsCompare(string action) =>
-            string.Equals(action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase);
 
         private static int ParseStage(string id)
         {

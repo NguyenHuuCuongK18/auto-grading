@@ -1,6 +1,7 @@
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using System.Diagnostics;
+using System.Linq;
 
 namespace SolutionGrader.Core.Services
 {
@@ -63,7 +64,7 @@ namespace SolutionGrader.Core.Services
                 _run.ResultRoot = outDir;
 
                 // NEW: Begin Excel case log; pass the case's Detail.xlsx template path
-                _log.BeginCase(outDir, q.Name, q.DetailPath);
+                _log.BeginCase(outDir, q.Name, q.DetailPath, q.Mark);
 
                 var results = new List<StepResult>();
                 foreach (var step in steps)
@@ -83,6 +84,11 @@ namespace SolutionGrader.Core.Services
 
                 Console.WriteLine($"[TestCase] Writing results to: {outDir}");
                 await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
+
+                var casePassed = results.All(r => r.Passed);
+                var pointsAwarded = casePassed ? q.Mark : 0;
+                var summaryMessage = casePassed ? "All steps passed." : "One or more steps failed.";
+                _log.LogCaseSummary(q.Name, casePassed, pointsAwarded, q.Mark, summaryMessage);
 
                 _log.EndCase();
 

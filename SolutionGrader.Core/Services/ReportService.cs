@@ -33,22 +33,16 @@ public sealed class ReportService : IReportService
                 ws.Cell(r,3).Value = s.Step.Action;
                 ws.Cell(r,4).Value = s.Passed;
                 ws.Cell(r,5).Value = s.Message;
+                ws.Cell(r,5).Style.Alignment.WrapText = true;
                 ws.Cell(r,6).Value = s.DurationMs;
                 r++;
             }
+
+            ws.Columns().AdjustToContents();
+            ws.Rows().AdjustToContents();
+
             using var fs = _files.OpenWrite(xlsxPath, overwrite:true);
             wb.SaveAs(fs);
-        }
-
-        var csvPath = System.IO.Path.Combine(outFolder, $"{questionCode}_Result.csv");
-        using (var sw = new System.IO.StreamWriter(_files.OpenWrite(csvPath, overwrite:true)))
-        {
-            sw.WriteLine("StepId,Stage,Action,Passed,Message,DurationMs");
-            foreach (var s in steps)
-            {
-                var msg = (s.Message ?? "").Replace("\"","\"\"");
-                sw.WriteLine($"{s.Step.Id},{s.Step.Stage},{s.Step.Action},{s.Passed},\"{msg}\",{s.DurationMs:0}");
-            }
         }
 
         return System.Threading.Tasks.Task.FromResult(xlsxPath);
