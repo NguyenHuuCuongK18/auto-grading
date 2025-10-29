@@ -1,9 +1,6 @@
 ﻿using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Services;
-using System;
-using System.Linq;
-using System.Collections.Generic;
 
 public class Program
 {
@@ -48,14 +45,17 @@ public class Program
         var suite = new ExcelSuiteLoader();
         var parse = new ExcelDetailParser();
 
-        IExecutableManager proc = new ExecutableManager();
-        IMiddlewareService mw = new MiddlewareProxyService();
-        IDataComparisonService cmp = new DataComparisonService();
+        IRunContext runctx = new RunContext();
 
-        IExecutor exec = new Executor(proc, mw, cmp);
+        IExecutableManager proc = new ExecutableManager(runctx);
+        IMiddlewareService mw = new MiddlewareProxyService(runctx);
+        IDataComparisonService cmp = new DataComparisonService();
+        IDetailLogService log = new ExcelDetailLogService(files); // <-- Excel logger
+
+        IExecutor exec = new Executor(proc, mw, cmp, log, runctx);
         IReportService rep = new ReportService(files);
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw);
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx);
         return await flow.ExecuteSuiteAsync(run);
     }
 
@@ -89,7 +89,7 @@ Usage:
                                 [--db-script <sql>] [--timeout <sec>]
 
 Notes:
-  - Protocol (HTTP/TCP) is read from Header.xlsx (Header!Type if present); no CLI flag needed.
+  - Protocol (HTTP/TCP) is read from Header.xlsx (if provided by the suite); no CLI flag needed.
 ");
         return -1;
     }

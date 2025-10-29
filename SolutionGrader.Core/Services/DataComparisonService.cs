@@ -1,131 +1,202 @@
-namespace SolutionGrader.Core.Services;
-
-using SolutionGrader.Core.Abstractions;
+﻿using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Domain.Models;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-public sealed class DataComparisonService : IDataComparisonService
+namespace SolutionGrader.Core.Services
 {
-    // Helpers for policy
-    private static bool IsMissing(string? pathOrValue) => string.IsNullOrWhiteSpace(pathOrValue);
-    private static string NormalizeNewlines(string s) => s.Replace("\r", "").Replace("\n", "").Trim();
-
-    public (bool, string) CompareFile(string? expectedPath, string? actualPath)
+    public sealed class DataComparisonService : IDataComparisonService
     {
-        // 1) If expected missing -> IGNORE (pass)
-        if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-            return (true, "Ignored: expected missing");
-        if (IsMissing(actualPath) || !File.Exists(actualPath!))
-            return (false, $"Actual file missing: {actualPath}");
+        private static bool IsMissing(string? s) => string.IsNullOrWhiteSpace(s);
+        private static string Norm(string s) => (s ?? string.Empty).Replace("\r", "").Replace("\n", "").Trim();
 
-        using var e = File.OpenRead(expectedPath!);
-        using var a = File.OpenRead(actualPath!);
-
-        if (e.Length != a.Length) return (false, $"Size differs: {e.Length} vs {a.Length}");
-
-        using var he = SHA256.Create(); using var ha = SHA256.Create();
-        var de = he.ComputeHash(e); var da = ha.ComputeHash(a);
-        return de.SequenceEqual(da) ? (true, "Files equal (SHA256)") : (false, "Content differs (SHA256)");
-    }
-
-    public (bool, string) CompareText(string? expectedPath, string? actualPath, bool caseInsensitive = true)
-    {
-        // 1) If expected missing -> IGNORE (pass)
-        if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-            return (true, "Ignored: expected missing");
-
-        if (IsMissing(actualPath) || !File.Exists(actualPath!))
-            return (false, $"Actual text missing: {actualPath}");
-
-        var e = NormalizeNewlines(File.ReadAllText(expectedPath!));
-        var a = NormalizeNewlines(File.ReadAllText(actualPath!));
-
-        var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return string.Equals(e, a, comparison) ? (true, "Text equal (newline-normalized)") : (false, "Text differs (newline-normalized)");
-    }
-
-    public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
-    {
-        if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-            return (true, "Ignored: expected JSON missing");
-        if (IsMissing(actualPath) || !File.Exists(actualPath!))
-            return (false, $"Actual JSON missing: {actualPath}");
-
-        try
+        public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
-            using var je = JsonDocument.Parse(File.ReadAllText(expectedPath!));
-            using var ja = JsonDocument.Parse(File.ReadAllText(actualPath!));
-            var ok = JsonEquals(je.RootElement, ja.RootElement, ignoreOrder);
-            return ok ? (true, "JSON equal") : (false, "JSON differs");
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return (true, "Ignored: expected missing");
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return (false, $"Actual file missing: {actualPath}");
+
+            using var e = File.OpenRead(expectedPath!);
+            using var a = File.OpenRead(actualPath!);
+
+            if (e.Length != a.Length) return (false, $"Size differs: {e.Length} vs {a.Length}");
+
+            using var he = SHA256.Create(); using var ha = SHA256.Create();
+            var de = he.ComputeHash(e); var da = ha.ComputeHash(a);
+            return de.SequenceEqual(da) ? (true, "Files equal (SHA256)") : (false, "Content differs (SHA256)");
         }
-        catch (Exception ex) { return (false, "JSON compare error: " + ex.Message); }
-    }
 
-    public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
-    {
-        if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
-            return (true, "Ignored: expected CSV missing");
-        if (IsMissing(actualPath) || !File.Exists(actualPath!))
-            return (false, $"Actual CSV missing: {actualPath}");
-
-        var eLines = File.ReadAllLines(expectedPath!).Select(NormalizeNewlines).Where(l => !string.IsNullOrWhiteSpace(l));
-        var aLines = File.ReadAllLines(actualPath!).Select(NormalizeNewlines).Where(l => !string.IsNullOrWhiteSpace(l));
-        if (ignoreOrder)
+        public (bool, string) CompareText(string? expectedPath, string? actualPath, bool caseInsensitive = true)
         {
-            var eSet = new HashSet<string>(eLines, StringComparer.OrdinalIgnoreCase);
-            var aSet = new HashSet<string>(aLines, StringComparer.OrdinalIgnoreCase);
-            return eSet.SetEquals(aSet) ? (true, "CSV equal (unordered, newline-normalized)") : (false, "CSV differs");
+            var d = CompareTextDetailed(expectedPath, actualPath, caseInsensitive);
+            return (d.AreEqual, d.Message);
         }
-        else
-        {
-            return eLines.SequenceEqual(aLines, StringComparer.OrdinalIgnoreCase) ? (true, "CSV equal (ordered, newline-normalized)") : (false, "CSV differs");
-        }
-    }
 
-    private static bool JsonEquals(JsonElement x, JsonElement y, bool ignoreOrder)
-    {
-        if (x.ValueKind != y.ValueKind) return false;
-        switch (x.ValueKind)
+        public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
         {
-            case JsonValueKind.Object:
-                var xProps = x.EnumerateObject().ToList();
-                var yProps = y.EnumerateObject().ToList();
-                if (xProps.Count != yProps.Count) return false;
-                foreach (var xp in xProps)
-                {
-                    if (!y.TryGetProperty(xp.Name, out var yp)) return false;
-                    if (!JsonEquals(xp.Value, yp, ignoreOrder)) return false;
-                }
-                return true;
-            case JsonValueKind.Array:
-                var xa = x.EnumerateArray().ToList();
-                var ya = y.EnumerateArray().ToList();
-                if (xa.Count != ya.Count) return false;
-                if (ignoreOrder)
-                {
-                    var canonX = xa.Select(Canonicalize).OrderBy(s => s, StringComparer.Ordinal).ToList();
-                    var canonY = ya.Select(Canonicalize).OrderBy(s => s, StringComparer.Ordinal).ToList();
-                    return canonX.SequenceEqual(canonY, StringComparer.Ordinal);
-                }
-                else
-                {
-                    for (int i=0;i<xa.Count;i++) if (!JsonEquals(xa[i], ya[i], ignoreOrder)) return false;
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return (true, "Ignored: expected JSON missing");
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return (false, $"Actual JSON missing: {actualPath}");
+
+            try
+            {
+                using var je = JsonDocument.Parse(File.ReadAllText(expectedPath!));
+                using var ja = JsonDocument.Parse(File.ReadAllText(actualPath!));
+                var ok = JsonEquals(je.RootElement, ja.RootElement, ignoreOrder);
+                return ok ? (true, "JSON equal") : (false, "JSON differs");
+            }
+            catch (Exception ex) { return (false, "JSON compare error: " + ex.Message); }
+        }
+
+        public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
+        {
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return (true, "Ignored: expected CSV missing");
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return (false, $"Actual CSV missing: {actualPath}");
+
+            var eLines = File.ReadAllLines(expectedPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
+            var aLines = File.ReadAllLines(actualPath!).Select(Norm).Where(l => !string.IsNullOrWhiteSpace(l));
+            if (ignoreOrder)
+            {
+                var eSet = new HashSet<string>(eLines, StringComparer.OrdinalIgnoreCase);
+                var aSet = new HashSet<string>(aLines, StringComparer.OrdinalIgnoreCase);
+                return eSet.SetEquals(aSet) ? (true, "CSV equal (unordered)") : (false, "CSV differs");
+            }
+            else
+            {
+                return eLines.SequenceEqual(aLines, StringComparer.OrdinalIgnoreCase) ? (true, "CSV equal (ordered)") : (false, "CSV differs");
+            }
+        }
+
+        // ===== Detailed text compare (for diff files / first-diff marker) =====
+        public DetailedCompareResult CompareTextDetailed(string? expectedPath, string? actualPath, bool caseInsensitive = true)
+        {
+            if (IsMissing(expectedPath) || !File.Exists(expectedPath!))
+                return new DetailedCompareResult { AreEqual = true, Message = "Ignored: expected missing" };
+
+            if (IsMissing(actualPath) || !File.Exists(actualPath!))
+                return new DetailedCompareResult { AreEqual = false, Message = $"Actual text missing: {actualPath}", FirstDiffIndex = -1 };
+
+            var eRaw = File.ReadAllText(expectedPath!);
+            var aRaw = File.ReadAllText(actualPath!);
+
+            var e = Norm(eRaw);
+            var a = Norm(aRaw);
+
+            var comparison = caseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (string.Equals(e, a, comparison))
+                return new DetailedCompareResult { AreEqual = true, Message = "Text equal (normalized)", NormalizedExpected = e, NormalizedActual = a };
+
+            int idx = FirstDiff(e, a, caseInsensitive);
+            var eChar = CharAt(e, idx);
+            var aChar = CharAt(a, idx);
+            string eCtx = ContextWithCaret(e, idx);
+            string aCtx = ContextWithCaret(a, idx);
+            var msg = $"Text differs (normalized). First diff at {idx}: expected '{Printable(eChar)}' vs actual '{Printable(aChar)}'.";
+
+            return new DetailedCompareResult
+            {
+                AreEqual = false,
+                Message = msg,
+                FirstDiffIndex = idx,
+                ExpectedChar = eChar,
+                ActualChar = aChar,
+                ExpectedContext = eCtx,
+                ActualContext = aCtx,
+                NormalizedExpected = e,
+                NormalizedActual = a
+            };
+        }
+
+        private static int FirstDiff(string s1, string s2, bool ci)
+        {
+            var c1 = ci ? s1.ToUpperInvariant() : s1;
+            var c2 = ci ? s2.ToUpperInvariant() : s2;
+            int n = Math.Min(c1.Length, c2.Length);
+            for (int i = 0; i < n; i++) if (c1[i] != c2[i]) return i;
+            return n;
+        }
+
+        private static char? CharAt(string s, int idx) => (idx >= 0 && idx < s.Length) ? s[idx] : (char?)null;
+
+        private static string ContextWithCaret(string s, int idx, int padding = 24)
+        {
+            idx = Math.Max(0, idx);
+            int start = Math.Max(0, idx - padding);
+            int end = Math.Min(s.Length, idx + padding);
+            var snippet = s.Substring(start, end - start);
+            var caretPos = idx - start;
+            var caretLine = new string(' ', Math.Max(0, caretPos)) + "^";
+            snippet = snippet.Replace("\t", "\\t");
+            var sb = new StringBuilder();
+            sb.AppendLine(snippet);
+            sb.AppendLine(caretLine);
+            sb.Append($"index={idx}");
+            return sb.ToString();
+        }
+
+        private static string Printable(char? c)
+        {
+            if (c == null) return "<null>";
+            return c switch
+            {
+                '\t' => @"\t",
+                '\n' => @"\n",
+                '\r' => @"\r",
+                ' ' => "␠",
+                _ => c.ToString()!
+            };
+        }
+
+        private static bool JsonEquals(JsonElement x, JsonElement y, bool ignoreOrder)
+        {
+            if (x.ValueKind != y.ValueKind) return false;
+            switch (x.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    var xProps = x.EnumerateObject().ToList();
+                    var yProps = y.EnumerateObject().ToList();
+                    if (xProps.Count != yProps.Count) return false;
+                    foreach (var xp in xProps)
+                    {
+                        if (!y.TryGetProperty(xp.Name, out var yp)) return false;
+                        if (!JsonEquals(xp.Value, yp, ignoreOrder)) return false;
+                    }
                     return true;
-                }
-            default:
-                // Normalize newlines in string nodes too
-                var sx = x.ToString()?.Replace("\r","").Replace("\n","");
-                var sy = y.ToString()?.Replace("\r","").Replace("\n","");
-                return string.Equals(sx, sy, StringComparison.Ordinal);
-        }
-    }
 
-    private static string Canonicalize(JsonElement e)
-    {
-        using var buf = new MemoryStream();
-        using var w = new Utf8JsonWriter(buf, new JsonWriterOptions { Indented = false });
-        e.WriteTo(w); w.Flush();
-        return Encoding.UTF8.GetString(buf.ToArray());
+                case JsonValueKind.Array:
+                    var xa = x.EnumerateArray().ToList();
+                    var ya = y.EnumerateArray().ToList();
+                    if (xa.Count != ya.Count) return false;
+                    if (ignoreOrder)
+                    {
+                        var canonX = xa.Select(Canonicalize).OrderBy(s => s, StringComparer.Ordinal).ToList();
+                        var canonY = ya.Select(Canonicalize).OrderBy(s => s, StringComparer.Ordinal).ToList();
+                        return canonX.SequenceEqual(canonY, StringComparer.Ordinal);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < xa.Count; i++) if (!JsonEquals(xa[i], ya[i], ignoreOrder)) return false;
+                        return true;
+                    }
+
+                default:
+                    var sx = x.ToString()?.Replace("\r", "").Replace("\n", "");
+                    var sy = y.ToString()?.Replace("\r", "").Replace("\n", "");
+                    return string.Equals(sx, sy, StringComparison.Ordinal);
+            }
+        }
+
+        private static string Canonicalize(JsonElement e)
+        {
+            using var buf = new MemoryStream();
+            using var w = new Utf8JsonWriter(buf, new JsonWriterOptions { Indented = false });
+            e.WriteTo(w); w.Flush();
+            return Encoding.UTF8.GetString(buf.ToArray());
+        }
     }
 }
