@@ -14,6 +14,7 @@ public sealed class MiddlewareProxyService : IMiddlewareService
     private bool _httpMode;
     private HttpListener? _http;
     private TcpListener? _tcp;
+    private Task? _listenTask;
 
     private const int ProxyPort = 5000;
     private const int RealServerPort = 5001;
@@ -39,11 +40,29 @@ public sealed class MiddlewareProxyService : IMiddlewareService
 
     private async Task StopCoreAsync()
     {
-        try { _cts?.Cancel(); _cts?.Dispose(); _cts = null; } catch { }
+        Task? taskToWait = null;
+        lock (_gate)
+        {
+            if (!_running) return;
+            _running = false;
+            taskToWait = _listenTask;
+        }
+
+        try { _cts?.Cancel(); } catch { }
         try { if (_http != null && _http.IsListening) { _http.Stop(); _http.Close(); } _http = null; } catch { }
         try { _tcp?.Stop(); _tcp = null; } catch { }
-        lock (_gate) { _running = false; }
-        await Task.CompletedTask;
+
+        // Wait for the listen task to complete with a timeout
+        if (taskToWait != null)
+        {
+            try
+            {
+                await Task.WhenAny(taskToWait, Task.Delay(2000));
+            }
+            catch { }
+        }
+
+        try { _cts?.Dispose(); _cts = null; } catch { }
     }
 
     private void StartHttp(CancellationToken token)
@@ -55,7 +74,7 @@ public sealed class MiddlewareProxyService : IMiddlewareService
             _http.Prefixes.Add($"http://127.0.0.1:{ProxyPort}/");
             _http.Start();
             Console.WriteLine($"[Proxy] HTTP proxy listening on http://127.0.0.1:{ProxyPort}/ -> http://127.0.0.1:{RealServerPort}/");
-            _ = Task.Run(() => ListenHttpAsync(token), token);
+            _listenTask = Task.Run(() => ListenHttpAsync(token), token);
         }
         catch (Exception ex) { Console.WriteLine($"[HTTP Proxy ERR] {ex.Message}"); }
     }
@@ -116,7 +135,8 @@ public sealed class MiddlewareProxyService : IMiddlewareService
         {
             _tcp = new TcpListener(IPAddress.Loopback, ProxyPort);
             _tcp.Start();
-            _ = Task.Run(() => ListenTcpAsync(token), token);
+            Console.WriteLine($"[Proxy] TCP proxy listening on 127.0.0.1:{ProxyPort} -> 127.0.0.1:{RealServerPort}");
+            _listenTask = Task.Run(() => ListenTcpAsync(token), token);
         }
         catch (Exception ex) { Console.WriteLine($"[TCP Proxy ERR] {ex.Message}"); }
     }
