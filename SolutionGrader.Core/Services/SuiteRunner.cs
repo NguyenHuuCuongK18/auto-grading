@@ -1,0 +1,90 @@
+namespace SolutionGrader.Core.Services;
+
+using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Domain.Models;
+using System.Diagnostics;
+
+public sealed class SuiteRunner
+{
+    private readonly IFileService _files;
+    private readonly IEnvironmentResetService _env;
+    private readonly ITestSuiteLoader _suite;
+    private readonly ITestCaseParser _parser;
+    private readonly IExecutor _exec;
+    private readonly IReportService _report;
+    private readonly IExecutableManager _proc;
+    private readonly IMiddlewareService _mw;
+
+    public SuiteRunner(
+        IFileService files,
+        IEnvironmentResetService env,
+        ITestSuiteLoader suite,
+        ITestCaseParser parser,
+        IExecutor exec,
+        IReportService report,
+        IExecutableManager proc,
+        IMiddlewareService mw)
+    {
+        _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _mw = mw;
+    }
+
+    public async Task<int> ExecuteSuiteAsync(ExecuteSuiteArgs args, CancellationToken ct = default)
+    {
+        var def = _suite.Load(args.SuitePath);
+        args.Protocol = def.Protocol;
+        _files.EnsureDirectory(args.ResultRoot);
+
+        foreach (var q in def.Cases)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
+            await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, ct);
+
+            var outDir = Path.Combine(args.ResultRoot, q.Name);
+            _files.EnsureDirectory(outDir);
+            _env.ClearFolder(outDir);
+
+            _proc.Init(args.ClientExePath, args.ServerExePath);
+
+            var steps = _parser.ParseDetail(q.DetailPath, q.Name);
+            if (steps.Count == 0) throw new InvalidOperationException("Test case does not contain any steps.");
+
+            // Bootstrap first-step flow: Server -> MW -> Client
+            await StartProcessesAsync(args, ct);
+
+            var results = new List<StepResult>();
+            foreach (var step in steps)
+            {
+                var sw = Stopwatch.StartNew();
+                var (ok, msg) = await _exec.ExecuteAsync(step, args, ct);
+                sw.Stop();
+                results.Add(new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds });
+            }
+
+            await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
+
+            try { await _proc.StopAllAsync(); } catch { }
+            try { await _mw.StopAsync(); } catch { }
+        }
+
+        return 1;
+    }
+
+    private async Task StartProcessesAsync(ExecuteSuiteArgs args, CancellationToken ct)
+    {
+        _proc.StartServer();
+
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (_proc.IsServerRunning) break;
+            await Task.Delay(100, ct);
+        }
+
+        bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+        await _mw.StartAsync(useHttp, ct);
+        _proc.StartClient();
+    }
+}
