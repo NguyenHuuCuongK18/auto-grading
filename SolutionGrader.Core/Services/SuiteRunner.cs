@@ -53,8 +53,11 @@ public sealed class SuiteRunner
             var results = new List<StepResult>();
             foreach (var step in steps)
             {
+                using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                stepCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, args.StageTimeoutSeconds)));
+
                 var sw = Stopwatch.StartNew();
-                var (ok, msg) = await _exec.ExecuteAsync(step, args, ct);
+                var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);
                 sw.Stop();
                 results.Add(new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds });
             }

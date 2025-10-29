@@ -13,7 +13,7 @@ public sealed class Executor : IExecutor
     private readonly IMiddlewareService _mw;
     private readonly IDataComparisonService _cmp;
 
-    private const int ServerReadyTimeoutSeconds = 2;
+    private const int ServerReadyTimeoutSeconds = 5;
     private const int ServerReadyPollIntervalMs = 100;
 
     public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp)
@@ -26,6 +26,9 @@ public sealed class Executor : IExecutor
     public async Task<(bool ok, string message)> ExecuteAsync(Step step, ExecuteSuiteArgs args, CancellationToken ct)
     {
         var useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+
+        // hard ceiling so sockets/connect/read don't hang forever
+        try { _http.Timeout = TimeSpan.FromSeconds(Math.Max(1, args.StageTimeoutSeconds)); } catch { }
 
         switch (step.Action)
         {
@@ -90,23 +93,22 @@ public sealed class Executor : IExecutor
 
             case var a when a == ActionKeywords.AssertText:
                 if (string.IsNullOrWhiteSpace(step.Target) || string.IsNullOrWhiteSpace(step.Value))
-                    return (true, "Ignored: expected missing"); // policy 1
+                    return (true, "Ignored: expected missing");
                 if (!File.Exists(step.Target)) return (false, $"File not found: {step.Target}");
                 var txt = await File.ReadAllTextAsync(step.Target, ct);
-                // normalize newlines (policy 2)
-                txt = txt.Replace("\r","").Replace("\n","").Trim();
-                var val = (step.Value ?? "").Replace("\r","").Replace("\n","").Trim();
+                txt = txt.Replace("\r", "").Replace("\n", "").Trim();
+                var val = (step.Value ?? "").Replace("\r", "").Replace("\n", "").Trim();
                 return txt.Contains(val, StringComparison.OrdinalIgnoreCase)
                     ? (true, "Text ok") : (false, "Text mismatch");
 
             case var a when a == ActionKeywords.AssertFileExists:
                 if (string.IsNullOrWhiteSpace(step.Target))
-                    return (true, "Ignored: expected missing"); // policy 1
+                    return (true, "Ignored: expected missing");
                 return File.Exists(step.Target) ? (true, "File exists") : (false, $"File not found: {step.Target}");
 
             case var a when a == ActionKeywords.CaptureFile:
                 if (string.IsNullOrWhiteSpace(step.Target) || string.IsNullOrWhiteSpace(step.Value))
-                    return (true, "Ignored: expected missing"); // policy 1
+                    return (true, "Ignored: expected missing");
                 Directory.CreateDirectory(Path.GetDirectoryName(step.Value)!);
                 File.Copy(step.Target, step.Value, overwrite: true);
                 return (true, "Captured file");
@@ -137,9 +139,6 @@ public sealed class Executor : IExecutor
             if (_proc.IsServerRunning) return;
             await Task.Delay(ServerReadyPollIntervalMs, ct);
         }
-
-        // Server didn't become ready within timeout - log warning but continue
-        // The subsequent middleware/client start may still work if server is starting up
         Console.WriteLine($"[WARNING] Server not fully initialized after {ServerReadyTimeoutSeconds}s wait. Continuing anyway.");
     }
 }

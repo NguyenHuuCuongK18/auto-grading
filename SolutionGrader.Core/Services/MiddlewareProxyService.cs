@@ -51,8 +51,10 @@ public sealed class MiddlewareProxyService : IMiddlewareService
         try
         {
             _http = new HttpListener();
-            _http.Prefixes.Add($"http://localhost:{ProxyPort}/");
+            // Use 127.0.0.1 for fewer URLACL surprises than "localhost" on Windows
+            _http.Prefixes.Add($"http://127.0.0.1:{ProxyPort}/");
             _http.Start();
+            Console.WriteLine($"[Proxy] HTTP proxy listening on http://127.0.0.1:{ProxyPort}/ -> http://127.0.0.1:{RealServerPort}/");
             _ = Task.Run(() => ListenHttpAsync(token), token);
         }
         catch (Exception ex) { Console.WriteLine($"[HTTP Proxy ERR] {ex.Message}"); }
@@ -76,7 +78,7 @@ public sealed class MiddlewareProxyService : IMiddlewareService
             var req = ctx.Request;
             string body; using (var reader = new StreamReader(req.InputStream, req.ContentEncoding)) body = reader.ReadToEnd();
 
-            var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), $"http://localhost:{RealServerPort}{req.Url?.AbsolutePath}")
+            var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), $"http://127.0.0.1:{RealServerPort}{req.Url?.AbsolutePath}")
             {
                 Content = new StringContent(body, req.ContentEncoding)
             };

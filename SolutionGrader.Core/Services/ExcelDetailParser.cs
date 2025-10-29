@@ -27,16 +27,16 @@ public sealed class ExcelDetailParser : ITestCaseParser
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
-                var stage  = Get(row, map, SuiteKeywords.Col_IC_Stage);
-                var input  = Get(row, map, SuiteKeywords.Col_IC_Input);
+                var stage = Get(row, map, SuiteKeywords.Col_IC_Stage);
+                var input = Get(row, map, SuiteKeywords.Col_IC_Input);
                 var action = Get(row, map, SuiteKeywords.Col_IC_Action) ?? string.Empty;
-                var qid    = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
-                var qcode  = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
+                var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
+                var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
                 if (action.Equals("Connect", StringComparison.OrdinalIgnoreCase))
                 {
-                    steps.Add(new Step { Id = $"IC-SERVER-{stage}",  QuestionCode = qcode, Stage = "SETUP",  Action = ActionKeywords.ServerStart });
-                    steps.Add(new Step { Id = $"IC-CLIENT-{stage}",  QuestionCode = qcode, Stage = "SETUP",  Action = ActionKeywords.ClientStart });
+                    steps.Add(new Step { Id = $"IC-SERVER-{stage}", QuestionCode = qcode, Stage = "SETUP", Action = ActionKeywords.ServerStart });
+                    steps.Add(new Step { Id = $"IC-CLIENT-{stage}", QuestionCode = qcode, Stage = "SETUP", Action = ActionKeywords.ClientStart });
                 }
                 else if (action.Equals("Client Input", StringComparison.OrdinalIgnoreCase) || action.Equals("Input", StringComparison.OrdinalIgnoreCase))
                 {
@@ -51,33 +51,35 @@ public sealed class ExcelDetailParser : ITestCaseParser
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
-                var stage   = Get(row, map, SuiteKeywords.Col_OC_Stage);
-                var method  = Get(row, map, SuiteKeywords.Col_OC_Method);
-                var status  = Get(row, map, SuiteKeywords.Col_OC_StatusCode);
-                var output  = Get(row, map, SuiteKeywords.Col_OC_Output);
-                var qid     = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
-                var qcode   = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
+                var stage = Get(row, map, SuiteKeywords.Col_OC_Stage);
+                var method = Get(row, map, SuiteKeywords.Col_OC_Method);
+                var status = Get(row, map, SuiteKeywords.Col_OC_StatusCode);
+                var output = Get(row, map, SuiteKeywords.Col_OC_Output);
+                var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
+                var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
                 if (!string.IsNullOrWhiteSpace(method) && !string.IsNullOrWhiteSpace(output) && output.StartsWith("/"))
                 {
-                    steps.Add(new Step {
+                    steps.Add(new Step
+                    {
                         Id = $"OC-HTTP-{stage}",
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.HttpRequest,
-                        Value = $"{method}|http://localhost:5000{output}|{status}"
+                        Value = $"{method}|http://127.0.0.1:5000{output}|{status}"
                     });
                 }
 
                 if (!string.IsNullOrWhiteSpace(output))
                 {
-                    steps.Add(new Step {
+                    steps.Add(new Step
+                    {
                         Id = $"OC-CMP-{stage}",
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.CompareText,
                         Target = $"expected\\clients\\{qcode}\\{stage}.txt",
-                        Value  = $"actual\\clients\\{qcode}\\{stage}.txt"
+                        Value = $"actual\\clients\\{qcode}\\{stage}.txt"
                     });
                 }
             }
@@ -89,20 +91,21 @@ public sealed class ExcelDetailParser : ITestCaseParser
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
-                var stage   = Get(row, map, SuiteKeywords.Col_OS_Stage);
-                var output  = Get(row, map, SuiteKeywords.Col_OS_Output);
-                var qid     = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
-                var qcode   = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
+                var stage = Get(row, map, SuiteKeywords.Col_OS_Stage);
+                var output = Get(row, map, SuiteKeywords.Col_OS_Output);
+                var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
+                var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
                 if (!string.IsNullOrWhiteSpace(output))
                 {
-                    steps.Add(new Step {
+                    steps.Add(new Step
+                    {
                         Id = $"OS-CMP-{stage}",
                         QuestionCode = qcode,
                         Stage = "VERIFY",
                         Action = ActionKeywords.CompareText,
                         Target = $"expected\\servers\\{qcode}\\{stage}.txt",
-                        Value  = $"actual\\servers\\{qcode}\\{stage}.txt"
+                        Value = $"actual\\servers\\{qcode}\\{stage}.txt"
                     });
                 }
             }
@@ -114,9 +117,9 @@ public sealed class ExcelDetailParser : ITestCaseParser
         return steps;
     }
 
-    private static Dictionary<string,int> Header(IXLWorksheet ws)
+    private static Dictionary<string, int> Header(IXLWorksheet ws)
     {
-        var map = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var header = ws.FirstRowUsed();
         if (header == null) return map;
         foreach (var c in header.CellsUsed())
@@ -127,7 +130,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
         return map;
     }
 
-    private static string? Get(IXLRangeRow row, Dictionary<string,int> map, string colName)
+    private static string? Get(IXLRangeRow row, Dictionary<string, int> map, string colName)
     {
         if (!map.TryGetValue(colName, out var col)) return null;
         return row.Cell(col).GetString();
