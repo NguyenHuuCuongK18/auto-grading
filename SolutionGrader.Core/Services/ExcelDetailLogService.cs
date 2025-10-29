@@ -329,25 +329,8 @@ namespace SolutionGrader.Core.Services
 
         private void UpsertOverallSummaryRow(string summaryPath, string testCase, bool passed, double pointsAwarded, double pointsPossible)
         {
-            XLWorkbook wb;
-            IXLWorksheet ws;
-
-            if (File.Exists(summaryPath))
-            {
-                using var sr = _files.OpenRead(summaryPath);
-                wb = new XLWorkbook(sr);
-                ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet("Summary");
-            }
-            else
-            {
-                wb = new XLWorkbook();
-                ws = wb.AddWorksheet("Summary");
-                ws.Cell(1, 1).Value = "TestCase";
-                ws.Cell(1, 2).Value = "Passed";
-                ws.Cell(1, 3).Value = "PointsAwarded";
-                ws.Cell(1, 4).Value = "PointsPossible";
-                ws.Row(1).Style.Font.Bold = true;
-            }
+            using XLWorkbook wb = File.Exists(summaryPath) ? LoadExistingWorkbook(summaryPath) : CreateNewWorkbook();
+            var ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet("Summary");
 
             // Find existing row by TestCase
             var last = ws.LastRowUsed()?.RowNumber() ?? 1;
@@ -373,8 +356,28 @@ namespace SolutionGrader.Core.Services
                 ws.Column(c).AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 60);
             }
 
-            using var sw = _files.OpenWrite(summaryPath);
-            wb.SaveAs(sw);
+            using (var sw = _files.OpenWrite(summaryPath))
+            {
+                wb.SaveAs(sw);
+            }
+        }
+
+        private XLWorkbook LoadExistingWorkbook(string path)
+        {
+            using var sr = _files.OpenRead(path);
+            return new XLWorkbook(sr);
+        }
+
+        private static XLWorkbook CreateNewWorkbook()
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.AddWorksheet("Summary");
+            ws.Cell(1, 1).Value = "TestCase";
+            ws.Cell(1, 2).Value = "Passed";
+            ws.Cell(1, 3).Value = "PointsAwarded";
+            ws.Cell(1, 4).Value = "PointsPossible";
+            ws.Row(1).Style.Font.Bold = true;
+            return wb;
         }
 
         private static string ResolveSheet(Step step, string? actualPath)
