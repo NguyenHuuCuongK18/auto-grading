@@ -242,6 +242,13 @@ namespace SolutionGrader.Core.Services
             }
 
             sw.Stop();
+            
+            // If expected output is missing, don't count this step toward grading
+            if (result.message.Contains("Ignored: expected missing", StringComparison.OrdinalIgnoreCase))
+            {
+                pointsPossible = 0;
+            }
+            
             var awarded = (result.ok && pointsPossible > 0) ? pointsPossible : 0;
 
             _log.LogStepGrade(step, result.ok, result.message, awarded, pointsPossible, sw.Elapsed.TotalMilliseconds, errCode, detailPath, actualPath);
