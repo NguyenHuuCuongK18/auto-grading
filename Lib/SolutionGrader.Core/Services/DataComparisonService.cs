@@ -71,20 +71,31 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // Try to read actual output - if it's a memory:// path, try cumulative approach
-            if (!TryReadContent(actualPath, out var actualRaw))
-            {
-                var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
-                return (false, $"{info.Title}: {outputType} not available but expected output was defined");
-            }
-            
-            // For console output, also try reading cumulative output from all stages
-            // This handles cases where buffered output (e.g., Console.Write without flush)
-            // doesn't appear until later stages
+            // For console output with memory:// paths, use cumulative approach FIRST
+            // This handles timing issues where output might be in earlier stages
+            string? actualRaw = null;
             if ((isClientOutput || isServerOutput) && actualPath != null && actualPath.StartsWith("memory://"))
             {
-                actualRaw = TryGetCumulativeOutput(actualPath, actualRaw);
+                // Try cumulative approach for memory keys
+                actualRaw = TryGetCumulativeOutput(actualPath, "");
+                
+                // If cumulative returns empty, the stage doesn't exist or has no output
+                if (string.IsNullOrEmpty(actualRaw))
+                {
+                    var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                    string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
+                    return (false, $"{info.Title}: {outputType} not available but expected output was defined (key: {actualPath})");
+                }
+            }
+            else
+            {
+                // For non-memory paths, read directly
+                if (!TryReadContent(actualPath, out actualRaw))
+                {
+                    var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                    string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
+                    return (false, $"{info.Title}: {outputType} not available but expected output was defined");
+                }
             }
 
             var exp = Normalize(expectedRaw, caseInsensitive);
@@ -272,18 +283,26 @@ namespace SolutionGrader.Core.Services
 
         private string TryGetCumulativeOutput(string memoryPath, string currentStageOutput)
         {
-            // memory://clients/TC01/2 -> get ALL stages (1, 2, 3, ...)
+            // memory://clients/TC01/2 -> get stages up to and including current stage
             // This is more lenient to handle timing differences and buffered output
             var parts = memoryPath.Replace("memory://", "").Split('/');
             if (parts.Length < 3) return currentStageOutput;
             
             var scope = parts[0]; // "clients" or "servers"
             var questionCode = parts[1];
+            var currentStage = parts[2]; // "1", "2", etc.
             
-            // Try to accumulate ALL available stages for this component
+            // Try to parse current stage as integer
+            if (!int.TryParse(currentStage, out var currentStageNum))
+            {
+                // Not a numeric stage, return current output only
+                return currentStageOutput;
+            }
+            
+            // Try to accumulate stages from 1 up to current stage
             // This handles cases where expected output from stage N actually appears in stage N+1 due to buffering
             var cumulative = new StringBuilder();
-            for (int stage = 1; stage <= 10; stage++) // Max 10 stages
+            for (int stage = 1; stage <= currentStageNum; stage++)
             {
                 var stageKey = $"memory://{scope}/{questionCode}/{stage}";
                 if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
@@ -295,15 +314,11 @@ namespace SolutionGrader.Core.Services
                     }
                     cumulative.Append(stageOutput);
                 }
-                else
-                {
-                    // No more stages available
-                    break;
-                }
             }
             
             var result = cumulative.ToString();
-            return result;
+            // If cumulative is empty, return current stage output as fallback
+            return string.IsNullOrEmpty(result) ? currentStageOutput : result;
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)
