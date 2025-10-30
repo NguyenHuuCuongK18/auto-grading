@@ -22,6 +22,7 @@ namespace SolutionGrader.Core.Services
     public sealed class ExcelDetailLogService : IDetailLogService, IDisposable
     {
         private readonly IFileService _files;
+        private readonly IRunContext _run;
 
         private XLWorkbook? _wb;
         private string? _outPath;
@@ -46,10 +47,14 @@ namespace SolutionGrader.Core.Services
         private static readonly string[] BaseColumns = { "Stage", "Input", "DataType", "Action" };
         private static readonly string[] ResultColumns = {
             "Result","ErrorCode","ErrorCategory","PointsAwarded","PointsPossible",
-            "DurationMs","DetailPath","Message","DiffIndex","ExpectedExcerpt","ActualExcerpt"
+            "DurationMs","DetailPath","Message","DiffIndex","ExpectedExcerpt","ActualExcerpt","ActualOutput"
         };
 
-        public ExcelDetailLogService(IFileService files) => _files = files;
+        public ExcelDetailLogService(IFileService files, IRunContext run)
+        {
+            _files = files;
+            _run = run;
+        }
 
         public void BeginCase(string outFolder, string questionCode, string detailTemplatePath, double pointsPossible)
         {
@@ -197,6 +202,9 @@ namespace SolutionGrader.Core.Services
             SetCell(ws, rowNum, hdr, "DetailPath", detailPath ?? "");
             SetCell(ws, rowNum, hdr, "Message", message ?? "");
 
+            // Write actual output if available
+            TryWriteActualOutput(ws, hdr, rowNum, stage, actualPath);
+
             // If we have a text diff, write index + short excerpts
             TryWriteDiffColumns(ws, hdr, rowNum, stage, detailPath, message, actualPath);
 
@@ -289,6 +297,56 @@ namespace SolutionGrader.Core.Services
         }
 
         // ---------- helpers ----------
+
+        private void TryWriteActualOutput(IXLWorksheet ws, Dictionary<string, int> hdr, int rowNum, int stage, string? actualPath)
+        {
+            try
+            {
+                // Try to get actual output from actualPath (memory:// or file path)
+                string? actualOutput = null;
+                
+                if (!string.IsNullOrEmpty(actualPath))
+                {
+                    actualOutput = TryReadContext(actualPath, 5000); // Read up to 5000 chars
+                }
+                
+                // If no actualPath provided, try to infer from the sheet and stage
+                if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
+                {
+                    var sheetName = ws.Name;
+                    var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+                    var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (isClientSheet)
+                    {
+                        var captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
+                        if (_run.TryGetCapturedOutput(captureKey, out var captured))
+                        {
+                            actualOutput = captured;
+                        }
+                    }
+                    else if (isServerSheet)
+                    {
+                        var captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
+                        if (_run.TryGetCapturedOutput(captureKey, out var captured))
+                        {
+                            actualOutput = captured;
+                        }
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(actualOutput))
+                {
+                    // Truncate if too long for display
+                    if (actualOutput.Length > 5000)
+                    {
+                        actualOutput = actualOutput.Substring(0, 5000) + "... (truncated)";
+                    }
+                    SetCell(ws, rowNum, hdr, "ActualOutput", actualOutput);
+                }
+            }
+            catch { /* best effort */ }
+        }
 
         private void TryWriteDiffColumns(IXLWorksheet ws, Dictionary<string, int> hdr, int rowNum, int stage, string? detailPath, string? message, string? actualPath)
         {

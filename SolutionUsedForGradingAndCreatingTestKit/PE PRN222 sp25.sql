@@ -134,8 +134,8 @@ GO
 -- Books
 SET IDENTITY_INSERT dbo.Books ON;
 INSERT INTO dbo.Books (BookId, Title, PublicationYear, GenreId) VALUES
-(1, N'Harry Potter and the Philosopher''s Stone', 1997, 1),
-(2, N'1984', 1949, 2),
+(1, N'1984', 1949, 2),
+(2, N'Harry Potter and the Philosopher''s Stone', 1997, 1),
 (3, N'The Hobbit', 1937, 1),
 (4, N'Murder on the Orient Express', 1934, 3),
 (5, N'The Da Vinci Code', 2003, 4),
