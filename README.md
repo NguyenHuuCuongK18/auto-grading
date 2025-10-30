@@ -11,10 +11,22 @@ This is a CLI version of the SolutionGrader tool that allows you to run automate
 - Validates outputs against expected results
 - Generates detailed test reports
 
+## Project Structure
+
+The project follows a library-based architecture inspired by test-grader:
+
+```
+├── Lib/                           # Reusable libraries
+│   └── SolutionGrader.Core/      # Core grading functionality
+├── Application/                   # Executable applications
+│   └── SolutionGrader.Cli/       # Command-line interface
+└── SampleTestKit/                # Sample test suite
+```
+
 ## Usage
 
 ```bash
-dotnet run --project SolutionGrader.Cli -- ExecuteSuite \
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite \
   --suite <suiteFolder|Header.xlsx> \
   --out <resultRoot> \
   [--client <client.exe>] \
@@ -39,7 +51,7 @@ dotnet run --project SolutionGrader.Cli -- ExecuteSuite \
 ### Example
 
 ```bash
-dotnet run --project SolutionGrader.Cli -- ExecuteSuite \
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite \
   --suite "C:\Tests\TestSuite" \
   --out "C:\Results" \
   --client "C:\Apps\Client\Client.exe" \

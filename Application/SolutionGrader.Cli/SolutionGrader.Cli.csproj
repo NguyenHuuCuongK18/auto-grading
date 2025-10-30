@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\SolutionGrader.Core\SolutionGrader.Core.csproj" />
+    <ProjectReference Include="..\..\Lib\SolutionGrader.Core\SolutionGrader.Core.csproj" />
   </ItemGroup>
 </Project>
