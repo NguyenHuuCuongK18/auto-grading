@@ -54,35 +54,41 @@ public sealed class ExcelDetailParser : ITestCaseParser
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
                 var stage = Get(row, map, SuiteKeywords.Col_OC_Stage);
-                var method = Get(row, map, SuiteKeywords.Col_OC_Method);
-                var status = Get(row, map, SuiteKeywords.Col_OC_StatusCode);
+                if (string.IsNullOrWhiteSpace(stage)) continue;
+
                 var dataResponse = Get(row, map, SuiteKeywords.Col_OC_DataResponse);
                 var output = Get(row, map, SuiteKeywords.Col_OC_Output);
+                var dataType = Get(row, map, SuiteKeywords.Col_OC_DataTypeMiddleware);
+
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
-                if (!string.IsNullOrWhiteSpace(method) && !string.IsNullOrWhiteSpace(output) && output.StartsWith("/"))
+                // Test execution relies solely on the Excel-provided payload instead of separate expected files.
+
+                if (!string.IsNullOrWhiteSpace(dataResponse))
                 {
+                    var action = string.Equals(dataType, "JSON", StringComparison.OrdinalIgnoreCase)
+                        ? ActionKeywords.CompareJson
+                        : ActionKeywords.CompareText;
+
                     steps.Add(new Step
                     {
-                        Id = $"OC-HTTP-{stage}",
+                        Id = $"OC-DATA-{stage}",
                         QuestionCode = qcode,
-                        Stage = "VERIFY",
-                        Action = ActionKeywords.HttpRequest,
-                        // METHOD|URL|STATUS|EXPECTED_BODY (last two optional)
-                        Value = $"{method}|http://127.0.0.1:5000{output}|{status}|{dataResponse}"
+                        Stage = stage,
+                        Action = action,
+                        Target = dataResponse,
                     });
                 }
-                else if (!string.IsNullOrWhiteSpace(output))
+                if (!string.IsNullOrWhiteSpace(output))
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OC-CMP-{stage}",
+                        Id = $"OC-OUT-{stage}",
                         QuestionCode = qcode,
-                        Stage = "VERIFY",
+                        Stage = stage,
                         Action = ActionKeywords.CompareText,
-                        Target = string.Format(FileKeywords.PathTemplate_ExpectedClient, qcode, stage),
-                        Value = string.Format(FileKeywords.PathTemplate_ActualClient, qcode, stage)
+                        Target = output,
                     });
                 }
             }
@@ -95,24 +101,42 @@ public sealed class ExcelDetailParser : ITestCaseParser
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
                 var stage = Get(row, map, SuiteKeywords.Col_OS_Stage);
-                var method = Get(row, map, SuiteKeywords.Col_OS_Method);
+                if (string.IsNullOrWhiteSpace(stage)) continue;
                 var req = Get(row, map, SuiteKeywords.Col_OS_DataRequest);
                 var output = Get(row, map, SuiteKeywords.Col_OS_Output);
+                var dataType = Get(row, map, SuiteKeywords.Col_OS_DataTypeMiddleware);
+
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
-                if (!string.IsNullOrWhiteSpace(output))
+
+                if (!string.IsNullOrWhiteSpace(req))
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OS-CMP-{stage}",
+                        Id = $"OS-REQ-{stage}",
                         QuestionCode = qcode,
-                        Stage = "VERIFY",
+                        Stage = stage,
                         Action = ActionKeywords.CompareText,
-                        Target = string.Format(FileKeywords.PathTemplate_ExpectedServer, qcode, stage),
-                        Value = string.Format(FileKeywords.PathTemplate_ActualServer, qcode, stage)
+                        Target = req,
                     });
                 }
+
+                if (!string.IsNullOrWhiteSpace(output))
+                {
+                    var action = string.Equals(dataType, "JSON", StringComparison.OrdinalIgnoreCase)
+                        ? ActionKeywords.CompareJson
+                        : ActionKeywords.CompareText;
+
+                    steps.Add(new Step
+                    {
+                        Id = $"OS-OUT-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = action,
+                        Target = output
+                    });
+                };
             }
         });
 

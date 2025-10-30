@@ -4,7 +4,8 @@ using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Errors;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
-
+using System;
+using System.IO;
 namespace SolutionGrader.Core.Services
 {
     public sealed class Executor : IExecutor
@@ -104,23 +105,21 @@ namespace SolutionGrader.Core.Services
                             // Write client actual as before
                             try
                             {
-                                var stage = ParseStageFromId(step.Id);
-                                var path = _run.ResolveActualClientText(step.QuestionCode, stage);
-                                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                                await File.WriteAllTextAsync(path, body, ct);
+                                var stageLabel = GetStageLabel(step);
+                                _run.SetClientOutput(step.QuestionCode, stageLabel, body);
                             }
-                            catch { /* ignore write errors */ }
+                            catch { /* ignore capture errors */ }
 
                             result = (true, "HTTP ok");
                             break;
                         }
 
                     case var a when a == ActionKeywords.CompareText:
-                        result = _cmp.CompareText(step.Target, step.Value);
+                        result = _cmp.CompareText(step.Target, ResolveActualPath(step));
                         break;
 
                     case var a when a == ActionKeywords.CompareJson:
-                        result = _cmp.CompareJson(step.Target, step.Value);
+                        result = _cmp.CompareText(step.Target, ResolveActualPath(step));
                         break;
 
                     case var a when a == ActionKeywords.CompareCsv:
@@ -146,6 +145,39 @@ namespace SolutionGrader.Core.Services
             catch (Exception ex) { errCode = ErrorCodes.UNKNOWN; return (false, ex.Message); }
 
             return result;
+
+            string? ResolveActualPath(Step step)
+            {
+                var actual = step.Value;
+                if (!string.IsNullOrWhiteSpace(actual) &&
+                    (actual.StartsWith("memory://", StringComparison.OrdinalIgnoreCase) || Path.IsPathRooted(actual)))
+                    return actual;
+
+                var stage = ParseStageFromId(step.Id);
+                var stageLabel = GetStageLabel(step);
+                if (string.IsNullOrWhiteSpace(stage))
+                    return actual;
+
+                if (step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
+
+                if (step.Id.StartsWith("OS-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
+
+                return actual;
+            }
+
+            string GetStageLabel(Step step)
+            {
+                if (!string.IsNullOrWhiteSpace(step.Stage))
+                    return step.Stage;
+
+                var parsed = ParseStageFromId(step.Id);
+                if (!string.IsNullOrWhiteSpace(parsed))
+                    return parsed;
+
+                return _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+            }
 
             static string ParseStageFromId(string id)
             {

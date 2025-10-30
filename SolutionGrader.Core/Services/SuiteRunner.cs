@@ -86,6 +86,8 @@ namespace SolutionGrader.Core.Services
 
                     _run.CurrentQuestionCode = step.QuestionCode;
                     _run.CurrentStage = TryParseStage(step.Id);
+                    _run.CurrentStageLabel = step.Stage;
+
 
                     var sw = Stopwatch.StartNew();
                     var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);

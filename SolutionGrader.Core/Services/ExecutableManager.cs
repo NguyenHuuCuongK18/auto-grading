@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
+using System.IO;
+
 
 namespace SolutionGrader.Core.Services
 {
@@ -122,9 +124,15 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                var q = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                var s = _run.CurrentStage ?? 0;
-                var path = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, q, string.Format(FileKeywords.Pattern_StageOutput, s));
+                var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+                var payload = line + Environment.NewLine;
+
+                if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
+                    _run.AppendServerOutput(question, stage, payload);
+                else
+                    _run.AppendClientOutput(question, stage, payload);
+                var path = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, question, string.Format(FileKeywords.Pattern_StageOutput, stage));
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 File.AppendAllText(path, line + Environment.NewLine, Encoding.UTF8);
             }

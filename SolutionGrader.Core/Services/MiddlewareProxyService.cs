@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -193,11 +194,11 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                var q = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                var s = _run.CurrentStage ?? 0;
-                var folder = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, FileKeywords.Folder_Servers, q);
+                var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+                var folder = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, FileKeywords.Folder_Servers, question);
                 Directory.CreateDirectory(folder);
-                var path = Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, s));
+                var path = Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, stage));
 
                 var sb = new StringBuilder();
                 sb.AppendLine("=== REQUEST ===");
@@ -213,7 +214,7 @@ namespace SolutionGrader.Core.Services
                     sb.AppendLine($"<binary {responseBytes?.Length ?? 0} bytes>");
                 }
 
-                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                _run.SetServerOutput(question, stage, sb.ToString());
             }
             catch { }
         }
