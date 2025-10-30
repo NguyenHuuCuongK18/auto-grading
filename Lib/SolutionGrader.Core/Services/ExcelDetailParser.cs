@@ -94,7 +94,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         Id = $"IC-INPUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
-                        Action = "CLIENT_INPUT",
+                        Action = ActionKeywords.ClientInput,
                         Value = input
                     });
                     
