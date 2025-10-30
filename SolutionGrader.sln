@@ -3,9 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36603.0 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolutionGrader.Cli", "SolutionGrader.Cli\SolutionGrader.Cli.csproj", "{B8BB831D-C978-285C-053B-727E5826FBFE}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lib", "Lib", "{18CC4608-EAA9-4582-9B14-93726CE3457B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolutionGrader.Core", "SolutionGrader.Core\SolutionGrader.Core.csproj", "{DD89DA38-0139-71CD-9B11-E235EC6632D7}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Application", "Application", "{E78EABE4-0802-4EE5-B4CA-9E23CCC8034F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolutionGrader.Cli", "Application\SolutionGrader.Cli\SolutionGrader.Cli.csproj", "{B8BB831D-C978-285C-053B-727E5826FBFE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolutionGrader.Core", "Lib\SolutionGrader.Core\SolutionGrader.Core.csproj", "{DD89DA38-0139-71CD-9B11-E235EC6632D7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -24,6 +28,10 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B8BB831D-C978-285C-053B-727E5826FBFE} = {E78EABE4-0802-4EE5-B4CA-9E23CCC8034F}
+		{DD89DA38-0139-71CD-9B11-E235EC6632D7} = {18CC4608-EAA9-4582-9B14-93726CE3457B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E5D04C96-B2FB-483E-AE74-F400DA0A56A8}
