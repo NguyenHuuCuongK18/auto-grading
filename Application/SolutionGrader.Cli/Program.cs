@@ -55,7 +55,7 @@ public class Program
         IExecutableManager proc = new ExecutableManager(runctx);
         IMiddlewareService mw = new MiddlewareProxyService(runctx);
         IDataComparisonService cmp = new DataComparisonService(runctx);
-        IDetailLogService log = new ExcelDetailLogService(files); // <-- Excel logger
+        IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
 
         IExecutor exec = new Executor(proc, mw, cmp, log, runctx);
         IReportService rep = new ReportService(files);

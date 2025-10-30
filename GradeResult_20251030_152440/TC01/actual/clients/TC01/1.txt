@@ -1,1 +1,0 @@
-﻿Client started, connecting to Server at http://localhost:5000/

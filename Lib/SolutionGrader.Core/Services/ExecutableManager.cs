@@ -122,21 +122,57 @@ namespace SolutionGrader.Core.Services
             }
         }
 
-        private static Process Create(string exe) => new()
+        private static Process Create(string exe)
         {
-            StartInfo = new ProcessStartInfo
+            // Handle both .exe and .dll files - on non-Windows, .exe won't run directly
+            // Also handle if user passes .exe but we need to use .dll on Linux/Mac
+            string fileName = exe;
+            string arguments = "";
+            
+            // If it's a .dll or if it's an .exe on a non-Windows platform, use dotnet
+            if (exe.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+                (exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !OperatingSystem.IsWindows()))
             {
-                FileName = exe,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            },
-            EnableRaisingEvents = true
-        };
+                // If .exe is provided on non-Windows, try to find the .dll instead
+                if (exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    var dllPath = Path.ChangeExtension(exe, ".dll");
+                    if (File.Exists(dllPath))
+                    {
+                        fileName = "dotnet";
+                        arguments = dllPath;
+                    }
+                    else
+                    {
+                        // No .dll found, try running .exe with dotnet anyway (might fail)
+                        fileName = "dotnet";
+                        arguments = exe;
+                    }
+                }
+                else
+                {
+                    fileName = "dotnet";
+                    arguments = exe;
+                }
+            }
+            
+            return new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                },
+                EnableRaisingEvents = true
+            };
+        }
 
         private async Task PumpAsync(Process p, string logName, bool appendServer)
         {
