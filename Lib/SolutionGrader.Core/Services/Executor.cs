@@ -274,6 +274,13 @@ namespace SolutionGrader.Core.Services
                 if (step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
 
+                if (step.Id.StartsWith("OS-REQ-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
+
+                if (step.Id.StartsWith("OS-OUT-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
+
+                // Fallback for other OS- prefixed steps
                 if (step.Id.StartsWith("OS-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
 

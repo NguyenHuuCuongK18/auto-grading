@@ -200,21 +200,27 @@ namespace SolutionGrader.Core.Services
                 Directory.CreateDirectory(folder);
                 var path = Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, stage));
 
+                // Store HTTP request and response separately in memory to avoid overwriting console output
+                _run.SetServerRequest(question, stage, requestBody ?? "");
+                
+                string respText;
+                try
+                {
+                    respText = Encoding.UTF8.GetString(responseBytes);
+                }
+                catch
+                {
+                    respText = $"<binary {responseBytes?.Length ?? 0} bytes>";
+                }
+                _run.SetServerResponse(question, stage, respText);
+
+                // Also write combined traffic to file for debugging
                 var sb = new StringBuilder();
                 sb.AppendLine("=== REQUEST ===");
                 sb.AppendLine(requestBody ?? "");
                 sb.AppendLine("=== RESPONSE ===");
-                try
-                {
-                    var respText = Encoding.UTF8.GetString(responseBytes);
-                    sb.AppendLine(respText);
-                }
-                catch
-                {
-                    sb.AppendLine($"<binary {responseBytes?.Length ?? 0} bytes>");
-                }
-
-                _run.SetServerOutput(question, stage, sb.ToString());
+                sb.AppendLine(respText);
+                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
             }
             catch { }
         }
