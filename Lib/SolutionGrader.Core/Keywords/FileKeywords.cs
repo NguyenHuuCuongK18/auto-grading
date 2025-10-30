@@ -32,6 +32,8 @@ public static class FileKeywords
     public const string Folder_Actual = "actual";
     public const string Folder_Clients = "clients";
     public const string Folder_Servers = "servers";
+    public const string Folder_ServersRequest = "servers-req";
+    public const string Folder_ServersResponse = "servers-resp";
     public const string Folder_Mismatches = "mismatches";
 
     // File Name Patterns
