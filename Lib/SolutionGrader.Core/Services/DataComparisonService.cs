@@ -202,10 +202,55 @@ namespace SolutionGrader.Core.Services
 
         private static string Normalize(string s, bool ci)
         {
-            // Normalize newlines and collapse whitespace
+            if (string.IsNullOrWhiteSpace(s))
+                return string.Empty;
+
+            // 1. Unescape Unicode sequences (\u0027 -> ')
+            s = UnescapeUnicode(s);
+
+            // 2. Normalize smart quotes and dashes
+            s = s
+                .Replace("\u2018", "'")  // ' left single quote
+                .Replace("\u2019", "'")  // ' right single quote
+                .Replace("\u201C", "\"") // " left double quote
+                .Replace("\u201D", "\"") // " right double quote
+                .Replace("\u2013", "-")  // – en dash
+                .Replace("\u2014", "-"); // — em dash
+
+            // 3. Try JSON canonicalization if it looks like JSON
+            if ((s.TrimStart().StartsWith("{") || s.TrimStart().StartsWith("[")))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(s);
+                    s = JsonSerializer.Serialize(doc, new JsonSerializerOptions
+                    {
+                        WriteIndented = false,
+                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                    });
+                }
+                catch
+                {
+                    // Not valid JSON, continue with text normalization
+                }
+            }
+
+            // 4. Normalize newlines and collapse whitespace
             s = s.Replace("\r", "").Replace("\n", " ");
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+            
             return ci ? s.ToLowerInvariant() : s;
+        }
+
+        private static string UnescapeUnicode(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            // Convert ONLY \uXXXX -> char
+            return System.Text.RegularExpressions.Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
+            {
+                var code = Convert.ToInt32(m.Groups[1].Value, 16);
+                return char.ConvertFromUtf32(code);
+            });
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)
