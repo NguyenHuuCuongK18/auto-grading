@@ -42,7 +42,17 @@ namespace SolutionGrader.Core.Services
                     case var a when a == ActionKeywords.ServerStart:
                         {
                             Console.WriteLine($"[Action] ServerStart: Starting server application...");
-                            _proc.StartServer();
+                            
+                            try
+                            {
+                                _proc.StartServer();
+                            }
+                            catch (Exception ex)
+                            {
+                                errCode = ErrorCodes.SERVER_EXE_MISSING;
+                                result = (false, $"Failed to start server: {ex.Message}");
+                                break;
+                            }
                             
                             // Wait for server to be ready
                             var t0 = Environment.TickCount;
@@ -70,20 +80,72 @@ namespace SolutionGrader.Core.Services
                                 await Task.Delay(ServerReadyPollIntervalMs, ct);
                             }
                             
+                            if (!_proc.IsServerRunning)
+                            {
+                                errCode = ErrorCodes.PROCESS_CRASHED;
+                                var output = _proc.GetServerOutput();
+                                result = (false, $"Server process failed to start or crashed immediately. Output: {output.Substring(0, Math.Min(200, output.Length))}");
+                                break;
+                            }
+                            
                             if (!serverReady)
                             {
                                 Console.WriteLine("[Action] ServerStart: Warning - Server may not be fully initialized");
                             }
                             
-                            result = (true, "Server started");
+                            // Get initial output for logging
+                            await Task.Delay(500, ct); // Give server time to output startup messages
+                            var serverOutput = _proc.GetServerOutput();
+                            var outputPreview = serverOutput.Length > 100 
+                                ? serverOutput.Substring(0, 100) + "..." 
+                                : serverOutput;
+                            
+                            Console.WriteLine($"[Action] ServerStart: Server output: {outputPreview}");
+                            result = (true, $"Server started successfully. Process running: {_proc.IsServerRunning}");
                             break;
                         }
 
                     case var a when a == ActionKeywords.ClientStart:
                         {
                             Console.WriteLine($"[Action] ClientStart: Starting client application...");
-                            _proc.StartClient();
-                            result = (true, "Client started");
+                            
+                            try
+                            {
+                                _proc.StartClient();
+                            }
+                            catch (Exception ex)
+                            {
+                                errCode = ErrorCodes.CLIENT_EXE_MISSING;
+                                result = (false, $"Failed to start client: {ex.Message}");
+                                break;
+                            }
+                            
+                            // Give client time to start and output initial messages
+                            await Task.Delay(500, ct);
+                            
+                            if (!_proc.IsClientRunning)
+                            {
+                                errCode = ErrorCodes.PROCESS_CRASHED;
+                                var output = _proc.GetClientOutput();
+                                result = (false, $"Client process failed to start or crashed immediately. Output: {output.Substring(0, Math.Min(200, output.Length))}");
+                                break;
+                            }
+                            
+                            var clientOutput = _proc.GetClientOutput();
+                            var outputPreview = clientOutput.Length > 100 
+                                ? clientOutput.Substring(0, 100) + "..." 
+                                : clientOutput;
+                            
+                            Console.WriteLine($"[Action] ClientStart: Client output: {outputPreview}");
+                            result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
+                            break;
+                        }
+
+                    case var a when a == ActionKeywords.ClientInput:
+                        {
+                            Console.WriteLine($"[Action] ClientInput: Sending input to client: {step.Value}");
+                            _proc.SendClientInput(step.Value ?? "");
+                            result = (true, $"Sent input: {step.Value}");
                             break;
                         }
 

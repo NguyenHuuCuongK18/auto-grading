@@ -13,4 +13,8 @@ public interface IExecutableManager
     System.Threading.Tasks.Task StopServerAsync();
     System.Threading.Tasks.Task StopClientAsync();
     System.Threading.Tasks.Task StopAllAsync();
+    
+    void SendClientInput(string input);
+    string GetClientOutput();
+    string GetServerOutput();
 }

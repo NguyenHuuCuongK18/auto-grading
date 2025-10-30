@@ -88,14 +88,24 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     isFirstRow = false;
                     
-                    // For other steps with input, just wait (simulating input)
+                    // For other steps with input, send the input to client
                     steps.Add(new Step
                     {
                         Id = $"IC-INPUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
+                        Action = "CLIENT_INPUT",
+                        Value = input
+                    });
+                    
+                    // Add a wait after input to let it process
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-WAIT-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "500"
+                        Value = "1000"
                     });
                 }
             }
