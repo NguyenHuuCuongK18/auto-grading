@@ -81,6 +81,8 @@ namespace SolutionGrader.Core.Services
 
                 var results = new List<StepResult>();
                 int? previousStage = null;
+                bool hasSeenInputStep = false;
+                bool hasAddedComparisonDelay = false;
                 
                 foreach (var step in steps)
                 {
@@ -94,6 +96,29 @@ namespace SolutionGrader.Core.Services
                     {
                         await Task.Delay(500, ct); // 500ms buffer for async output
                     }
+                    
+                    // Track if we've seen input steps
+                    if (string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasSeenInputStep = true;
+                    }
+                    
+                    // Add extra delay before first comparison step if we've sent input
+                    // This allows time for async HTTP responses to complete and be captured
+                    bool isComparison = step.Action != null && (
+                        string.Equals(step.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
+                    );
+                    
+                    if (isComparison && hasSeenInputStep && !hasAddedComparisonDelay)
+                    {
+                        Console.WriteLine("[TestCase] Adding extra delay before comparisons to ensure async output is captured...");
+                        await Task.Delay(1000, ct); // Extra delay for HTTP responses
+                        hasAddedComparisonDelay = true;
+                    }
+                    
                     previousStage = currentStage;
 
                     _run.CurrentQuestionCode = step.QuestionCode;

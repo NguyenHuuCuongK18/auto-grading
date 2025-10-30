@@ -94,18 +94,18 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         Id = $"IC-INPUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
-                        Action = "CLIENT_INPUT",
+                        Action = ActionKeywords.ClientInput,
                         Value = input
                     });
                     
-                    // Add a wait after input to let it process
+                    // Add a wait after input to let it process (increased for HTTP requests)
                     steps.Add(new Step
                     {
                         Id = $"IC-WAIT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000"
+                        Value = "2000"
                     });
                 }
             }
