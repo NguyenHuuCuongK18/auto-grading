@@ -1,5 +1,6 @@
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 using System.Diagnostics;
 
 namespace SolutionGrader.Core.Services
@@ -70,10 +71,10 @@ namespace SolutionGrader.Core.Services
                 // calculate per-step points even if the Detail.xlsx template contains no data rows.
                 var compareCount = steps.Count(s =>
                     s.Action != null && (
-                        string.Equals(s.Action, "CompareFile", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(s.Action, "CompareText", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(s.Action, "CompareJson", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(s.Action, "CompareCsv", StringComparison.OrdinalIgnoreCase)
+                        string.Equals(s.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
                     ) && !string.Equals(s.Stage, "INPUT", StringComparison.OrdinalIgnoreCase)
                 );
                 _log.SetTotalCompareSteps(compareCount);
@@ -100,10 +101,10 @@ namespace SolutionGrader.Core.Services
                     // Log to detail service for grading
                     // Determine if this is a comparison step (has points)
                     bool isComparisonStep = step.Action != null && (
-                        string.Equals(step.Action, "CompareFile", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(step.Action, "CompareText", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(step.Action, "CompareJson", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(step.Action, "CompareCsv", StringComparison.OrdinalIgnoreCase)
+                        string.Equals(step.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
                     );
                     
                     // Determine error code from step action and result
