@@ -31,10 +31,10 @@ namespace SolutionGrader.Core.Services
             => BuildKey(FileKeywords.Folder_Servers, questionCode, stage);
 
         public string GetServerRequestCaptureKey(string questionCode, string stage)
-            => BuildKey("servers-req", questionCode, stage);
+            => BuildKey(FileKeywords.Folder_ServersRequest, questionCode, stage);
 
         public string GetServerResponseCaptureKey(string questionCode, string stage)
-            => BuildKey("servers-resp", questionCode, stage);
+            => BuildKey(FileKeywords.Folder_ServersResponse, questionCode, stage);
 
         public void AppendClientOutput(string questionCode, string stage, string content)
             => AppendCapture(FileKeywords.Folder_Clients, questionCode, stage, content);
@@ -49,10 +49,10 @@ namespace SolutionGrader.Core.Services
             => SetCapture(FileKeywords.Folder_Servers, questionCode, stage, content);
 
         public void SetServerRequest(string questionCode, string stage, string content)
-            => SetCapture("servers-req", questionCode, stage, content);
+            => SetCapture(FileKeywords.Folder_ServersRequest, questionCode, stage, content);
 
         public void SetServerResponse(string questionCode, string stage, string content)
-            => SetCapture("servers-resp", questionCode, stage, content);
+            => SetCapture(FileKeywords.Folder_ServersResponse, questionCode, stage, content);
 
         public bool TryGetCapturedOutput(string captureKey, out string? content)
         {
