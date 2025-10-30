@@ -205,6 +205,12 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(s))
                 return string.Empty;
 
+            // 0. Strip BOM (Byte Order Mark) if present
+            if (s.Length > 0 && s[0] == '\uFEFF')
+            {
+                s = s.Substring(1);
+            }
+
             // 1. Unescape Unicode sequences (\u0027 -> ')
             s = UnescapeUnicode(s);
 
