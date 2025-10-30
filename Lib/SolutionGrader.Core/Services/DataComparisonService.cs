@@ -71,18 +71,29 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // If actual is unreachable (memory://, missing, or non-existent), FAIL (expected exists but actual doesn't)
+            // Try to read actual output - if it's a memory:// path, try cumulative approach
             if (!TryReadContent(actualPath, out var actualRaw))
             {
                 var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
                 string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
                 return (false, $"{info.Title}: {outputType} not available but expected output was defined");
             }
+            
+            // For console output, also try reading cumulative output from all stages
+            // This handles cases where buffered output (e.g., Console.Write without flush)
+            // doesn't appear until later stages
+            if ((isClientOutput || isServerOutput) && actualPath != null && actualPath.StartsWith("memory://"))
+            {
+                actualRaw = TryGetCumulativeOutput(actualPath, actualRaw);
+            }
 
             var exp = Normalize(expectedRaw, caseInsensitive);
             var act = Normalize(actualRaw, caseInsensitive);
-
-            if (exp == act)
+            
+            // For console output comparisons, check if expected is contained in actual
+            // This handles buffered output and timing differences where expected output
+            // may appear in actual output along with additional content
+            if (exp == act || ((isClientOutput || isServerOutput) && act.Contains(exp)))
             {
                 string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text content";
                 return (true, $"Text comparison passed: {outputType} matches expected");
@@ -257,6 +268,42 @@ namespace SolutionGrader.Core.Services
                 var code = Convert.ToInt32(m.Groups[1].Value, 16);
                 return char.ConvertFromUtf32(code);
             });
+        }
+
+        private string TryGetCumulativeOutput(string memoryPath, string currentStageOutput)
+        {
+            // memory://clients/TC01/2 -> get ALL stages (1, 2, 3, ...)
+            // This is more lenient to handle timing differences and buffered output
+            var parts = memoryPath.Replace("memory://", "").Split('/');
+            if (parts.Length < 3) return currentStageOutput;
+            
+            var scope = parts[0]; // "clients" or "servers"
+            var questionCode = parts[1];
+            
+            // Try to accumulate ALL available stages for this component
+            // This handles cases where expected output from stage N actually appears in stage N+1 due to buffering
+            var cumulative = new StringBuilder();
+            for (int stage = 1; stage <= 10; stage++) // Max 10 stages
+            {
+                var stageKey = $"memory://{scope}/{questionCode}/{stage}";
+                if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
+                {
+                    // Strip BOM from this stage's output before appending
+                    if (!string.IsNullOrEmpty(stageOutput) && stageOutput[0] == '\uFEFF')
+                    {
+                        stageOutput = stageOutput.Substring(1);
+                    }
+                    cumulative.Append(stageOutput);
+                }
+                else
+                {
+                    // No more stages available
+                    break;
+                }
+            }
+            
+            var result = cumulative.ToString();
+            return result;
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)

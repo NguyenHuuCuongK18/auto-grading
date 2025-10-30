@@ -80,13 +80,24 @@ namespace SolutionGrader.Core.Services
                 _log.SetTotalCompareSteps(compareCount);
 
                 var results = new List<StepResult>();
+                int? previousStage = null;
+                
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     stepCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, args.StageTimeoutSeconds)));
 
+                    var currentStage = TryParseStage(step.Id);
+                    
+                    // If stage changed, give a delay for async/buffered output to be captured
+                    if (previousStage.HasValue && currentStage.HasValue && currentStage != previousStage)
+                    {
+                        await Task.Delay(500, ct); // 500ms buffer for async output
+                    }
+                    previousStage = currentStage;
+
                     _run.CurrentQuestionCode = step.QuestionCode;
-                    _run.CurrentStage = TryParseStage(step.Id);
+                    _run.CurrentStage = currentStage;
                     _run.CurrentStageLabel = step.Stage;
 
                     Console.WriteLine($"[Step] Executing: {step.Action} (Stage: {step.Stage}, ID: {step.Id})");
