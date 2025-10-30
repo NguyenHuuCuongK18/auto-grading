@@ -1,8 +1,12 @@
-# Bug Fix: Output Capture Overwrite Issue
+# Bug Fixes: Output Capture and Comparison Issues
 
 ## Summary
 
-Fixed a critical bug where HTTP middleware was overwriting server console output, causing all test cases to fail with "Content differs at position 0" errors. The fix separates HTTP traffic capture from console output capture by using distinct memory storage locations.
+Fixed multiple critical bugs causing test failures:
+1. **HTTP middleware overwriting server console output** - Fixed by using distinct memory storage locations
+2. **Timing issues causing output to wrong stage** - Fixed by using cumulative output approach as primary method
+3. **Excel stage whitespace causing key mismatches** - Fixed by trimming all Excel cell values
+4. **Unicode whitespace not being normalized** - Fixed by adding normalization for special space characters
 
 ## Problem Description
 
@@ -222,6 +226,80 @@ Watch for:
 - No sensitive data exposure
 - Proper encapsulation maintained
 
+## Additional Fixes (v1.1 - 2025-10-30)
+
+### Bug #2: Timing Issues and Stage Mismatches
+
+**Problem:** Even after fixing the HTTP overwrite issue, tests were still failing with:
+- "Content differs at position 0" - suggesting empty or wrong actual output
+- "Actual Output Missing" - memory key not found
+
+**Root Cause:**
+Server console output was being written to the wrong stage due to async timing:
+1. Server outputs "GET /books/1" during async HTTP request processing
+2. The output gets captured to stage 1 (during setup) instead of stage 2 (where comparison expects it)
+3. When comparison runs for stage 2, the memory key `memory://servers/TC01/2` is empty
+4. The original cumulative approach was only used as a FALLBACK after trying current stage, so it never ran
+
+**Solution:**
+Changed cumulative output to be the PRIMARY method for memory:// paths:
+
+```csharp
+// Before: Try current stage first, use cumulative as fallback
+if (!TryReadContent(actualPath, out var actualRaw))
+    return error;  // Never reaches cumulative!
+actualRaw = TryGetCumulativeOutput(actualPath, actualRaw);  // Too late
+
+// After: Use cumulative as primary for memory:// paths
+if (actualPath.StartsWith("memory://"))
+    actualRaw = TryGetCumulativeOutput(actualPath, "");  // Accumulates stages 1-N
+```
+
+**Additional Improvements:**
+- Limited cumulative iteration to current stage (not hardcoded 1-10)
+- Added safety limit of 50 stages max to prevent excessive loops
+- Extracted memory path parsing into reusable helper method
+
+### Bug #3: Excel Whitespace in Stage Values
+
+**Problem:** Stage values from Excel might have leading/trailing whitespace (e.g., " 2 " instead of "2"), causing memory key mismatches.
+
+**Solution:** Added `.Trim()` to all Excel cell value reads:
+
+```csharp
+// ExcelDetailParser.cs
+private static string Get(IXLRangeRow row, Dictionary<string, int> map, string key)
+    => map.TryGetValue(key, out var c) ? row.Cell(c).GetString().Trim() : "";
+```
+
+### Bug #4: Unicode Whitespace Normalization
+
+**Problem:** Expected output might contain non-breaking spaces (U+00A0) or other Unicode whitespace that don't match regular spaces.
+
+**Solution:** Added normalization for Unicode whitespace characters:
+
+```csharp
+// DataComparisonService.cs Normalize()
+s = s.Replace("\u00A0", " "); // Non-breaking space
+s = s.Replace("\u2002", " "); // En space  
+s = s.Replace("\u2003", " "); // Em space
+s = s.Replace("\u2009", " "); // Thin space
+```
+
+### Testing Results
+
+**Build:** ✅ Successful
+**Code Review:** ✅ All feedback addressed
+**Security Scan:** ✅ No vulnerabilities (CodeQL)
+
+### Impact
+
+These fixes ensure:
+- ✅ Output captured to wrong stage (due to timing) is still found via cumulative approach
+- ✅ Whitespace in Excel cells doesn't break stage key matching
+- ✅ Unicode whitespace in expected output is normalized correctly
+- ✅ Better error messages showing which stage/key failed
+
 ## Credits
 
 - Issue identified by: NguyenHuuCuongK18
@@ -230,5 +308,5 @@ Watch for:
 
 ---
 **Date:** 2025-10-30  
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** ✅ Complete

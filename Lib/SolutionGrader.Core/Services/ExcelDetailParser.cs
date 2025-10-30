@@ -220,5 +220,5 @@ public sealed class ExcelDetailParser : ITestCaseParser
     }
 
     private static string Get(IXLRangeRow row, Dictionary<string, int> map, string key)
-        => map.TryGetValue(key, out var c) ? row.Cell(c).GetString() : "";
+        => map.TryGetValue(key, out var c) ? row.Cell(c).GetString().Trim() : "";
 }
