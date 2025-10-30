@@ -15,6 +15,8 @@ namespace SolutionGrader.Core.Services
         private string? _serverPath;
 
         private readonly IRunContext _run;
+        private readonly StringBuilder _clientOutputBuffer = new();
+        private readonly StringBuilder _serverOutputBuffer = new();
 
         public ExecutableManager(IRunContext run) { _run = run; }
 
@@ -26,6 +28,8 @@ namespace SolutionGrader.Core.Services
             _clientPath = clientPath;
             _serverPath = serverPath;
             _client = null; _server = null;
+            _clientOutputBuffer.Clear();
+            _serverOutputBuffer.Clear();
         }
 
         public void StartServer()
@@ -82,6 +86,42 @@ namespace SolutionGrader.Core.Services
         public Task StopClientAsync() { TryKill(_client); _client = null; return Task.CompletedTask; }
         public Task StopAllAsync() { TryKill(_client); TryKill(_server); _client = null; _server = null; return Task.CompletedTask; }
 
+        public void SendClientInput(string input)
+        {
+            if (_client == null || _client.HasExited)
+            {
+                Console.WriteLine($"[ClientInput] Cannot send input - client not running");
+                return;
+            }
+
+            try
+            {
+                _client.StandardInput.WriteLine(input);
+                _client.StandardInput.Flush();
+                Console.WriteLine($"[ClientInput] Sent: {input}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ClientInput] Error sending input: {ex.Message}");
+            }
+        }
+
+        public string GetClientOutput()
+        {
+            lock (_clientOutputBuffer)
+            {
+                return _clientOutputBuffer.ToString();
+            }
+        }
+
+        public string GetServerOutput()
+        {
+            lock (_serverOutputBuffer)
+            {
+                return _serverOutputBuffer.ToString();
+            }
+        }
+
         private static Process Create(string exe) => new()
         {
             StartInfo = new ProcessStartInfo
@@ -111,6 +151,14 @@ namespace SolutionGrader.Core.Services
                     while ((line = await reader.ReadLineAsync()) != null)
                     {
                         await sw.WriteLineAsync(line);
+                        
+                        // Also append to buffer for retrieval
+                        var buffer = appendServer ? _serverOutputBuffer : _clientOutputBuffer;
+                        lock (buffer)
+                        {
+                            buffer.AppendLine(line);
+                        }
+                        
                         AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, line);
                     }
                 }

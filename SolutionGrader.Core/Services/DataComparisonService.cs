@@ -71,12 +71,12 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // If actual is unreachable (memory://, missing, or non-existent), IGNORE instead of failing
+            // If actual is unreachable (memory://, missing, or non-existent), FAIL (expected exists but actual doesn't)
             if (!TryReadContent(actualPath, out var actualRaw))
             {
                 var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
                 string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
-                return (true, $"{info.Title}: {outputType} not available (ignored)");
+                return (false, $"{info.Title}: {outputType} not available but expected output was defined");
             }
 
             var exp = Normalize(expectedRaw, caseInsensitive);
@@ -106,7 +106,7 @@ namespace SolutionGrader.Core.Services
             if (!TryReadContent(actualPath, out var actualJson) || string.IsNullOrWhiteSpace(actualJson))
             {
                 var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                return (true, $"{info.Title}: Actual JSON not available (ignored)");
+                return (false, $"{info.Title}: Actual JSON not available but expected JSON was defined");
             }
 
             try
@@ -134,7 +134,7 @@ namespace SolutionGrader.Core.Services
             if (!TryReadContent(actualPath, out var actualCsv))
             {
                 var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                return (false, $"{infoActual.Title}: Actual CSV output was not generated");
+                return (false, $"{infoActual.Title}: Actual CSV output was not generated but expected CSV was defined");
             }
 
             var expectedCsv = TryReadContent(expectedPath, out var expectedFromFile)
@@ -162,9 +162,11 @@ namespace SolutionGrader.Core.Services
             content = string.Empty;
             if (string.IsNullOrWhiteSpace(path)) return false;
 
-            // We deliberately DO NOT attempt to resolve memory:// keys anymore.
+            // Try to resolve memory:// keys from RunContext
             if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
-                return false;
+            {
+                return _run.TryGetCapturedOutput(path, out content);
+            }
 
             try
             {

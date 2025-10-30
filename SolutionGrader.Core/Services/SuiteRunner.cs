@@ -88,11 +88,47 @@ namespace SolutionGrader.Core.Services
                     _run.CurrentStage = TryParseStage(step.Id);
                     _run.CurrentStageLabel = step.Stage;
 
+                    Console.WriteLine($"[Step] Executing: {step.Action} (Stage: {step.Stage}, ID: {step.Id})");
 
                     var sw = Stopwatch.StartNew();
                     var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);
                     sw.Stop();
-                    results.Add(new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds });
+                    
+                    var result = new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds };
+                    results.Add(result);
+                    
+                    // Log to detail service for grading
+                    // Determine if this is a comparison step (has points)
+                    bool isComparisonStep = step.Action != null && (
+                        string.Equals(step.Action, "CompareFile", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, "CompareText", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, "CompareJson", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(step.Action, "CompareCsv", StringComparison.OrdinalIgnoreCase)
+                    );
+                    
+                    // Determine error code from step action and result
+                    string errorCode = "NONE";
+                    if (!ok)
+                    {
+                        if (step.Action?.Contains("Compare", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            if (step.Action.Contains("Json", StringComparison.OrdinalIgnoreCase))
+                                errorCode = "JSON_MISMATCH";
+                            else if (step.Action.Contains("Csv", StringComparison.OrdinalIgnoreCase))
+                                errorCode = "CSV_MISMATCH";
+                            else
+                                errorCode = "TEXT_MISMATCH";
+                        }
+                        else if (msg.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+                            errorCode = "TIMEOUT";
+                        else
+                            errorCode = "UNKNOWN";
+                    }
+                    
+                    double pointsPossible = isComparisonStep ? 1.0 : 0.0; // Actual points calculated by log service
+                    _log.LogStepGrade(step, ok, msg, 0, pointsPossible, sw.Elapsed.TotalMilliseconds, 
+                        errorCode, null, null);
+                    
                     Console.WriteLine($"[Step] Result: {(ok ? "PASS" : "FAIL")} - {msg} ({sw.Elapsed.TotalMilliseconds:F0}ms)");
                 }
 

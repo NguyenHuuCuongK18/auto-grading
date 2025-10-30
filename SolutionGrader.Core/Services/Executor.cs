@@ -39,6 +39,118 @@ namespace SolutionGrader.Core.Services
             {
                 switch (step.Action)
                 {
+                    case var a when a == ActionKeywords.ServerStart:
+                        {
+                            Console.WriteLine($"[Action] ServerStart: Starting server application...");
+                            
+                            try
+                            {
+                                _proc.StartServer();
+                            }
+                            catch (Exception ex)
+                            {
+                                errCode = ErrorCodes.SERVER_EXE_MISSING;
+                                result = (false, $"Failed to start server: {ex.Message}");
+                                break;
+                            }
+                            
+                            // Wait for server to be ready
+                            var t0 = Environment.TickCount;
+                            bool serverReady = false;
+                            while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
+                            {
+                                try
+                                {
+                                    var res = await _http.GetAsync($"http://127.0.0.1:{RealServerPort}/healthz", ct);
+                                    if (res.IsSuccessStatusCode)
+                                    {
+                                        serverReady = true;
+                                        break;
+                                    }
+                                }
+                                catch { /* wait */ }
+                                
+                                if (_proc.IsServerRunning)
+                                {
+                                    // Server process is running, even if health check fails
+                                    serverReady = true;
+                                    break;
+                                }
+                                
+                                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                            }
+                            
+                            if (!_proc.IsServerRunning)
+                            {
+                                errCode = ErrorCodes.PROCESS_CRASHED;
+                                var output = _proc.GetServerOutput() ?? "";
+                                var errorPreview = output.Length > 200 ? output.Substring(0, 200) : output;
+                                result = (false, $"Server process failed to start or crashed immediately. Output: {errorPreview}");
+                                break;
+                            }
+                            
+                            if (!serverReady)
+                            {
+                                Console.WriteLine("[Action] ServerStart: Warning - Server may not be fully initialized");
+                            }
+                            
+                            // Get initial output for logging
+                            await Task.Delay(500, ct); // Give server time to output startup messages
+                            var serverOutput = _proc.GetServerOutput();
+                            var outputPreview = serverOutput.Length > 100 
+                                ? serverOutput.Substring(0, 100) + "..." 
+                                : serverOutput;
+                            
+                            Console.WriteLine($"[Action] ServerStart: Server output: {outputPreview}");
+                            result = (true, $"Server started successfully. Process running: {_proc.IsServerRunning}");
+                            break;
+                        }
+
+                    case var a when a == ActionKeywords.ClientStart:
+                        {
+                            Console.WriteLine($"[Action] ClientStart: Starting client application...");
+                            
+                            try
+                            {
+                                _proc.StartClient();
+                            }
+                            catch (Exception ex)
+                            {
+                                errCode = ErrorCodes.CLIENT_EXE_MISSING;
+                                result = (false, $"Failed to start client: {ex.Message}");
+                                break;
+                            }
+                            
+                            // Give client time to start and output initial messages
+                            await Task.Delay(500, ct);
+                            
+                            if (!_proc.IsClientRunning)
+                            {
+                                errCode = ErrorCodes.PROCESS_CRASHED;
+                                var output = _proc.GetClientOutput() ?? "";
+                                var errorPreview = output.Length > 200 ? output.Substring(0, 200) : output;
+                                result = (false, $"Client process failed to start or crashed immediately. Output: {errorPreview}");
+                                break;
+                            }
+                            
+                            var clientOutput = _proc.GetClientOutput();
+                            var outputPreview = clientOutput.Length > 100 
+                                ? clientOutput.Substring(0, 100) + "..." 
+                                : clientOutput;
+                            
+                            Console.WriteLine($"[Action] ClientStart: Client output: {outputPreview}");
+                            result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
+                            break;
+                        }
+
+                    case var a when a == ActionKeywords.ClientInput:
+                        {
+                            Console.WriteLine($"[Action] ClientInput: Sending input to client: {step.Value}");
+                            _proc.SendClientInput(step.Value ?? "");
+                            result = (true, $"Sent input: {step.Value}");
+                            break;
+                        }
+
                     case var a when a == ActionKeywords.RunServer:
                         {
                             var serverPath = _run.ResolveServerExecutable();
@@ -128,9 +240,10 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.TcpRelay:
                         {
-                            var ok = await _mw.ProxyAsync(_run, ct);
-                            if (!ok) { errCode = ErrorCodes.TCP_RELAY_ERROR; result = (false, "TCP relay failed"); }
-                            else result = (true, "TCP relay ok");
+                            Console.WriteLine($"[Action] TcpRelay: Starting middleware proxy (protocol: {args.Protocol})...");
+                            bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+                            await _mw.StartAsync(useHttp, ct);
+                            result = (true, $"Middleware proxy started ({args.Protocol} mode)");
                             break;
                         }
 

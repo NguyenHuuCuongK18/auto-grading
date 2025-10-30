@@ -25,23 +25,87 @@ public sealed class ExcelDetailParser : ITestCaseParser
         ReadSheet(SuiteKeywords.Sheet_InputClients, ws =>
         {
             var map = Header(ws);
+            bool isFirstRow = true;
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
             {
                 var stage = Get(row, map, SuiteKeywords.Col_IC_Stage);
                 var input = Get(row, map, SuiteKeywords.Col_IC_Input);
                 var dataType = Get(row, map, SuiteKeywords.Col_IC_DataType);
+                var action = Get(row, map, SuiteKeywords.Col_IC_Action);
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
                 var qcode = string.IsNullOrWhiteSpace(qid) ? questionCode : qid;
 
-                if (!string.IsNullOrWhiteSpace(input))
+                // Skip completely empty rows
+                if (string.IsNullOrWhiteSpace(stage) && string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(action))
+                    continue;
+
+                // First step with "Connect" action needs to start processes
+                if (isFirstRow && string.Equals(action, "Connect", StringComparison.OrdinalIgnoreCase))
                 {
+                    isFirstRow = false;
+                    
+                    // Add server start step
                     steps.Add(new Step
                     {
-                        Id = $"IC-{stage}",
+                        Id = $"IC-SERVER-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.ServerStart,
+                        Value = null
+                    });
+
+                    // Add middleware/proxy step
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-PROXY-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.TcpRelay,
+                        Value = null
+                    });
+
+                    // Add client start step
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-CLIENT-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.ClientStart,
+                        Value = null
+                    });
+
+                    // Add wait for processes to initialize
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-WAIT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
+                        Value = "1000"
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(input))
+                {
+                    isFirstRow = false;
+                    
+                    // For other steps with input, send the input to client
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-INPUT-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = "CLIENT_INPUT",
                         Value = input
+                    });
+                    
+                    // Add a wait after input to let it process
+                    steps.Add(new Step
+                    {
+                        Id = $"IC-WAIT-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.Wait,
+                        Value = "1000"
                     });
                 }
             }
