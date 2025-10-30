@@ -83,8 +83,9 @@ namespace SolutionGrader.Core.Services
                             if (!_proc.IsServerRunning)
                             {
                                 errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetServerOutput();
-                                result = (false, $"Server process failed to start or crashed immediately. Output: {output.Substring(0, Math.Min(200, output.Length))}");
+                                var output = _proc.GetServerOutput() ?? "";
+                                var errorPreview = output.Length > 200 ? output.Substring(0, 200) : output;
+                                result = (false, $"Server process failed to start or crashed immediately. Output: {errorPreview}");
                                 break;
                             }
                             
@@ -126,8 +127,9 @@ namespace SolutionGrader.Core.Services
                             if (!_proc.IsClientRunning)
                             {
                                 errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetClientOutput();
-                                result = (false, $"Client process failed to start or crashed immediately. Output: {output.Substring(0, Math.Min(200, output.Length))}");
+                                var output = _proc.GetClientOutput() ?? "";
+                                var errorPreview = output.Length > 200 ? output.Substring(0, 200) : output;
+                                result = (false, $"Client process failed to start or crashed immediately. Output: {errorPreview}");
                                 break;
                             }
                             
