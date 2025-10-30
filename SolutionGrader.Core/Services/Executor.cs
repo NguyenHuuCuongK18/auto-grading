@@ -39,6 +39,54 @@ namespace SolutionGrader.Core.Services
             {
                 switch (step.Action)
                 {
+                    case var a when a == ActionKeywords.ServerStart:
+                        {
+                            Console.WriteLine($"[Action] ServerStart: Starting server application...");
+                            _proc.StartServer();
+                            
+                            // Wait for server to be ready
+                            var t0 = Environment.TickCount;
+                            bool serverReady = false;
+                            while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
+                            {
+                                try
+                                {
+                                    var res = await _http.GetAsync($"http://127.0.0.1:{RealServerPort}/healthz", ct);
+                                    if (res.IsSuccessStatusCode)
+                                    {
+                                        serverReady = true;
+                                        break;
+                                    }
+                                }
+                                catch { /* wait */ }
+                                
+                                if (_proc.IsServerRunning)
+                                {
+                                    // Server process is running, even if health check fails
+                                    serverReady = true;
+                                    break;
+                                }
+                                
+                                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                            }
+                            
+                            if (!serverReady)
+                            {
+                                Console.WriteLine("[Action] ServerStart: Warning - Server may not be fully initialized");
+                            }
+                            
+                            result = (true, "Server started");
+                            break;
+                        }
+
+                    case var a when a == ActionKeywords.ClientStart:
+                        {
+                            Console.WriteLine($"[Action] ClientStart: Starting client application...");
+                            _proc.StartClient();
+                            result = (true, "Client started");
+                            break;
+                        }
+
                     case var a when a == ActionKeywords.RunServer:
                         {
                             var serverPath = _run.ResolveServerExecutable();
