@@ -176,9 +176,10 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.TcpRelay:
                         {
-                            var ok = await _mw.ProxyAsync(_run, ct);
-                            if (!ok) { errCode = ErrorCodes.TCP_RELAY_ERROR; result = (false, "TCP relay failed"); }
-                            else result = (true, "TCP relay ok");
+                            Console.WriteLine($"[Action] TcpRelay: Starting middleware proxy (protocol: {args.Protocol})...");
+                            bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+                            await _mw.StartAsync(useHttp, ct);
+                            result = (true, $"Middleware proxy started ({args.Protocol} mode)");
                             break;
                         }
 

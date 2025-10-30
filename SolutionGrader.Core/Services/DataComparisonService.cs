@@ -162,9 +162,11 @@ namespace SolutionGrader.Core.Services
             content = string.Empty;
             if (string.IsNullOrWhiteSpace(path)) return false;
 
-            // We deliberately DO NOT attempt to resolve memory:// keys anymore.
+            // Try to resolve memory:// keys from RunContext
             if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
-                return false;
+            {
+                return _run.TryGetCapturedOutput(path, out content);
+            }
 
             try
             {
