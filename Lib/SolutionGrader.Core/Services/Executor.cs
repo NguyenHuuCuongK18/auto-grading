@@ -231,7 +231,7 @@ namespace SolutionGrader.Core.Services
                         break;
 
                     case var a when a == ActionKeywords.CompareJson:
-                        result = _cmp.CompareText(step.Target, ResolveActualPath(step));
+                        result = _cmp.CompareJson(step.Target, ResolveActualPath(step));
                         break;
 
                     case var a when a == ActionKeywords.CompareCsv:
