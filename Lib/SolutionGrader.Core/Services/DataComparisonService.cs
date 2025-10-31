@@ -449,5 +449,187 @@ namespace SolutionGrader.Core.Services
             }
             catch { return false; }
         }
+
+        // ---------- NEW: Extended validation methods for comprehensive grading ----------
+
+        public (bool, string) CompareHttpMethod(string? expectedMethod, string? actualMethod)
+        {
+            if (string.IsNullOrWhiteSpace(expectedMethod))
+            {
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: Expected HTTP method not specified (ignored)");
+            }
+
+            if (string.IsNullOrWhiteSpace(actualMethod))
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual HTTP method not captured");
+            }
+
+            var expNorm = expectedMethod.Trim().ToUpperInvariant();
+            var actNorm = actualMethod.Trim().ToUpperInvariant();
+
+            if (expNorm == actNorm)
+                return (true, $"HTTP method matches: {actualMethod}");
+
+            var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.HTTP_METHOD_MISMATCH);
+            return (false, $"{infoMismatch.Title}: Expected '{expectedMethod}', got '{actualMethod}'");
+        }
+
+        public (bool, string) CompareStatusCode(string? expectedStatusCode, int? actualStatusCode)
+        {
+            if (string.IsNullOrWhiteSpace(expectedStatusCode))
+            {
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: Expected status code not specified (ignored)");
+            }
+
+            if (!actualStatusCode.HasValue)
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual status code not captured");
+            }
+
+            // Normalize both expected and actual status codes for comparison
+            var expNorm = GradingKeywords.NormalizeStatusCode(expectedStatusCode);
+            var actNorm = GradingKeywords.NormalizeStatusCode(actualStatusCode.Value.ToString());
+
+            if (expNorm == actNorm || expNorm.Equals(actualStatusCode.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+                return (true, $"Status code matches: {actualStatusCode}");
+
+            var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.STATUS_CODE_MISMATCH);
+            return (false, $"{infoMismatch.Title}: Expected '{expectedStatusCode}', got '{actualStatusCode}'");
+        }
+
+        public (bool, string) CompareByteSize(int? expectedByteSize, int? actualByteSize)
+        {
+            if (!expectedByteSize.HasValue || expectedByteSize.Value < 0)
+            {
+                var infoExpected = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
+                return (true, $"{infoExpected.Title}: Expected byte size not specified (ignored)");
+            }
+
+            if (!actualByteSize.HasValue)
+            {
+                var infoActual = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{infoActual.Title}: Actual byte size not captured");
+            }
+
+            if (GradingKeywords.IsByteSizeWithinTolerance(expectedByteSize.Value, actualByteSize.Value))
+                return (true, $"Byte size within tolerance: Expected {expectedByteSize}, got {actualByteSize}");
+
+            var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.BYTE_SIZE_MISMATCH);
+            return (false, $"{infoMismatch.Title}: Expected {expectedByteSize} bytes, got {actualByteSize} bytes (diff: {Math.Abs(expectedByteSize.Value - actualByteSize.Value)})");
+        }
+
+        public (bool, string) ValidateStep(Step step, string? actualPath, GradingConfig config)
+        {
+            // Extract validation type from step metadata
+            var validationType = step.Metadata?.ContainsKey("ValidationType") == true
+                ? step.Metadata["ValidationType"]?.ToString()
+                : null;
+
+            // Check if this validation is enabled in config
+            if (!string.IsNullOrEmpty(validationType) && !config.IsEnabled(validationType))
+            {
+                return (true, $"Validation skipped by config: {validationType}");
+            }
+
+            // Route to appropriate validation based on step ID or metadata
+            if (step.Id.Contains("-METHOD-", StringComparison.OrdinalIgnoreCase) || validationType == "HTTP_METHOD")
+            {
+                if (!config.ValidateHttpMethod)
+                    return (true, "HTTP method validation disabled");
+
+                // Get actual HTTP method from captured metadata
+                var questionCode = step.QuestionCode;
+                var stage = step.Stage;
+                if (_run.TryGetHttpMetadata(questionCode, stage, out var httpMethod, out _, out _))
+                {
+                    return CompareHttpMethod(step.HttpMethod ?? step.Target, httpMethod);
+                }
+                return (false, "HTTP method not captured from middleware");
+            }
+
+            if (step.Id.Contains("-STATUS-", StringComparison.OrdinalIgnoreCase) || validationType == "STATUS_CODE")
+            {
+                if (!config.ValidateStatusCode)
+                    return (true, "Status code validation disabled");
+
+                // Get actual status code from captured metadata
+                var questionCode = step.QuestionCode;
+                var stage = step.Stage;
+                if (_run.TryGetHttpMetadata(questionCode, stage, out _, out var statusCode, out _))
+                {
+                    return CompareStatusCode(step.StatusCode ?? step.Target, statusCode);
+                }
+                return (false, "Status code not captured from middleware");
+            }
+
+            if (step.Id.Contains("-SIZE-", StringComparison.OrdinalIgnoreCase) || validationType == "BYTE_SIZE")
+            {
+                if (!config.ValidateByteSize)
+                    return (true, "Byte size validation disabled");
+
+                // Get actual byte size from captured metadata
+                var questionCode = step.QuestionCode;
+                var stage = step.Stage;
+                if (_run.TryGetHttpMetadata(questionCode, stage, out _, out _, out var byteSize))
+                {
+                    return CompareByteSize(step.ByteSize, byteSize);
+                }
+                return (false, "Byte size not captured from middleware");
+            }
+
+            if (step.Id.Contains("-DATA-", StringComparison.OrdinalIgnoreCase) || validationType == "DATA_RESPONSE")
+            {
+                if (!config.ValidateDataResponse)
+                    return (true, "Data response validation disabled");
+
+                // Validate data response content
+                if (step.Action == ActionKeywords.CompareJson)
+                    return CompareJson(step.Target, actualPath);
+                else
+                    return CompareText(step.Target, actualPath);
+            }
+
+            if (step.Id.Contains("-REQ-", StringComparison.OrdinalIgnoreCase) || validationType == "DATA_REQUEST")
+            {
+                if (!config.ValidateDataRequest)
+                    return (true, "Data request validation disabled");
+
+                // Validate data request content
+                return CompareText(step.Target, actualPath);
+            }
+
+            if (step.Id.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if it's client or server output
+                var isClientOutput = step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase);
+                var isServerOutput = step.Id.StartsWith("OS-", StringComparison.OrdinalIgnoreCase);
+
+                if (isClientOutput && !config.ValidateClientOutput)
+                    return (true, "Client output validation disabled");
+
+                if (isServerOutput && !config.ValidateServerOutput)
+                    return (true, "Server output validation disabled");
+
+                // Validate console output
+                if (step.Action == ActionKeywords.CompareJson)
+                    return CompareJson(step.Target, actualPath);
+                else
+                    return CompareText(step.Target, actualPath);
+            }
+
+            // Fallback to original comparison logic
+            return step.Action switch
+            {
+                var a when a == ActionKeywords.CompareText => CompareText(step.Target, actualPath),
+                var a when a == ActionKeywords.CompareJson => CompareJson(step.Target, actualPath),
+                var a when a == ActionKeywords.CompareCsv => CompareCsv(step.Target, actualPath),
+                var a when a == ActionKeywords.CompareFile => CompareFile(step.Target, actualPath),
+                _ => (false, $"Unknown comparison action: {step.Action}")
+            };
+        }
     }
 }

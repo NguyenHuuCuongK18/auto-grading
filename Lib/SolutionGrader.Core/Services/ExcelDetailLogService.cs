@@ -126,6 +126,12 @@ namespace SolutionGrader.Core.Services
                 ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 80);
             }
 
+            // NEW: Create separate TestRunData sheet with ONLY actual runtime data (no template duplication)
+            CreateTestRunDataSheet();
+
+            // NEW: Create separate ErrorReport sheet with ALL errors (not just first one)
+            CreateErrorReportSheet();
+
             // Totals for this case → feed in-memory and incremental summary
             var (casePassed, totalAwarded, totalPossible) = ComputeCaseTotals();
             if (_questionCode != null)
@@ -723,6 +729,191 @@ namespace SolutionGrader.Core.Services
 
             using var s = _files.OpenWrite(_failedTestDetailPath!);
             workbook.SaveAs(s);
+        }
+
+        /// <summary>
+        /// Creates a TestRunData sheet with ONLY actual runtime data (no template duplication).
+        /// This sheet shows what was actually captured during test execution.
+        /// </summary>
+        private void CreateTestRunDataSheet()
+        {
+            if (_wb == null || _records.Count == 0) return;
+
+            // Remove existing TestRunData sheet if it exists
+            if (_wb.Worksheets.TryGetWorksheet("TestRunData", out var existingSheet))
+            {
+                existingSheet.Delete();
+            }
+
+            var ws = _wb.AddWorksheet("TestRunData");
+            
+            // Create header row
+            ws.Cell(1, 1).Value = "Stage";
+            ws.Cell(1, 2).Value = "StepId";
+            ws.Cell(1, 3).Value = "ValidationType";
+            ws.Cell(1, 4).Value = "Action";
+            ws.Cell(1, 5).Value = "Result";
+            ws.Cell(1, 6).Value = "Message";
+            ws.Cell(1, 7).Value = "DurationMs";
+            ws.Cell(1, 8).Value = "ActualOutput";
+            ws.Cell(1, 9).Value = "HttpMethod";
+            ws.Cell(1, 10).Value = "StatusCode";
+            ws.Cell(1, 11).Value = "ByteSize";
+            
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            int row = 2;
+            foreach (var record in _records)
+            {
+                ws.Cell(row, 1).Value = record.Stage;
+                ws.Cell(row, 2).Value = record.StepId;
+                
+                // Extract validation type from metadata if available
+                var validationType = record.StepId.Contains("-METHOD-") ? "HTTP_METHOD" :
+                                   record.StepId.Contains("-STATUS-") ? "STATUS_CODE" :
+                                   record.StepId.Contains("-SIZE-") ? "BYTE_SIZE" :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? "DATA_RESPONSE" : "DATA_REQUEST") :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? "CLIENT_OUTPUT" : "SERVER_OUTPUT") :
+                                   record.StepId.Contains("-REQ-") ? "DATA_REQUEST" : "OTHER";
+                ws.Cell(row, 3).Value = validationType;
+                
+                ws.Cell(row, 4).Value = record.Action ?? "";
+                ws.Cell(row, 5).Value = record.Passed ? "PASS" : "FAIL";
+                ws.Cell(row, 6).Value = record.Message;
+                ws.Cell(row, 7).Value = Math.Round(record.DurationMs, 2);
+                
+                // Get actual output from captured data if available
+                if (!string.IsNullOrEmpty(record.ActualPath))
+                {
+                    if (_run.TryGetCapturedOutput(record.ActualPath, out var actualOutput))
+                    {
+                        var truncated = actualOutput.Length > 500 ? actualOutput.Substring(0, 500) + "..." : actualOutput;
+                        ws.Cell(row, 8).Value = truncated;
+                    }
+                }
+                
+                // Get HTTP metadata if available
+                if (_run.TryGetHttpMetadata(record.QuestionCode, record.Stage, out var httpMethod, out var statusCode, out var byteSize))
+                {
+                    ws.Cell(row, 9).Value = httpMethod ?? "";
+                    ws.Cell(row, 10).Value = statusCode ?? 0;
+                    ws.Cell(row, 11).Value = byteSize ?? 0;
+                }
+                
+                // Color code the result row
+                if (!record.Passed)
+                {
+                    ws.Row(row).Style.Fill.BackgroundColor = XLColor.LightPink;
+                }
+                
+                row++;
+            }
+
+            ws.Style.Alignment.WrapText = true;
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+        }
+
+        /// <summary>
+        /// Creates an ErrorReport sheet with ALL errors found during test execution.
+        /// This sheet consolidates all failures for easy debugging.
+        /// </summary>
+        private void CreateErrorReportSheet()
+        {
+            if (_wb == null) return;
+
+            var failedRecords = _records.Where(r => !r.Passed).ToList();
+            if (failedRecords.Count == 0) return; // No errors to report
+
+            // Remove existing ErrorReport sheet if it exists
+            if (_wb.Worksheets.TryGetWorksheet("ErrorReport", out var existingSheet))
+            {
+                existingSheet.Delete();
+            }
+
+            var ws = _wb.AddWorksheet("ErrorReport");
+            
+            // Create header row
+            ws.Cell(1, 1).Value = "Stage";
+            ws.Cell(1, 2).Value = "StepId";
+            ws.Cell(1, 3).Value = "ValidationType";
+            ws.Cell(1, 4).Value = "ErrorCode";
+            ws.Cell(1, 5).Value = "ErrorCategory";
+            ws.Cell(1, 6).Value = "Message";
+            ws.Cell(1, 7).Value = "ExpectedValue";
+            ws.Cell(1, 8).Value = "ActualValue";
+            ws.Cell(1, 9).Value = "PointsLost";
+            
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.Red;
+            ws.Row(1).Style.Font.FontColor = XLColor.White;
+            ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            int row = 2;
+            foreach (var record in failedRecords)
+            {
+                ws.Cell(row, 1).Value = record.Stage;
+                ws.Cell(row, 2).Value = record.StepId;
+                
+                // Extract validation type
+                var validationType = record.StepId.Contains("-METHOD-") ? "HTTP_METHOD" :
+                                   record.StepId.Contains("-STATUS-") ? "STATUS_CODE" :
+                                   record.StepId.Contains("-SIZE-") ? "BYTE_SIZE" :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? "DATA_RESPONSE" : "DATA_REQUEST") :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? "CLIENT_OUTPUT" : "SERVER_OUTPUT") :
+                                   record.StepId.Contains("-REQ-") ? "DATA_REQUEST" : "OTHER";
+                ws.Cell(row, 3).Value = validationType;
+                
+                ws.Cell(row, 4).Value = record.ErrorCode;
+                ws.Cell(row, 5).Value = record.ErrorCategory.ToString();
+                ws.Cell(row, 6).Value = record.Message;
+                
+                // Try to extract expected vs actual from the message
+                var message = record.Message ?? "";
+                if (message.Contains("Expected") && message.Contains("got"))
+                {
+                    var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);
+                    if (parts.Length >= 2)
+                    {
+                        var expectedPart = parts[1].Split(',')[0].Trim().Trim('\'', '"');
+                        ws.Cell(row, 7).Value = expectedPart;
+                    }
+                    if (parts.Length >= 3)
+                    {
+                        var actualPart = parts[2].Split('.')[0].Trim().Trim('\'', '"');
+                        ws.Cell(row, 8).Value = actualPart;
+                    }
+                }
+                
+                ws.Cell(row, 9).Value = record.PointsPossible;
+                
+                // Highlight critical errors more prominently
+                if (record.ErrorCategory == ErrorCategory.Compare)
+                {
+                    ws.Row(row).Style.Fill.BackgroundColor = XLColor.LightPink;
+                }
+                else if (record.ErrorCategory == ErrorCategory.Process || record.ErrorCategory == ErrorCategory.Timeout)
+                {
+                    ws.Row(row).Style.Fill.BackgroundColor = XLColor.LightYellow;
+                }
+                
+                row++;
+            }
+
+            // Add summary at the bottom
+            row++;
+            ws.Cell(row, 1).Value = "Summary";
+            ws.Cell(row, 1).Style.Font.Bold = true;
+            row++;
+            ws.Cell(row, 1).Value = "Total Errors:";
+            ws.Cell(row, 2).Value = failedRecords.Count;
+            row++;
+            ws.Cell(row, 1).Value = "Total Points Lost:";
+            ws.Cell(row, 2).Value = Math.Round(failedRecords.Sum(r => r.PointsPossible), 2);
+
+            ws.Style.Alignment.WrapText = true;
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
         }
 
         public void Dispose() => _wb?.Dispose();

@@ -8,6 +8,13 @@ public sealed class Step
     public required string Action { get; init; }
     public string? Target { get; init; }
     public string? Value { get; init; }
+    
+    // Extended properties for comprehensive validation
+    public string? HttpMethod { get; init; }
+    public string? StatusCode { get; init; }
+    public int? ByteSize { get; init; }
+    public string? DataType { get; init; }
+    public Dictionary<string, object>? Metadata { get; init; }
 }
 
 public sealed class StepResult

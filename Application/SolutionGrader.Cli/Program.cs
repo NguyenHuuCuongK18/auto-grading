@@ -57,7 +57,18 @@ public class Program
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
 
-        IExecutor exec = new Executor(proc, mw, cmp, log, runctx);
+        // Configure grading options - can be toggled based on command line args or config file
+        // Options: GradingConfig.Default (all enabled), .ClientOnly, .ServerOnly, .ConsoleOutputOnly, .HttpTrafficOnly
+        var gradingConfig = a.TryGetValue("grading-mode", out var mode) ? mode.ToUpperInvariant() switch
+        {
+            "CLIENT" => GradingConfig.ClientOnly,
+            "SERVER" => GradingConfig.ServerOnly,
+            "CONSOLE" => GradingConfig.ConsoleOutputOnly,
+            "HTTP" => GradingConfig.HttpTrafficOnly,
+            _ => GradingConfig.Default
+        } : GradingConfig.Default;
+
+        IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
         var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx);
@@ -95,9 +106,18 @@ Usage:
                                 [--client <client.exe>] [--server <server.exe>]
                                 [--client-appsettings <path>] [--server-appsettings <path>]
                                 [--db-script <sql>] [--timeout <sec>]
+                                [--grading-mode <mode>]
+
+Grading Modes:
+  DEFAULT - Validate all aspects (client output, server output, HTTP traffic, etc.)
+  CLIENT  - Validate only client-side (client output and data responses)
+  SERVER  - Validate only server-side (server output and data requests)
+  CONSOLE - Validate only console outputs (no HTTP validation)
+  HTTP    - Validate only HTTP traffic (no console output validation)
 
 Notes:
   - Protocol (HTTP/TCP) is read from Header.xlsx (if provided by the suite); no CLI flag needed.
+  - Grading mode allows easy toggling of validations for debugging purposes.
 ");
         return -1;
     }

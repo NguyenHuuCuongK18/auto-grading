@@ -19,6 +19,10 @@
         void SetServerOutput(string questionCode, string stage, string content);
         void SetServerRequest(string questionCode, string stage, string content);
         void SetServerResponse(string questionCode, string stage, string content);
+        
+        // HTTP metadata capture
+        void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize);
+        bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize);
 
         bool TryGetCapturedOutput(string captureKey, out string? content);
     }
