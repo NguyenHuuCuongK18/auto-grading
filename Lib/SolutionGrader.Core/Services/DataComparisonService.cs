@@ -61,6 +61,7 @@ namespace SolutionGrader.Core.Services
         {
             var isClientOutput = ContainsScope(actualPath, FileKeywords.Folder_Clients);
             var isServerOutput = ContainsScope(actualPath, FileKeywords.Folder_Servers);
+            string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
 
             // Expected may be inline (Excel cell) or a file path
             var expectedRaw = TryReadContent(expectedPath, out var expectedFromFile)
@@ -95,7 +96,6 @@ namespace SolutionGrader.Core.Services
                 if (string.IsNullOrEmpty(actualRaw))
                 {
                     var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                    string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
                     // Extract stage from memory key for better error message
                     var parsed = ParseMemoryPath(actualPath);
                     var stageInfo = parsed.HasValue ? $" stage {parsed.Value.stage}" : "";
@@ -108,7 +108,6 @@ namespace SolutionGrader.Core.Services
                 if (!TryReadContent(actualPath, out actualRaw))
                 {
                     var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                    string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text";
                     return (false, $"{info.Title}: {outputType} not available but expected output was defined");
                 }
             }
@@ -116,13 +115,33 @@ namespace SolutionGrader.Core.Services
             var exp = Normalize(expectedRaw, caseInsensitive);
             var act = Normalize(actualRaw, caseInsensitive);
             
-            // For console output comparisons, check if expected is contained in actual
+            // First try exact match
+            if (exp == act)
+            {
+                return (true, $"Text comparison passed: {outputType} matches exactly");
+            }
+            
+            // For console output, try looser comparison with contains as fallback
             // This handles buffered output and timing differences where expected output
             // may appear in actual output along with additional content
-            if (exp == act || ((isClientOutput || isServerOutput) && act.Contains(exp)))
+            if ((isClientOutput || isServerOutput) && act.Contains(exp))
             {
-                string outputType = isClientOutput ? "client output" : isServerOutput ? "server output" : "text content";
-                return (true, $"Text comparison passed: {outputType} matches expected");
+                return (true, $"Text comparison passed: {outputType} contains expected (loose match)");
+            }
+            
+            // If exact match failed, try even looser comparison by stripping more aggressively
+            var expLoose = StripAggressive(exp);
+            var actLoose = StripAggressive(act);
+            
+            if (expLoose == actLoose)
+            {
+                return (true, $"Text comparison passed: {outputType} matches after aggressive normalization");
+            }
+            
+            // As a last resort, try contains with aggressive stripping
+            if (actLoose.Contains(expLoose))
+            {
+                return (true, $"Text comparison passed: {outputType} contains expected after aggressive normalization");
             }
 
             var (idx, _, _, _, _) = FirstDiff(exp, act);
@@ -301,6 +320,25 @@ namespace SolutionGrader.Core.Services
                 var code = Convert.ToInt32(m.Groups[1].Value, 16);
                 return char.ConvertFromUtf32(code);
             });
+        }
+
+        /// <summary>
+        /// Even more aggressive normalization for lenient comparison.
+        /// Strips all spaces, newlines, and special characters.
+        /// </summary>
+        /// <param name="s">The string to normalize</param>
+        /// <returns>A string with all whitespace and common punctuation removed</returns>
+        private static string StripAggressive(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            
+            // Remove all whitespace (spaces, tabs, newlines, etc.)
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", "");
+            
+            // Remove common punctuation that might differ
+            s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
+            
+            return s;
         }
 
         private static (string scope, string questionCode, string stage)? ParseMemoryPath(string memoryPath)

@@ -147,7 +147,26 @@ namespace SolutionGrader.Core.Services
                         {
                             Console.WriteLine($"[Action] ClientInput: Sending input to client: {step.Value}");
                             _proc.SendClientInput(step.Value ?? "");
-                            result = (true, $"Sent input: {step.Value}");
+                            
+                            // Wait for client to process input and respond, or timeout (default 15 seconds)
+                            var timeoutSeconds = args.StageTimeoutSeconds > 0 ? args.StageTimeoutSeconds : 15;
+                            var gotOutput = await _proc.WaitForClientOutputAsync(timeoutSeconds, ct);
+                            
+                            if (gotOutput)
+                            {
+                                result = (true, $"Sent input: {step.Value}, received response");
+                            }
+                            else if (_proc.IsClientRunning)
+                            {
+                                // Client still running but no output - might be waiting for more input
+                                result = (true, $"Sent input: {step.Value}, no response yet (client still running)");
+                            }
+                            else
+                            {
+                                // Client exited - might be an error
+                                errCode = ErrorCodes.PROCESS_CRASHED;
+                                result = (false, $"Sent input: {step.Value}, but client process exited");
+                            }
                             break;
                         }
 

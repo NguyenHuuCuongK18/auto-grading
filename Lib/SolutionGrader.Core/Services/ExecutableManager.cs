@@ -105,6 +105,60 @@ namespace SolutionGrader.Core.Services
                 Console.WriteLine($"[ClientInput] Error sending input: {ex.Message}");
             }
         }
+        
+        /// <summary>
+        /// Waits for the client process to produce output or exit.
+        /// </summary>
+        /// <param name="timeoutSeconds">Maximum time to wait in seconds (default: 15)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if new output was produced, false if process exited or timed out</returns>
+        public async Task<bool> WaitForClientOutputAsync(int timeoutSeconds = 15, CancellationToken ct = default)
+        {
+            if (_client == null) return false;
+            
+            // Wait for client to either:
+            // 1. Exit (finished processing)
+            // 2. Produce output (response received)
+            // 3. Timeout
+            // 4. Cancellation requested
+            
+            var startTime = DateTime.UtcNow;
+            var initialOutputLength = GetClientOutput().Length;
+            
+            while (!ct.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalSeconds < timeoutSeconds)
+            {
+                // Check if process exited
+                if (_client.HasExited)
+                {
+                    Console.WriteLine($"[ClientInput] Client process exited");
+                    return false;
+                }
+                
+                // Check if new output was produced
+                var currentOutputLength = GetClientOutput().Length;
+                if (currentOutputLength > initialOutputLength)
+                {
+                    Console.WriteLine($"[ClientInput] Client produced output ({currentOutputLength - initialOutputLength} bytes)");
+                    // Give a little more time for buffered output
+                    await Task.Delay(100, ct);
+                    return true;
+                }
+                
+                // Short delay before checking again
+                await Task.Delay(100, ct);
+            }
+            
+            if (ct.IsCancellationRequested)
+            {
+                Console.WriteLine($"[ClientInput] Wait cancelled");
+            }
+            else
+            {
+                Console.WriteLine($"[ClientInput] Wait timed out after {timeoutSeconds}s");
+            }
+            
+            return false;
+        }
 
         public string GetClientOutput()
         {
@@ -225,9 +279,86 @@ namespace SolutionGrader.Core.Services
 
         private static void TryKill(Process? p)
         {
-            try { if (p is { HasExited: false }) p.Kill(entireProcessTree: true); }
-            catch { }
-            finally { try { p?.Dispose(); } catch { } }
+            if (p == null) return;
+            
+            try 
+            { 
+                if (p.HasExited) return;
+                
+                var processId = p.Id;
+                
+                // Try graceful kill first with entire process tree
+                p.Kill(entireProcessTree: true);
+                
+                // Wait up to 1 second for process to exit
+                if (!p.WaitForExit(1000))
+                {
+                    // If still running after 1 second, use TaskKill as fallback
+                    Console.WriteLine($"[Process] Process {processId} did not exit gracefully, using TaskKill...");
+                    TryTaskKill(processId);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Process] Error killing process: {ex.Message}");
+            }
+            finally 
+            { 
+                try { p?.Dispose(); } 
+                catch { } 
+            }
+        }
+        
+        /// <summary>
+        /// Forcefully terminates a process using platform-specific commands.
+        /// Uses TaskKill on Windows, kill -9 on Unix-like systems.
+        /// </summary>
+        /// <param name="processId">The process ID to terminate</param>
+        private static void TryTaskKill(int processId)
+        {
+            try
+            {
+                // Use TaskKill on Windows or kill on Unix
+                if (OperatingSystem.IsWindows())
+                {
+                    var taskKill = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "taskkill",
+                            Arguments = $"/F /T /PID {processId}",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        }
+                    };
+                    taskKill.Start();
+                    taskKill.WaitForExit(2000); // Wait up to 2 seconds
+                }
+                else
+                {
+                    // On Unix, use kill -9 (SIGKILL)
+                    var kill = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "kill",
+                            Arguments = $"-9 {processId}",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        }
+                    };
+                    kill.Start();
+                    kill.WaitForExit(2000);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Process] TaskKill/kill failed: {ex.Message}");
+            }
         }
     }
 }
