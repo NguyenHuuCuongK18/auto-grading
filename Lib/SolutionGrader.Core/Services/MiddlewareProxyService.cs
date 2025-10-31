@@ -126,8 +126,8 @@ namespace SolutionGrader.Core.Services
                 var response = await client.SendAsync(forward);
                 var bytes = await response.Content.ReadAsByteArrayAsync();
 
-                // Capture server traffic to memory (no txt files)
-                TryAppendServerActual(body, bytes);
+                // Capture server traffic to memory (no txt files) with metadata
+                TryAppendServerActual(body, bytes, req.HttpMethod, (int)response.StatusCode);
 
                 var resp = ctx.Response;
                 resp.StatusCode = (int)response.StatusCode;
@@ -200,7 +200,7 @@ namespace SolutionGrader.Core.Services
                 await to.WriteAsync(buffer, 0, read, token);
         }
 
-        private void TryAppendServerActual(string requestBody, byte[] responseBytes)
+        private void TryAppendServerActual(string requestBody, byte[] responseBytes, string httpMethod = "GET", int statusCode = 200)
         {
             try
             {
@@ -220,6 +220,9 @@ namespace SolutionGrader.Core.Services
                     respText = $"<binary {responseBytes?.Length ?? 0} bytes>";
                 }
                 _run.SetServerResponse(question, stage, respText);
+                
+                // Store HTTP metadata (method, status code, byte size)
+                _run.SetHttpMetadata(question, stage, httpMethod, statusCode, responseBytes?.Length ?? 0);
 
                 // Note: HTTP traffic is now stored in memory only (servers-req and servers-resp namespaces)
                 // This data is available for comparison steps and included in Excel output when tests fail

@@ -23,6 +23,7 @@ namespace SolutionGrader.Core.Services
         private const string MemoryScheme = "memory://";
 
         private readonly ConcurrentDictionary<string, StringBuilder> _captures = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, (string HttpMethod, int StatusCode, int ByteSize)> _httpMetadata = new(StringComparer.OrdinalIgnoreCase);
 
         public string GetClientCaptureKey(string questionCode, string stage)
             => BuildKey(FileKeywords.Folder_Clients, questionCode, stage);
@@ -63,6 +64,29 @@ namespace SolutionGrader.Core.Services
             }
 
             content = null;
+            return false;
+        }
+
+        public void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize)
+        {
+            var key = $"{questionCode}-{stage}";
+            _httpMetadata[key] = (httpMethod, statusCode, byteSize);
+        }
+
+        public bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize)
+        {
+            var key = $"{questionCode}-{stage}";
+            if (_httpMetadata.TryGetValue(key, out var metadata))
+            {
+                httpMethod = metadata.HttpMethod;
+                statusCode = metadata.StatusCode;
+                byteSize = metadata.ByteSize;
+                return true;
+            }
+
+            httpMethod = null;
+            statusCode = null;
+            byteSize = null;
             return false;
         }
 

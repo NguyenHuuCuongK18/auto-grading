@@ -75,6 +75,14 @@
         public const string CSV_MISMATCH = "CSV_MISMATCH";
         public const string FILE_SIZE_MISMATCH = "FILE_SIZE_MISMATCH";
         public const string FILE_HASH_MISMATCH = "FILE_HASH_MISMATCH";
+        
+        // HTTP / Network Validation
+        public const string HTTP_METHOD_MISMATCH = "HTTP_METHOD_MISMATCH";
+        public const string STATUS_CODE_MISMATCH = "STATUS_CODE_MISMATCH";
+        public const string BYTE_SIZE_MISMATCH = "BYTE_SIZE_MISMATCH";
+        public const string DATA_TYPE_MISMATCH = "DATA_TYPE_MISMATCH";
+        public const string DATA_REQUEST_MISMATCH = "DATA_REQUEST_MISMATCH";
+        public const string DATA_RESPONSE_MISMATCH = "DATA_RESPONSE_MISMATCH";
 
         // Timeout / generic
         public const string TIMEOUT = "TIMEOUT";
@@ -99,7 +107,9 @@
             FILE_NOT_FOUND or ACTUAL_FILE_MISSING or EXPECTED_FILE_MISSING or EXPECTED_CLIENT_OUTPUT_MISSING 
                 or EXPECTED_SERVER_OUTPUT_MISSING or FILE_COPY_FAILED or PATH_NOT_FOUND or PERMISSION_DENIED => ErrorCategory.IO,
 
-            TEXT_MISMATCH or JSON_MISMATCH or CSV_MISMATCH or FILE_SIZE_MISMATCH or FILE_HASH_MISMATCH => ErrorCategory.Compare,
+            TEXT_MISMATCH or JSON_MISMATCH or CSV_MISMATCH or FILE_SIZE_MISMATCH or FILE_HASH_MISMATCH 
+                or HTTP_METHOD_MISMATCH or STATUS_CODE_MISMATCH or BYTE_SIZE_MISMATCH or DATA_TYPE_MISMATCH 
+                or DATA_REQUEST_MISMATCH or DATA_RESPONSE_MISMATCH => ErrorCategory.Compare,
 
             TIMEOUT or STEP_TIMEOUT => ErrorCategory.Timeout,
 
@@ -156,6 +166,14 @@
             CSV_MISMATCH => new() { Code = CSV_MISMATCH, Title = "CSV Content Mismatch", Description = "CSV file content does not match expected output", Category = ErrorCategory.Compare },
             FILE_SIZE_MISMATCH => new() { Code = FILE_SIZE_MISMATCH, Title = "File Size Mismatch", Description = "File size differs from expected size", Category = ErrorCategory.Compare },
             FILE_HASH_MISMATCH => new() { Code = FILE_HASH_MISMATCH, Title = "File Hash Mismatch", Description = "File hash does not match expected hash value", Category = ErrorCategory.Compare },
+            
+            // HTTP / Network Validation
+            HTTP_METHOD_MISMATCH => new() { Code = HTTP_METHOD_MISMATCH, Title = "HTTP Method Mismatch", Description = "HTTP method (GET, POST, etc.) does not match expected value", Category = ErrorCategory.Compare },
+            STATUS_CODE_MISMATCH => new() { Code = STATUS_CODE_MISMATCH, Title = "Status Code Mismatch", Description = "HTTP status code does not match expected value", Category = ErrorCategory.Compare },
+            BYTE_SIZE_MISMATCH => new() { Code = BYTE_SIZE_MISMATCH, Title = "Byte Size Mismatch", Description = "Response byte size does not match expected value within tolerance", Category = ErrorCategory.Compare },
+            DATA_TYPE_MISMATCH => new() { Code = DATA_TYPE_MISMATCH, Title = "Data Type Mismatch", Description = "Data type (JSON, CSV, etc.) does not match expected value", Category = ErrorCategory.Compare },
+            DATA_REQUEST_MISMATCH => new() { Code = DATA_REQUEST_MISMATCH, Title = "Data Request Mismatch", Description = "HTTP request payload does not match expected value", Category = ErrorCategory.Compare },
+            DATA_RESPONSE_MISMATCH => new() { Code = DATA_RESPONSE_MISMATCH, Title = "Data Response Mismatch", Description = "HTTP response payload does not match expected value", Category = ErrorCategory.Compare },
 
             // Timeout
             TIMEOUT => new() { Code = TIMEOUT, Title = "Operation Timeout", Description = "Operation exceeded the configured timeout limit", Category = ErrorCategory.Timeout },
