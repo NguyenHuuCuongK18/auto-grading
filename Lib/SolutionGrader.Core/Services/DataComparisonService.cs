@@ -70,9 +70,10 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // Get actual content from memory only (no txt file fallback):
-            // 1) If memory://… path, try that specific key.
+            // Get actual content from memory (no txt files):
+            // 1) If memory://… path, try that specific key from RunContext.
             // 2) If empty or missing, aggregate ALL stages from memory for that (scope, question).
+            // 3) If still empty after memory aggregation, try path inference to aggregate from memory.
             string actualRaw = string.Empty;
 
             if (actualPath != null && actualPath.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
@@ -406,14 +407,14 @@ namespace SolutionGrader.Core.Services
         /// 
         /// Primary use case: memory:// URIs (e.g., "memory://clients/TC01/3")
         /// 
-        /// Fallback use cases (for backward compatibility):
-        /// - Old test configs that may use relative path notation (e.g., "clients/TC01")
-        /// - Inline value patterns that follow scope/question convention
-        /// - Used when TryReadContent fails to resolve a path and we need to aggregate memory
+        /// Fallback use cases (for backward compatibility with non-memory actualPath values):
+        /// - When actualPath is provided as a simple pattern like "clients/TC01" instead of memory:// URI
+        /// - When test configurations use relative path notation from older versions
+        /// - Enables memory aggregation even when path format doesn't match standard memory:// scheme
         /// 
-        /// Note: File-based txt outputs are no longer created by this system, but this fallback
-        /// helps parse any non-memory path patterns that might appear in test configurations
-        /// or inline expected values in Detail.xlsx files.
+        /// Note: This method is used to parse actualPath values (not expected values).
+        /// File-based txt outputs are no longer created by this system; all actual outputs
+        /// are stored in memory and this method helps aggregate them by inferring scope/question.
         /// </summary>
         private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
         {
