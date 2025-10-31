@@ -1,6 +1,0 @@
-﻿Please enter integer number : 
- Server returned an error: BadRequest - Bad Request
-
-----------------------------------------
-
-Please enter integer number : 

@@ -1,2 +1,0 @@
-﻿Client started, connecting to Server at http://localhost:5000/
-Please enter integer number : 
