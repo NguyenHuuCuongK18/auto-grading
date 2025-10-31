@@ -277,19 +277,11 @@ namespace SolutionGrader.Core.Services
                 catch { }
             }
 
-            // More aggressive whitespace normalization:
-            // 1. Convert all line endings to \n temporarily for easier processing
+            // More aggressive whitespace normalization (but preserve structure):
+            // 1. Convert all line endings to \n for consistency
             s = s.Replace("\r\n", "\n").Replace("\r", "\n");
             
-            // 2. Strip leading/trailing whitespace from each line
-            var lines = s.Split('\n');
-            for (int i = 0; i < lines.Length; i++)
-            {
-                lines[i] = lines[i].Trim();
-            }
-            s = string.Join(" ", lines);
-
-            // 3. Replace all Unicode whitespace variants with regular spaces
+            // 2. Replace all Unicode whitespace variants with regular spaces
             s = s.Replace("\u00A0", " ")  // Non-breaking space
                  .Replace("\u2002", " ")  // En space
                  .Replace("\u2003", " ")  // Em space
@@ -300,11 +292,19 @@ namespace SolutionGrader.Core.Services
                  .Replace("\u3000", " ")  // Ideographic space
                  .Replace("\t", " ");      // Tab to space
 
-            // 4. Remove whitespace around common punctuation marks
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*([,;:.!?])\s*", "$1");
+            // 3. Strip leading/trailing whitespace from each line BUT preserve line breaks
+            var lines = s.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                lines[i] = lines[i].Trim();
+            }
+            s = string.Join("\n", lines);
             
-            // 5. Collapse multiple whitespace into single space
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+            // 4. Collapse multiple consecutive spaces into single space (but keep newlines)
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"[ ]+", " ");
+            
+            // 5. Remove extra blank lines (more than 2 consecutive newlines)
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\n{3,}", "\n\n");
             
             // 6. Final trim
             s = s.Trim();

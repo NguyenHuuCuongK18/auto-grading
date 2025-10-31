@@ -47,7 +47,7 @@ namespace SolutionGrader.Core.Services
         private static readonly string[] BaseColumns = { "Stage", "Input", "DataType", "Action" };
         private static readonly string[] ResultColumns = {
             "Result","ErrorCode","ErrorCategory","PointsAwarded","PointsPossible",
-            "DurationMs","DetailPath","Message","DiffIndex","ExpectedExcerpt","ActualExcerpt","ActualOutput"
+            "DurationMs","DetailPath","Message","DiffIndex","ExpectedOutput","ActualOutput","ExpectedExcerpt","ActualExcerpt"
         };
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
@@ -362,59 +362,108 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                if (string.IsNullOrEmpty(detailPath) || !File.Exists(detailPath)) return;
-
-                // Diff index if it's in the message
-                var idx = FirstDiffIndexFromMessage(message ?? "");
-                if (idx >= 0) SetCell(ws, rowNum, hdr, "DiffIndex", idx);
-
-                // Only show excerpts around the mismatch (10 characters before and after)
-                var exp = TryReadContext(detailPath, 2000);
-                var act = TryReadContext(actualPath, 2000);
-                
-                if (!string.IsNullOrEmpty(exp) && !string.IsNullOrEmpty(act) && idx >= 0)
+                // Get expected output from the Detail.xlsx template (from the Output column in the current sheet)
+                string? expectedOutput = null;
+                if (hdr.TryGetValue("Output", out var outputCol))
                 {
-                    // Extract context around the mismatch (10 chars on each side)
-                    const int contextSize = 10;
-                    var startIdx = Math.Max(0, idx - contextSize);
-                    
-                    var expSnippet = ExtractSnippet(exp, startIdx, idx, contextSize);
-                    var actSnippet = ExtractSnippet(act, startIdx, idx, contextSize);
-                    
-                    if (!string.IsNullOrEmpty(expSnippet))
+                    expectedOutput = ws.Cell(rowNum, outputCol).GetString();
+                }
+                
+                // If no expected output in template, try reading from detailPath (diff file)
+                if (string.IsNullOrEmpty(expectedOutput) && !string.IsNullOrEmpty(detailPath) && File.Exists(detailPath))
+                {
+                    expectedOutput = TryReadContext(detailPath, 5000);
+                }
+
+                // Get actual output (already written by TryWriteActualOutput)
+                string? actualOutput = null;
+                if (hdr.TryGetValue("ActualOutput", out var actualOutputCol))
+                {
+                    actualOutput = ws.Cell(rowNum, actualOutputCol).GetString();
+                }
+                
+                // If ActualOutput column doesn't have data yet, try to get it
+                if (string.IsNullOrEmpty(actualOutput))
+                {
+                    actualOutput = TryReadContext(actualPath, 5000);
+                    if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                     {
-                        SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
-                        // Color expected in green
-                        if (hdr.TryGetValue("ExpectedExcerpt", out var expCol))
+                        var sheetName = ws.Name;
+                        var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+                        var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                        
+                        if (isClientSheet)
                         {
-                            ws.Cell(rowNum, expCol).Style.Font.FontColor = XLColor.DarkGreen;
-                            ws.Cell(rowNum, expCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                            var captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
+                            if (_run.TryGetCapturedOutput(captureKey, out var captured))
+                            {
+                                actualOutput = captured;
+                            }
                         }
-                    }
-                    
-                    if (!string.IsNullOrEmpty(actSnippet))
-                    {
-                        SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
-                        // Color actual in red
-                        if (hdr.TryGetValue("ActualExcerpt", out var actCol))
+                        else if (isServerSheet)
                         {
-                            ws.Cell(rowNum, actCol).Style.Font.FontColor = XLColor.DarkRed;
-                            ws.Cell(rowNum, actCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                            var captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
+                            if (_run.TryGetCapturedOutput(captureKey, out var captured))
+                            {
+                                actualOutput = captured;
+                            }
                         }
                     }
                 }
-                else if (!string.IsNullOrEmpty(exp) || !string.IsNullOrEmpty(act))
+
+                // Write full expected and actual outputs with color coding
+                if (!string.IsNullOrEmpty(expectedOutput))
                 {
-                    // Fallback: no specific index, show beginning of both
-                    if (!string.IsNullOrEmpty(exp)) 
+                    var truncatedExp = expectedOutput.Length > 5000 ? expectedOutput.Substring(0, 5000) + "... (truncated)" : expectedOutput;
+                    SetCell(ws, rowNum, hdr, "ExpectedOutput", truncatedExp);
+                    // Color expected in green
+                    if (hdr.TryGetValue("ExpectedOutput", out var expCol))
                     {
-                        var expSnippet = exp.Length > 50 ? exp.Substring(0, 50) + "..." : exp;
-                        SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
+                        ws.Cell(rowNum, expCol).Style.Font.FontColor = XLColor.DarkGreen;
+                        ws.Cell(rowNum, expCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
                     }
-                    if (!string.IsNullOrEmpty(act))
+                }
+                
+                // Color actual output in red (it was already written by TryWriteActualOutput)
+                if (!string.IsNullOrEmpty(actualOutput) && hdr.TryGetValue("ActualOutput", out var actCol))
+                {
+                    ws.Cell(rowNum, actCol).Style.Font.FontColor = XLColor.DarkRed;
+                    ws.Cell(rowNum, actCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                }
+
+                // Also write excerpts around the difference point for quick comparison
+                var idx = FirstDiffIndexFromMessage(message ?? "");
+                if (idx >= 0)
+                {
+                    SetCell(ws, rowNum, hdr, "DiffIndex", idx);
+                    
+                    if (!string.IsNullOrEmpty(expectedOutput) && !string.IsNullOrEmpty(actualOutput))
                     {
-                        var actSnippet = act.Length > 50 ? act.Substring(0, 50) + "..." : act;
-                        SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
+                        // Extract context around the mismatch (20 chars on each side for better context)
+                        const int contextSize = 20;
+                        
+                        var expSnippet = ExtractSnippet(expectedOutput, idx, contextSize);
+                        var actSnippet = ExtractSnippet(actualOutput, idx, contextSize);
+                        
+                        if (!string.IsNullOrEmpty(expSnippet))
+                        {
+                            SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
+                            if (hdr.TryGetValue("ExpectedExcerpt", out var expExcerptCol))
+                            {
+                                ws.Cell(rowNum, expExcerptCol).Style.Font.FontColor = XLColor.DarkGreen;
+                                ws.Cell(rowNum, expExcerptCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                            }
+                        }
+                        
+                        if (!string.IsNullOrEmpty(actSnippet))
+                        {
+                            SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
+                            if (hdr.TryGetValue("ActualExcerpt", out var actExcerptCol))
+                            {
+                                ws.Cell(rowNum, actExcerptCol).Style.Font.FontColor = XLColor.DarkRed;
+                                ws.Cell(rowNum, actExcerptCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                            }
+                        }
                     }
                 }
             }
@@ -425,11 +474,10 @@ namespace SolutionGrader.Core.Services
         /// Extracts a snippet of text around a difference index for display in Excel.
         /// </summary>
         /// <param name="text">The full text to extract from</param>
-        /// <param name="startIdx">Start index (not used, kept for compatibility)</param>
         /// <param name="diffIdx">The index where the difference occurred</param>
         /// <param name="contextSize">Number of characters to show before and after the diff</param>
         /// <returns>A snippet with ellipsis markers if truncated</returns>
-        private static string ExtractSnippet(string text, int startIdx, int diffIdx, int contextSize)
+        private static string ExtractSnippet(string text, int diffIdx, int contextSize)
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;
             

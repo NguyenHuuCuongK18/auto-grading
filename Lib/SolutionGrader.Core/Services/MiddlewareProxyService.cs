@@ -206,9 +206,6 @@ namespace SolutionGrader.Core.Services
             {
                 var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
                 var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
-                var folder = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, FileKeywords.Folder_Servers, question);
-                Directory.CreateDirectory(folder);
-                var path = Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, stage));
 
                 // Store HTTP request and response separately in memory to avoid overwriting console output
                 _run.SetServerRequest(question, stage, requestBody ?? "");
@@ -224,13 +221,8 @@ namespace SolutionGrader.Core.Services
                 }
                 _run.SetServerResponse(question, stage, respText);
 
-                // Also write combined traffic to file for debugging
-                var sb = new StringBuilder();
-                sb.AppendLine("=== REQUEST ===");
-                sb.AppendLine(requestBody ?? "");
-                sb.AppendLine("=== RESPONSE ===");
-                sb.AppendLine(respText);
-                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                // Note: HTTP traffic is now stored in memory only (servers-req and servers-resp namespaces)
+                // This data is available for comparison steps and included in Excel output when tests fail
             }
             catch { }
         }
