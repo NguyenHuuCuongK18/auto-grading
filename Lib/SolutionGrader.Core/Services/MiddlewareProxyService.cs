@@ -126,7 +126,7 @@ namespace SolutionGrader.Core.Services
                 var response = await client.SendAsync(forward);
                 var bytes = await response.Content.ReadAsByteArrayAsync();
 
-                // Capture to actual\servers\{Q}\{Stage}.txt
+                // Capture server traffic to memory (no txt files)
                 TryAppendServerActual(body, bytes);
 
                 var resp = ctx.Response;

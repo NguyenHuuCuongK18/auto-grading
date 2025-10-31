@@ -7,7 +7,6 @@ public static class FileKeywords
 {
     // File Extensions
     public const string Extension_Excel = ".xlsx";
-    public const string Extension_Text = ".txt";
     public const string Extension_Json = ".json";
     public const string Extension_Csv = ".csv";
     public const string Extension_Sql = ".sql";
@@ -39,14 +38,7 @@ public static class FileKeywords
     // File Name Patterns
     public const string Pattern_Result = "{0}_Result.xlsx";
     public const string Pattern_StageDiff = "stage_{0}.diff.txt";
-    public const string Pattern_StageOutput = "{0}.txt";
     public const string Pattern_GradeResult = "GradeResult_{0}";
-
-    // Path Templates (using backslash for Windows paths)
-    public const string PathTemplate_ExpectedClient = "expected\\clients\\{0}\\{1}.txt";
-    public const string PathTemplate_ActualClient = "actual\\clients\\{0}\\{1}.txt";
-    public const string PathTemplate_ExpectedServer = "expected\\servers\\{0}\\{1}.txt";
-    public const string PathTemplate_ActualServer = "actual\\servers\\{0}\\{1}.txt";
 
     // Special Values
     public const string Value_MissingPlaceholder = "-";

@@ -15,8 +15,9 @@ namespace SolutionGrader.Core.Services
     /// DataComparisonService that tolerates async/late console output by aggregating
     /// all captured client/server stages before comparing. Policy:
     ///  - If expected is missing => PASS (ignored).
-    ///  - If actual is missing => try memory (all stages) then files (all stages).
+    ///  - If actual is missing => try memory (all stages).
     ///  - Text compare tries exact, then contains, then aggressive normalization.
+    /// Note: All actual outputs are stored in memory only (no txt files).
     /// </summary>
     public sealed class DataComparisonService : IDataComparisonService
     {
@@ -69,10 +70,10 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // Get actual content:
-            // 1) If memory://… path, try that specific key.
+            // Get actual content from memory (no txt files):
+            // 1) If memory://… path, try that specific key from RunContext.
             // 2) If empty or missing, aggregate ALL stages from memory for that (scope, question).
-            // 3) If still empty, aggregate ALL stage files from disk actual\{scope}\{question}\*.txt
+            // 3) If still empty after memory aggregation, try path inference to aggregate from memory.
             string actualRaw = string.Empty;
 
             if (actualPath != null && actualPath.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
@@ -89,27 +90,18 @@ namespace SolutionGrader.Core.Services
                         actualRaw = ReadAllStagesFromMemory(scope, question);
                     }
                 }
-
-                // If still empty, try aggregated files on disk
-                if (string.IsNullOrWhiteSpace(actualRaw))
-                {
-                    if (TryParseMemory(actualPath, out var scope, out var question))
-                    {
-                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
-                    }
-                }
             }
             else
             {
                 // Non-memory: try direct read; if that fails and it's a client/server compare,
-                // we still attempt the aggregated files because the step semantic expects console output.
+                // we still attempt memory aggregation (combine all stage outputs for the scope/question)
+                // because the step semantic expects console output to be available.
                 if (!TryReadContent(actualPath, out actualRaw) && (isClientOutput || isServerOutput))
                 {
-                    // Try to infer (scope, question) from the ResultRoot folder (best effort).
-                    // If actualPath is a file within actual\{scope}\{question}\, read the whole folder.
+                    // Try to infer (scope, question) from memory path
                     if (TryInferScopeQuestionFromPath(actualPath, out var scope, out var question))
                     {
-                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
+                        actualRaw = ReadAllStagesFromMemory(scope, question);
                     }
                 }
             }
@@ -410,58 +402,50 @@ namespace SolutionGrader.Core.Services
             return sb.ToString();
         }
 
-        private static string ReadAllStagesFromFiles(string scope, string question, string resultRoot)
-        {
-            try
-            {
-                var folder = Path.Combine(resultRoot, FileKeywords.Folder_Actual, scope, question);
-                if (!Directory.Exists(folder)) return string.Empty;
-
-                // Files are named like "1.txt", "2.txt", …
-                var files = Directory.EnumerateFiles(folder, "*.txt", SearchOption.TopDirectoryOnly)
-                                     .Select(p => new { Path = p, Stage = TryParseStage(Path.GetFileNameWithoutExtension(p)) })
-                                     .Where(x => x.Stage.HasValue)
-                                     .OrderBy(x => x.Stage!.Value)
-                                     .Select(x => x.Path)
-                                     .ToList();
-
-                var sb = new StringBuilder();
-                foreach (var f in files)
-                {
-                    try
-                    {
-                        var chunk = File.ReadAllText(f);
-                        if (!string.IsNullOrEmpty(chunk) && chunk[0] == '\uFEFF') chunk = chunk.Substring(1);
-                        sb.Append(chunk);
-                    }
-                    catch { /* ignore single-file errors */ }
-                }
-                return sb.ToString();
-            }
-            catch { return string.Empty; }
-        }
-
-        private static int? TryParseStage(string? s)
-        {
-            if (int.TryParse(s, out var n)) return n;
-            return null;
-        }
-
+        /// <summary>
+        /// Attempts to extract scope (clients/servers) and question code from a path.
+        /// Used as a fallback when a comparison step provides a non-standard path format.
+        /// 
+        /// Primary use case: memory:// URIs (e.g., "memory://clients/TC01/3")
+        /// 
+        /// Fallback use cases (for backward compatibility with non-memory actualPath values):
+        /// - When actualPath is provided as a simple pattern like "clients/TC01" instead of memory:// URI
+        /// - When test configurations use relative path notation from older versions
+        /// - Enables memory aggregation even when path format doesn't match standard memory:// scheme
+        /// 
+        /// Note: This method is used to parse actualPath values (not expected values).
+        /// File-based txt outputs are no longer created by this system; all actual outputs
+        /// are stored in memory and this method helps aggregate them by inferring scope/question.
+        /// </summary>
         private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
         {
             scope = ""; question = "";
             try
             {
                 if (string.IsNullOrWhiteSpace(path)) return false;
-                // …\actual\clients\TC01\2.txt  OR  …/actual/servers/TC02/1.txt
+                
+                // Primary case: parse memory:// path format: memory://scope/question/stage
+                if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryParseMemory(path, out scope, out question);
+                }
+                
+                // Fallback: extract scope/question from path-like patterns
+                // This handles cases where comparison steps use simplified notation like "clients/TC01"
+                // or when actualPath is derived from test configurations that pre-date memory:// URIs
                 var norm = path.Replace('\\', '/').ToLowerInvariant();
-                var i = norm.IndexOf("/actual/");
-                if (i < 0) return false;
-                var rest = norm.Substring(i + "/actual/".Length); // clients/tc01/2.txt
-                var parts = rest.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3) return false;
-                scope = parts[0]; question = parts[1];
-                return true;
+                
+                // Try simple format: scope/question (e.g., "clients/tc01" or "servers/tc02")
+                var parts = norm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    // Extract first two parts as scope and question
+                    scope = parts[0]; 
+                    question = parts[1];
+                    return true;
+                }
+                
+                return false;
             }
             catch { return false; }
         }
