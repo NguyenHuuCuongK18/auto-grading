@@ -76,13 +76,17 @@ namespace SolutionGrader.Core.Services
             string? actualRaw = null;
             if ((isClientOutput || isServerOutput) && actualPath != null && actualPath.StartsWith("memory://"))
             {
-                Console.WriteLine($"[DEBUG] Using cumulative approach for: {actualPath}");
                 // Try cumulative approach for memory keys
                 actualRaw = TryGetCumulativeOutput(actualPath, "");
-                Console.WriteLine($"[DEBUG] Cumulative result length: {actualRaw?.Length ?? 0}");
                 
-                // If cumulative returns empty, the output was not captured
-                // This could be due to process not running, output buffering, or wrong stage
+                // If cumulative returns empty, fall back to reading from actual files
+                // This handles cases where async output wasn't captured to memory in time
+                if (string.IsNullOrEmpty(actualRaw))
+                {
+                    actualRaw = TryGetCumulativeOutputFromFiles(actualPath);
+                }
+                
+                // If still empty after trying files, the output was not captured at all
                 if (string.IsNullOrEmpty(actualRaw))
                 {
                     var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
@@ -336,7 +340,6 @@ namespace SolutionGrader.Core.Services
                 var stageKey = $"memory://{scope}/{questionCode}/{stage}";
                 if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
                 {
-                    Console.WriteLine($"[DEBUG]   Stage {stage}: {stageOutput?.Length ?? 0} chars");
                     // Strip BOM from this stage's output before appending
                     if (!string.IsNullOrEmpty(stageOutput) && stageOutput[0] == '\uFEFF')
                     {
@@ -349,6 +352,51 @@ namespace SolutionGrader.Core.Services
             var result = cumulative.ToString();
             // If cumulative is empty, return current stage output as fallback
             return string.IsNullOrEmpty(result) ? currentStageOutput : result;
+        }
+
+        private string TryGetCumulativeOutputFromFiles(string memoryPath)
+        {
+            // Fall back to reading from actual files when memory is not populated
+            // This handles timing issues where async output arrives after memory capture
+            var parsed = ParseMemoryPath(memoryPath);
+            if (!parsed.HasValue) return string.Empty;
+            
+            var scope = parsed.Value.scope; // "clients" or "servers"
+            var questionCode = parsed.Value.questionCode;
+            var requestedStage = parsed.Value.stage;
+            
+            if (!int.TryParse(requestedStage, out var requestedStageNum))
+                return string.Empty;
+            
+            var maxStageToCheck = Math.Max(requestedStageNum, 10);
+            maxStageToCheck = Math.Min(maxStageToCheck, 50);
+            
+            var cumulative = new StringBuilder();
+            for (int stage = 1; stage <= maxStageToCheck; stage++)
+            {
+                var filePath = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, questionCode, 
+                    string.Format(FileKeywords.Pattern_StageOutput, stage.ToString()));
+                
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        var content = File.ReadAllText(filePath, Encoding.UTF8);
+                        // Strip BOM if present
+                        if (!string.IsNullOrEmpty(content) && content[0] == '\uFEFF')
+                        {
+                            content = content.Substring(1);
+                        }
+                        cumulative.Append(content);
+                    }
+                    catch
+                    {
+                        // Ignore file read errors
+                    }
+                }
+            }
+            
+            return cumulative.ToString();
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)
