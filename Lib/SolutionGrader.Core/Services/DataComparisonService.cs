@@ -400,6 +400,11 @@ namespace SolutionGrader.Core.Services
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Attempts to extract scope (clients/servers) and question code from a path.
+        /// Used as a fallback when a comparison step provides a non-standard path format.
+        /// Primary path format is memory:// URIs; legacy fallback handles simple scope/question patterns.
+        /// </summary>
         private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
         {
             scope = ""; question = "";
@@ -413,8 +418,9 @@ namespace SolutionGrader.Core.Services
                     return TryParseMemory(path, out scope, out question);
                 }
                 
-                // Legacy fallback: extract from file path structure (rarely used now)
-                // This handles inline values or paths that might look like: "clients/TC01" or "servers/TC02"
+                // Legacy fallback for non-memory paths (e.g., inline values or simple path patterns)
+                // This may occur if comparison steps use simplified path notation like "clients/TC01"
+                // Note: Actual file-based txt output is no longer supported; this is best-effort parsing only
                 var norm = path.Replace('\\', '/').ToLowerInvariant();
                 
                 // Try simple format: scope/question (e.g., "clients/tc01")
