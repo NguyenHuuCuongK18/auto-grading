@@ -105,7 +105,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "2000"
+                        Value = "5000"
                     });
                 }
             }
