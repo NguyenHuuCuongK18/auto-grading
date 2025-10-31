@@ -94,7 +94,8 @@ namespace SolutionGrader.Core.Services
             else
             {
                 // Non-memory: try direct read; if that fails and it's a client/server compare,
-                // we still attempt the aggregated memory because the step semantic expects console output.
+                // we still attempt memory aggregation (combine all stage outputs for the scope/question)
+                // because the step semantic expects console output to be available.
                 if (!TryReadContent(actualPath, out actualRaw) && (isClientOutput || isServerOutput))
                 {
                     // Try to infer (scope, question) from memory path
