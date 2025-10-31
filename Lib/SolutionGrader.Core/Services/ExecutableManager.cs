@@ -237,19 +237,107 @@ namespace SolutionGrader.Core.Services
 
                 async Task readAsync(StreamReader reader)
                 {
-                    string? line;
-                    while ((line = await reader.ReadLineAsync()) != null)
+                    const int ReadBufferSize = 4096; // Read buffer size in characters
+                    const int FlushIntervalMs = 100; // Flush partial lines every 100ms
+                    
+                    var buffer = appendServer ? _serverOutputBuffer : _clientOutputBuffer;
+                    var lineBuffer = new StringBuilder();
+                    var charBuffer = new char[ReadBufferSize];
+                    var lastFlushTime = DateTime.UtcNow;
+                    
+                    try
                     {
-                        await sw.WriteLineAsync(line);
+                        Task<int>? pendingReadTask = null;
                         
-                        // Also append to buffer for retrieval
-                        var buffer = appendServer ? _serverOutputBuffer : _clientOutputBuffer;
-                        lock (buffer)
+                        while (true)
                         {
-                            buffer.AppendLine(line);
+                            // Start a read task if we don't have one pending
+                            if (pendingReadTask == null)
+                            {
+                                pendingReadTask = reader.ReadAsync(charBuffer, 0, charBuffer.Length);
+                            }
+                            
+                            // Only create delay task if we need to wait for flush interval
+                            var delayTask = lineBuffer.Length > 0 
+                                ? Task.Delay(FlushIntervalMs) 
+                                : Task.Delay(Timeout.Infinite); // Never complete if no partial data
+                            var completedTask = await Task.WhenAny(pendingReadTask, delayTask);
+                            
+                            int charsRead = 0;
+                            if (completedTask == pendingReadTask)
+                            {
+                                charsRead = await pendingReadTask;
+                                pendingReadTask = null; // Clear so we start a new read next iteration
+                                
+                                if (charsRead == 0)
+                                {
+                                    // End of stream
+                                    break;
+                                }
+                            }
+                            
+                            // If we read data, process it
+                            if (charsRead > 0)
+                            {
+                                for (int i = 0; i < charsRead; i++)
+                                {
+                                    var ch = charBuffer[i];
+                                    lineBuffer.Append(ch);
+                                    
+                                    // Flush on newline
+                                    if (ch == '\n')
+                                    {
+                                        var output = lineBuffer.ToString();
+                                        lineBuffer.Clear();
+                                        lastFlushTime = DateTime.UtcNow;
+                                        
+                                        await sw.WriteAsync(output);
+                                        lock (buffer) { buffer.Append(output); }
+                                        
+                                        var outputForFile = output.TrimEnd('\r', '\n');
+                                        if (outputForFile.Length > 0 || output.EndsWith('\n'))
+                                        {
+                                            AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, outputForFile);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Check if we should flush partial line based on time
+                            if (lineBuffer.Length > 0 && (DateTime.UtcNow - lastFlushTime).TotalMilliseconds >= FlushIntervalMs)
+                            {
+                                var output = lineBuffer.ToString();
+                                lineBuffer.Clear();
+                                lastFlushTime = DateTime.UtcNow;
+                                
+                                await sw.WriteAsync(output);
+                                lock (buffer) { buffer.Append(output); }
+                                
+                                var outputForFile = output.TrimEnd('\r', '\n');
+                                if (outputForFile.Length > 0)
+                                {
+                                    AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, outputForFile);
+                                }
+                            }
                         }
                         
-                        AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, line);
+                        // Flush any remaining content when stream ends
+                        if (lineBuffer.Length > 0)
+                        {
+                            var output = lineBuffer.ToString();
+                            await sw.WriteAsync(output);
+                            lock (buffer) { buffer.Append(output); }
+                            
+                            var outputForFile = output.TrimEnd('\r', '\n');
+                            if (outputForFile.Length > 0)
+                            {
+                                AppendActual(appendServer ? FileKeywords.Folder_Servers : FileKeywords.Folder_Clients, outputForFile);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[PumpAsync] Error reading stream: {ex.Message}");
                     }
                 }
 
