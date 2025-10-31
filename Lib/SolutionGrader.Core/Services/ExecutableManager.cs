@@ -106,6 +106,12 @@ namespace SolutionGrader.Core.Services
             }
         }
         
+        /// <summary>
+        /// Waits for the client process to produce output or exit.
+        /// </summary>
+        /// <param name="timeoutSeconds">Maximum time to wait in seconds (default: 15)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if new output was produced, false if process exited or timed out</returns>
         public async Task<bool> WaitForClientOutputAsync(int timeoutSeconds = 15, CancellationToken ct = default)
         {
             if (_client == null) return false;
@@ -303,6 +309,11 @@ namespace SolutionGrader.Core.Services
             }
         }
         
+        /// <summary>
+        /// Forcefully terminates a process using platform-specific commands.
+        /// Uses TaskKill on Windows, kill -9 on Unix-like systems.
+        /// </summary>
+        /// <param name="processId">The process ID to terminate</param>
         private static void TryTaskKill(int processId)
         {
             try

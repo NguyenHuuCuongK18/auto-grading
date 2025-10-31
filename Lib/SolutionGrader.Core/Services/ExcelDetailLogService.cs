@@ -421,6 +421,14 @@ namespace SolutionGrader.Core.Services
             catch { /* best effort */ }
         }
         
+        /// <summary>
+        /// Extracts a snippet of text around a difference index for display in Excel.
+        /// </summary>
+        /// <param name="text">The full text to extract from</param>
+        /// <param name="startIdx">Start index (not used, kept for compatibility)</param>
+        /// <param name="diffIdx">The index where the difference occurred</param>
+        /// <param name="contextSize">Number of characters to show before and after the diff</param>
+        /// <returns>A snippet with ellipsis markers if truncated</returns>
         private static string ExtractSnippet(string text, int startIdx, int diffIdx, int contextSize)
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;

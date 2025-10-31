@@ -326,6 +326,8 @@ namespace SolutionGrader.Core.Services
         /// Even more aggressive normalization for lenient comparison.
         /// Strips all spaces, newlines, and special characters.
         /// </summary>
+        /// <param name="s">The string to normalize</param>
+        /// <returns>A string with all whitespace and common punctuation removed</returns>
         private static string StripAggressive(string s)
         {
             if (string.IsNullOrEmpty(s)) return string.Empty;
