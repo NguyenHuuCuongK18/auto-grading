@@ -7,48 +7,40 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace SolutionGrader.Core.Services
 {
     /// <summary>
-    /// DataComparisonService that DOES NOT require runtime captures or generated files.
-    /// Policy:
+    /// DataComparisonService that tolerates async/late console output by aggregating
+    /// all captured client/server stages before comparing. Policy:
     ///  - If expected is missing => PASS (ignored).
-    ///  - If actual is missing (including memory:// keys or non-existent files) => PASS (ignored).
-    ///  - If both sides present and readable => compare (text equality by default).
-    ///  - Error/diagnostic messages avoid referencing memory:// or physical paths.
+    ///  - If actual is missing => try memory (all stages) then files (all stages).
+    ///  - Text compare tries exact, then contains, then aggressive normalization.
     /// </summary>
     public sealed class DataComparisonService : IDataComparisonService
     {
         private readonly IRunContext _run;
-        
-        // Minimum number of stages to check when accumulating output to handle timing issues
-        private const int MinStagesToCheck = 10;
-        // Maximum number of stages to prevent excessive iterations
-        private const int MaxStagesToCheck = 50;
 
-        public DataComparisonService(IRunContext run)
-        {
-            _run = run;
-        }
+        // Keep a sane upper bound for scanning stages when we need to read from files.
+        private const int MaxStagesToScanFromFiles = 200;
+
+        public DataComparisonService(IRunContext run) => _run = run;
 
         public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
-            // No expected -> ignore
             if (IsMissing(expectedPath) || !SafeFileExists(expectedPath!))
             {
                 var info = ErrorCodes.GetInfo(ErrorCodes.EXPECTED_FILE_MISSING);
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // No actual -> ignore instead of failing
             if (IsMissing(actualPath) || !SafeFileExists(actualPath!))
             {
                 var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
                 return (true, $"{info.Title}: Actual output not available (ignored)");
             }
 
-            // Compare
             var exp = Normalize(File.ReadAllText(expectedPath!), false);
             var act = Normalize(File.ReadAllText(actualPath!), false);
 
@@ -77,72 +69,76 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // For console output with memory:// paths, use cumulative approach FIRST
-            // This handles timing issues where output might be in earlier stages
-            string? actualRaw = null;
-            if ((isClientOutput || isServerOutput) && actualPath != null && actualPath.StartsWith("memory://"))
+            // Get actual content:
+            // 1) If memory://… path, try that specific key.
+            // 2) If empty or missing, aggregate ALL stages from memory for that (scope, question).
+            // 3) If still empty, aggregate ALL stage files from disk actual\{scope}\{question}\*.txt
+            string actualRaw = string.Empty;
+
+            if (actualPath != null && actualPath.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
             {
-                // Try cumulative approach for memory keys
-                actualRaw = TryGetCumulativeOutput(actualPath, "");
-                
-                // If cumulative returns empty, fall back to reading from actual files
-                // This handles cases where async output wasn't captured to memory in time
-                if (string.IsNullOrEmpty(actualRaw))
+                // Specific stage attempt
+                if (_run.TryGetCapturedOutput(actualPath, out var stageContent))
+                    actualRaw = stageContent ?? string.Empty;
+
+                // If that specific stage was empty, try aggregated memory for all stages
+                if (string.IsNullOrWhiteSpace(actualRaw))
                 {
-                    actualRaw = TryGetCumulativeOutputFromFiles(actualPath);
+                    if (TryParseMemory(actualPath, out var scope, out var question))
+                    {
+                        actualRaw = ReadAllStagesFromMemory(scope, question);
+                    }
                 }
-                
-                // If still empty after trying files, the output was not captured at all
-                if (string.IsNullOrEmpty(actualRaw))
+
+                // If still empty, try aggregated files on disk
+                if (string.IsNullOrWhiteSpace(actualRaw))
                 {
-                    var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                    // Extract stage from memory key for better error message
-                    var parsed = ParseMemoryPath(actualPath);
-                    var stageInfo = parsed.HasValue ? $" stage {parsed.Value.stage}" : "";
-                    return (false, $"{info.Title}: {outputType}{stageInfo} not captured (process may not be running or output not flushed)");
+                    if (TryParseMemory(actualPath, out var scope, out var question))
+                    {
+                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
+                    }
                 }
             }
             else
             {
-                // For non-memory paths, read directly
-                if (!TryReadContent(actualPath, out actualRaw))
+                // Non-memory: try direct read; if that fails and it's a client/server compare,
+                // we still attempt the aggregated files because the step semantic expects console output.
+                if (!TryReadContent(actualPath, out actualRaw) && (isClientOutput || isServerOutput))
                 {
-                    var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
-                    return (false, $"{info.Title}: {outputType} not available but expected output was defined");
+                    // Try to infer (scope, question) from the ResultRoot folder (best effort).
+                    // If actualPath is a file within actual\{scope}\{question}\, read the whole folder.
+                    if (TryInferScopeQuestionFromPath(actualPath, out var scope, out var question))
+                    {
+                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
+                    }
                 }
             }
 
+            // If nothing was captured anywhere and this was console output, treat as "not available but expected defined" (fail)
+            if (string.IsNullOrWhiteSpace(actualRaw) && (isClientOutput || isServerOutput))
+            {
+                var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
+                return (false, $"{info.Title}: {outputType} not captured (expected was provided)");
+            }
+
+            // Normalize & compare (with multiple fallbacks)
             var exp = Normalize(expectedRaw, caseInsensitive);
             var act = Normalize(actualRaw, caseInsensitive);
-            
-            // First try exact match
+
             if (exp == act)
-            {
                 return (true, $"Text comparison passed: {outputType} matches exactly");
-            }
-            
-            // For console output, try looser comparison with contains as fallback
-            // This handles buffered output and timing differences where expected output
-            // may appear in actual output along with additional content
+
             if ((isClientOutput || isServerOutput) && act.Contains(exp))
-            {
                 return (true, $"Text comparison passed: {outputType} contains expected (loose match)");
-            }
-            
-            // If exact match failed, try even looser comparison by stripping more aggressively
+
             var expLoose = StripAggressive(exp);
             var actLoose = StripAggressive(act);
-            
+
             if (expLoose == actLoose)
-            {
                 return (true, $"Text comparison passed: {outputType} matches after aggressive normalization");
-            }
-            
-            // As a last resort, try contains with aggressive stripping
+
             if (actLoose.Contains(expLoose))
-            {
                 return (true, $"Text comparison passed: {outputType} contains expected after aggressive normalization");
-            }
 
             var (idx, _, _, _, _) = FirstDiff(exp, act);
             var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.TEXT_MISMATCH);
@@ -206,23 +202,18 @@ namespace SolutionGrader.Core.Services
             return (false, idx >= 0 ? $"CSV differs (first diff at idx {idx})" : "CSV differs");
         }
 
-        private static bool IsMissing(string? p) => string.IsNullOrWhiteSpace(p) || p == FileKeywords.Value_MissingPlaceholder;
+        // ---------------- helpers ----------------
 
-        private static bool SafeFileExists(string path)
-        {
-            try { return File.Exists(path); } catch { return false; }
-        }
+        private static bool IsMissing(string? p) => string.IsNullOrWhiteSpace(p) || p == FileKeywords.Value_MissingPlaceholder;
+        private static bool SafeFileExists(string path) { try { return File.Exists(path); } catch { return false; } }
 
         private bool TryReadContent(string? path, out string content)
         {
             content = string.Empty;
             if (string.IsNullOrWhiteSpace(path)) return false;
 
-            // Try to resolve memory:// keys from RunContext
             if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
-            {
                 return _run.TryGetCapturedOutput(path, out content);
-            }
 
             try
             {
@@ -232,13 +223,8 @@ namespace SolutionGrader.Core.Services
                     return true;
                 }
             }
-            catch
-            {
-                // IO failure -> treat as not found.
-            }
+            catch { /* ignore */ }
 
-            // If it's not a file path, treat it as inline literal text (e.g., from Excel)
-            // but only when it doesn't look like a rooted path.
             var looksLikePath = Path.IsPathRooted(path) || path.Contains('\\') || path.Contains('/');
             if (!looksLikePath)
             {
@@ -253,33 +239,30 @@ namespace SolutionGrader.Core.Services
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
             return path.IndexOf($"\\{scope}\\", StringComparison.OrdinalIgnoreCase) >= 0
-                || path.IndexOf($"/{scope}/", StringComparison.OrdinalIgnoreCase) >= 0;
+                || path.IndexOf($"/{scope}/", StringComparison.OrdinalIgnoreCase) >= 0
+                || path.IndexOf($"memory://{scope}/", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static string Normalize(string s, bool ci)
         {
-            if (string.IsNullOrWhiteSpace(s))
-                return string.Empty;
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
 
-            // 0. Strip BOM (Byte Order Mark) if present
-            if (s.Length > 0 && s[0] == '\uFEFF')
+            // Strip BOM
+            if (s.Length > 0 && s[0] == '\uFEFF') s = s.Substring(1);
+
+            // Unescape \uXXXX
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
             {
-                s = s.Substring(1);
-            }
+                var code = Convert.ToInt32(m.Groups[1].Value, 16);
+                return char.ConvertFromUtf32(code);
+            });
 
-            // 1. Unescape Unicode sequences (\u0027 -> ')
-            s = UnescapeUnicode(s);
+            // Smart quotes / dashes
+            s = s.Replace("\u2018", "'").Replace("\u2019", "'")
+                 .Replace("\u201C", "\"").Replace("\u201D", "\"")
+                 .Replace("\u2013", "-").Replace("\u2014", "-");
 
-            // 2. Normalize smart quotes and dashes
-            s = s
-                .Replace("\u2018", "'")  // ' left single quote
-                .Replace("\u2019", "'")  // ' right single quote
-                .Replace("\u201C", "\"") // " left double quote
-                .Replace("\u201D", "\"") // " right double quote
-                .Replace("\u2013", "-")  // – en dash
-                .Replace("\u2014", "-"); // — em dash
-
-            // 3. Try JSON canonicalization if it looks like JSON
+            // Try JSON canonicalization
             if ((s.TrimStart().StartsWith("{") || s.TrimStart().StartsWith("[")))
             {
                 try
@@ -291,155 +274,50 @@ namespace SolutionGrader.Core.Services
                         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                     });
                 }
-                catch
-                {
-                    // Not valid JSON, continue with text normalization
-                }
+                catch { }
             }
 
-            // 4. Normalize newlines and collapse whitespace
-            s = s.Replace("\r", "").Replace("\n", " ");
+            // More aggressive whitespace normalization:
+            // 1. Convert all line endings to \n temporarily for easier processing
+            s = s.Replace("\r\n", "\n").Replace("\r", "\n");
             
-            // Replace non-breaking spaces and other Unicode whitespace
-            s = s.Replace("\u00A0", " "); // Non-breaking space
-            s = s.Replace("\u2002", " "); // En space
-            s = s.Replace("\u2003", " "); // Em space
-            s = s.Replace("\u2009", " "); // Thin space
+            // 2. Strip leading/trailing whitespace from each line
+            var lines = s.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                lines[i] = lines[i].Trim();
+            }
+            s = string.Join(" ", lines);
+
+            // 3. Replace all Unicode whitespace variants with regular spaces
+            s = s.Replace("\u00A0", " ")  // Non-breaking space
+                 .Replace("\u2002", " ")  // En space
+                 .Replace("\u2003", " ")  // Em space
+                 .Replace("\u2009", " ")  // Thin space
+                 .Replace("\u200A", " ")  // Hair space
+                 .Replace("\u202F", " ")  // Narrow no-break space
+                 .Replace("\u205F", " ")  // Medium mathematical space
+                 .Replace("\u3000", " ")  // Ideographic space
+                 .Replace("\t", " ");      // Tab to space
+
+            // 4. Remove whitespace around common punctuation marks
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*([,;:.!?])\s*", "$1");
             
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+            // 5. Collapse multiple whitespace into single space
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
             
+            // 6. Final trim
+            s = s.Trim();
+
             return ci ? s.ToLowerInvariant() : s;
         }
 
-        private static string UnescapeUnicode(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return string.Empty;
-            // Convert ONLY \uXXXX -> char
-            return System.Text.RegularExpressions.Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
-            {
-                var code = Convert.ToInt32(m.Groups[1].Value, 16);
-                return char.ConvertFromUtf32(code);
-            });
-        }
-
-        /// <summary>
-        /// Even more aggressive normalization for lenient comparison.
-        /// Strips all spaces, newlines, and special characters.
-        /// </summary>
-        /// <param name="s">The string to normalize</param>
-        /// <returns>A string with all whitespace and common punctuation removed</returns>
         private static string StripAggressive(string s)
         {
             if (string.IsNullOrEmpty(s)) return string.Empty;
-            
-            // Remove all whitespace (spaces, tabs, newlines, etc.)
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", "");
-            
-            // Remove common punctuation that might differ
             s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
-            
             return s;
-        }
-
-        private static (string scope, string questionCode, string stage)? ParseMemoryPath(string memoryPath)
-        {
-            if (string.IsNullOrEmpty(memoryPath) || !memoryPath.StartsWith("memory://"))
-                return null;
-                
-            var parts = memoryPath.Replace("memory://", "").Split('/');
-            if (parts.Length < 3) return null;
-            
-            return (parts[0], parts[1], parts[2]);
-        }
-
-        private string TryGetCumulativeOutput(string memoryPath, string currentStageOutput)
-        {
-            // memory://clients/TC01/2 -> get ALL stages starting from 1
-            // This is more lenient to handle timing differences and buffered output
-            // where expected output for stage N might appear in stage N+1 or N+2 due to async processing
-            var parsed = ParseMemoryPath(memoryPath);
-            if (!parsed.HasValue) return currentStageOutput;
-            
-            var scope = parsed.Value.scope; // "clients" or "servers"
-            var questionCode = parsed.Value.questionCode;
-            var requestedStage = parsed.Value.stage; // "1", "2", etc.
-            
-            // Try to parse requested stage as integer
-            if (!int.TryParse(requestedStage, out var requestedStageNum))
-            {
-                // Not a numeric stage, return current output only
-                return currentStageOutput;
-            }
-            
-            // Accumulate ALL available stages, not just up to the requested stage
-            // This handles cases where timing issues cause output to appear in later stages
-            // We check up to a reasonable limit to catch any delayed output
-            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
-            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
-            
-            var cumulative = new StringBuilder();
-            for (int stage = 1; stage <= maxStageToCheck; stage++)
-            {
-                var stageKey = $"memory://{scope}/{questionCode}/{stage}";
-                if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
-                {
-                    // Strip BOM from this stage's output before appending
-                    if (!string.IsNullOrEmpty(stageOutput) && stageOutput[0] == '\uFEFF')
-                    {
-                        stageOutput = stageOutput.Substring(1);
-                    }
-                    cumulative.Append(stageOutput);
-                }
-            }
-            
-            var result = cumulative.ToString();
-            // If cumulative is empty, return current stage output as fallback
-            return string.IsNullOrEmpty(result) ? currentStageOutput : result;
-        }
-
-        private string TryGetCumulativeOutputFromFiles(string memoryPath)
-        {
-            // Fall back to reading from actual files when memory is not populated
-            // This handles timing issues where async output arrives after memory capture
-            var parsed = ParseMemoryPath(memoryPath);
-            if (!parsed.HasValue) return string.Empty;
-            
-            var scope = parsed.Value.scope; // "clients" or "servers"
-            var questionCode = parsed.Value.questionCode;
-            var requestedStage = parsed.Value.stage;
-            
-            if (!int.TryParse(requestedStage, out var requestedStageNum))
-                return string.Empty;
-            
-            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
-            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
-            
-            var cumulative = new StringBuilder();
-            for (int stage = 1; stage <= maxStageToCheck; stage++)
-            {
-                var filePath = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, questionCode, 
-                    string.Format(FileKeywords.Pattern_StageOutput, stage.ToString()));
-                
-                if (File.Exists(filePath))
-                {
-                    try
-                    {
-                        var content = File.ReadAllText(filePath, Encoding.UTF8);
-                        // Strip BOM if present
-                        if (!string.IsNullOrEmpty(content) && content[0] == '\uFEFF')
-                        {
-                            content = content.Substring(1);
-                        }
-                        cumulative.Append(content);
-                    }
-                    catch
-                    {
-                        // Ignore file read errors
-                    }
-                }
-            }
-            
-            return cumulative.ToString();
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)
@@ -471,7 +349,7 @@ namespace SolutionGrader.Core.Services
             switch (el.ValueKind)
             {
                 case JsonValueKind.Object:
-                    var props = new System.Collections.Generic.List<string>();
+                    var props = new List<string>();
                     foreach (var p in el.EnumerateObject())
                         props.Add("\"" + p.Name + "\":" + JsonNormalize(p.Value, ignoreOrder));
                     props.Sort(StringComparer.Ordinal);
@@ -493,6 +371,99 @@ namespace SolutionGrader.Core.Services
                 case JsonValueKind.False: return "false";
                 default: return "null";
             }
+        }
+
+        // ---------- NEW aggregation helpers ----------
+
+        private static bool TryParseMemory(string memoryPath, out string scope, out string question)
+        {
+            scope = ""; question = "";
+            if (string.IsNullOrEmpty(memoryPath) || !memoryPath.StartsWith("memory://")) return false;
+            var parts = memoryPath.Replace("memory://", "").Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) return false;
+            scope = parts[0]; question = parts[1];
+            return true;
+        }
+
+        private string ReadAllStagesFromMemory(string scope, string question)
+        {
+            var sb = new StringBuilder();
+
+            // We don't know the max stage in memory; accumulate anything that exists (1..N)
+            // Probe a generous range, but stop when we miss a long stretch (gap heuristic).
+            int missesInARow = 0;
+            for (int i = 1; i <= MaxStagesToScanFromFiles && missesInARow < 50; i++)
+            {
+                var key = $"memory://{scope}/{question}/{i}";
+                if (_run.TryGetCapturedOutput(key, out var chunk) && !string.IsNullOrEmpty(chunk))
+                {
+                    // strip BOM per chunk
+                    if (chunk.Length > 0 && chunk[0] == '\uFEFF') chunk = chunk.Substring(1);
+                    sb.Append(chunk);
+                    missesInARow = 0;
+                }
+                else
+                {
+                    missesInARow++;
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string ReadAllStagesFromFiles(string scope, string question, string resultRoot)
+        {
+            try
+            {
+                var folder = Path.Combine(resultRoot, FileKeywords.Folder_Actual, scope, question);
+                if (!Directory.Exists(folder)) return string.Empty;
+
+                // Files are named like "1.txt", "2.txt", …
+                var files = Directory.EnumerateFiles(folder, "*.txt", SearchOption.TopDirectoryOnly)
+                                     .Select(p => new { Path = p, Stage = TryParseStage(Path.GetFileNameWithoutExtension(p)) })
+                                     .Where(x => x.Stage.HasValue)
+                                     .OrderBy(x => x.Stage!.Value)
+                                     .Select(x => x.Path)
+                                     .ToList();
+
+                var sb = new StringBuilder();
+                foreach (var f in files)
+                {
+                    try
+                    {
+                        var chunk = File.ReadAllText(f);
+                        if (!string.IsNullOrEmpty(chunk) && chunk[0] == '\uFEFF') chunk = chunk.Substring(1);
+                        sb.Append(chunk);
+                    }
+                    catch { /* ignore single-file errors */ }
+                }
+                return sb.ToString();
+            }
+            catch { return string.Empty; }
+        }
+
+        private static int? TryParseStage(string? s)
+        {
+            if (int.TryParse(s, out var n)) return n;
+            return null;
+        }
+
+        private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
+        {
+            scope = ""; question = "";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) return false;
+                // …\actual\clients\TC01\2.txt  OR  …/actual/servers/TC02/1.txt
+                var norm = path.Replace('\\', '/').ToLowerInvariant();
+                var i = norm.IndexOf("/actual/");
+                if (i < 0) return false;
+                var rest = norm.Substring(i + "/actual/".Length); // clients/tc01/2.txt
+                var parts = rest.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 3) return false;
+                scope = parts[0]; question = parts[1];
+                return true;
+            }
+            catch { return false; }
         }
     }
 }
