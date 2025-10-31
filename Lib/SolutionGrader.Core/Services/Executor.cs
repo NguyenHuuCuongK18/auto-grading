@@ -16,18 +16,20 @@ namespace SolutionGrader.Core.Services
         private readonly IDataComparisonService _cmp;
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
+        private readonly GradingConfig _gradingConfig;
 
         private const int ServerReadyTimeoutSeconds = 5;
         private const int ServerReadyPollIntervalMs = 100;
         private const int RealServerPort = 5001;
 
-        public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run)
+        public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
         {
             _proc = proc;
             _mw = mw;
             _cmp = cmp;
             _log = log;
             _run = run;
+            _gradingConfig = gradingConfig ?? GradingConfig.Default;
         }
 
         public async Task<(bool, string)> ExecuteAsync(Step step, ExecuteSuiteArgs args, CancellationToken ct)
@@ -246,11 +248,27 @@ namespace SolutionGrader.Core.Services
                         }
 
                     case var a when a == ActionKeywords.CompareText:
-                        result = _cmp.CompareText(step.Target, ResolveActualPath(step));
+                        // Use comprehensive validation if step has metadata
+                        if (step.Metadata?.Count > 0)
+                        {
+                            result = _cmp.ValidateStep(step, ResolveActualPath(step), _gradingConfig);
+                        }
+                        else
+                        {
+                            result = _cmp.CompareText(step.Target, ResolveActualPath(step));
+                        }
                         break;
 
                     case var a when a == ActionKeywords.CompareJson:
-                        result = _cmp.CompareJson(step.Target, ResolveActualPath(step));
+                        // Use comprehensive validation if step has metadata
+                        if (step.Metadata?.Count > 0)
+                        {
+                            result = _cmp.ValidateStep(step, ResolveActualPath(step), _gradingConfig);
+                        }
+                        else
+                        {
+                            result = _cmp.CompareJson(step.Target, ResolveActualPath(step));
+                        }
                         break;
 
                     case var a when a == ActionKeywords.CompareCsv:
