@@ -115,14 +115,10 @@ namespace SolutionGrader.Core.Services
                 // Set content with proper media type if body exists
                 if (!string.IsNullOrEmpty(body) || req.ContentLength64 > 0)
                 {
+                    forward.Content = new StringContent(body, req.ContentEncoding);
                     if (req.ContentType != null)
                     {
-                        var contentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(req.ContentType);
-                        forward.Content = new StringContent(body, contentType);
-                    }
-                    else
-                    {
-                        forward.Content = new StringContent(body, Encoding.UTF8);
+                        forward.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(req.ContentType);
                     }
                 }
 

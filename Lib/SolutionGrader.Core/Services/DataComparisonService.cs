@@ -21,6 +21,11 @@ namespace SolutionGrader.Core.Services
     public sealed class DataComparisonService : IDataComparisonService
     {
         private readonly IRunContext _run;
+        
+        // Minimum number of stages to check when accumulating output to handle timing issues
+        private const int MinStagesToCheck = 10;
+        // Maximum number of stages to prevent excessive iterations
+        private const int MaxStagesToCheck = 50;
 
         public DataComparisonService(IRunContext run)
         {
@@ -331,8 +336,8 @@ namespace SolutionGrader.Core.Services
             // Accumulate ALL available stages, not just up to the requested stage
             // This handles cases where timing issues cause output to appear in later stages
             // We check up to a reasonable limit to catch any delayed output
-            var maxStageToCheck = Math.Max(requestedStageNum, 10); // Check at least 10 stages
-            maxStageToCheck = Math.Min(maxStageToCheck, 50); // But cap at 50 for performance
+            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
+            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
             
             var cumulative = new StringBuilder();
             for (int stage = 1; stage <= maxStageToCheck; stage++)
@@ -368,8 +373,8 @@ namespace SolutionGrader.Core.Services
             if (!int.TryParse(requestedStage, out var requestedStageNum))
                 return string.Empty;
             
-            var maxStageToCheck = Math.Max(requestedStageNum, 10);
-            maxStageToCheck = Math.Min(maxStageToCheck, 50);
+            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
+            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
             
             var cumulative = new StringBuilder();
             for (int stage = 1; stage <= maxStageToCheck; stage++)
