@@ -21,6 +21,11 @@ namespace SolutionGrader.Core.Services
     public sealed class DataComparisonService : IDataComparisonService
     {
         private readonly IRunContext _run;
+        
+        // Minimum number of stages to check when accumulating output to handle timing issues
+        private const int MinStagesToCheck = 10;
+        // Maximum number of stages to prevent excessive iterations
+        private const int MaxStagesToCheck = 50;
 
         public DataComparisonService(IRunContext run)
         {
@@ -79,8 +84,14 @@ namespace SolutionGrader.Core.Services
                 // Try cumulative approach for memory keys
                 actualRaw = TryGetCumulativeOutput(actualPath, "");
                 
-                // If cumulative returns empty, the output was not captured
-                // This could be due to process not running, output buffering, or wrong stage
+                // If cumulative returns empty, fall back to reading from actual files
+                // This handles cases where async output wasn't captured to memory in time
+                if (string.IsNullOrEmpty(actualRaw))
+                {
+                    actualRaw = TryGetCumulativeOutputFromFiles(actualPath);
+                }
+                
+                // If still empty after trying files, the output was not captured at all
                 if (string.IsNullOrEmpty(actualRaw))
                 {
                     var info = ErrorCodes.GetInfo(ErrorCodes.ACTUAL_FILE_MISSING);
@@ -305,29 +316,31 @@ namespace SolutionGrader.Core.Services
 
         private string TryGetCumulativeOutput(string memoryPath, string currentStageOutput)
         {
-            // memory://clients/TC01/2 -> get stages up to and including current stage
+            // memory://clients/TC01/2 -> get ALL stages starting from 1
             // This is more lenient to handle timing differences and buffered output
+            // where expected output for stage N might appear in stage N+1 or N+2 due to async processing
             var parsed = ParseMemoryPath(memoryPath);
             if (!parsed.HasValue) return currentStageOutput;
             
             var scope = parsed.Value.scope; // "clients" or "servers"
             var questionCode = parsed.Value.questionCode;
-            var currentStage = parsed.Value.stage; // "1", "2", etc.
+            var requestedStage = parsed.Value.stage; // "1", "2", etc.
             
-            // Try to parse current stage as integer
-            if (!int.TryParse(currentStage, out var currentStageNum))
+            // Try to parse requested stage as integer
+            if (!int.TryParse(requestedStage, out var requestedStageNum))
             {
                 // Not a numeric stage, return current output only
                 return currentStageOutput;
             }
             
-            // Limit maximum stages to prevent excessive iterations
-            currentStageNum = Math.Min(currentStageNum, 50);
+            // Accumulate ALL available stages, not just up to the requested stage
+            // This handles cases where timing issues cause output to appear in later stages
+            // We check up to a reasonable limit to catch any delayed output
+            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
+            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
             
-            // Try to accumulate stages from 1 up to current stage
-            // This handles cases where expected output from stage N actually appears in stage N+1 due to buffering
             var cumulative = new StringBuilder();
-            for (int stage = 1; stage <= currentStageNum; stage++)
+            for (int stage = 1; stage <= maxStageToCheck; stage++)
             {
                 var stageKey = $"memory://{scope}/{questionCode}/{stage}";
                 if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
@@ -344,6 +357,51 @@ namespace SolutionGrader.Core.Services
             var result = cumulative.ToString();
             // If cumulative is empty, return current stage output as fallback
             return string.IsNullOrEmpty(result) ? currentStageOutput : result;
+        }
+
+        private string TryGetCumulativeOutputFromFiles(string memoryPath)
+        {
+            // Fall back to reading from actual files when memory is not populated
+            // This handles timing issues where async output arrives after memory capture
+            var parsed = ParseMemoryPath(memoryPath);
+            if (!parsed.HasValue) return string.Empty;
+            
+            var scope = parsed.Value.scope; // "clients" or "servers"
+            var questionCode = parsed.Value.questionCode;
+            var requestedStage = parsed.Value.stage;
+            
+            if (!int.TryParse(requestedStage, out var requestedStageNum))
+                return string.Empty;
+            
+            var maxStageToCheck = Math.Max(requestedStageNum, MinStagesToCheck);
+            maxStageToCheck = Math.Min(maxStageToCheck, MaxStagesToCheck);
+            
+            var cumulative = new StringBuilder();
+            for (int stage = 1; stage <= maxStageToCheck; stage++)
+            {
+                var filePath = Path.Combine(_run.ResultRoot, FileKeywords.Folder_Actual, scope, questionCode, 
+                    string.Format(FileKeywords.Pattern_StageOutput, stage.ToString()));
+                
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        var content = File.ReadAllText(filePath, Encoding.UTF8);
+                        // Strip BOM if present
+                        if (!string.IsNullOrEmpty(content) && content[0] == '\uFEFF')
+                        {
+                            content = content.Substring(1);
+                        }
+                        cumulative.Append(content);
+                    }
+                    catch
+                    {
+                        // Ignore file read errors
+                    }
+                }
+            }
+            
+            return cumulative.ToString();
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)

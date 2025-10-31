@@ -80,9 +80,9 @@ namespace SolutionGrader.Core.Services
             try
             {
                 _http = new HttpListener();
-                _http.Prefixes.Add($"http://127.0.0.1:{ProxyPort}/");
+                _http.Prefixes.Add($"http://localhost:{ProxyPort}/");
                 _http.Start();
-                Console.WriteLine($"[Proxy] HTTP proxy listening on http://127.0.0.1:{ProxyPort}/ -> http://127.0.0.1:{RealServerPort}/");
+                Console.WriteLine($"[Proxy] HTTP proxy listening on http://localhost:{ProxyPort}/ -> http://localhost:{RealServerPort}/");
                 _listenTask = Task.Run(() => ListenHttpAsync(token), token);
             }
             catch (Exception ex) { Console.WriteLine($"[HTTP Proxy ERR] {ex.Message}"); }
@@ -106,11 +106,21 @@ namespace SolutionGrader.Core.Services
                 var req = ctx.Request;
                 string body; using (var reader = new StreamReader(req.InputStream, req.ContentEncoding)) body = reader.ReadToEnd();
 
-                var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), $"http://127.0.0.1:{RealServerPort}{req.Url?.AbsolutePath}")
+                // Build complete URL with query string using localhost (not 127.0.0.1) to match Host header
+                var urlBuilder = new UriBuilder("http", "localhost", RealServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
+                var targetUrl = urlBuilder.ToString();
+
+                var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), targetUrl);
+                
+                // Set content with proper media type if body exists
+                if (!string.IsNullOrEmpty(body) || req.ContentLength64 > 0)
                 {
-                    Content = new StringContent(body, req.ContentEncoding)
-                };
-                if (req.ContentType != null) forward.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(req.ContentType);
+                    forward.Content = new StringContent(body, req.ContentEncoding);
+                    if (req.ContentType != null)
+                    {
+                        forward.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(req.ContentType);
+                    }
+                }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
                 var response = await client.SendAsync(forward);
