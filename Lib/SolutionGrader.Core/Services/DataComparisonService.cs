@@ -407,22 +407,26 @@ namespace SolutionGrader.Core.Services
             {
                 if (string.IsNullOrWhiteSpace(path)) return false;
                 
-                // Try to parse memory:// path format: memory://scope/question/stage
+                // Primary case: parse memory:// path format: memory://scope/question/stage
                 if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
                 {
                     return TryParseMemory(path, out scope, out question);
                 }
                 
-                // For file paths, try to extract scope and question from path structure
-                // e.g., actual\clients\TC01 or actual/servers/TC02
+                // Legacy fallback: extract from file path structure (rarely used now)
+                // This handles inline values or paths that might look like: "clients/TC01" or "servers/TC02"
                 var norm = path.Replace('\\', '/').ToLowerInvariant();
-                var i = norm.IndexOf("/actual/");
-                if (i < 0) return false;
-                var rest = norm.Substring(i + "/actual/".Length); // clients/tc01 or servers/tc02
-                var parts = rest.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 2) return false;
-                scope = parts[0]; question = parts[1];
-                return true;
+                
+                // Try simple format: scope/question (e.g., "clients/tc01")
+                var parts = norm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    scope = parts[0]; 
+                    question = parts[1];
+                    return true;
+                }
+                
+                return false;
             }
             catch { return false; }
         }
