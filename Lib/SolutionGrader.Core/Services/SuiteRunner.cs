@@ -69,13 +69,17 @@ namespace SolutionGrader.Core.Services
 
                 // Inform the log service how many compare steps will be executed so it can
                 // calculate per-step points even if the Detail.xlsx template contains no data rows.
+                // Only count comparison steps that are NOT from InputClients (IC-* prefix)
+                // Focus on test case flow validation, not input validation
                 var compareCount = steps.Count(s =>
                     s.Action != null && (
                         string.Equals(s.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(s.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(s.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(s.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
-                    ) && !string.Equals(s.Stage, "INPUT", StringComparison.OrdinalIgnoreCase)
+                    ) 
+                    && !string.Equals(s.Stage, "INPUT", StringComparison.OrdinalIgnoreCase)
+                    && !s.Id.StartsWith("IC-", StringComparison.OrdinalIgnoreCase) // Exclude InputClients
                 );
                 _log.SetTotalCompareSteps(compareCount);
 
@@ -136,12 +140,13 @@ namespace SolutionGrader.Core.Services
                     
                     // Log to detail service for grading
                     // Determine if this is a comparison step (has points)
+                    // Exclude InputClients (IC-*) from grading - focus on test case flow only
                     bool isComparisonStep = step.Action != null && (
                         string.Equals(step.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(step.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(step.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
-                    );
+                    ) && !step.Id.StartsWith("IC-", StringComparison.OrdinalIgnoreCase);
                     
                     // Determine error code from step action and result
                     string errorCode = "NONE";

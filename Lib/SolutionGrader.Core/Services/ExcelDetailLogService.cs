@@ -199,14 +199,24 @@ namespace SolutionGrader.Core.Services
             SetCell(ws, rowNum, hdr, "PointsAwarded", 0);             // awarded later in EndCase
             SetCell(ws, rowNum, hdr, "PointsPossible", actualPossible);
             SetCell(ws, rowNum, hdr, "DurationMs", Math.Round(durationMs, 2));
-            SetCell(ws, rowNum, hdr, "DetailPath", detailPath ?? "");
-            SetCell(ws, rowNum, hdr, "Message", message ?? "");
-
-            // Write actual output if available
-            TryWriteActualOutput(ws, hdr, rowNum, stage, actualPath);
-
-            // If we have a text diff, write index + short excerpts
-            TryWriteDiffColumns(ws, hdr, rowNum, stage, detailPath, message, actualPath);
+            
+            // Only write detailed information when test fails (optimization)
+            if (!passed)
+            {
+                SetCell(ws, rowNum, hdr, "DetailPath", detailPath ?? "");
+                SetCell(ws, rowNum, hdr, "Message", message ?? "");
+                
+                // Write actual output for failed tests
+                TryWriteActualOutput(ws, hdr, rowNum, stage, actualPath);
+                
+                // Write diff columns with colored excerpts
+                TryWriteDiffColumns(ws, hdr, rowNum, stage, detailPath, message, actualPath);
+            }
+            else
+            {
+                // For passing tests, only show brief success message
+                SetCell(ws, rowNum, hdr, "Message", message ?? "PASS");
+            }
 
             _records.Add(new StepGradeRecord
             {
@@ -358,14 +368,76 @@ namespace SolutionGrader.Core.Services
                 var idx = FirstDiffIndexFromMessage(message ?? "");
                 if (idx >= 0) SetCell(ws, rowNum, hdr, "DiffIndex", idx);
 
-                // Heuristics: if we know expected/actual paths, put short excerpts in the sheet
-                // (Callers generate .diff.txt as well; we only store short snippets here.)
+                // Only show excerpts around the mismatch (10 characters before and after)
                 var exp = TryReadContext(detailPath, 2000);
                 var act = TryReadContext(actualPath, 2000);
-                if (!string.IsNullOrEmpty(exp)) SetCell(ws, rowNum, hdr, "ExpectedExcerpt", exp);
-                if (!string.IsNullOrEmpty(act)) SetCell(ws, rowNum, hdr, "ActualExcerpt", act);
+                
+                if (!string.IsNullOrEmpty(exp) && !string.IsNullOrEmpty(act) && idx >= 0)
+                {
+                    // Extract context around the mismatch (10 chars on each side)
+                    const int contextSize = 10;
+                    var startIdx = Math.Max(0, idx - contextSize);
+                    
+                    var expSnippet = ExtractSnippet(exp, startIdx, idx, contextSize);
+                    var actSnippet = ExtractSnippet(act, startIdx, idx, contextSize);
+                    
+                    if (!string.IsNullOrEmpty(expSnippet))
+                    {
+                        SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
+                        // Color expected in green
+                        if (hdr.TryGetValue("ExpectedExcerpt", out var expCol))
+                        {
+                            ws.Cell(rowNum, expCol).Style.Font.FontColor = XLColor.DarkGreen;
+                            ws.Cell(rowNum, expCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(actSnippet))
+                    {
+                        SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
+                        // Color actual in red
+                        if (hdr.TryGetValue("ActualExcerpt", out var actCol))
+                        {
+                            ws.Cell(rowNum, actCol).Style.Font.FontColor = XLColor.DarkRed;
+                            ws.Cell(rowNum, actCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        }
+                    }
+                }
+                else if (!string.IsNullOrEmpty(exp) || !string.IsNullOrEmpty(act))
+                {
+                    // Fallback: no specific index, show beginning of both
+                    if (!string.IsNullOrEmpty(exp)) 
+                    {
+                        var expSnippet = exp.Length > 50 ? exp.Substring(0, 50) + "..." : exp;
+                        SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
+                    }
+                    if (!string.IsNullOrEmpty(act))
+                    {
+                        var actSnippet = act.Length > 50 ? act.Substring(0, 50) + "..." : act;
+                        SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
+                    }
+                }
             }
             catch { /* best effort */ }
+        }
+        
+        private static string ExtractSnippet(string text, int startIdx, int diffIdx, int contextSize)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            
+            var start = Math.Max(0, diffIdx - contextSize);
+            var end = Math.Min(text.Length, diffIdx + contextSize + 1);
+            var length = end - start;
+            
+            if (length <= 0) return string.Empty;
+            
+            var snippet = text.Substring(start, length);
+            
+            // Add ellipsis if truncated
+            if (start > 0) snippet = "..." + snippet;
+            if (end < text.Length) snippet = snippet + "...";
+            
+            return snippet;
         }
 
         private static string? TryReadContext(string? path, int maxChars)
