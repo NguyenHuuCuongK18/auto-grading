@@ -442,8 +442,8 @@ namespace SolutionGrader.Core.Services
                         // Extract context around the mismatch (20 chars on each side for better context)
                         const int contextSize = 20;
                         
-                        var expSnippet = ExtractSnippet(expectedOutput, 0, idx, contextSize);
-                        var actSnippet = ExtractSnippet(actualOutput, 0, idx, contextSize);
+                        var expSnippet = ExtractSnippet(expectedOutput, idx, contextSize);
+                        var actSnippet = ExtractSnippet(actualOutput, idx, contextSize);
                         
                         if (!string.IsNullOrEmpty(expSnippet))
                         {
@@ -474,11 +474,10 @@ namespace SolutionGrader.Core.Services
         /// Extracts a snippet of text around a difference index for display in Excel.
         /// </summary>
         /// <param name="text">The full text to extract from</param>
-        /// <param name="startIdx">Start index (not used, kept for compatibility)</param>
         /// <param name="diffIdx">The index where the difference occurred</param>
         /// <param name="contextSize">Number of characters to show before and after the diff</param>
         /// <returns>A snippet with ellipsis markers if truncated</returns>
-        private static string ExtractSnippet(string text, int startIdx, int diffIdx, int contextSize)
+        private static string ExtractSnippet(string text, int diffIdx, int contextSize)
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;
             
