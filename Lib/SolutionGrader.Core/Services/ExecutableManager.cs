@@ -237,11 +237,13 @@ namespace SolutionGrader.Core.Services
 
                 async Task readAsync(StreamReader reader)
                 {
+                    const int ReadBufferSize = 4096; // Read buffer size in characters
+                    const int FlushIntervalMs = 100; // Flush partial lines every 100ms
+                    
                     var buffer = appendServer ? _serverOutputBuffer : _clientOutputBuffer;
                     var lineBuffer = new StringBuilder();
-                    var charBuffer = new char[4096]; // Read in chunks for efficiency
+                    var charBuffer = new char[ReadBufferSize];
                     var lastFlushTime = DateTime.UtcNow;
-                    const int FlushIntervalMs = 100; // Flush partial lines every 100ms
                     
                     try
                     {
@@ -255,8 +257,10 @@ namespace SolutionGrader.Core.Services
                                 pendingReadTask = reader.ReadAsync(charBuffer, 0, charBuffer.Length);
                             }
                             
-                            // Wait for either the read to complete or the flush interval
-                            var delayTask = Task.Delay(FlushIntervalMs);
+                            // Only create delay task if we need to wait for flush interval
+                            var delayTask = lineBuffer.Length > 0 
+                                ? Task.Delay(FlushIntervalMs) 
+                                : Task.Delay(Timeout.Infinite); // Never complete if no partial data
                             var completedTask = await Task.WhenAny(pendingReadTask, delayTask);
                             
                             int charsRead = 0;
