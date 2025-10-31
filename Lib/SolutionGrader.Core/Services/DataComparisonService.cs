@@ -76,8 +76,10 @@ namespace SolutionGrader.Core.Services
             string? actualRaw = null;
             if ((isClientOutput || isServerOutput) && actualPath != null && actualPath.StartsWith("memory://"))
             {
+                Console.WriteLine($"[DEBUG] Using cumulative approach for: {actualPath}");
                 // Try cumulative approach for memory keys
                 actualRaw = TryGetCumulativeOutput(actualPath, "");
+                Console.WriteLine($"[DEBUG] Cumulative result length: {actualRaw?.Length ?? 0}");
                 
                 // If cumulative returns empty, the output was not captured
                 // This could be due to process not running, output buffering, or wrong stage
@@ -305,33 +307,36 @@ namespace SolutionGrader.Core.Services
 
         private string TryGetCumulativeOutput(string memoryPath, string currentStageOutput)
         {
-            // memory://clients/TC01/2 -> get stages up to and including current stage
+            // memory://clients/TC01/2 -> get ALL stages starting from 1
             // This is more lenient to handle timing differences and buffered output
+            // where expected output for stage N might appear in stage N+1 or N+2 due to async processing
             var parsed = ParseMemoryPath(memoryPath);
             if (!parsed.HasValue) return currentStageOutput;
             
             var scope = parsed.Value.scope; // "clients" or "servers"
             var questionCode = parsed.Value.questionCode;
-            var currentStage = parsed.Value.stage; // "1", "2", etc.
+            var requestedStage = parsed.Value.stage; // "1", "2", etc.
             
-            // Try to parse current stage as integer
-            if (!int.TryParse(currentStage, out var currentStageNum))
+            // Try to parse requested stage as integer
+            if (!int.TryParse(requestedStage, out var requestedStageNum))
             {
                 // Not a numeric stage, return current output only
                 return currentStageOutput;
             }
             
-            // Limit maximum stages to prevent excessive iterations
-            currentStageNum = Math.Min(currentStageNum, 50);
+            // Accumulate ALL available stages, not just up to the requested stage
+            // This handles cases where timing issues cause output to appear in later stages
+            // We check up to a reasonable limit to catch any delayed output
+            var maxStageToCheck = Math.Max(requestedStageNum, 10); // Check at least 10 stages
+            maxStageToCheck = Math.Min(maxStageToCheck, 50); // But cap at 50 for performance
             
-            // Try to accumulate stages from 1 up to current stage
-            // This handles cases where expected output from stage N actually appears in stage N+1 due to buffering
             var cumulative = new StringBuilder();
-            for (int stage = 1; stage <= currentStageNum; stage++)
+            for (int stage = 1; stage <= maxStageToCheck; stage++)
             {
                 var stageKey = $"memory://{scope}/{questionCode}/{stage}";
                 if (_run.TryGetCapturedOutput(stageKey, out var stageOutput))
                 {
+                    Console.WriteLine($"[DEBUG]   Stage {stage}: {stageOutput?.Length ?? 0} chars");
                     // Strip BOM from this stage's output before appending
                     if (!string.IsNullOrEmpty(stageOutput) && stageOutput[0] == '\uFEFF')
                     {
