@@ -403,7 +403,17 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Attempts to extract scope (clients/servers) and question code from a path.
         /// Used as a fallback when a comparison step provides a non-standard path format.
-        /// Primary path format is memory:// URIs; legacy fallback handles simple scope/question patterns.
+        /// 
+        /// Primary use case: memory:// URIs (e.g., "memory://clients/TC01/3")
+        /// 
+        /// Fallback use cases (for backward compatibility):
+        /// - Old test configs that may use relative path notation (e.g., "clients/TC01")
+        /// - Inline value patterns that follow scope/question convention
+        /// - Used when TryReadContent fails to resolve a path and we need to aggregate memory
+        /// 
+        /// Note: File-based txt outputs are no longer created by this system, but this fallback
+        /// helps parse any non-memory path patterns that might appear in test configurations
+        /// or inline expected values in Detail.xlsx files.
         /// </summary>
         private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
         {
@@ -418,15 +428,16 @@ namespace SolutionGrader.Core.Services
                     return TryParseMemory(path, out scope, out question);
                 }
                 
-                // Legacy fallback for non-memory paths (e.g., inline values or simple path patterns)
-                // This may occur if comparison steps use simplified path notation like "clients/TC01"
-                // Note: Actual file-based txt output is no longer supported; this is best-effort parsing only
+                // Fallback: extract scope/question from path-like patterns
+                // This handles cases where comparison steps use simplified notation like "clients/TC01"
+                // or when actualPath is derived from test configurations that pre-date memory:// URIs
                 var norm = path.Replace('\\', '/').ToLowerInvariant();
                 
-                // Try simple format: scope/question (e.g., "clients/tc01")
+                // Try simple format: scope/question (e.g., "clients/tc01" or "servers/tc02")
                 var parts = norm.Split('/', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length >= 2)
                 {
+                    // Extract first two parts as scope and question
                     scope = parts[0]; 
                     question = parts[1];
                     return true;
