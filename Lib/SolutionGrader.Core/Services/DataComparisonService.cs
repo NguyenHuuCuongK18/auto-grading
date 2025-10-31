@@ -15,8 +15,9 @@ namespace SolutionGrader.Core.Services
     /// DataComparisonService that tolerates async/late console output by aggregating
     /// all captured client/server stages before comparing. Policy:
     ///  - If expected is missing => PASS (ignored).
-    ///  - If actual is missing => try memory (all stages) then files (all stages).
+    ///  - If actual is missing => try memory (all stages).
     ///  - Text compare tries exact, then contains, then aggressive normalization.
+    /// Note: All actual outputs are stored in memory only (no txt files).
     /// </summary>
     public sealed class DataComparisonService : IDataComparisonService
     {
@@ -69,10 +70,9 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: {info.Description} (ignored)");
             }
 
-            // Get actual content:
+            // Get actual content from memory only (no txt file fallback):
             // 1) If memory://… path, try that specific key.
             // 2) If empty or missing, aggregate ALL stages from memory for that (scope, question).
-            // 3) If still empty, aggregate ALL stage files from disk actual\{scope}\{question}\*.txt
             string actualRaw = string.Empty;
 
             if (actualPath != null && actualPath.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
@@ -89,27 +89,17 @@ namespace SolutionGrader.Core.Services
                         actualRaw = ReadAllStagesFromMemory(scope, question);
                     }
                 }
-
-                // If still empty, try aggregated files on disk
-                if (string.IsNullOrWhiteSpace(actualRaw))
-                {
-                    if (TryParseMemory(actualPath, out var scope, out var question))
-                    {
-                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
-                    }
-                }
             }
             else
             {
                 // Non-memory: try direct read; if that fails and it's a client/server compare,
-                // we still attempt the aggregated files because the step semantic expects console output.
+                // we still attempt the aggregated memory because the step semantic expects console output.
                 if (!TryReadContent(actualPath, out actualRaw) && (isClientOutput || isServerOutput))
                 {
-                    // Try to infer (scope, question) from the ResultRoot folder (best effort).
-                    // If actualPath is a file within actual\{scope}\{question}\, read the whole folder.
+                    // Try to infer (scope, question) from memory path
                     if (TryInferScopeQuestionFromPath(actualPath, out var scope, out var question))
                     {
-                        actualRaw = ReadAllStagesFromFiles(scope, question, _run.ResultRoot);
+                        actualRaw = ReadAllStagesFromMemory(scope, question);
                     }
                 }
             }
@@ -410,56 +400,27 @@ namespace SolutionGrader.Core.Services
             return sb.ToString();
         }
 
-        private static string ReadAllStagesFromFiles(string scope, string question, string resultRoot)
-        {
-            try
-            {
-                var folder = Path.Combine(resultRoot, FileKeywords.Folder_Actual, scope, question);
-                if (!Directory.Exists(folder)) return string.Empty;
-
-                // Files are named like "1.txt", "2.txt", …
-                var files = Directory.EnumerateFiles(folder, "*.txt", SearchOption.TopDirectoryOnly)
-                                     .Select(p => new { Path = p, Stage = TryParseStage(Path.GetFileNameWithoutExtension(p)) })
-                                     .Where(x => x.Stage.HasValue)
-                                     .OrderBy(x => x.Stage!.Value)
-                                     .Select(x => x.Path)
-                                     .ToList();
-
-                var sb = new StringBuilder();
-                foreach (var f in files)
-                {
-                    try
-                    {
-                        var chunk = File.ReadAllText(f);
-                        if (!string.IsNullOrEmpty(chunk) && chunk[0] == '\uFEFF') chunk = chunk.Substring(1);
-                        sb.Append(chunk);
-                    }
-                    catch { /* ignore single-file errors */ }
-                }
-                return sb.ToString();
-            }
-            catch { return string.Empty; }
-        }
-
-        private static int? TryParseStage(string? s)
-        {
-            if (int.TryParse(s, out var n)) return n;
-            return null;
-        }
-
         private static bool TryInferScopeQuestionFromPath(string? path, out string scope, out string question)
         {
             scope = ""; question = "";
             try
             {
                 if (string.IsNullOrWhiteSpace(path)) return false;
-                // …\actual\clients\TC01\2.txt  OR  …/actual/servers/TC02/1.txt
+                
+                // Try to parse memory:// path format: memory://scope/question/stage
+                if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryParseMemory(path, out scope, out question);
+                }
+                
+                // For file paths, try to extract scope and question from path structure
+                // e.g., actual\clients\TC01 or actual/servers/TC02
                 var norm = path.Replace('\\', '/').ToLowerInvariant();
                 var i = norm.IndexOf("/actual/");
                 if (i < 0) return false;
-                var rest = norm.Substring(i + "/actual/".Length); // clients/tc01/2.txt
+                var rest = norm.Substring(i + "/actual/".Length); // clients/tc01 or servers/tc02
                 var parts = rest.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3) return false;
+                if (parts.Length < 2) return false;
                 scope = parts[0]; question = parts[1];
                 return true;
             }

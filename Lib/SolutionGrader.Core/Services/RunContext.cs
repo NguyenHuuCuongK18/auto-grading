@@ -81,11 +81,8 @@ namespace SolutionGrader.Core.Services
             _captures[key] = builder;
         }
 
-        public string ResolveActualServerText(string questionCode, string stage)
-        {
-            var folder = Path.Combine(ResultRoot, FileKeywords.Folder_Actual, FileKeywords.Folder_Servers, questionCode);
-            return Path.Combine(folder, string.Format(FileKeywords.Pattern_StageOutput, stage));
-        }
+        // Removed: ResolveActualServerText - no longer using txt files for actual outputs
+        // Actual outputs are now stored in memory only and included in Excel reports
 
         private string BuildKey(string scope, string questionCode, string stage)
         {
