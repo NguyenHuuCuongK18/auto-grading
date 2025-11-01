@@ -524,6 +524,15 @@ namespace SolutionGrader.Core.Services
 
         public (bool, string) ValidateStep(Step step, string? actualPath, GradingConfig config)
         {
+            // Check if this step's sheet should be graded based on grading mode
+            if (!config.ShouldGradeStep(step.Id))
+            {
+                var sheetName = step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase) 
+                    ? "OutputClients" 
+                    : "OutputServers";
+                return (true, $"Validation skipped: {sheetName} sheet not enabled in grading mode");
+            }
+
             // Extract validation type from step metadata
             var validationType = step.Metadata?.ContainsKey("ValidationType") == true
                 ? step.Metadata["ValidationType"]?.ToString()
