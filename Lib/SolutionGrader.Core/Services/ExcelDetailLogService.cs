@@ -368,9 +368,25 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Get expected output from the Detail.xlsx template (from the Output column in the current sheet)
+                // Get expected output from the Detail.xlsx template
+                // For OutputClients, check DataResponse column first (for HTTP data validation), then fall back to Output
+                // For OutputServers, check DataRequest column first, then fall back to Output
                 string? expectedOutput = null;
-                if (hdr.TryGetValue("Output", out var outputCol))
+                var sheetName = ws.Name;
+                var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+                
+                if (isClientSheet && hdr.TryGetValue("DataResponse", out var dataResponseCol))
+                {
+                    expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                }
+                
+                if (string.IsNullOrEmpty(expectedOutput) && !isClientSheet && hdr.TryGetValue("DataRequest", out var dataRequestCol))
+                {
+                    expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
+                }
+                
+                // Fall back to Output column if no data columns found
+                if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue("Output", out var outputCol))
                 {
                     expectedOutput = ws.Cell(rowNum, outputCol).GetString();
                 }
@@ -394,9 +410,8 @@ namespace SolutionGrader.Core.Services
                     actualOutput = TryReadContext(actualPath, 5000);
                     if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                     {
-                        var sheetName = ws.Name;
-                        var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
-                        var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                        // Reuse sheetName and isClientSheet from above
+                        var isServerSheet = !isClientSheet && string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
                         
                         if (isClientSheet)
                         {
