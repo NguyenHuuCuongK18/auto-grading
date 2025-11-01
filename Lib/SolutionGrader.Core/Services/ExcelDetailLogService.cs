@@ -374,13 +374,14 @@ namespace SolutionGrader.Core.Services
                 string? expectedOutput = null;
                 var sheetName = ws.Name;
                 var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+                var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
                 
                 if (isClientSheet && hdr.TryGetValue("DataResponse", out var dataResponseCol))
                 {
                     expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
                 }
                 
-                if (string.IsNullOrEmpty(expectedOutput) && !isClientSheet && hdr.TryGetValue("DataRequest", out var dataRequestCol))
+                if (string.IsNullOrEmpty(expectedOutput) && isServerSheet && hdr.TryGetValue("DataRequest", out var dataRequestCol))
                 {
                     expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
                 }
@@ -410,9 +411,7 @@ namespace SolutionGrader.Core.Services
                     actualOutput = TryReadContext(actualPath, 5000);
                     if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                     {
-                        // Reuse sheetName and isClientSheet from above
-                        var isServerSheet = !isClientSheet && string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
-                        
+                        // Reuse sheetName, isClientSheet, and isServerSheet from above
                         if (isClientSheet)
                         {
                             var captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
