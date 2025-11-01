@@ -308,6 +308,11 @@ namespace SolutionGrader.Core.Services
                 if (string.IsNullOrWhiteSpace(stage))
                     return actual;
 
+                // OC-DATA- steps should read from server response (data sent from server to client)
+                if (step.Id.StartsWith("OC-DATA-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
+
+                // Other OC- steps read from client output
                 if (step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
 

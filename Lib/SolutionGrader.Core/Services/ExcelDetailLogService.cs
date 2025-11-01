@@ -368,9 +368,26 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Get expected output from the Detail.xlsx template (from the Output column in the current sheet)
+                // Get expected output from the Detail.xlsx template
+                // For OutputClients, check DataResponse column first (for HTTP data validation), then fall back to Output
+                // For OutputServers, check DataRequest column first, then fall back to Output
                 string? expectedOutput = null;
-                if (hdr.TryGetValue("Output", out var outputCol))
+                var sheetName = ws.Name;
+                var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+                var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                
+                if (isClientSheet && hdr.TryGetValue("DataResponse", out var dataResponseCol))
+                {
+                    expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                }
+                
+                if (string.IsNullOrEmpty(expectedOutput) && isServerSheet && hdr.TryGetValue("DataRequest", out var dataRequestCol))
+                {
+                    expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
+                }
+                
+                // Fall back to Output column if no data columns found
+                if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue("Output", out var outputCol))
                 {
                     expectedOutput = ws.Cell(rowNum, outputCol).GetString();
                 }
@@ -394,10 +411,7 @@ namespace SolutionGrader.Core.Services
                     actualOutput = TryReadContext(actualPath, 5000);
                     if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                     {
-                        var sheetName = ws.Name;
-                        var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
-                        var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
-                        
+                        // Reuse sheetName, isClientSheet, and isServerSheet from above
                         if (isClientSheet)
                         {
                             var captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
@@ -502,12 +516,27 @@ namespace SolutionGrader.Core.Services
             return snippet;
         }
 
-        private static string? TryReadContext(string? path, int maxChars)
+        private string? TryReadContext(string? path, int maxChars)
         {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-            var txt = File.ReadAllText(path);
-            if (txt.Length > maxChars) txt = txt.Substring(0, maxChars) + "...";
-            return txt;
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            
+            // Handle memory:// URIs
+            if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_run.TryGetCapturedOutput(path, out var captured))
+                {
+                    var txt = captured ?? string.Empty;
+                    if (txt.Length > maxChars) txt = txt.Substring(0, maxChars) + "...";
+                    return txt;
+                }
+                return null;
+            }
+            
+            // Handle file paths
+            if (!File.Exists(path)) return null;
+            var fileTxt = File.ReadAllText(path);
+            if (fileTxt.Length > maxChars) fileTxt = fileTxt.Substring(0, maxChars) + "...";
+            return fileTxt;
         }
 
         private (bool casePassed, double awarded, double possible) ComputeCaseTotals()
