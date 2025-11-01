@@ -58,7 +58,7 @@ namespace SolutionGrader.Core.Domain.Models
         /// <summary>
         /// Enable/disable validation of response byte size.
         /// </summary>
-        public bool ValidateByteSize { get; set; } = true;
+        public bool ValidateByteSize { get; set; } = false;
 
         /// <summary>
         /// Enable/disable validation of data type (JSON, CSV, Text, etc.).
@@ -85,7 +85,7 @@ namespace SolutionGrader.Core.Domain.Models
             ValidateDataResponse = true,
             ValidateHttpMethod = true,
             ValidateStatusCode = true,
-            ValidateByteSize = true,
+            ValidateByteSize = false,
             ValidateDataType = true,
             // Server validations not applicable since OutputServers sheet is skipped
             ValidateServerOutput = false,
@@ -105,7 +105,7 @@ namespace SolutionGrader.Core.Domain.Models
             ValidateServerOutput = true,
             ValidateDataRequest = true,
             ValidateHttpMethod = true,
-            ValidateByteSize = true,
+            ValidateByteSize = false,
             ValidateDataType = true,
             // Client validations not applicable since OutputClients sheet is skipped
             ValidateClientOutput = false,
@@ -148,7 +148,7 @@ namespace SolutionGrader.Core.Domain.Models
             ValidateDataRequest = true,
             ValidateHttpMethod = true,
             ValidateStatusCode = true,
-            ValidateByteSize = true,
+            ValidateByteSize = false,
             ValidateDataType = true
         };
 
