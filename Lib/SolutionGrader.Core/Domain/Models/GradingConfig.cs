@@ -3,9 +3,28 @@ namespace SolutionGrader.Core.Domain.Models
     /// <summary>
     /// Configuration for controlling which aspects of the test kit to validate during grading.
     /// This allows easy toggling of validation checks for debugging and incremental testing.
+    /// 
+    /// Grading modes control which sheets to grade:
+    /// - DEFAULT: Grade both OutputClients and OutputServers sheets (all validations)
+    /// - CLIENT: Grade only OutputClients sheet (all validations on that sheet)
+    /// - SERVER: Grade only OutputServers sheet (all validations on that sheet)
+    /// - CONSOLE: Grade only console output columns from both sheets
+    /// - HTTP: Grade only HTTP-related columns from both sheets
     /// </summary>
     public sealed class GradingConfig
     {
+        /// <summary>
+        /// Enable/disable grading of OutputClients sheet (client-side validations).
+        /// When false, all steps from OutputClients sheet are skipped.
+        /// </summary>
+        public bool GradeOutputClientsSheet { get; set; } = true;
+
+        /// <summary>
+        /// Enable/disable grading of OutputServers sheet (server-side validations).
+        /// When false, all steps from OutputServers sheet are skipped.
+        /// </summary>
+        public bool GradeOutputServersSheet { get; set; } = true;
+
         /// <summary>
         /// Enable/disable validation of client console output against expected output.
         /// </summary>
@@ -47,45 +66,62 @@ namespace SolutionGrader.Core.Domain.Models
         public bool ValidateDataType { get; set; } = true;
 
         /// <summary>
-        /// Gets the default configuration with all validations enabled.
+        /// Gets the default configuration with all validations enabled on both sheets.
+        /// Grades both OutputClients and OutputServers sheets with all validations.
         /// </summary>
         public static GradingConfig Default => new GradingConfig();
 
         /// <summary>
-        /// Creates a configuration for debugging client-side only.
+        /// Creates a configuration for grading only OutputClients sheet (client-side).
+        /// Grades client console output, data responses, HTTP methods, status codes, and byte sizes
+        /// from the OutputClients sheet. Skips OutputServers sheet entirely.
         /// </summary>
         public static GradingConfig ClientOnly => new GradingConfig
         {
+            GradeOutputClientsSheet = true,
+            GradeOutputServersSheet = false,
+            // Enable all validations for the OutputClients sheet
             ValidateClientOutput = true,
-            ValidateServerOutput = false,
             ValidateDataResponse = true,
-            ValidateDataRequest = false,
-            ValidateHttpMethod = false,
-            ValidateStatusCode = false,
-            ValidateByteSize = false,
-            ValidateDataType = false
+            ValidateHttpMethod = true,
+            ValidateStatusCode = true,
+            ValidateByteSize = true,
+            ValidateDataType = true,
+            // Server validations not applicable since OutputServers sheet is skipped
+            ValidateServerOutput = false,
+            ValidateDataRequest = false
         };
 
         /// <summary>
-        /// Creates a configuration for debugging server-side only.
+        /// Creates a configuration for grading only OutputServers sheet (server-side).
+        /// Grades server console output, data requests, HTTP methods, and byte sizes
+        /// from the OutputServers sheet. Skips OutputClients sheet entirely.
         /// </summary>
         public static GradingConfig ServerOnly => new GradingConfig
         {
-            ValidateClientOutput = false,
+            GradeOutputClientsSheet = false,
+            GradeOutputServersSheet = true,
+            // Enable all validations for the OutputServers sheet
             ValidateServerOutput = true,
-            ValidateDataResponse = false,
             ValidateDataRequest = true,
-            ValidateHttpMethod = false,
-            ValidateStatusCode = false,
-            ValidateByteSize = false,
-            ValidateDataType = false
+            ValidateHttpMethod = true,
+            ValidateByteSize = true,
+            ValidateDataType = true,
+            // Client validations not applicable since OutputClients sheet is skipped
+            ValidateClientOutput = false,
+            ValidateDataResponse = false,
+            ValidateStatusCode = false
         };
 
         /// <summary>
-        /// Creates a configuration for validating only console outputs (no HTTP validation).
+        /// Creates a configuration for validating only console outputs from both sheets.
+        /// Grades Output columns from both OutputClients and OutputServers sheets.
+        /// Skips HTTP-related validations (methods, status codes, data requests/responses, byte sizes).
         /// </summary>
         public static GradingConfig ConsoleOutputOnly => new GradingConfig
         {
+            GradeOutputClientsSheet = true,
+            GradeOutputServersSheet = true,
             ValidateClientOutput = true,
             ValidateServerOutput = true,
             ValidateDataResponse = false,
@@ -97,10 +133,15 @@ namespace SolutionGrader.Core.Domain.Models
         };
 
         /// <summary>
-        /// Creates a configuration for validating only HTTP traffic (no console output validation).
+        /// Creates a configuration for validating only HTTP traffic from both sheets.
+        /// Grades HTTP-related columns (methods, status codes, data requests/responses, byte sizes)
+        /// from both OutputClients and OutputServers sheets.
+        /// Skips console output validations.
         /// </summary>
         public static GradingConfig HttpTrafficOnly => new GradingConfig
         {
+            GradeOutputClientsSheet = true,
+            GradeOutputServersSheet = true,
             ValidateClientOutput = false,
             ValidateServerOutput = false,
             ValidateDataResponse = true,
@@ -128,6 +169,27 @@ namespace SolutionGrader.Core.Domain.Models
                 "DATA_TYPE" => ValidateDataType,
                 _ => true
             };
+        }
+
+        /// <summary>
+        /// Checks if a step should be graded based on its sheet origin (OC- or OS- prefix).
+        /// </summary>
+        /// <param name="stepId">The step ID, which should start with OC- or OS-</param>
+        /// <returns>True if the step should be graded, false if it should be skipped</returns>
+        public bool ShouldGradeStep(string stepId)
+        {
+            if (string.IsNullOrEmpty(stepId)) return true;
+            
+            // Steps from OutputClients sheet start with "OC-"
+            if (stepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
+                return GradeOutputClientsSheet;
+            
+            // Steps from OutputServers sheet start with "OS-"
+            if (stepId.StartsWith("OS-", StringComparison.OrdinalIgnoreCase))
+                return GradeOutputServersSheet;
+            
+            // Steps from other sources (e.g., InputClients) are always graded
+            return true;
         }
     }
 }
