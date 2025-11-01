@@ -135,11 +135,6 @@ SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode
 ```
 
 **Note:** The key difference from the previous implementation is that modes now control which **sheets** are graded, not just which validation types are enabled. For example, CLIENT mode now only grades the OutputClients sheet but performs ALL validations on that sheet (output, responses, status codes, byte sizes), rather than grading both sheets but skipping some validation types.
-- Request/Response payloads
-- Byte sizes
-```bash
-SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode HTTP
-```
 
 ## Output Files
 

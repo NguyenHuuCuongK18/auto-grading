@@ -2,6 +2,8 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 
@@ -223,11 +225,11 @@ namespace SolutionGrader.Core.Services
                         try
                         {
                             // Parse and serialize JSON to canonical form (no whitespace)
-                            var jsonDoc = System.Text.Json.JsonDocument.Parse(respText);
-                            var normalizedJson = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions
+                            var jsonDoc = JsonDocument.Parse(respText);
+                            var normalizedJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
                             {
                                 WriteIndented = false,
-                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                             });
                             normalizedByteSize = Encoding.UTF8.GetByteCount(normalizedJson);
                         }
