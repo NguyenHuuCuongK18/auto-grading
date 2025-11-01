@@ -211,18 +211,48 @@ namespace SolutionGrader.Core.Services
                 _run.SetServerRequest(question, stage, requestBody ?? "");
                 
                 string respText;
+                int normalizedByteSize;
                 try
                 {
                     respText = Encoding.UTF8.GetString(responseBytes);
+                    
+                    // Calculate byte size from normalized content to avoid formatting differences
+                    // For JSON, normalize and recalculate the byte size
+                    if (respText.TrimStart().StartsWith("{") || respText.TrimStart().StartsWith("["))
+                    {
+                        try
+                        {
+                            // Parse and serialize JSON to canonical form (no whitespace)
+                            var jsonDoc = System.Text.Json.JsonDocument.Parse(respText);
+                            var normalizedJson = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions
+                            {
+                                WriteIndented = false,
+                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                            });
+                            normalizedByteSize = Encoding.UTF8.GetByteCount(normalizedJson);
+                        }
+                        catch
+                        {
+                            // If JSON parsing fails, use raw byte size
+                            normalizedByteSize = responseBytes?.Length ?? 0;
+                        }
+                    }
+                    else
+                    {
+                        // For non-JSON content, use raw byte size
+                        normalizedByteSize = responseBytes?.Length ?? 0;
+                    }
                 }
                 catch
                 {
                     respText = $"<binary {responseBytes?.Length ?? 0} bytes>";
+                    normalizedByteSize = responseBytes?.Length ?? 0;
                 }
                 _run.SetServerResponse(question, stage, respText);
                 
-                // Store HTTP metadata (method, status code, byte size)
-                _run.SetHttpMetadata(question, stage, httpMethod, statusCode, responseBytes?.Length ?? 0);
+                // Store HTTP metadata (method, status code, normalized byte size)
+                // Using normalized byte size ensures consistent comparison regardless of formatting
+                _run.SetHttpMetadata(question, stage, httpMethod, statusCode, normalizedByteSize);
 
                 // Note: HTTP traffic is now stored in memory only (servers-req and servers-resp namespaces)
                 // This data is available for comparison steps and included in Excel output when tests fail

@@ -785,13 +785,42 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 7).Value = Math.Round(record.DurationMs, 2);
                 
                 // Get actual output from captured data if available
+                string? actualOutput = null;
                 if (!string.IsNullOrEmpty(record.ActualPath))
                 {
-                    if (_run.TryGetCapturedOutput(record.ActualPath, out var actualOutput))
+                    _run.TryGetCapturedOutput(record.ActualPath, out actualOutput);
+                }
+                
+                // If ActualPath didn't work, try inferring from validation type and stage
+                if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(record.QuestionCode))
+                {
+                    // Reuse the validationType calculated above
+                    if (validationType == "CLIENT_OUTPUT")
                     {
-                        var truncated = actualOutput.Length > 500 ? actualOutput.Substring(0, 500) + "..." : actualOutput;
-                        ws.Cell(row, 8).Value = truncated;
+                        var key = _run.GetClientCaptureKey(record.QuestionCode, record.Stage.ToString());
+                        _run.TryGetCapturedOutput(key, out actualOutput);
                     }
+                    else if (validationType == "SERVER_OUTPUT")
+                    {
+                        var key = _run.GetServerCaptureKey(record.QuestionCode, record.Stage.ToString());
+                        _run.TryGetCapturedOutput(key, out actualOutput);
+                    }
+                    else if (validationType == "DATA_RESPONSE")
+                    {
+                        var key = $"memory://servers-resp/{record.QuestionCode}/{record.Stage}";
+                        _run.TryGetCapturedOutput(key, out actualOutput);
+                    }
+                    else if (validationType == "DATA_REQUEST")
+                    {
+                        var key = $"memory://servers-req/{record.QuestionCode}/{record.Stage}";
+                        _run.TryGetCapturedOutput(key, out actualOutput);
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(actualOutput))
+                {
+                    var truncated = actualOutput.Length > 500 ? actualOutput.Substring(0, 500) + "..." : actualOutput;
+                    ws.Cell(row, 8).Value = truncated;
                 }
                 
                 // Get HTTP metadata if available

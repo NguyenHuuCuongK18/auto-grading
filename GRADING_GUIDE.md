@@ -82,42 +82,59 @@ Defines expected outputs from the server side.
 
 ## Grading Modes
 
-Control which validations to run using the `--grading-mode` parameter:
+Grading modes control which sheets (OutputClients vs OutputServers) are graded and which validations are performed on those sheets.
 
 ### DEFAULT (Full Validation)
-Validates everything - all HTTP traffic and console outputs.
+Grades both OutputClients and OutputServers sheets with all validations enabled.
+- OutputClients: client console output, HTTP responses, status codes, byte sizes
+- OutputServers: server console output, HTTP requests, methods, byte sizes
 ```bash
 SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results
 ```
 
 ### CLIENT Mode
-Validates only client-side:
+Grades only the OutputClients sheet (all validations on that sheet).
 - Client console output
 - Data responses from server
+- HTTP status codes
+- Response byte sizes
+- Skips OutputServers sheet entirely
 ```bash
 SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode CLIENT
 ```
 
 ### SERVER Mode
-Validates only server-side:
+Grades only the OutputServers sheet (all validations on that sheet).
 - Server console output
 - Data requests from client
+- HTTP methods
+- Request byte sizes
+- Skips OutputClients sheet entirely
 ```bash
 SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode SERVER
 ```
 
 ### CONSOLE Mode
-Validates only console outputs (no HTTP validation):
-- Client console output
-- Server console output
+Grades only console output columns from both sheets (skips HTTP validations).
+- Client console output (from OutputClients)
+- Server console output (from OutputServers)
+- Skips: HTTP methods, status codes, data requests/responses, byte sizes
 ```bash
 SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode CONSOLE
 ```
 
 ### HTTP Mode
-Validates only HTTP traffic (no console outputs):
-- HTTP methods
-- Status codes
+Grades only HTTP-related columns from both sheets (skips console outputs).
+- HTTP methods (from both sheets)
+- Status codes (from OutputClients)
+- Data requests/responses
+- Byte sizes
+- Skips: client console output, server console output
+```bash
+SolutionGrader.Cli ExecuteSuite --suite TestKitDemo --out Results --grading-mode HTTP
+```
+
+**Note:** The key difference from the previous implementation is that modes now control which **sheets** are graded, not just which validation types are enabled. For example, CLIENT mode now only grades the OutputClients sheet but performs ALL validations on that sheet (output, responses, status codes, byte sizes), rather than grading both sheets but skipping some validation types.
 - Request/Response payloads
 - Byte sizes
 ```bash
