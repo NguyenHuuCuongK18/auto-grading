@@ -502,12 +502,27 @@ namespace SolutionGrader.Core.Services
             return snippet;
         }
 
-        private static string? TryReadContext(string? path, int maxChars)
+        private string? TryReadContext(string? path, int maxChars)
         {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-            var txt = File.ReadAllText(path);
-            if (txt.Length > maxChars) txt = txt.Substring(0, maxChars) + "...";
-            return txt;
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            
+            // Handle memory:// URIs
+            if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_run.TryGetCapturedOutput(path, out var captured))
+                {
+                    var txt = captured ?? string.Empty;
+                    if (txt.Length > maxChars) txt = txt.Substring(0, maxChars) + "...";
+                    return txt;
+                }
+                return null;
+            }
+            
+            // Handle file paths
+            if (!File.Exists(path)) return null;
+            var fileTxt = File.ReadAllText(path);
+            if (fileTxt.Length > maxChars) fileTxt = fileTxt.Substring(0, maxChars) + "...";
+            return fileTxt;
         }
 
         private (bool casePassed, double awarded, double possible) ComputeCaseTotals()
