@@ -569,7 +569,6 @@ coverage*[.json, .xml, .info]
 # Ionide (cross platform F# VS Code tools) working folder
 
 # Test results
-GradeResult_*/
-GradeResult_Test*/
+
 
 # End of https://www.toptal.com/developers/gitignore/api/dotnetcore,csharp,vs
