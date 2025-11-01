@@ -17,11 +17,11 @@ This is a comprehensive auto-grading system designed to test and grade client-se
 - ✅ **Data Types** - Supports JSON, CSV, Text, and other formats
 
 ### Flexible Grading Modes
-- **DEFAULT** - Full validation of all aspects
-- **CLIENT** - Client-side only (output + responses)
-- **SERVER** - Server-side only (output + requests)
-- **CONSOLE** - Console outputs only
-- **HTTP** - HTTP traffic only
+- **DEFAULT** - Grade both OutputClients and OutputServers sheets (all validations)
+- **CLIENT** - Grade only OutputClients sheet (client output, HTTP responses, status codes, byte sizes)
+- **SERVER** - Grade only OutputServers sheet (server output, HTTP requests, methods, byte sizes)
+- **CONSOLE** - Grade only console output columns from both sheets (skip HTTP validations)
+- **HTTP** - Grade only HTTP-related columns from both sheets (skip console output)
 
 ### Enhanced Reporting
 - **GradeDetail.xlsx** - Complete grading report with multiple sheets
@@ -51,7 +51,7 @@ dotnet build --configuration Release
     --client path/to/client.exe \
     --server path/to/server.exe
 
-# Client-only validation (for debugging)
+# Client-only validation (grades only OutputClients sheet)
 ./Application/SolutionGrader.Cli/bin/Release/net8.0/SolutionGrader.Cli \
     ExecuteSuite \
     --suite TestKitDemo \

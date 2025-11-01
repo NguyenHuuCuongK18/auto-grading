@@ -524,6 +524,15 @@ namespace SolutionGrader.Core.Services
 
         public (bool, string) ValidateStep(Step step, string? actualPath, GradingConfig config)
         {
+            // Check if this step's sheet should be graded based on grading mode
+            if (!config.ShouldGradeStep(step.Id))
+            {
+                var sheetName = step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase) 
+                    ? "OutputClients" 
+                    : "OutputServers";
+                return (true, $"Validation skipped: {sheetName} sheet not enabled in grading mode");
+            }
+
             // Extract validation type from step metadata
             var validationType = step.Metadata?.ContainsKey("ValidationType") == true
                 ? step.Metadata["ValidationType"]?.ToString()
@@ -538,9 +547,6 @@ namespace SolutionGrader.Core.Services
             // Route to appropriate validation based on step ID or metadata
             if (step.Id.Contains("-METHOD-", StringComparison.OrdinalIgnoreCase) || validationType == "HTTP_METHOD")
             {
-                if (!config.ValidateHttpMethod)
-                    return (true, "HTTP method validation disabled");
-
                 // Get actual HTTP method from captured metadata
                 var questionCode = step.QuestionCode;
                 var stage = step.Stage;
@@ -553,9 +559,6 @@ namespace SolutionGrader.Core.Services
 
             if (step.Id.Contains("-STATUS-", StringComparison.OrdinalIgnoreCase) || validationType == "STATUS_CODE")
             {
-                if (!config.ValidateStatusCode)
-                    return (true, "Status code validation disabled");
-
                 // Get actual status code from captured metadata
                 var questionCode = step.QuestionCode;
                 var stage = step.Stage;
@@ -568,9 +571,6 @@ namespace SolutionGrader.Core.Services
 
             if (step.Id.Contains("-SIZE-", StringComparison.OrdinalIgnoreCase) || validationType == "BYTE_SIZE")
             {
-                if (!config.ValidateByteSize)
-                    return (true, "Byte size validation disabled");
-
                 // Get actual byte size from captured metadata
                 var questionCode = step.QuestionCode;
                 var stage = step.Stage;
@@ -583,9 +583,6 @@ namespace SolutionGrader.Core.Services
 
             if (step.Id.Contains("-DATA-", StringComparison.OrdinalIgnoreCase) || validationType == "DATA_RESPONSE")
             {
-                if (!config.ValidateDataResponse)
-                    return (true, "Data response validation disabled");
-
                 // Validate data response content
                 if (step.Action == ActionKeywords.CompareJson)
                     return CompareJson(step.Target, actualPath);
@@ -595,25 +592,12 @@ namespace SolutionGrader.Core.Services
 
             if (step.Id.Contains("-REQ-", StringComparison.OrdinalIgnoreCase) || validationType == "DATA_REQUEST")
             {
-                if (!config.ValidateDataRequest)
-                    return (true, "Data request validation disabled");
-
                 // Validate data request content
                 return CompareText(step.Target, actualPath);
             }
 
             if (step.Id.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
             {
-                // Check if it's client or server output
-                var isClientOutput = step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase);
-                var isServerOutput = step.Id.StartsWith("OS-", StringComparison.OrdinalIgnoreCase);
-
-                if (isClientOutput && !config.ValidateClientOutput)
-                    return (true, "Client output validation disabled");
-
-                if (isServerOutput && !config.ValidateServerOutput)
-                    return (true, "Server output validation disabled");
-
                 // Validate console output
                 if (step.Action == ActionKeywords.CompareJson)
                     return CompareJson(step.Target, actualPath);
