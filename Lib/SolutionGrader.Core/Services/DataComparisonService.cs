@@ -217,7 +217,21 @@ namespace SolutionGrader.Core.Services
             }
             catch { /* ignore */ }
 
-            var looksLikePath = Path.IsPathRooted(path) || path.Contains('\\') || path.Contains('/');
+            // Check if this looks like inline JSON/CSV/text content rather than a file path
+            // Inline JSON starts with '{' or '['
+            // Inline CSV typically doesn't contain path separators or starts with data
+            var trimmed = path.TrimStart();
+            if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
+            {
+                // This is inline JSON content
+                content = path;
+                return true;
+            }
+
+            // If it doesn't look like a rooted path or contain backslashes, treat as inline content
+            // But be careful: content with forward slashes might be inline (e.g., dates, URLs)
+            // Only treat as path if it's rooted or contains backslashes (Windows paths)
+            var looksLikePath = Path.IsPathRooted(path) || path.Contains('\\');
             if (!looksLikePath)
             {
                 content = path;
