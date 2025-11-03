@@ -42,6 +42,9 @@ namespace SolutionGrader.Core.Services
         private const string SheetInput = SuiteKeywords.Sheet_InputClients;
         private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;
         private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;
+        
+        // Maximum length for expected/actual values displayed in ErrorReport sheet
+        private const int ErrorReportMaxValueLength = 100;
 
         // Columns we always ensure exist
         private static readonly string[] BaseColumns =
@@ -1006,13 +1009,17 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Attempts to retrieve expected and actual values from the OutputClients or OutputServers sheets
-        /// for a given failed step record.
+        /// for a given failed step record. These values are already populated by TryWriteDiffColumns during
+        /// test execution.
         /// </summary>
+        /// <param name="record">The failed step record to get expected/actual values for</param>
+        /// <returns>A tuple of (expected, actual) values, or (null, null) if values cannot be retrieved</returns>
         private (string? expected, string? actual) TryGetExpectedActualFromSheets(StepGradeRecord record)
         {
             if (_wb == null) return (null, null);
             
-            // Determine which sheet to look in based on the step ID
+            // Determine which sheet to look in based on the step ID prefix
+            // Step IDs follow the convention: "OC-*" for OutputClients, "OS-*" for OutputServers
             string sheetName = record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase)
                 ? SheetOutClients
                 : SheetOutServers;
@@ -1022,7 +1029,8 @@ namespace SolutionGrader.Core.Services
             
             var hdr = GetHeaderIndex(ws);
             
-            // Find the row that corresponds to this stage
+            // Parse the stage number from the Stage string (should be an integer)
+            // If parsing fails, we cannot locate the row in the sheet
             if (!int.TryParse(record.Stage, out var stage))
                 return (null, null);
             
@@ -1045,11 +1053,11 @@ namespace SolutionGrader.Core.Services
                 actualValue = ws.Cell(rowNum.Value, actCol).GetString();
             }
             
-            // Truncate for display in error report (keep it concise)
-            if (!string.IsNullOrEmpty(expectedValue) && expectedValue.Length > 100)
-                expectedValue = expectedValue.Substring(0, 100) + "...";
-            if (!string.IsNullOrEmpty(actualValue) && actualValue.Length > 100)
-                actualValue = actualValue.Substring(0, 100) + "...";
+            // Truncate long values for display in error report (keep it concise)
+            if (!string.IsNullOrEmpty(expectedValue) && expectedValue.Length > ErrorReportMaxValueLength)
+                expectedValue = expectedValue.Substring(0, ErrorReportMaxValueLength) + "...";
+            if (!string.IsNullOrEmpty(actualValue) && actualValue.Length > ErrorReportMaxValueLength)
+                actualValue = actualValue.Substring(0, ErrorReportMaxValueLength) + "...";
             
             return (expectedValue, actualValue);
         }
