@@ -1,6 +1,7 @@
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
+using SolutionGrader.Core.Domain.Errors;
 using System.Diagnostics;
 
 namespace SolutionGrader.Core.Services
@@ -78,7 +79,7 @@ namespace SolutionGrader.Core.Services
                         string.Equals(s.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(s.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
                     ) 
-                    && !string.Equals(s.Stage, "INPUT", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(s.Stage, StageKeywords.Input, StringComparison.OrdinalIgnoreCase)
                     && !s.Id.StartsWith("IC-", StringComparison.OrdinalIgnoreCase) // Exclude InputClients
                 );
                 _log.SetTotalCompareSteps(compareCount);
@@ -148,23 +149,21 @@ namespace SolutionGrader.Core.Services
                         string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
                     ) && !step.Id.StartsWith("IC-", StringComparison.OrdinalIgnoreCase);
                     
-                    // Determine error code from step action and result
-                    string errorCode = "NONE";
+                    // Determine error code from step action and result using action keywords
+                    string errorCode = Domain.Errors.ErrorCodes.NONE;
                     if (!ok)
                     {
-                        if (step.Action?.Contains("Compare", StringComparison.OrdinalIgnoreCase) == true)
-                        {
-                            if (step.Action.Contains("Json", StringComparison.OrdinalIgnoreCase))
-                                errorCode = "JSON_MISMATCH";
-                            else if (step.Action.Contains("Csv", StringComparison.OrdinalIgnoreCase))
-                                errorCode = "CSV_MISMATCH";
-                            else
-                                errorCode = "TEXT_MISMATCH";
-                        }
+                        if (string.Equals(step.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase))
+                            errorCode = Domain.Errors.ErrorCodes.JSON_MISMATCH;
+                        else if (string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase))
+                            errorCode = Domain.Errors.ErrorCodes.CSV_MISMATCH;
+                        else if (string.Equals(step.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(step.Action, ActionKeywords.CompareFile, StringComparison.OrdinalIgnoreCase))
+                            errorCode = Domain.Errors.ErrorCodes.TEXT_MISMATCH;
                         else if (msg.Contains("timeout", StringComparison.OrdinalIgnoreCase))
-                            errorCode = "TIMEOUT";
+                            errorCode = Domain.Errors.ErrorCodes.TIMEOUT;
                         else
-                            errorCode = "UNKNOWN";
+                            errorCode = Domain.Errors.ErrorCodes.UNKNOWN;
                     }
                     
                     double pointsPossible = isComparisonStep ? 1.0 : 0.0; // Actual points calculated by log service

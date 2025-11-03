@@ -39,15 +39,34 @@ namespace SolutionGrader.Core.Services
         private readonly List<TestCaseSummary> _caseSummaries = new();
 
         // Sheets expected in Detail.xlsx
-        private const string SheetInput = "InputClients";
-        private const string SheetOutClients = "OutputClients";
-        private const string SheetOutServers = "OutputServers";
+        private const string SheetInput = SuiteKeywords.Sheet_InputClients;
+        private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;
+        private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;
 
         // Columns we always ensure exist
-        private static readonly string[] BaseColumns = { "Stage", "Input", "DataType", "Action" };
-        private static readonly string[] ResultColumns = {
-            "Result","ErrorCode","ErrorCategory","PointsAwarded","PointsPossible",
-            "DurationMs","DetailPath","Message","DiffIndex","ExpectedOutput","ActualOutput","ExpectedExcerpt","ActualExcerpt"
+        private static readonly string[] BaseColumns =
+        {
+            GradingKeywords.Col_Stage,
+            SuiteKeywords.Col_IC_Input,
+            SuiteKeywords.Col_IC_DataType,
+            SuiteKeywords.Col_IC_Action
+        };
+
+        private static readonly string[] ResultColumns =
+        {
+            GradingKeywords.Col_Result,
+            GradingKeywords.Col_ErrorCode,
+            GradingKeywords.Col_ErrorCategory,
+            GradingKeywords.Col_PointsAwarded,
+            GradingKeywords.Col_PointsPossible,
+            GradingKeywords.Col_DurationMs,
+            GradingKeywords.Col_DetailPath,
+            GradingKeywords.Col_Message,
+            GradingKeywords.Col_DiffIndex,
+            GradingKeywords.Col_ExpectedOutput,
+            GradingKeywords.Col_ActualOutput,
+            GradingKeywords.Col_ExpectedExcerpt,
+            GradingKeywords.Col_ActualExcerpt
         };
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
@@ -106,8 +125,8 @@ namespace SolutionGrader.Core.Services
             {
                 if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
                 var hdr = GetHeaderIndex(ws);
-                if (!hdr.TryGetValue("PointsAwarded", out var awardedCol) ||
-                    !hdr.TryGetValue("PointsPossible", out var possibleCol))
+                if (!hdr.TryGetValue(GradingKeywords.Col_PointsAwarded, out var awardedCol) ||
+                    !hdr.TryGetValue(GradingKeywords.Col_PointsPossible, out var possibleCol))
                     continue;
 
                 var rng = ws.RangeUsed();
@@ -199,18 +218,18 @@ namespace SolutionGrader.Core.Services
             var perStep = _totalCompareSteps > 0 ? _totalMark / _totalCompareSteps : 0;
             var actualPossible = pointsPossible > 0 ? perStep : 0;
 
-            SetCell(ws, rowNum, hdr, "Result", passed ? "PASS" : "FAIL");
-            SetCell(ws, rowNum, hdr, "ErrorCode", errorCode);
-            SetCell(ws, rowNum, hdr, "ErrorCategory", errorCategory);
-            SetCell(ws, rowNum, hdr, "PointsAwarded", 0);             // awarded later in EndCase
-            SetCell(ws, rowNum, hdr, "PointsPossible", actualPossible);
-            SetCell(ws, rowNum, hdr, "DurationMs", Math.Round(durationMs, 2));
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_Result, passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail);
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ErrorCode, errorCode);
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ErrorCategory, errorCategory);
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_PointsAwarded, 0);             // awarded later in EndCase
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_PointsPossible, actualPossible);
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_DurationMs, Math.Round(durationMs, 2));
             
             // Only write detailed information when test fails (optimization)
             if (!passed)
             {
-                SetCell(ws, rowNum, hdr, "DetailPath", detailPath ?? "");
-                SetCell(ws, rowNum, hdr, "Message", message ?? "");
+                SetCell(ws, rowNum, hdr, GradingKeywords.Col_DetailPath, detailPath ?? string.Empty);
+                SetCell(ws, rowNum, hdr, GradingKeywords.Col_Message, message ?? string.Empty);
                 
                 // Write actual output for failed tests
                 TryWriteActualOutput(ws, hdr, rowNum, stage, actualPath);
@@ -221,7 +240,7 @@ namespace SolutionGrader.Core.Services
             else
             {
                 // For passing tests, only show brief success message
-                SetCell(ws, rowNum, hdr, "Message", message ?? "PASS");
+                SetCell(ws, rowNum, hdr, GradingKeywords.Col_Message, message ?? GradingKeywords.Result_Pass);
             }
 
             _records.Add(new StepGradeRecord
@@ -236,7 +255,7 @@ namespace SolutionGrader.Core.Services
                 DurationMs = durationMs,
                 ErrorCode = errorCode,
                 ErrorCategory = ErrorCodes.CategoryOf(errorCode),
-                Message = message ?? "",
+                Message = message ?? string.Empty,
                 DetailPath = detailPath,
                 ActualPath = actualPath
             });
@@ -258,10 +277,10 @@ namespace SolutionGrader.Core.Services
             sb.AppendLine($"FirstDiffIndex: {detail.FirstDiffIndex}");
             sb.AppendLine();
             sb.AppendLine("From test case (expected):");
-            sb.AppendLine(detail.ExpectedContext ?? "");
+            sb.AppendLine(detail.ExpectedContext ?? string.Empty);
             sb.AppendLine();
             sb.AppendLine("Got:");
-            sb.AppendLine(detail.ActualContext ?? "");
+            sb.AppendLine(detail.ActualContext ?? string.Empty);
             sb.AppendLine();
 
             File.WriteAllText(outPath, sb.ToString(), Encoding.UTF8);
@@ -274,7 +293,7 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrEmpty(_overallSummaryPath) || _caseSummaries.Count == 0) return;
 
             using var wb = new XLWorkbook();
-            var ws = wb.AddWorksheet("Summary");
+            var ws = wb.AddWorksheet(GradingKeywords.Sheet_Summary);
 
             ws.Cell(1, 1).Value = "TestCase";
             ws.Cell(1, 2).Value = "Pass/Fail";
@@ -288,7 +307,7 @@ namespace SolutionGrader.Core.Services
             foreach (var s in _caseSummaries)
             {
                 ws.Cell(r, 1).Value = s.TestCase;
-                ws.Cell(r, 2).Value = s.Passed ? "PASS" : "FAIL";
+                ws.Cell(r, 2).Value = s.Passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
                 ws.Cell(r, 3).Value = s.PointsAwarded;
                 ws.Cell(r, 4).Value = s.PointsPossible;
                 r++;
@@ -358,7 +377,7 @@ namespace SolutionGrader.Core.Services
                     {
                         actualOutput = actualOutput.Substring(0, 5000) + "... (truncated)";
                     }
-                    SetCell(ws, rowNum, hdr, "ActualOutput", actualOutput);
+                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_ActualOutput, actualOutput);
                 }
             }
             catch { /* best effort */ }
@@ -376,20 +395,20 @@ namespace SolutionGrader.Core.Services
                 var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
                 var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
                 
-                if (isClientSheet && hdr.TryGetValue("DataResponse", out var dataResponseCol))
+                if (isClientSheet)
                 {
-                    expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                    if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
+                        expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                    if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
+                        expectedOutput = ws.Cell(rowNum, ocOutCol).GetString();
                 }
                 
-                if (string.IsNullOrEmpty(expectedOutput) && isServerSheet && hdr.TryGetValue("DataRequest", out var dataRequestCol))
+                if (string.IsNullOrEmpty(expectedOutput) && isServerSheet)
                 {
-                    expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
-                }
-                
-                // Fall back to Output column if no data columns found
-                if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue("Output", out var outputCol))
-                {
-                    expectedOutput = ws.Cell(rowNum, outputCol).GetString();
+                    if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
+                        expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
+                    if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
+                        expectedOutput = ws.Cell(rowNum, osOutCol).GetString();
                 }
                 
                 // If no expected output in template, try reading from detailPath (diff file)
@@ -400,7 +419,7 @@ namespace SolutionGrader.Core.Services
 
                 // Get actual output (already written by TryWriteActualOutput)
                 string? actualOutput = null;
-                if (hdr.TryGetValue("ActualOutput", out var actualOutputCol))
+                if (hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actualOutputCol))
                 {
                     actualOutput = ws.Cell(rowNum, actualOutputCol).GetString();
                 }
@@ -435,9 +454,9 @@ namespace SolutionGrader.Core.Services
                 if (!string.IsNullOrEmpty(expectedOutput))
                 {
                     var truncatedExp = expectedOutput.Length > 5000 ? expectedOutput.Substring(0, 5000) + "... (truncated)" : expectedOutput;
-                    SetCell(ws, rowNum, hdr, "ExpectedOutput", truncatedExp);
+                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_ExpectedOutput, truncatedExp);
                     // Color expected in green
-                    if (hdr.TryGetValue("ExpectedOutput", out var expCol))
+                    if (hdr.TryGetValue(GradingKeywords.Col_ExpectedOutput, out var expCol))
                     {
                         ws.Cell(rowNum, expCol).Style.Font.FontColor = XLColor.DarkGreen;
                         ws.Cell(rowNum, expCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
@@ -445,17 +464,17 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Color actual output in red (it was already written by TryWriteActualOutput)
-                if (!string.IsNullOrEmpty(actualOutput) && hdr.TryGetValue("ActualOutput", out var actCol))
+                if (!string.IsNullOrEmpty(actualOutput) && hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actCol))
                 {
                     ws.Cell(rowNum, actCol).Style.Font.FontColor = XLColor.DarkRed;
                     ws.Cell(rowNum, actCol).Style.Fill.BackgroundColor = XLColor.LightPink;
                 }
 
                 // Also write excerpts around the difference point for quick comparison
-                var idx = FirstDiffIndexFromMessage(message ?? "");
+                var idx = FirstDiffIndexFromMessage(message ?? string.Empty);
                 if (idx >= 0)
                 {
-                    SetCell(ws, rowNum, hdr, "DiffIndex", idx);
+                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_DiffIndex, idx);
                     
                     if (!string.IsNullOrEmpty(expectedOutput) && !string.IsNullOrEmpty(actualOutput))
                     {
@@ -467,8 +486,8 @@ namespace SolutionGrader.Core.Services
                         
                         if (!string.IsNullOrEmpty(expSnippet))
                         {
-                            SetCell(ws, rowNum, hdr, "ExpectedExcerpt", expSnippet);
-                            if (hdr.TryGetValue("ExpectedExcerpt", out var expExcerptCol))
+                            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ExpectedExcerpt, expSnippet);
+                            if (hdr.TryGetValue(GradingKeywords.Col_ExpectedExcerpt, out var expExcerptCol))
                             {
                                 ws.Cell(rowNum, expExcerptCol).Style.Font.FontColor = XLColor.DarkGreen;
                                 ws.Cell(rowNum, expExcerptCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
@@ -477,8 +496,8 @@ namespace SolutionGrader.Core.Services
                         
                         if (!string.IsNullOrEmpty(actSnippet))
                         {
-                            SetCell(ws, rowNum, hdr, "ActualExcerpt", actSnippet);
-                            if (hdr.TryGetValue("ActualExcerpt", out var actExcerptCol))
+                            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ActualExcerpt, actSnippet);
+                            if (hdr.TryGetValue(GradingKeywords.Col_ActualExcerpt, out var actExcerptCol))
                             {
                                 ws.Cell(rowNum, actExcerptCol).Style.Font.FontColor = XLColor.DarkRed;
                                 ws.Cell(rowNum, actExcerptCol).Style.Fill.BackgroundColor = XLColor.LightPink;
@@ -551,7 +570,7 @@ namespace SolutionGrader.Core.Services
         private void UpsertOverallSummaryRow(string summaryPath, string testCase, bool passed, double pointsAwarded, double pointsPossible)
         {
             using XLWorkbook wb = File.Exists(summaryPath) ? LoadExistingWorkbook(summaryPath) : CreateNewWorkbook();
-            var ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet("Summary");
+            var ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet(GradingKeywords.Sheet_Summary);
 
             // Find existing row by TestCase
             var last = ws.LastRowUsed()?.RowNumber() ?? 1;
@@ -566,7 +585,7 @@ namespace SolutionGrader.Core.Services
 
             var row = found ?? (last + 1);
             ws.Cell(row, 1).Value = testCase;
-            ws.Cell(row, 2).Value = passed ? "PASS" : "FAIL";
+            ws.Cell(row, 2).Value = passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
             ws.Cell(row, 3).Value = pointsAwarded;
             ws.Cell(row, 4).Value = pointsPossible;
 
@@ -595,7 +614,7 @@ namespace SolutionGrader.Core.Services
         private static XLWorkbook CreateNewWorkbook()
         {
             var wb = new XLWorkbook();
-            var ws = wb.AddWorksheet("Summary");
+            var ws = wb.AddWorksheet(GradingKeywords.Sheet_Summary);
             ws.Cell(1, 1).Value = "TestCase";
             ws.Cell(1, 2).Value = "Passed";
             ws.Cell(1, 3).Value = "PointsAwarded";
@@ -612,8 +631,8 @@ namespace SolutionGrader.Core.Services
             if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/")) return SheetOutServers;
 
             // fallback by action
-            var action = (step.Action ?? "").ToLowerInvariant();
-            if (action.Contains("server")) return SheetOutServers;
+            var action = (step.Action ?? string.Empty).ToUpperInvariant();
+            if (action.Contains("SERVER")) return SheetOutServers;
             return SheetOutClients;
         }
 
@@ -655,7 +674,7 @@ namespace SolutionGrader.Core.Services
 
         private static int? FindRowByStage(IXLWorksheet ws, Dictionary<string, int> hdr, int stage)
         {
-            if (!hdr.TryGetValue("Stage", out var c)) return null;
+            if (!hdr.TryGetValue(GradingKeywords.Col_Stage, out var c)) return null;
             var rng = ws.RangeUsed();
             if (rng == null) return null;
             foreach (var row in rng.RowsUsed().Skip(1))
@@ -669,7 +688,7 @@ namespace SolutionGrader.Core.Services
         private static int AppendStageRow(IXLWorksheet ws, Dictionary<string, int> hdr, int stage)
         {
             var newRow = (ws.LastRowUsed()?.RowNumber() ?? 1) + 1;
-            if (hdr.TryGetValue("Stage", out var c)) ws.Cell(newRow, c).Value = stage;
+            if (hdr.TryGetValue(GradingKeywords.Col_Stage, out var c)) ws.Cell(newRow, c).Value = stage;
             return newRow;
         }
 
@@ -678,7 +697,7 @@ namespace SolutionGrader.Core.Services
             if (!hdr.TryGetValue(name, out var c)) return;
             if (value == null)
             {
-                ws.Cell(row, c).Value = "";
+                ws.Cell(row, c).Value = string.Empty;
             }
             else
             {
@@ -688,7 +707,7 @@ namespace SolutionGrader.Core.Services
 
         private static int FirstDiffIndexFromMessage(string message)
         {
-            var m = System.Text.RegularExpressions.Regex.Match(message ?? "", @"(\d+)");
+            var m = System.Text.RegularExpressions.Regex.Match(message ?? string.Empty, @"(\d+)");
             return m.Success ? int.Parse(m.Value) : -1;
         }
 
@@ -703,27 +722,28 @@ namespace SolutionGrader.Core.Services
             {
                 if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var worksheet)) continue;
                 var hdr = GetHeaderIndex(worksheet);
-                if (!hdr.TryGetValue("Result", out var resultCol)) continue;
+                if (!hdr.TryGetValue(GradingKeywords.Col_Result, out var resultCol)) continue;
 
                 var rng = worksheet.RangeUsed();
                 if (rng == null) continue;
 
-                foreach (var row in rng.RowsUsed().Skip(1))
+                foreach (var row in rng.RowsUsed().Skip(1)
+                )
                 {
                     var result = row.Cell(resultCol).GetString();
-                    if (!result.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+                    if (!result.Equals(GradingKeywords.Result_Pass, StringComparison.OrdinalIgnoreCase))
                     {
-                        var stageCol = hdr.TryGetValue("Stage", out var sc) ? sc : 0;
-                        var messageCol = hdr.TryGetValue("Message", out var mc) ? mc : 0;
-                        var detailCol = hdr.TryGetValue("DetailPath", out var dc) ? dc : 0;
+                        var stageCol = hdr.TryGetValue(GradingKeywords.Col_Stage, out var sc) ? sc : 0;
+                        var messageCol = hdr.TryGetValue(GradingKeywords.Col_Message, out var mc) ? mc : 0;
+                        var detailCol = hdr.TryGetValue(GradingKeywords.Col_DetailPath, out var dc) ? dc : 0;
 
                         failed.Add((
                             sheetName,
                             row.RowNumber(),
-                            stageCol > 0 ? row.Cell(stageCol).GetString() : "",
+                            stageCol > 0 ? row.Cell(stageCol).GetString() : string.Empty,
                             result,
-                            messageCol > 0 ? row.Cell(messageCol).GetString() : "",
-                            detailCol > 0 ? row.Cell(detailCol).GetString() : ""
+                            messageCol > 0 ? row.Cell(messageCol).GetString() : string.Empty,
+                            detailCol > 0 ? row.Cell(detailCol).GetString() : string.Empty
                         ));
                     }
                 }
@@ -732,14 +752,14 @@ namespace SolutionGrader.Core.Services
             if (failed.Count == 0) return;
 
             using var workbook = new XLWorkbook();
-            var failedSheet = workbook.AddWorksheet("FailedTests");
+            var failedSheet = workbook.AddWorksheet(GradingKeywords.Sheet_FailedTests);
 
             failedSheet.Cell(1, 1).Value = "Sheet";
             failedSheet.Cell(1, 2).Value = "Row";
-            failedSheet.Cell(1, 3).Value = "Stage";
-            failedSheet.Cell(1, 4).Value = "Result";
-            failedSheet.Cell(1, 5).Value = "Message";
-            failedSheet.Cell(1, 6).Value = "DetailPath";
+            failedSheet.Cell(1, 3).Value = GradingKeywords.Col_Stage;
+            failedSheet.Cell(1, 4).Value = GradingKeywords.Col_Result;
+            failedSheet.Cell(1, 5).Value = GradingKeywords.Col_Message;
+            failedSheet.Cell(1, 6).Value = GradingKeywords.Col_DetailPath;
             failedSheet.Row(1).Style.Font.Bold = true;
 
             int r = 2;
@@ -769,25 +789,25 @@ namespace SolutionGrader.Core.Services
             if (_wb == null || _records.Count == 0) return;
 
             // Remove existing TestRunData sheet if it exists
-            if (_wb.Worksheets.TryGetWorksheet("TestRunData", out var existingSheet))
+            if (_wb.Worksheets.TryGetWorksheet(GradingKeywords.Sheet_TestRunData, out var existingSheet))
             {
                 existingSheet.Delete();
             }
 
-            var ws = _wb.AddWorksheet("TestRunData");
+            var ws = _wb.AddWorksheet(GradingKeywords.Sheet_TestRunData);
             
             // Create header row
-            ws.Cell(1, 1).Value = "Stage";
-            ws.Cell(1, 2).Value = "StepId";
-            ws.Cell(1, 3).Value = "ValidationType";
+            ws.Cell(1, 1).Value = GradingKeywords.Col_Stage;
+            ws.Cell(1, 2).Value = GradingKeywords.Col_StepId;
+            ws.Cell(1, 3).Value = GradingKeywords.Col_ValidationType;
             ws.Cell(1, 4).Value = "Action";
-            ws.Cell(1, 5).Value = "Result";
-            ws.Cell(1, 6).Value = "Message";
-            ws.Cell(1, 7).Value = "DurationMs";
-            ws.Cell(1, 8).Value = "ActualOutput";
-            ws.Cell(1, 9).Value = "HttpMethod";
-            ws.Cell(1, 10).Value = "StatusCode";
-            ws.Cell(1, 11).Value = "ByteSize";
+            ws.Cell(1, 5).Value = GradingKeywords.Col_Result;
+            ws.Cell(1, 6).Value = GradingKeywords.Col_Message;
+            ws.Cell(1, 7).Value = GradingKeywords.Col_DurationMs;
+            ws.Cell(1, 8).Value = GradingKeywords.Col_ActualOutput;
+            ws.Cell(1, 9).Value = GradingKeywords.Col_HttpMethod;
+            ws.Cell(1, 10).Value = GradingKeywords.Col_StatusCode;
+            ws.Cell(1, 11).Value = GradingKeywords.Col_ByteSize;
             
             ws.Row(1).Style.Font.Bold = true;
             ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
@@ -800,16 +820,16 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 2).Value = record.StepId;
                 
                 // Extract validation type from metadata if available
-                var validationType = record.StepId.Contains("-METHOD-") ? "HTTP_METHOD" :
-                                   record.StepId.Contains("-STATUS-") ? "STATUS_CODE" :
-                                   record.StepId.Contains("-SIZE-") ? "BYTE_SIZE" :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? "DATA_RESPONSE" : "DATA_REQUEST") :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? "CLIENT_OUTPUT" : "SERVER_OUTPUT") :
-                                   record.StepId.Contains("-REQ-") ? "DATA_REQUEST" : "OTHER";
+                var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
+                                   record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
+                                   record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
-                ws.Cell(row, 4).Value = record.Action ?? "";
-                ws.Cell(row, 5).Value = record.Passed ? "PASS" : "FAIL";
+                ws.Cell(row, 4).Value = record.Action ?? string.Empty;
+                ws.Cell(row, 5).Value = record.Passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
                 ws.Cell(row, 6).Value = record.Message;
                 ws.Cell(row, 7).Value = Math.Round(record.DurationMs, 2);
                 
@@ -824,24 +844,24 @@ namespace SolutionGrader.Core.Services
                 if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(record.QuestionCode))
                 {
                     // Reuse the validationType calculated above
-                    if (validationType == "CLIENT_OUTPUT")
+                    if (validationType == GradingKeywords.Validation_ClientOutput)
                     {
                         var key = _run.GetClientCaptureKey(record.QuestionCode, record.Stage.ToString());
                         _run.TryGetCapturedOutput(key, out actualOutput);
                     }
-                    else if (validationType == "SERVER_OUTPUT")
+                    else if (validationType == GradingKeywords.Validation_ServerOutput)
                     {
                         var key = _run.GetServerCaptureKey(record.QuestionCode, record.Stage.ToString());
                         _run.TryGetCapturedOutput(key, out actualOutput);
                     }
-                    else if (validationType == "DATA_RESPONSE")
+                    else if (validationType == GradingKeywords.Validation_DataResponse)
                     {
-                        var key = $"memory://servers-resp/{record.QuestionCode}/{record.Stage}";
+                        var key = $"memory://{FileKeywords.Folder_ServersResponse}/{record.QuestionCode}/{record.Stage}";
                         _run.TryGetCapturedOutput(key, out actualOutput);
                     }
-                    else if (validationType == "DATA_REQUEST")
+                    else if (validationType == GradingKeywords.Validation_DataRequest)
                     {
-                        var key = $"memory://servers-req/{record.QuestionCode}/{record.Stage}";
+                        var key = $"memory://{FileKeywords.Folder_ServersRequest}/{record.QuestionCode}/{record.Stage}";
                         _run.TryGetCapturedOutput(key, out actualOutput);
                     }
                 }
@@ -855,7 +875,7 @@ namespace SolutionGrader.Core.Services
                 // Get HTTP metadata if available
                 if (_run.TryGetHttpMetadata(record.QuestionCode, record.Stage, out var httpMethod, out var statusCode, out var byteSize))
                 {
-                    ws.Cell(row, 9).Value = httpMethod ?? "";
+                    ws.Cell(row, 9).Value = httpMethod ?? string.Empty;
                     ws.Cell(row, 10).Value = statusCode ?? 0;
                     ws.Cell(row, 11).Value = byteSize ?? 0;
                 }
@@ -885,23 +905,23 @@ namespace SolutionGrader.Core.Services
             if (failedRecords.Count == 0) return; // No errors to report
 
             // Remove existing ErrorReport sheet if it exists
-            if (_wb.Worksheets.TryGetWorksheet("ErrorReport", out var existingSheet))
+            if (_wb.Worksheets.TryGetWorksheet(GradingKeywords.Sheet_ErrorReport, out var existingSheet))
             {
                 existingSheet.Delete();
             }
 
-            var ws = _wb.AddWorksheet("ErrorReport");
+            var ws = _wb.AddWorksheet(GradingKeywords.Sheet_ErrorReport);
             
             // Create header row
-            ws.Cell(1, 1).Value = "Stage";
-            ws.Cell(1, 2).Value = "StepId";
-            ws.Cell(1, 3).Value = "ValidationType";
-            ws.Cell(1, 4).Value = "ErrorCode";
-            ws.Cell(1, 5).Value = "ErrorCategory";
-            ws.Cell(1, 6).Value = "Message";
-            ws.Cell(1, 7).Value = "ExpectedValue";
-            ws.Cell(1, 8).Value = "ActualValue";
-            ws.Cell(1, 9).Value = "PointsLost";
+            ws.Cell(1, 1).Value = GradingKeywords.Col_Stage;
+            ws.Cell(1, 2).Value = GradingKeywords.Col_StepId;
+            ws.Cell(1, 3).Value = GradingKeywords.Col_ValidationType;
+            ws.Cell(1, 4).Value = GradingKeywords.Col_ErrorCode;
+            ws.Cell(1, 5).Value = GradingKeywords.Col_ErrorCategory;
+            ws.Cell(1, 6).Value = GradingKeywords.Col_Message;
+            ws.Cell(1, 7).Value = GradingKeywords.Col_Expected;
+            ws.Cell(1, 8).Value = GradingKeywords.Col_Actual;
+            ws.Cell(1, 9).Value = GradingKeywords.Col_PointsLost;
             
             ws.Row(1).Style.Font.Bold = true;
             ws.Row(1).Style.Fill.BackgroundColor = XLColor.Red;
@@ -915,12 +935,12 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 2).Value = record.StepId;
                 
                 // Extract validation type
-                var validationType = record.StepId.Contains("-METHOD-") ? "HTTP_METHOD" :
-                                   record.StepId.Contains("-STATUS-") ? "STATUS_CODE" :
-                                   record.StepId.Contains("-SIZE-") ? "BYTE_SIZE" :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? "DATA_RESPONSE" : "DATA_REQUEST") :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? "CLIENT_OUTPUT" : "SERVER_OUTPUT") :
-                                   record.StepId.Contains("-REQ-") ? "DATA_REQUEST" : "OTHER";
+                var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
+                                   record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
+                                   record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
                 ws.Cell(row, 4).Value = record.ErrorCode;
@@ -928,7 +948,7 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 6).Value = record.Message;
                 
                 // Try to extract expected vs actual from the message
-                var message = record.Message ?? "";
+                var message = record.Message ?? string.Empty;
                 if (message.Contains("Expected") && message.Contains("got"))
                 {
                     var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);

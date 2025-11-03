@@ -15,6 +15,7 @@ public static class GradingKeywords
     public const string Validation_StatusCode = "STATUS_CODE";
     public const string Validation_ByteSize = "BYTE_SIZE";
     public const string Validation_DataType = "DATA_TYPE";
+    public const string Validation_Other = "OTHER";
 
     // HTTP Methods
     public const string Method_GET = "GET";
@@ -60,6 +61,7 @@ public static class GradingKeywords
     public const string Sheet_ErrorReport = "ErrorReport";
     public const string Sheet_Summary = "Summary";
     public const string Sheet_ValidationDetails = "ValidationDetails";
+    public const string Sheet_FailedTests = "FailedTests";
 
     // Excel Column Names for grading output
     public const string Col_Stage = "Stage";
@@ -74,6 +76,19 @@ public static class GradingKeywords
     public const string Col_PointsPossible = "PointsPossible";
     public const string Col_DurationMs = "DurationMs";
     public const string Col_Timestamp = "Timestamp";
+
+    // Additional columns used across reports
+    public const string Col_DetailPath = "DetailPath";
+    public const string Col_DiffIndex = "DiffIndex";
+    public const string Col_ExpectedOutput = "ExpectedOutput";
+    public const string Col_ActualOutput = "ActualOutput";
+    public const string Col_ExpectedExcerpt = "ExpectedExcerpt";
+    public const string Col_ActualExcerpt = "ActualExcerpt";
+    public const string Col_StepId = "StepId";
+    public const string Col_HttpMethod = "HttpMethod";
+    public const string Col_StatusCode = "StatusCode";
+    public const string Col_ByteSize = "ByteSize";
+    public const string Col_PointsLost = "PointsLost";
 
     // Tolerance values
     public const int ByteSizeTolerance = 10; // Allow ±10 bytes difference
