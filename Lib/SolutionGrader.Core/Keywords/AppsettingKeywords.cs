@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 /// </summary>
 public static class AppsettingKeywords
 {
+    private const string CONNECTION_TYPE = "Type";
     private const string SQL_EXPRESS = "SQLEXPRESS";
     private const string CONNECTION_STRINGS = "ConnectionStrings";
     private const string MY_CNN = "MyCnn";
