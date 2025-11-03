@@ -28,8 +28,15 @@ namespace SolutionGrader.Core.Services
 
         public void ConfigurePorts(int proxyPort, int serverPort)
         {
-            _proxyPort = proxyPort;
-            _realServerPort = serverPort;
+            lock (_gate)
+            {
+                if (_running)
+                {
+                    throw new InvalidOperationException("Cannot configure ports while the middleware is running. Stop the service first.");
+                }
+                _proxyPort = proxyPort;
+                _realServerPort = serverPort;
+            }
         }
 
         public async Task StartAsync(bool useHttp, CancellationToken ct = default)

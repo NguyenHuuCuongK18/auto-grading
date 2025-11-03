@@ -15,9 +15,12 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath)
     {
-        // Allocate random available ports
+        // Allocate random available ports, ensuring they're different
         _proxyPort = FindAvailablePort();
-        _serverPort = FindAvailablePort();
+        do
+        {
+            _serverPort = FindAvailablePort();
+        } while (_serverPort == _proxyPort);
 
         // Determine IP address based on Type
         var ipAddress = DetermineIpAddress(dbConfig?.Type ?? "HTTP");
@@ -74,13 +77,13 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     private static int FindAvailablePort()
     {
         // Use ephemeral port range (49152-65535) which is safer for dynamic allocation
-        var random = new Random();
         const int maxAttempts = 100;
 
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             // Generate random port in ephemeral range
-            int port = random.Next(49152, 65536);
+            // Use Random.Shared for better randomization across rapid calls
+            int port = Random.Shared.Next(49152, 65536);
 
             if (IsPortAvailable(port))
             {
