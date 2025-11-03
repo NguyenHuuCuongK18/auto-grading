@@ -1008,9 +1008,9 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Attempts to retrieve expected and actual values from the OutputClients or OutputServers sheets
-        /// for a given failed step record. These values are already populated by TryWriteDiffColumns during
-        /// test execution.
+        /// Attempts to retrieve expected and actual values for a given failed step record.
+        /// Expected values come from the Detail.xlsx template (DataResponse, Output, DataRequest columns).
+        /// Actual values come from runtime execution captured in memory.
         /// </summary>
         /// <param name="record">The failed step record to get expected/actual values for</param>
         /// <returns>A tuple of (expected, actual) values, or (null, null) if values cannot be retrieved</returns>
@@ -1032,6 +1032,8 @@ namespace SolutionGrader.Core.Services
                 return (null, null);
             
             var hdr = GetHeaderIndex(ws);
+            var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+            var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
             
             // Parse the stage number from the Stage string (should be an integer)
             // If parsing fails, we cannot locate the row in the sheet
@@ -1045,16 +1047,48 @@ namespace SolutionGrader.Core.Services
             string? expectedValue = null;
             string? actualValue = null;
             
-            // Get the expected value from ExpectedOutput column (if it exists)
-            if (hdr.TryGetValue(GradingKeywords.Col_ExpectedOutput, out var expCol))
+            // Get expected value from the Detail.xlsx template columns (not ExpectedOutput)
+            // For OutputClients, check DataResponse first, then Output
+            // For OutputServers, check DataRequest first, then Output
+            if (isClientSheet)
             {
-                expectedValue = ws.Cell(rowNum.Value, expCol).GetString();
+                if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
+                    expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
+                if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
+                    expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
+            }
+            else if (isServerSheet)
+            {
+                if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
+                    expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
+                if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
+                    expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
             }
             
-            // Get the actual value from ActualOutput column (if it exists)
-            if (hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actCol))
+            // Get actual value from runtime execution (captured in memory)
+            // Try to read from RunContext using the capture key
+            if (!string.IsNullOrEmpty(record.QuestionCode))
             {
-                actualValue = ws.Cell(rowNum.Value, actCol).GetString();
+                string? captureKey = null;
+                if (isClientSheet)
+                {
+                    captureKey = _run.GetClientCaptureKey(record.QuestionCode, stage.ToString());
+                }
+                else if (isServerSheet)
+                {
+                    captureKey = _run.GetServerCaptureKey(record.QuestionCode, stage.ToString());
+                }
+                
+                if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
+                {
+                    actualValue = captured;
+                }
+                
+                // If still no actual value, try reading from ActualPath
+                if (string.IsNullOrEmpty(actualValue) && !string.IsNullOrEmpty(record.ActualPath))
+                {
+                    actualValue = TryReadContext(record.ActualPath, 5000);
+                }
             }
             
             // Truncate long values for display in error report (keep it concise)
