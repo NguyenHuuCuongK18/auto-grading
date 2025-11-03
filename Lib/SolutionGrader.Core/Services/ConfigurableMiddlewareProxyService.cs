@@ -34,6 +34,12 @@ namespace SolutionGrader.Core.Services
             _realServerPort = realServerPort;
         }
 
+        public void ConfigurePorts(int proxyPort, int serverPort)
+        {
+            _proxyPort = proxyPort;
+            _realServerPort = serverPort;
+        }
+
         public async Task StartAsync(bool useHttp, CancellationToken ct = default)
         {
             lock (_gate)

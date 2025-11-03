@@ -68,14 +68,24 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         try
         {
             using var wb = new XLWorkbook(headerPath);
-            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+            // Look for Config worksheet first, then Header, then fall back to first worksheet
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Config", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
                      ?? wb.Worksheet(1);
 
             var config = new Domain.Models.DatabaseConfiguration();
             bool foundAnyConfig = false;
 
-            // Read key-value pairs from Header.xlsx
-            for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+            // Read key-value pairs from Header.xlsx (skip row 1 if it's a header row)
+            int startRow = 1;
+            // Check if row 1 looks like a header
+            var firstRowCol1 = ws.Cell(1, 1).GetString().Trim();
+            if (firstRowCol1.Equals("Key", StringComparison.OrdinalIgnoreCase))
+            {
+                startRow = 2; // Skip header row
+            }
+
+            for (int r = startRow; r <= Math.Min(50, ws.RowCount()); r++)
             {
                 var key = ws.Cell(r, 1).GetString().Trim();
                 var value = ws.Cell(r, 2).GetString().Trim();
@@ -112,8 +122,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
             return foundAnyConfig ? config : null;
         }
-        catch
+        catch (System.Exception ex)
         {
+            System.Console.WriteLine($"[DatabaseConfig] Error reading database config: {ex.Message}");
             return null;
         }
     }

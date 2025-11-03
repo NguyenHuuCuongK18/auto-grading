@@ -19,12 +19,18 @@ namespace SolutionGrader.Core.Services
         private TcpListener? _tcp;
         private Task? _listenTask;
 
-        private const int ProxyPort = 5000;
-        private const int RealServerPort = 5001;
+        private int _proxyPort = 5000;
+        private int _realServerPort = 5001;
 
         private readonly IRunContext _run;
 
         public MiddlewareProxyService(IRunContext run) { _run = run; }
+
+        public void ConfigurePorts(int proxyPort, int serverPort)
+        {
+            _proxyPort = proxyPort;
+            _realServerPort = serverPort;
+        }
 
         public async Task StartAsync(bool useHttp, CancellationToken ct = default)
         {
@@ -82,9 +88,9 @@ namespace SolutionGrader.Core.Services
             try
             {
                 _http = new HttpListener();
-                _http.Prefixes.Add($"http://localhost:{ProxyPort}/");
+                _http.Prefixes.Add($"http://localhost:{_proxyPort}/");
                 _http.Start();
-                Console.WriteLine($"[Proxy] HTTP proxy listening on http://localhost:{ProxyPort}/ -> http://localhost:{RealServerPort}/");
+                Console.WriteLine($"[Proxy] HTTP proxy listening on http://localhost:{_proxyPort}/ -> http://localhost:{_realServerPort}/");
                 _listenTask = Task.Run(() => ListenHttpAsync(token), token);
             }
             catch (Exception ex) { Console.WriteLine($"[HTTP Proxy ERR] {ex.Message}"); }
@@ -109,7 +115,7 @@ namespace SolutionGrader.Core.Services
                 string body; using (var reader = new StreamReader(req.InputStream, req.ContentEncoding)) body = reader.ReadToEnd();
 
                 // Build complete URL with query string using localhost (not 127.0.0.1) to match Host header
-                var urlBuilder = new UriBuilder("http", "localhost", RealServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
+                var urlBuilder = new UriBuilder("http", "localhost", _realServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
                 var targetUrl = urlBuilder.ToString();
 
                 var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), targetUrl);
@@ -157,9 +163,9 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                _tcp = new TcpListener(IPAddress.Loopback, ProxyPort);
+                _tcp = new TcpListener(IPAddress.Loopback, _proxyPort);
                 _tcp.Start();
-                Console.WriteLine($"[Proxy] TCP proxy listening on 127.0.0.1:{ProxyPort} -> 127.0.0.1:{RealServerPort}");
+                Console.WriteLine($"[Proxy] TCP proxy listening on 127.0.0.1:{_proxyPort} -> 127.0.0.1:{_realServerPort}");
                 _listenTask = Task.Run(() => ListenTcpAsync(token), token);
             }
             catch (Exception ex) { Console.WriteLine($"[TCP Proxy ERR] {ex.Message}"); }
@@ -176,14 +182,14 @@ namespace SolutionGrader.Core.Services
             }
         }
 
-        private static async Task HandleTcpAsync(TcpClient client, CancellationToken token)
+        private async Task HandleTcpAsync(TcpClient client, CancellationToken token)
         {
             try
             {
                 using (client)
                 using (var server = new TcpClient())
                 {
-                    await server.ConnectAsync(IPAddress.Loopback, RealServerPort, token);
+                    await server.ConnectAsync(IPAddress.Loopback, _realServerPort, token);
                     using var cs = client.GetStream();
                     using var ss = server.GetStream();
                     var c2s = RelayAsync(cs, ss, token);
