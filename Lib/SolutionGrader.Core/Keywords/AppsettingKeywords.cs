@@ -15,8 +15,8 @@ public static class AppsettingKeywords
     private const string IP_ADDRESS = "IpAddress";
     private const string PORT = "Port";
     private const string SQL_SERVER = "SqlServer";
-    private const string DATABASE_NAME = "DatabaseName";
-    private const string USER_ID = "UserId";
+    private const string DATABASE_NAME = "Database";
+    private const string USER_ID = "Username";
     private const string PASSWORD = "Password";
     private const string TRUSTED_CONNECTION = "Trusted_Connection";
     private const string TRUST_SERVER_CERTIFICATE = "TrustServerCertificate";
