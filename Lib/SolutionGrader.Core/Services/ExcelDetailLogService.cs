@@ -947,22 +947,32 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 5).Value = record.ErrorCategory.ToString();
                 ws.Cell(row, 6).Value = record.Message;
                 
-                // Try to extract expected vs actual from the message
-                var message = record.Message ?? string.Empty;
-                if (message.Contains("Expected") && message.Contains("got"))
+                // Try to extract expected vs actual values
+                // First, try to read from the actual test sheets (OutputClients/OutputServers) where they were already populated
+                var (expectedValue, actualValue) = TryGetExpectedActualFromSheets(record);
+                
+                // If not found in sheets, try parsing from the message (for HTTP method, status code, byte size errors)
+                if (string.IsNullOrEmpty(expectedValue) && string.IsNullOrEmpty(actualValue))
                 {
-                    var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);
-                    if (parts.Length >= 2)
+                    var message = record.Message ?? string.Empty;
+                    if (message.Contains("Expected") && message.Contains("got"))
                     {
-                        var expectedPart = parts[1].Split(',')[0].Trim().Trim('\'', '"');
-                        ws.Cell(row, 7).Value = expectedPart;
-                    }
-                    if (parts.Length >= 3)
-                    {
-                        var actualPart = parts[2].Split('.')[0].Trim().Trim('\'', '"');
-                        ws.Cell(row, 8).Value = actualPart;
+                        var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);
+                        if (parts.Length >= 2)
+                        {
+                            expectedValue = parts[1].Split(',')[0].Trim().Trim('\'', '"');
+                        }
+                        if (parts.Length >= 3)
+                        {
+                            actualValue = parts[2].Split('.')[0].Trim().Trim('\'', '"');
+                        }
                     }
                 }
+                
+                if (!string.IsNullOrEmpty(expectedValue))
+                    ws.Cell(row, 7).Value = expectedValue;
+                if (!string.IsNullOrEmpty(actualValue))
+                    ws.Cell(row, 8).Value = actualValue;
                 
                 ws.Cell(row, 9).Value = record.PointsPossible;
                 
@@ -992,6 +1002,56 @@ namespace SolutionGrader.Core.Services
 
             ws.Style.Alignment.WrapText = true;
             ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+        }
+
+        /// <summary>
+        /// Attempts to retrieve expected and actual values from the OutputClients or OutputServers sheets
+        /// for a given failed step record.
+        /// </summary>
+        private (string? expected, string? actual) TryGetExpectedActualFromSheets(StepGradeRecord record)
+        {
+            if (_wb == null) return (null, null);
+            
+            // Determine which sheet to look in based on the step ID
+            string sheetName = record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase)
+                ? SheetOutClients
+                : SheetOutServers;
+            
+            if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws))
+                return (null, null);
+            
+            var hdr = GetHeaderIndex(ws);
+            
+            // Find the row that corresponds to this stage
+            if (!int.TryParse(record.Stage, out var stage))
+                return (null, null);
+            
+            int? rowNum = FindRowByStage(ws, hdr, stage);
+            if (!rowNum.HasValue)
+                return (null, null);
+            
+            string? expectedValue = null;
+            string? actualValue = null;
+            
+            // Get the expected value from ExpectedOutput column (if it exists)
+            if (hdr.TryGetValue(GradingKeywords.Col_ExpectedOutput, out var expCol))
+            {
+                expectedValue = ws.Cell(rowNum.Value, expCol).GetString();
+            }
+            
+            // Get the actual value from ActualOutput column (if it exists)
+            if (hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actCol))
+            {
+                actualValue = ws.Cell(rowNum.Value, actCol).GetString();
+            }
+            
+            // Truncate for display in error report (keep it concise)
+            if (!string.IsNullOrEmpty(expectedValue) && expectedValue.Length > 100)
+                expectedValue = expectedValue.Substring(0, 100) + "...";
+            if (!string.IsNullOrEmpty(actualValue) && actualValue.Length > 100)
+                actualValue = actualValue.Substring(0, 100) + "...";
+            
+            return (expectedValue, actualValue);
         }
 
         public void Dispose() => _wb?.Dispose();
