@@ -9,7 +9,10 @@ using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
 {
-    public sealed class MiddlewareProxyService : IMiddlewareService
+    /// <summary>
+    /// Middleware proxy service that accepts dynamically generated ports
+    /// </summary>
+    public sealed class ConfigurableMiddlewareProxyService : IMiddlewareService
     {
         private readonly object _gate = new();
         private CancellationTokenSource? _cts;
@@ -19,12 +22,17 @@ namespace SolutionGrader.Core.Services
         private TcpListener? _tcp;
         private Task? _listenTask;
 
-        private int _proxyPort = 5000;
-        private int _realServerPort = 5001;
+        private int _proxyPort;
+        private int _realServerPort;
 
         private readonly IRunContext _run;
 
-        public MiddlewareProxyService(IRunContext run) { _run = run; }
+        public ConfigurableMiddlewareProxyService(IRunContext run, int proxyPort, int realServerPort)
+        {
+            _run = run;
+            _proxyPort = proxyPort;
+            _realServerPort = realServerPort;
+        }
 
         public void ConfigurePorts(int proxyPort, int serverPort)
         {
