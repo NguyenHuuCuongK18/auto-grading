@@ -12,12 +12,14 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
     {
         var headerPath = ResolveHeaderPath(suitePathOrHeaderXlsx);
         var protocol = ReadProtocolFromHeader(headerPath);
+        var dbConfig = ReadDatabaseConfigFromHeader(headerPath);
         var marks = ReadMarksFromHeader(headerPath);
         var cases = BuildCasesFromDirectory(Path.GetDirectoryName(headerPath)!, marks);
         return new SuiteDefinition
         {
             HeaderPath = headerPath,
             Protocol = protocol,
+            DatabaseConfig = dbConfig,
             Cases = cases
         };
     }
@@ -59,6 +61,61 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         catch { }
 
         return "HTTP"; // default
+    }
+
+    private static Domain.Models.DatabaseConfiguration? ReadDatabaseConfigFromHeader(string headerPath)
+    {
+        try
+        {
+            using var wb = new XLWorkbook(headerPath);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheet(1);
+
+            var config = new Domain.Models.DatabaseConfiguration();
+            bool foundAnyConfig = false;
+
+            // Read key-value pairs from Header.xlsx
+            for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+            {
+                var key = ws.Cell(r, 1).GetString().Trim();
+                var value = ws.Cell(r, 2).GetString().Trim();
+
+                if (string.IsNullOrEmpty(key)) continue;
+
+                if (key.Equals("Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.Type = value.ToUpperInvariant();
+                    foundAnyConfig = true;
+                }
+                else if (key.Equals("Sql Server", StringComparison.OrdinalIgnoreCase) ||
+                         key.Equals("SqlServer", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.SqlServer = value;
+                    foundAnyConfig = true;
+                }
+                else if (key.Equals("Database", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.Database = value;
+                    foundAnyConfig = true;
+                }
+                else if (key.Equals("Username", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.Username = value;
+                    foundAnyConfig = true;
+                }
+                else if (key.Equals("Password", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.Password = value;
+                    foundAnyConfig = true;
+                }
+            }
+
+            return foundAnyConfig ? config : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Dictionary<string, double> ReadMarksFromHeader(string headerPath)
