@@ -42,6 +42,9 @@ namespace SolutionGrader.Core.Services
         private const string SheetInput = SuiteKeywords.Sheet_InputClients;
         private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;
         private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;
+        
+        // Maximum length for expected/actual values displayed in ErrorReport sheet
+        private const int ErrorReportMaxValueLength = 100;
 
         // Columns we always ensure exist
         private static readonly string[] BaseColumns =
@@ -947,22 +950,32 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 5).Value = record.ErrorCategory.ToString();
                 ws.Cell(row, 6).Value = record.Message;
                 
-                // Try to extract expected vs actual from the message
-                var message = record.Message ?? string.Empty;
-                if (message.Contains("Expected") && message.Contains("got"))
+                // Try to extract expected vs actual values
+                // First, try to read from the actual test sheets (OutputClients/OutputServers) where they were already populated
+                var (expectedValue, actualValue) = TryGetExpectedActualFromSheets(record);
+                
+                // If not found in sheets, try parsing from the message (for HTTP method, status code, byte size errors)
+                if (string.IsNullOrEmpty(expectedValue) && string.IsNullOrEmpty(actualValue))
                 {
-                    var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);
-                    if (parts.Length >= 2)
+                    var message = record.Message ?? string.Empty;
+                    if (message.Contains("Expected") && message.Contains("got"))
                     {
-                        var expectedPart = parts[1].Split(',')[0].Trim().Trim('\'', '"');
-                        ws.Cell(row, 7).Value = expectedPart;
-                    }
-                    if (parts.Length >= 3)
-                    {
-                        var actualPart = parts[2].Split('.')[0].Trim().Trim('\'', '"');
-                        ws.Cell(row, 8).Value = actualPart;
+                        var parts = message.Split(new[] { "Expected", "got" }, StringSplitOptions.TrimEntries);
+                        if (parts.Length >= 2)
+                        {
+                            expectedValue = parts[1].Split(',')[0].Trim().Trim('\'', '"');
+                        }
+                        if (parts.Length >= 3)
+                        {
+                            actualValue = parts[2].Split('.')[0].Trim().Trim('\'', '"');
+                        }
                     }
                 }
+                
+                if (!string.IsNullOrEmpty(expectedValue))
+                    ws.Cell(row, 7).Value = expectedValue;
+                if (!string.IsNullOrEmpty(actualValue))
+                    ws.Cell(row, 8).Value = actualValue;
                 
                 ws.Cell(row, 9).Value = record.PointsPossible;
                 
@@ -992,6 +1005,99 @@ namespace SolutionGrader.Core.Services
 
             ws.Style.Alignment.WrapText = true;
             ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+        }
+
+        /// <summary>
+        /// Attempts to retrieve expected and actual values for a given failed step record.
+        /// Expected values come from the Detail.xlsx template (DataResponse, Output, DataRequest columns).
+        /// Actual values come from runtime execution captured in memory.
+        /// </summary>
+        /// <param name="record">The failed step record to get expected/actual values for</param>
+        /// <returns>A tuple of (expected, actual) values, or (null, null) if values cannot be retrieved</returns>
+        private (string? expected, string? actual) TryGetExpectedActualFromSheets(StepGradeRecord record)
+        {
+            if (_wb == null) return (null, null);
+            
+            // Determine which sheet to look in based on the step ID prefix
+            // Step IDs follow the convention: "OC-*" for OutputClients, "OS-*" for OutputServers
+            // IC- (InputClients) steps don't have expected/actual output, so return null for those
+            if (record.StepId.StartsWith("IC-", StringComparison.OrdinalIgnoreCase))
+                return (null, null);
+            
+            string sheetName = record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase)
+                ? SheetOutClients
+                : SheetOutServers;
+            
+            if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws))
+                return (null, null);
+            
+            var hdr = GetHeaderIndex(ws);
+            var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
+            var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+            
+            // Parse the stage number from the Stage string (should be an integer)
+            // If parsing fails, we cannot locate the row in the sheet
+            if (!int.TryParse(record.Stage, out var stage))
+                return (null, null);
+            
+            int? rowNum = FindRowByStage(ws, hdr, stage);
+            if (!rowNum.HasValue)
+                return (null, null);
+            
+            string? expectedValue = null;
+            string? actualValue = null;
+            
+            // Get expected value from the Detail.xlsx template columns (not ExpectedOutput)
+            // For OutputClients, check DataResponse first, then Output
+            // For OutputServers, check DataRequest first, then Output
+            if (isClientSheet)
+            {
+                if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
+                    expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
+                if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
+                    expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
+            }
+            else if (isServerSheet)
+            {
+                if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
+                    expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
+                if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
+                    expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
+            }
+            
+            // Get actual value from runtime execution (captured in memory)
+            // Try to read from RunContext using the capture key
+            if (!string.IsNullOrEmpty(record.QuestionCode))
+            {
+                string? captureKey = null;
+                if (isClientSheet)
+                {
+                    captureKey = _run.GetClientCaptureKey(record.QuestionCode, stage.ToString());
+                }
+                else if (isServerSheet)
+                {
+                    captureKey = _run.GetServerCaptureKey(record.QuestionCode, stage.ToString());
+                }
+                
+                if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
+                {
+                    actualValue = captured;
+                }
+                
+                // If still no actual value, try reading from ActualPath
+                if (string.IsNullOrEmpty(actualValue) && !string.IsNullOrEmpty(record.ActualPath))
+                {
+                    actualValue = TryReadContext(record.ActualPath, 5000);
+                }
+            }
+            
+            // Truncate long values for display in error report (keep it concise)
+            if (!string.IsNullOrEmpty(expectedValue) && expectedValue.Length > ErrorReportMaxValueLength)
+                expectedValue = expectedValue[..ErrorReportMaxValueLength] + "...";
+            if (!string.IsNullOrEmpty(actualValue) && actualValue.Length > ErrorReportMaxValueLength)
+                actualValue = actualValue[..ErrorReportMaxValueLength] + "...";
+            
+            return (expectedValue, actualValue);
         }
 
         public void Dispose() => _wb?.Dispose();
