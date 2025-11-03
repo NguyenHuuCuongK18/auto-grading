@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 /// </summary>
 public static class AppsettingKeywords
 {
+    private const string HEADER = "Header.xlsx";
+    private const string CONFIG_SHEET = "Config";
     private const string CONNECTION_TYPE = "Type";
     private const string SQL_EXPRESS = "SQLEXPRESS";
     private const string CONNECTION_STRINGS = "ConnectionStrings";
