@@ -1020,6 +1020,10 @@ namespace SolutionGrader.Core.Services
             
             // Determine which sheet to look in based on the step ID prefix
             // Step IDs follow the convention: "OC-*" for OutputClients, "OS-*" for OutputServers
+            // IC- (InputClients) steps don't have expected/actual output, so return null for those
+            if (record.StepId.StartsWith("IC-", StringComparison.OrdinalIgnoreCase))
+                return (null, null);
+            
             string sheetName = record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase)
                 ? SheetOutClients
                 : SheetOutServers;
@@ -1055,9 +1059,9 @@ namespace SolutionGrader.Core.Services
             
             // Truncate long values for display in error report (keep it concise)
             if (!string.IsNullOrEmpty(expectedValue) && expectedValue.Length > ErrorReportMaxValueLength)
-                expectedValue = expectedValue.Substring(0, ErrorReportMaxValueLength) + "...";
+                expectedValue = expectedValue[..ErrorReportMaxValueLength] + "...";
             if (!string.IsNullOrEmpty(actualValue) && actualValue.Length > ErrorReportMaxValueLength)
-                actualValue = actualValue.Substring(0, ErrorReportMaxValueLength) + "...";
+                actualValue = actualValue[..ErrorReportMaxValueLength] + "...";
             
             return (expectedValue, actualValue);
         }
