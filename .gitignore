@@ -570,5 +570,7 @@ coverage*[.json, .xml, .info]
 
 # Test results
 
+# Auto-grading test result artifacts
+GradeResult_*/
 
 # End of https://www.toptal.com/developers/gitignore/api/dotnetcore,csharp,vs
