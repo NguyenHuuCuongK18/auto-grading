@@ -355,56 +355,32 @@ namespace SolutionGrader.Core.Services
                     var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
                     var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
                     
-                    // Determine the correct capture key based on validation type (step ID)
+                    // Determine the correct capture key based on validation type
+                    var validationType = GetValidationType(stepId);
+                    string? captureKey = null;
+                    
                     if (isClientSheet)
                     {
-                        string? captureKey = null;
-                        
-                        if (stepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                        captureKey = validationType switch
                         {
-                            // Data response validation - get from server response
-                            captureKey = _run.GetServerResponseCaptureKey(_questionCode, stage.ToString());
-                        }
-                        else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Console output validation - get from client output
-                            captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
-                        }
-                        else
-                        {
-                            // For other types (METHOD, STATUS, SIZE), default to client output
-                            captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
-                        }
-                        
-                        if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
-                        {
-                            actualOutput = captured;
-                        }
+                            StepValidationType.DataResponse => _run.GetServerResponseCaptureKey(_questionCode, stage.ToString()),
+                            StepValidationType.ConsoleOutput => _run.GetClientCaptureKey(_questionCode, stage.ToString()),
+                            _ => _run.GetClientCaptureKey(_questionCode, stage.ToString())
+                        };
                     }
                     else if (isServerSheet)
                     {
-                        string? captureKey = null;
-                        
-                        if (stepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                        captureKey = validationType switch
                         {
-                            // Data request validation - get from server request
-                            captureKey = _run.GetServerRequestCaptureKey(_questionCode, stage.ToString());
-                        }
-                        else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Server console output validation - get from server output
-                            captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
-                        }
-                        else
-                        {
-                            // For other types (METHOD, SIZE), default to server output
-                            captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
-                        }
-                        
-                        if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
-                        {
-                            actualOutput = captured;
-                        }
+                            StepValidationType.DataRequest => _run.GetServerRequestCaptureKey(_questionCode, stage.ToString()),
+                            StepValidationType.ConsoleOutput => _run.GetServerCaptureKey(_questionCode, stage.ToString()),
+                            _ => _run.GetServerCaptureKey(_questionCode, stage.ToString())
+                        };
+                    }
+                    
+                    if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
+                    {
+                        actualOutput = captured;
                     }
                 }
                 
@@ -436,60 +412,52 @@ namespace SolutionGrader.Core.Services
                 var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
                 var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
                 
-                // Determine which column to read from based on the step ID
+                // Determine which column to read from based on the validation type
+                var validationType = GetValidationType(stepId);
+                
                 if (isClientSheet)
                 {
-                    // For OutputClients sheet:
-                    // - OC-DATA- steps should read from DataResponse column
-                    // - OC-OUT- steps should read from Output column
-                    // - Other OC- steps (METHOD, STATUS, SIZE) don't have output, fall back to DataResponse then Output
-                    if (stepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                    // For OutputClients sheet, determine which column to read based on validation type
+                    switch (validationType)
                     {
-                        // Data response validation - read from DataResponse column
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                            expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
-                    }
-                    else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Console output validation - read from Output column
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                            expectedOutput = ws.Cell(rowNum, ocOutCol).GetString();
-                    }
-                    else
-                    {
-                        // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                            expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
-                        if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                            expectedOutput = ws.Cell(rowNum, ocOutCol).GetString();
+                        case StepValidationType.DataResponse:
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
+                                expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                            break;
+                        case StepValidationType.ConsoleOutput:
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
+                                expectedOutput = ws.Cell(rowNum, ocOutCol).GetString();
+                            break;
+                        default:
+                            // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataRespCol))
+                                expectedOutput = ws.Cell(rowNum, dataRespCol).GetString();
+                            if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var outCol))
+                                expectedOutput = ws.Cell(rowNum, outCol).GetString();
+                            break;
                     }
                 }
                 
                 if (string.IsNullOrEmpty(expectedOutput) && isServerSheet)
                 {
-                    // For OutputServers sheet:
-                    // - OS-REQ- steps should read from DataRequest column
-                    // - OS-OUT- steps should read from Output column
-                    // - Other OS- steps (METHOD, SIZE) don't have output, fall back to DataRequest then Output
-                    if (stepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                    // For OutputServers sheet, determine which column to read based on validation type
+                    switch (validationType)
                     {
-                        // Data request validation - read from DataRequest column
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                            expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
-                    }
-                    else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Server console output validation - read from Output column
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                            expectedOutput = ws.Cell(rowNum, osOutCol).GetString();
-                    }
-                    else
-                    {
-                        // For other validation types (METHOD, SIZE), try DataRequest first, then Output
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                            expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
-                        if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                            expectedOutput = ws.Cell(rowNum, osOutCol).GetString();
+                        case StepValidationType.DataRequest:
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
+                                expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
+                            break;
+                        case StepValidationType.ConsoleOutput:
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
+                                expectedOutput = ws.Cell(rowNum, osOutCol).GetString();
+                            break;
+                        default:
+                            // For other validation types (METHOD, SIZE), try DataRequest first, then Output
+                            if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataReqCol))
+                                expectedOutput = ws.Cell(rowNum, dataReqCol).GetString();
+                            if (string.IsNullOrEmpty(expectedOutput) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var outCol))
+                                expectedOutput = ws.Cell(rowNum, outCol).GetString();
+                            break;
                     }
                 }
                 
@@ -512,56 +480,31 @@ namespace SolutionGrader.Core.Services
                     actualOutput = TryReadContext(actualPath, 5000);
                     if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                     {
-                        // Get the actual output based on validation type (step ID)
+                        // Reuse the validationType already determined above
+                        string? captureKey = null;
+                        
                         if (isClientSheet)
                         {
-                            string? captureKey = null;
-                            
-                            if (stepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                            captureKey = validationType switch
                             {
-                                // Data response validation - get from server response
-                                captureKey = _run.GetServerResponseCaptureKey(_questionCode, stage.ToString());
-                            }
-                            else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                            {
-                                // Console output validation - get from client output
-                                captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
-                            }
-                            else
-                            {
-                                // For other types (METHOD, STATUS, SIZE), default to client output
-                                captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
-                            }
-                            
-                            if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
-                            {
-                                actualOutput = captured;
-                            }
+                                StepValidationType.DataResponse => _run.GetServerResponseCaptureKey(_questionCode, stage.ToString()),
+                                StepValidationType.ConsoleOutput => _run.GetClientCaptureKey(_questionCode, stage.ToString()),
+                                _ => _run.GetClientCaptureKey(_questionCode, stage.ToString())
+                            };
                         }
                         else if (isServerSheet)
                         {
-                            string? captureKey = null;
-                            
-                            if (stepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                            captureKey = validationType switch
                             {
-                                // Data request validation - get from server request
-                                captureKey = _run.GetServerRequestCaptureKey(_questionCode, stage.ToString());
-                            }
-                            else if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                            {
-                                // Server console output validation - get from server output
-                                captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
-                            }
-                            else
-                            {
-                                // For other types (METHOD, SIZE), default to server output
-                                captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
-                            }
-                            
-                            if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
-                            {
-                                actualOutput = captured;
-                            }
+                                StepValidationType.DataRequest => _run.GetServerRequestCaptureKey(_questionCode, stage.ToString()),
+                                StepValidationType.ConsoleOutput => _run.GetServerCaptureKey(_questionCode, stage.ToString()),
+                                _ => _run.GetServerCaptureKey(_questionCode, stage.ToString())
+                            };
+                        }
+                        
+                        if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
+                        {
+                            actualOutput = captured;
                         }
                     }
                 }
@@ -1160,100 +1103,75 @@ namespace SolutionGrader.Core.Services
             string? expectedValue = null;
             string? actualValue = null;
             
-            // Get expected value from the Detail.xlsx template columns (not ExpectedOutput)
-            // The column to read from depends on the validation type, determined by the StepId:
-            // - OC-OUT- = console output validation -> read from Output column
-            // - OC-DATA- = data response validation -> read from DataResponse column
-            // - OS-OUT- = server console output validation -> read from Output column
-            // - OS-REQ- = data request validation -> read from DataRequest column
+            // Get expected value from the Detail.xlsx template columns based on validation type
+            var validationType = GetValidationType(record.StepId);
+            
             if (isClientSheet)
             {
-                if (record.StepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                switch (validationType)
                 {
-                    // Data response validation - read from DataResponse column
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                        expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
-                }
-                else if (record.StepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Console output validation - read from Output column
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                        expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
-                }
-                else
-                {
-                    // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                        expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
-                    if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                        expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
+                    case StepValidationType.DataResponse:
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
+                            expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
+                        break;
+                    case StepValidationType.ConsoleOutput:
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
+                            expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
+                        break;
+                    default:
+                        // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataRespCol))
+                            expectedValue = ws.Cell(rowNum.Value, dataRespCol).GetString();
+                        if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var outCol))
+                            expectedValue = ws.Cell(rowNum.Value, outCol).GetString();
+                        break;
                 }
             }
             else if (isServerSheet)
             {
-                if (record.StepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                switch (validationType)
                 {
-                    // Data request validation - read from DataRequest column
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                        expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
-                }
-                else if (record.StepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Server console output validation - read from Output column
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                        expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
-                }
-                else
-                {
-                    // For other validation types (METHOD, SIZE), try DataRequest first, then Output
-                    if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                        expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
-                    if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                        expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
+                    case StepValidationType.DataRequest:
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
+                            expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
+                        break;
+                    case StepValidationType.ConsoleOutput:
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
+                            expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
+                        break;
+                    default:
+                        // For other validation types (METHOD, SIZE), try DataRequest first, then Output
+                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataReqCol))
+                            expectedValue = ws.Cell(rowNum.Value, dataReqCol).GetString();
+                        if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var outCol))
+                            expectedValue = ws.Cell(rowNum.Value, outCol).GetString();
+                        break;
                 }
             }
             
             // Get actual value from runtime execution (captured in memory)
-            // The capture key depends on the validation type (step ID)
+            // The capture key depends on the validation type
             if (!string.IsNullOrEmpty(record.QuestionCode))
             {
                 string? captureKey = null;
                 
                 if (isClientSheet)
                 {
-                    if (record.StepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                    captureKey = validationType switch
                     {
-                        // Data response validation - get from server response
-                        captureKey = _run.GetServerResponseCaptureKey(record.QuestionCode, stage.ToString());
-                    }
-                    else if (record.StepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Console output validation - get from client output
-                        captureKey = _run.GetClientCaptureKey(record.QuestionCode, stage.ToString());
-                    }
-                    else
-                    {
-                        // For other types (METHOD, STATUS, SIZE), default to client output
-                        captureKey = _run.GetClientCaptureKey(record.QuestionCode, stage.ToString());
-                    }
+                        StepValidationType.DataResponse => _run.GetServerResponseCaptureKey(record.QuestionCode, stage.ToString()),
+                        StepValidationType.ConsoleOutput => _run.GetClientCaptureKey(record.QuestionCode, stage.ToString()),
+                        _ => _run.GetClientCaptureKey(record.QuestionCode, stage.ToString())
+                    };
                 }
                 else if (isServerSheet)
                 {
-                    if (record.StepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                    captureKey = validationType switch
                     {
-                        // Data request validation - get from server request
-                        captureKey = _run.GetServerRequestCaptureKey(record.QuestionCode, stage.ToString());
-                    }
-                    else if (record.StepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Server console output validation - get from server output
-                        captureKey = _run.GetServerCaptureKey(record.QuestionCode, stage.ToString());
-                    }
-                    else
-                    {
-                        // For other types (METHOD, SIZE), default to server output
-                        captureKey = _run.GetServerCaptureKey(record.QuestionCode, stage.ToString());
-                    }
+                        StepValidationType.DataRequest => _run.GetServerRequestCaptureKey(record.QuestionCode, stage.ToString()),
+                        StepValidationType.ConsoleOutput => _run.GetServerCaptureKey(record.QuestionCode, stage.ToString()),
+                        _ => _run.GetServerCaptureKey(record.QuestionCode, stage.ToString())
+                    };
                 }
                 
                 if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
@@ -1275,6 +1193,40 @@ namespace SolutionGrader.Core.Services
                 actualValue = actualValue[..ErrorReportMaxValueLength] + "...";
             
             return (expectedValue, actualValue);
+        }
+
+        /// <summary>
+        /// Determines the validation type from a step ID.
+        /// Step IDs follow a pattern like "OC-OUT-2", "OC-DATA-3", "OS-REQ-1", etc.
+        /// This helps determine which column to read expected values from and which memory location to get actual values from.
+        /// </summary>
+        /// <param name="stepId">The step ID (e.g., "OC-OUT-2", "OC-DATA-3")</param>
+        /// <returns>The validation type (OUT, DATA, REQ, or OTHER)</returns>
+        private enum StepValidationType
+        {
+            ConsoleOutput,      // OC-OUT or OS-OUT
+            DataResponse,       // OC-DATA
+            DataRequest,        // OS-REQ
+            Other              // METHOD, STATUS, SIZE, etc.
+        }
+
+        private static StepValidationType GetValidationType(string stepId)
+        {
+            // Step IDs have format: PREFIX-TYPE-STAGE (e.g., "OC-OUT-2", "OC-DATA-3")
+            // We check the TYPE part to determine validation type
+            var parts = stepId.Split('-');
+            if (parts.Length >= 2)
+            {
+                var type = parts[1].ToUpperInvariant();
+                return type switch
+                {
+                    "OUT" => StepValidationType.ConsoleOutput,
+                    "DATA" => StepValidationType.DataResponse,
+                    "REQ" => StepValidationType.DataRequest,
+                    _ => StepValidationType.Other
+                };
+            }
+            return StepValidationType.Other;
         }
 
         public void Dispose() => _wb?.Dispose();
