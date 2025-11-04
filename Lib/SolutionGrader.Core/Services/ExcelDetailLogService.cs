@@ -1196,24 +1196,51 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Determines the validation type from a step ID.
-        /// Step IDs follow a pattern like "OC-OUT-2", "OC-DATA-3", "OS-REQ-1", etc.
-        /// This helps determine which column to read expected values from and which memory location to get actual values from.
+        /// Enum representing the validation type determined from a step ID.
+        /// Used to determine which Excel column to read expected values from and which memory location to retrieve actual values from.
         /// </summary>
-        /// <param name="stepId">The step ID (e.g., "OC-OUT-2", "OC-DATA-3")</param>
-        /// <returns>The validation type (OUT, DATA, REQ, or OTHER)</returns>
         private enum StepValidationType
         {
-            ConsoleOutput,      // OC-OUT or OS-OUT
-            DataResponse,       // OC-DATA
-            DataRequest,        // OS-REQ
-            Other              // METHOD, STATUS, SIZE, etc.
+            /// <summary>Console output validation (OC-OUT or OS-OUT steps)</summary>
+            ConsoleOutput,
+            
+            /// <summary>HTTP data response validation (OC-DATA steps)</summary>
+            DataResponse,
+            
+            /// <summary>HTTP data request validation (OS-REQ steps)</summary>
+            DataRequest,
+            
+            /// <summary>Other validation types (METHOD, STATUS, SIZE, etc.)</summary>
+            Other
         }
 
-        private static StepValidationType GetValidationType(string stepId)
+        /// <summary>
+        /// Determines the validation type from a step ID by parsing its structure.
+        /// Step IDs follow the format: PREFIX-TYPE-STAGE (e.g., "OC-OUT-2", "OC-DATA-3", "OS-REQ-1").
+        /// This method extracts the TYPE part to determine what kind of validation is being performed.
+        /// </summary>
+        /// <param name="stepId">
+        /// The step ID to parse. Expected format: PREFIX-TYPE-STAGE where:
+        /// - PREFIX is "OC" (OutputClients), "OS" (OutputServers), or "IC" (InputClients)
+        /// - TYPE is "OUT" (output), "DATA" (data response), "REQ" (data request), "METHOD", "STATUS", "SIZE", etc.
+        /// - STAGE is a numeric stage identifier
+        /// Examples: "OC-OUT-2", "OC-DATA-3", "OS-REQ-1", "OC-METHOD-2"
+        /// </param>
+        /// <returns>
+        /// The validation type:
+        /// - ConsoleOutput for OUT steps (console/terminal output validation)
+        /// - DataResponse for DATA steps (HTTP response body validation)
+        /// - DataRequest for REQ steps (HTTP request body validation)
+        /// - Other for all other types (METHOD, STATUS, SIZE, or invalid/null stepIds)
+        /// </returns>
+        private static StepValidationType GetValidationType(string? stepId)
         {
+            // Handle null or empty stepId gracefully
+            if (string.IsNullOrWhiteSpace(stepId))
+                return StepValidationType.Other;
+            
             // Step IDs have format: PREFIX-TYPE-STAGE (e.g., "OC-OUT-2", "OC-DATA-3")
-            // We check the TYPE part to determine validation type
+            // We extract the TYPE part (index 1) to determine validation type
             var parts = stepId.Split('-');
             if (parts.Length >= 2)
             {
@@ -1226,6 +1253,8 @@ namespace SolutionGrader.Core.Services
                     _ => StepValidationType.Other
                 };
             }
+            
+            // If the stepId doesn't follow expected format, treat as Other
             return StepValidationType.Other;
         }
 
