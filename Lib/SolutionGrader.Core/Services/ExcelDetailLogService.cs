@@ -39,12 +39,13 @@ namespace SolutionGrader.Core.Services
         private readonly List<TestCaseSummary> _caseSummaries = new();
 
         // Sheets expected in Detail.xlsx - support both old (plural) and new (singular) formats
-        private const string SheetInput = SuiteKeywords.Sheet_InputClients;
-        private const string SheetInputAlt = SuiteKeywords.Sheet_InputClient;
-        private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;
-        private const string SheetOutClientsAlt = SuiteKeywords.Sheet_OutputClient;
-        private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;
-        private const string SheetOutServersAlt = SuiteKeywords.Sheet_OutputServer;
+        // Priority: Try new format first (singular), then fall back to old format (plural)
+        private const string SheetInput = SuiteKeywords.Sheet_InputClients;        // Old: "InputClients"
+        private const string SheetInputAlt = SuiteKeywords.Sheet_InputClient;      // New: "InputClient"
+        private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;  // Old: "OutputClients"
+        private const string SheetOutClientsAlt = SuiteKeywords.Sheet_OutputClient;// New: "OutputClient"
+        private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;  // Old: "OutputServers"
+        private const string SheetOutServersAlt = SuiteKeywords.Sheet_OutputServer;// New: "OutputServer"
         
         // Maximum length for expected/actual values displayed in ErrorReport sheet
         private const int ErrorReportMaxValueLength = 100;
