@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
@@ -143,14 +144,17 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         if (dbConfig == null)
         {
-            // Default connection string using template
-            return string.Format(
-                AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
-                AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
-                AppsettingKeywords.DEFAULT_DATABASE_NAME,
-                AppsettingKeywords.DEFAULT_USERNAME,
-                AppsettingKeywords.DEFAULT_PASSWORD
-            );
+            // Default connection string using SqlConnectionStringBuilder
+            var defaultBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
+                InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME,
+                UserID = AppsettingKeywords.DEFAULT_USERNAME,
+                Password = AppsettingKeywords.DEFAULT_PASSWORD,
+                TrustServerCertificate = true,
+                ConnectTimeout = 30
+            };
+            return defaultBuilder.ConnectionString;
         }
 
         var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
@@ -159,12 +163,13 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         // - localhost, 127.0.0.1, or hostnames/IPs
         // - Already formatted instances (.\SQLEXPRESS)
         // - (local) keyword
-        // - Server with port specification (server:port)
+        // - Server with port specification (server:port or server,port)
         if (!server.StartsWith(".\\") && 
             !server.Contains("\\") && 
             !server.Equals("(local)", StringComparison.OrdinalIgnoreCase) &&
             !server.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
             !server.Contains(":") &&   // Avoid prefixing server with port (server:port)
+            !server.Contains(",") &&   // Avoid prefixing server with port (server,port)
             !IPAddress.TryParse(server, out _)) // Don't prefix valid IP addresses
         {
             // Check if it looks like a hostname (contains dots for FQDN or computer.instance format)
@@ -179,13 +184,17 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         var username = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
         var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
 
-        // Use template for consistent formatting
-        return string.Format(
-            AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
-            server,
-            database,
-            username,
-            password
-        );
+        // Build connection string with SqlConnectionStringBuilder for consistency and better defaults
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = server,
+            InitialCatalog = database,
+            UserID = username,
+            Password = password,
+            TrustServerCertificate = true,
+            ConnectTimeout = 30
+        };
+
+        return builder.ConnectionString;
     }
 }

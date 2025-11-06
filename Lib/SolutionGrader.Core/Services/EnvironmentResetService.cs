@@ -183,14 +183,31 @@ END";
             builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
             builder.Password = AppsettingKeywords.DEFAULT_PASSWORD;
             builder.TrustServerCertificate = true;
+            builder.ConnectTimeout = 30;
         }
         else
         {
             var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
             // Format SQL Server instance name properly
-            if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase))
+            // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
+            // - localhost, 127.0.0.1, or hostnames/IPs
+            // - Already formatted instances (.\SQLEXPRESS)
+            // - (local) keyword
+            // - Server with port specification (server:port or server,port)
+            if (!server.StartsWith(".\\") && 
+                !server.Contains("\\") && 
+                !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase) &&
+                !server.Equals("localhost", System.StringComparison.OrdinalIgnoreCase) &&
+                !server.Contains(":") &&   // Avoid prefixing server with port (server:port)
+                !server.Contains(",") &&   // Avoid prefixing server with port (server,port)
+                !System.Net.IPAddress.TryParse(server, out _)) // Don't prefix valid IP addresses
             {
-                server = $".\\{server}";
+                // Check if it looks like a hostname (contains dots for FQDN or computer.instance format)
+                // Only add prefix if it's a simple instance name without dots
+                if (!server.Contains("."))
+                {
+                    server = $".\\{server}";
+                }
             }
 
             builder.DataSource = server;
@@ -198,6 +215,7 @@ END";
             builder.UserID = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
             builder.Password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
             builder.TrustServerCertificate = true;
+            builder.ConnectTimeout = 30;
         }
 
         return builder.ConnectionString;
