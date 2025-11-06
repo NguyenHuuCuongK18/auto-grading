@@ -130,7 +130,7 @@ namespace SolutionGrader.Core.Services
                 string body; using (var reader = new StreamReader(req.InputStream, req.ContentEncoding)) body = reader.ReadToEnd();
 
                 // Build complete URL with query string using localhost (not 127.0.0.1) to match Host header
-                var urlBuilder = new UriBuilder("http", "localhost", _realServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
+                var urlBuilder = new UriBuilder(AppsettingKeywords.PROTOCOL_HTTP, "localhost", _realServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
                 var targetUrl = urlBuilder.ToString();
 
                 var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), targetUrl);
@@ -231,7 +231,7 @@ namespace SolutionGrader.Core.Services
                 var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
 
                 // Store HTTP request and response separately in memory to avoid overwriting console output
-                _run.SetServerRequest(question, stage, requestBody ?? "");
+                _run.SetServerRequest(question, stage, requestBody ?? string.Empty);
                 
                 string respText;
                 int normalizedByteSize;

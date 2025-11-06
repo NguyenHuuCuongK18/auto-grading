@@ -143,8 +143,14 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         if (dbConfig == null)
         {
-            // Default connection string
-            return $"server={AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE};database={AppsettingKeywords.DEFAULT_DATABASE_NAME};uid={AppsettingKeywords.DEFAULT_USERNAME};pwd={AppsettingKeywords.DEFAULT_PASSWORD};TrustServerCertificate=True;";
+            // Default connection string using template
+            return string.Format(
+                AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
+                AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
+                AppsettingKeywords.DEFAULT_DATABASE_NAME,
+                AppsettingKeywords.DEFAULT_USERNAME,
+                AppsettingKeywords.DEFAULT_PASSWORD
+            );
         }
 
         var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
@@ -158,6 +164,13 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         var username = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
         var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
 
-        return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=True;";
+        // Use template for consistent formatting
+        return string.Format(
+            AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
+            server,
+            database,
+            username,
+            password
+        );
     }
 }
