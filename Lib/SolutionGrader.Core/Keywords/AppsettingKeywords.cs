@@ -35,8 +35,9 @@ public static class AppsettingKeywords
     public const string MASTER_DATABASE = "master";
     
     // Default connection string template
-    // Format: server={server};database={database};uid={username};pwd={password};TrustServerCertificate=true;Trusted_Connection=true
-    public const string DEFAULT_CONNECTION_STRING_TEMPLATE = "server={0};database={1};uid={2};pwd={3};TrustServerCertificate=true;Trusted_Connection=true";
+    // Format: server={server};database={database};uid={username};pwd={password};TrustServerCertificate=true
+    // Note: Trusted_Connection=true is mutually exclusive with uid/pwd and causes authentication failures
+    public const string DEFAULT_CONNECTION_STRING_TEMPLATE = "server={0};database={1};uid={2};pwd={3};TrustServerCertificate=true";
     
     // Protocol values
     public const string PROTOCOL_HTTP = "HTTP";
