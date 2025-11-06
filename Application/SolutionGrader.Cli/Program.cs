@@ -50,6 +50,7 @@ public class Program
         var env = new EnvironmentResetService(files);
         var suite = new ExcelSuiteLoader();
         var parse = new ExcelDetailParser();
+        var appsettings = new AppsettingsCreationService();
 
         IRunContext runctx = new RunContext();
 
@@ -72,7 +73,7 @@ public class Program
         IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx);
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx, appsettings);
         
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
         
@@ -120,6 +121,8 @@ Notes:
   - Protocol (HTTP/TCP) is read from Header.xlsx (if provided by the suite); no CLI flag needed.
   - Grading mode allows easy toggling of validations for debugging purposes.
   - Database reset: By default, uses local SQL Server connection. Set --db-docker true to use Docker environment.
+  - Appsettings: If not provided, appsettings.json files are automatically generated from Header.xlsx with random ports.
+    Database configuration (server, database, username, password) is read from Header.xlsx.
 ");
         return -1;
     }

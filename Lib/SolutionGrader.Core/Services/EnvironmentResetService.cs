@@ -46,7 +46,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
         try
         {
-            Console.WriteLine("[Database] Resetting database from script...");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Resetting database from script...");
             
             bool success;
             if (useDocker)
@@ -60,16 +60,16 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             
             if (!success)
             {
-                Console.WriteLine("[Database] Warning: Could not execute database reset script");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Could not execute database reset script");
             }
             else
             {
-                Console.WriteLine("[Database] Database reset completed successfully");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Database reset completed successfully");
             }
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"[Database] Warning: Database reset failed: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Database reset failed: {ex.Message}");
             // Don't throw - allow tests to continue even if DB reset fails
         }
     }
@@ -85,7 +85,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             var builder = new SqlConnectionStringBuilder(connectionString);
             if (string.IsNullOrWhiteSpace(builder.InitialCatalog))
             {
-                Console.WriteLine("[Database] Warning: Connection string does not specify a database name (Initial Catalog).");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Connection string does not specify a database name (Initial Catalog).");
                 return false;
             }
 
@@ -104,7 +104,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"[Database] Local database reset error: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Local database reset error: {ex.Message}");
             return false;
         }
     }
@@ -265,7 +265,7 @@ END";
                 if (!string.IsNullOrWhiteSpace(error) && error.Contains("Level 16"))
                 {
                     // Level 16 errors are warnings we can ignore
-                    Console.WriteLine($"[Database] SQL execution had warnings (non-fatal)");
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} SQL execution had warnings (non-fatal)");
                 }
                 
                 return execProcess.ExitCode == 0;
@@ -273,7 +273,7 @@ END";
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"[Database] Docker database reset error: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Docker database reset error: {ex.Message}");
             return false;
         }
     }

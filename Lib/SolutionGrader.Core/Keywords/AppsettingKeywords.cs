@@ -26,4 +26,12 @@ public static class AppsettingKeywords
     private const string TRUSTED_CONNECTION = "Trusted_Connection";
     private const string TRUST_SERVER_CERTIFICATE = "TrustServerCertificate";
     private const string APPSETTINGS = "appsettings";
+    
+    // Log prefixes
+    public const string LOG_PREFIX_APPSETTINGS = "[Appsettings]";
+    public const string LOG_PREFIX_DATABASE = "[Database]";
+    
+    // Messages
+    public const string MSG_GENERATING_FROM_HEADER = "Generating appsettings.json from Header.xlsx configuration...";
+    public const string MSG_CONFIGURED_MIDDLEWARE = "Configured middleware - Proxy: {0}, Server: {1}";
 }
