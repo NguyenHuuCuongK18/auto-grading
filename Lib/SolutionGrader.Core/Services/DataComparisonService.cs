@@ -539,8 +539,8 @@ namespace SolutionGrader.Core.Services
             if (!config.ShouldGradeStep(step.Id))
             {
                 var sheetName = step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase) 
-                    ? "OutputClients" 
-                    : "OutputServers";
+                    ? SuiteKeywords.Sheet_OutputClients 
+                    : SuiteKeywords.Sheet_OutputServers;
                 return (true, $"Validation skipped: {sheetName} sheet not enabled in grading mode");
             }
 

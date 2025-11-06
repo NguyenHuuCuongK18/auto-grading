@@ -42,8 +42,9 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 if (string.IsNullOrWhiteSpace(stage) && string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(action))
                     continue;
 
-                // First step with "Connect" action needs to start processes
-                if (isFirstRow && string.Equals(action, "Connect", StringComparison.OrdinalIgnoreCase))
+                // First step with "Connect" (old format) or "Start" (new format) action needs to start processes
+                if (isFirstRow && (string.Equals(action, "Connect", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(action, "Start", StringComparison.OrdinalIgnoreCase)))
                 {
                     isFirstRow = false;
                     
