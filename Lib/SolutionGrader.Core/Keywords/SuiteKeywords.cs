@@ -6,9 +6,17 @@ public static class SuiteKeywords
     public const string HeaderFileName = "Header.xlsx";  // Same as FileKeywords.FileName_Header
     public const string DetailFileName = "Detail.xlsx";  // Same as FileKeywords.FileName_Detail
 
+    // Sheet names - supporting both old (plural) and new (singular) formats
+    // Old format (plural) - for backward compatibility
     public const string Sheet_InputClients   = "InputClients";
     public const string Sheet_OutputClients  = "OutputClients";
     public const string Sheet_OutputServers  = "OutputServers";
+    
+    // New format (singular) - preferred format from Recorder_NetWorking
+    public const string Sheet_InputClient    = "InputClient";
+    public const string Sheet_OutputClient   = "OutputClient";
+    public const string Sheet_OutputServer   = "OutputServer";
+    
     public const string Sheet_Header         = "Header";        // fallback header
     public const string Sheet_QuestionMark   = "QuestionMark";  // for reading test case marks
 

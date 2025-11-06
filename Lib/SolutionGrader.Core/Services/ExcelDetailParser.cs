@@ -15,14 +15,17 @@ public sealed class ExcelDetailParser : ITestCaseParser
         using var wb = new XLWorkbook(xlsxPath);
         var steps = new List<Step>();
 
-        void ReadSheet(string name, Action<IXLWorksheet> parse)
+        // Helper to try both old (plural) and new (singular) sheet names
+        void ReadSheetFlexible(string primaryName, string alternateName, Action<IXLWorksheet> parse)
         {
-            var w = wb.Worksheets.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+            var w = wb.Worksheets.FirstOrDefault(s => 
+                string.Equals(s.Name, primaryName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.Name, alternateName, StringComparison.OrdinalIgnoreCase));
             if (w != null && w.RangeUsed() != null) parse(w);
         }
 
-        // InputClients
-        ReadSheet(SuiteKeywords.Sheet_InputClients, ws =>
+        // InputClients - try both "InputClient" (new) and "InputClients" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_InputClient, SuiteKeywords.Sheet_InputClients, ws =>
         {
             var map = Header(ws);
             bool isFirstRow = true;
@@ -111,8 +114,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
             }
         });
 
-        // OutputClients
-        ReadSheet(SuiteKeywords.Sheet_OutputClients, ws =>
+        // OutputClients - try both "OutputClient" (new) and "OutputClients" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_OutputClient, SuiteKeywords.Sheet_OutputClients, ws =>
         {
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
@@ -221,8 +224,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
             }
         });
 
-        // OutputServers
-        ReadSheet(SuiteKeywords.Sheet_OutputServers, ws =>
+        // OutputServers - try both "OutputServer" (new) and "OutputServers" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_OutputServer, SuiteKeywords.Sheet_OutputServers, ws =>
         {
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
