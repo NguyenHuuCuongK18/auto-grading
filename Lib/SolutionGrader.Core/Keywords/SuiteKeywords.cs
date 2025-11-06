@@ -26,6 +26,13 @@ public static class SuiteKeywords
     public const string Col_IC_DataType = "DataType";
     public const string Col_IC_Action   = "Action";
 
+    // Input DataType values - supporting both old and new formats
+    public const string InputDataType_System     = "System";      // New format: for system-generated actions (Start, Connect)
+    public const string InputDataType_UserInput  = "UserInput";   // New format: for user input
+    public const string InputDataType_Integer    = "Integer";     // Old format: specific type
+    public const string InputDataType_String     = "String";      // Old format: specific type
+    public const string InputDataType_Empty      = "";            // Old format: empty for Connect action
+
     // OutputClients
     public const string Col_OC_Stage             = "Stage";
     public const string Col_OC_Method            = "Method";

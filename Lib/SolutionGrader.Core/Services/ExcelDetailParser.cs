@@ -55,7 +55,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ServerStart,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add middleware/proxy step
@@ -65,7 +66,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.TcpRelay,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add client start step
@@ -75,7 +77,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ClientStart,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add wait for processes to initialize
@@ -85,7 +88,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000"
+                        Value = "1000",
+                        DataType = dataType
                     });
                 }
                 else if (!string.IsNullOrWhiteSpace(input))
@@ -99,7 +103,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ClientInput,
-                        Value = input
+                        Value = input,
+                        DataType = dataType
                     });
                     
                     // Add a wait after input to let it process (increased for HTTP requests)
@@ -109,7 +114,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000"
+                        Value = "1000",
+                        DataType = dataType
                     });
                 }
             }
