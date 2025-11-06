@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services;
 
@@ -23,7 +24,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         } while (_serverPort == _proxyPort);
 
         // Determine IP address based on Type
-        var ipAddress = DetermineIpAddress(dbConfig?.Type ?? "HTTP");
+        var ipAddress = DetermineIpAddress(dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
 
         // Generate server appsettings.json if server path provided
         if (!string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
@@ -31,13 +32,13 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             var serverDir = Path.GetDirectoryName(serverExePath);
             if (!string.IsNullOrEmpty(serverDir))
             {
-                var serverAppsettingsPath = Path.Combine(serverDir, "appsettings.json");
+                var serverAppsettingsPath = Path.Combine(serverDir, FileKeywords.FileName_AppSettings);
                 var serverConfig = CreateServerAppsettings(ipAddress, _serverPort, dbConfig);
                 File.WriteAllText(serverAppsettingsPath, JsonSerializer.Serialize(serverConfig, new JsonSerializerOptions 
                 { 
                     WriteIndented = true 
                 }));
-                Console.WriteLine($"[AppsettingsCreation] Generated server appsettings.json at: {serverAppsettingsPath}");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_SERVER_APPSETTINGS, serverAppsettingsPath)}");
             }
         }
 
@@ -47,17 +48,17 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             var clientDir = Path.GetDirectoryName(clientExePath);
             if (!string.IsNullOrEmpty(clientDir))
             {
-                var clientAppsettingsPath = Path.Combine(clientDir, "appsettings.json");
+                var clientAppsettingsPath = Path.Combine(clientDir, FileKeywords.FileName_AppSettings);
                 var clientConfig = CreateClientAppsettings(ipAddress, _proxyPort);
                 File.WriteAllText(clientAppsettingsPath, JsonSerializer.Serialize(clientConfig, new JsonSerializerOptions 
                 { 
                     WriteIndented = true 
                 }));
-                Console.WriteLine($"[AppsettingsCreation] Generated client appsettings.json at: {clientAppsettingsPath}");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_CLIENT_APPSETTINGS, clientAppsettingsPath)}");
             }
         }
 
-        Console.WriteLine($"[AppsettingsCreation] Allocated ports - Proxy: {_proxyPort}, Server: {_serverPort}");
+        Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_ALLOCATED_PORTS, _proxyPort, _serverPort)}");
         return (_proxyPort, _serverPort);
     }
 
@@ -69,9 +70,9 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     private static string DetermineIpAddress(string type)
     {
         // HTTP uses localhost, TCP uses 127.0.0.1
-        return type.Equals("HTTP", StringComparison.OrdinalIgnoreCase) 
-            ? "http://localhost" 
-            : "127.0.0.1";
+        return type.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) 
+            ? AppsettingKeywords.HTTP_LOCALHOST 
+            : AppsettingKeywords.TCP_LOCALHOST;
     }
 
     private static int FindAvailablePort()
@@ -143,19 +144,19 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         if (dbConfig == null)
         {
             // Default connection string
-            return "server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=True;";
+            return $"server={AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE};database={AppsettingKeywords.DEFAULT_DATABASE_NAME};uid={AppsettingKeywords.DEFAULT_USERNAME};pwd={AppsettingKeywords.DEFAULT_PASSWORD};TrustServerCertificate=True;";
         }
 
-        var server = dbConfig.SqlServer ?? "SQLEXPRESS";
+        var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
         // Format SQL Server instance name properly
         if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", StringComparison.OrdinalIgnoreCase))
         {
             server = $".\\{server}";
         }
 
-        var database = dbConfig.Database ?? "Library";
-        var username = dbConfig.Username ?? "sa";
-        var password = dbConfig.Password ?? "sa";
+        var database = dbConfig.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
+        var username = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
+        var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
 
         return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=True;";
     }

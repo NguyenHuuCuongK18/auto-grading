@@ -12,6 +12,7 @@ public sealed class ExecuteSuiteArgs
     public string? ClientAppSettingsTemplate { get; init; }
     public string? ServerAppSettingsTemplate { get; init; }
     public string? DatabaseScriptPath { get; init; }
+    public bool UseDatabaseDockerReset { get; init; } = false;  // Default to local reset
 
     public int StageTimeoutSeconds { get; init; } = 10;
 }

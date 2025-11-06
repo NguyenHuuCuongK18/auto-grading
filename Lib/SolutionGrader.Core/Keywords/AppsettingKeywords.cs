@@ -12,18 +12,65 @@ using SolutionGrader.Core.Keywords;
 public static class AppsettingKeywords
 {
     public const string HEADER = FileKeywords.FileName_Header;
-    private const string CONFIG_SHEET = "Config";
-    private const string CONNECTION_TYPE = "Type";
-    private const string SQL_EXPRESS = "SQLEXPRESS";
-    private const string CONNECTION_STRINGS = "ConnectionStrings";
-    private const string MY_CNN = "MyCnn";
-    private const string IP_ADDRESS = "IpAddress";
-    private const string PORT = "Port";
-    private const string SQL_SERVER = "SqlServer";
-    private const string DATABASE_NAME = "Database";
-    private const string USER_ID = "Username";
-    private const string PASSWORD = "Password";
-    private const string TRUSTED_CONNECTION = "Trusted_Connection";
-    private const string TRUST_SERVER_CERTIFICATE = "TrustServerCertificate";
-    private const string APPSETTINGS = "appsettings";
+    public const string CONFIG_SHEET = "Config";
+    public const string CONNECTION_TYPE = "Type";
+    public const string SQL_EXPRESS = "SQLEXPRESS";
+    public const string CONNECTION_STRINGS = "ConnectionStrings";
+    public const string MY_CNN = "MyCnn";
+    public const string IP_ADDRESS = "IpAddress";
+    public const string PORT = "Port";
+    public const string SQL_SERVER = "SqlServer";
+    public const string DATABASE_NAME = "Database";
+    public const string USER_ID = "Username";
+    public const string PASSWORD = "Password";
+    public const string TRUSTED_CONNECTION = "Trusted_Connection";
+    public const string TRUST_SERVER_CERTIFICATE = "TrustServerCertificate";
+    public const string APPSETTINGS = "appsettings";
+    
+    // Database defaults
+    public const string DEFAULT_SQL_SERVER_INSTANCE = ".\\SQLEXPRESS";
+    public const string DEFAULT_DATABASE_NAME = "Library";
+    public const string DEFAULT_USERNAME = "sa";
+    public const string DEFAULT_PASSWORD = "sa";
+    public const string MASTER_DATABASE = "master";
+    
+    // Protocol values
+    public const string PROTOCOL_HTTP = "HTTP";
+    public const string PROTOCOL_TCP = "TCP";
+    public const string HTTP_LOCALHOST = "http://localhost";
+    public const string TCP_LOCALHOST = "127.0.0.1";
+    
+    // Docker constants
+    public const string DOCKER_COMMAND = "docker";
+    public const string DOCKER_CONTAINER_NAME = "sqlserver-test";
+    public const string DOCKER_SQLCMD_PATH = "/opt/mssql-tools18/bin/sqlcmd";
+    public const string DOCKER_TMP_SCRIPT_PATH = "/tmp/db_reset.sql";
+    public const string DOCKER_SA_PASSWORD = "YourStrong@Passw0rd";
+    public const string DOCKER_LOCALHOST = "localhost";
+    
+    // SQL error levels
+    public const string SQL_ERROR_LEVEL_16 = "Level 16";
+    
+    // Database field names
+    public const string DB_FIELD_INITIAL_CATALOG = "Initial Catalog";
+    
+    // Log prefixes
+    public const string LOG_PREFIX_APPSETTINGS = "[Appsettings]";
+    public const string LOG_PREFIX_DATABASE = "[Database]";
+    public const string LOG_PREFIX_APPSETTINGS_CREATION = "[AppsettingsCreation]";
+    
+    // Messages
+    public const string MSG_GENERATING_FROM_HEADER = "Generating appsettings.json from Header.xlsx configuration...";
+    public const string MSG_CONFIGURED_MIDDLEWARE = "Configured middleware - Proxy: {0}, Server: {1}";
+    public const string MSG_RESETTING_DATABASE = "Resetting database from script...";
+    public const string MSG_DATABASE_RESET_SUCCESS = "Database reset completed successfully";
+    public const string MSG_DATABASE_RESET_FAILED = "Warning: Could not execute database reset script";
+    public const string MSG_DATABASE_RESET_ERROR = "Warning: Database reset failed: {0}";
+    public const string MSG_LOCAL_DB_RESET_ERROR = "Local database reset error: {0}";
+    public const string MSG_DOCKER_DB_RESET_ERROR = "Docker database reset error: {0}";
+    public const string MSG_NO_INITIAL_CATALOG = "Warning: Connection string does not specify a database name (Initial Catalog).";
+    public const string MSG_SQL_WARNINGS_NONFATAL = "SQL execution had warnings (non-fatal)";
+    public const string MSG_GENERATED_SERVER_APPSETTINGS = "Generated server appsettings.json at: {0}";
+    public const string MSG_GENERATED_CLIENT_APPSETTINGS = "Generated client appsettings.json at: {0}";
+    public const string MSG_ALLOCATED_PORTS = "Allocated ports - Proxy: {0}, Server: {1}";
 }

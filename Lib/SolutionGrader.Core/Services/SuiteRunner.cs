@@ -18,6 +18,7 @@ namespace SolutionGrader.Core.Services
         private readonly IMiddlewareService _mw;
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
+        private readonly IAppsettingsCreationService _appsettings;
 
         public SuiteRunner(
             IFileService files,
@@ -29,9 +30,10 @@ namespace SolutionGrader.Core.Services
             IExecutableManager proc,
             IMiddlewareService mw,
             IDetailLogService log,
-            IRunContext run)
+            IRunContext run,
+            IAppsettingsCreationService appsettings)
         {
-            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _mw = mw; _log = log; _run = run;
+            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _mw = mw; _log = log; _run = run; _appsettings = appsettings;
         }
 
         public async Task<int> ExecuteSuiteAsync(ExecuteSuiteArgs args, CancellationToken ct = default)
@@ -49,8 +51,23 @@ namespace SolutionGrader.Core.Services
 
                 Console.WriteLine($"\n[TestCase] Starting: {q.Name} (Mark: {q.Mark})");
 
-                _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
-                await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, ct);
+                // Generate appsettings if templates are not provided
+                if (string.IsNullOrWhiteSpace(args.ClientAppSettingsTemplate) && string.IsNullOrWhiteSpace(args.ServerAppSettingsTemplate))
+                {
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
+                    var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, args.ClientExePath, args.ServerExePath);
+                    
+                    // Configure middleware with the generated ports
+                    _mw.ConfigurePorts(proxyPort, serverPort);
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {string.Format(AppsettingKeywords.MSG_CONFIGURED_MIDDLEWARE, proxyPort, serverPort)}");
+                }
+                else
+                {
+                    // Use provided template files
+                    _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
+                }
+                
+                await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, def.DatabaseConfig, args.UseDatabaseDockerReset, ct);
 
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
                 _files.EnsureDirectory(outDir);

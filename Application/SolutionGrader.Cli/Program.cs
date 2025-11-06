@@ -42,6 +42,7 @@ public class Program
             ClientAppSettingsTemplate = a.GetValueOrDefault("client-appsettings"),
             ServerAppSettingsTemplate = a.GetValueOrDefault("server-appsettings"),
             DatabaseScriptPath = a.GetValueOrDefault("db-script"),
+            UseDatabaseDockerReset = a.TryGetValue("db-docker", out var dbDocker) && bool.TryParse(dbDocker, out var useDocker) && useDocker,
             StageTimeoutSeconds = a.TryGetValue("timeout", out var t) && int.TryParse(t, out var sec) ? Math.Max(1, sec) : 10,
         };
 
@@ -49,6 +50,7 @@ public class Program
         var env = new EnvironmentResetService(files);
         var suite = new ExcelSuiteLoader();
         var parse = new ExcelDetailParser();
+        var appsettings = new AppsettingsCreationService();
 
         IRunContext runctx = new RunContext();
 
@@ -71,7 +73,7 @@ public class Program
         IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx);
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx, appsettings);
         
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
         
@@ -105,7 +107,7 @@ Usage:
   SolutionGrader.Cli ExecuteSuite --suite <suiteFolder|Header.xlsx> --out <resultRoot>
                                 [--client <client.exe>] [--server <server.exe>]
                                 [--client-appsettings <path>] [--server-appsettings <path>]
-                                [--db-script <sql>] [--timeout <sec>]
+                                [--db-script <sql>] [--db-docker <true|false>] [--timeout <sec>]
                                 [--grading-mode <mode>]
 
 Grading Modes:
@@ -118,6 +120,9 @@ Grading Modes:
 Notes:
   - Protocol (HTTP/TCP) is read from Header.xlsx (if provided by the suite); no CLI flag needed.
   - Grading mode allows easy toggling of validations for debugging purposes.
+  - Database reset: By default, uses local SQL Server connection. Set --db-docker true to use Docker environment.
+  - Appsettings: If not provided, appsettings.json files are automatically generated from Header.xlsx with random ports.
+    Database configuration (server, database, username, password) is read from Header.xlsx.
 ");
         return -1;
     }
