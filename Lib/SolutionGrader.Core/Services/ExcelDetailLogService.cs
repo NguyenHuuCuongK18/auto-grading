@@ -38,10 +38,14 @@ namespace SolutionGrader.Core.Services
         // we keep summaries in-memory too, for end-of-suite WriteOverallSummary if the runner calls it
         private readonly List<TestCaseSummary> _caseSummaries = new();
 
-        // Sheets expected in Detail.xlsx
-        private const string SheetInput = SuiteKeywords.Sheet_InputClients;
-        private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;
-        private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;
+        // Sheets expected in Detail.xlsx - support both old (plural) and new (singular) formats
+        // Priority: Try new format first (singular), then fall back to old format (plural)
+        private const string SheetInput = SuiteKeywords.Sheet_InputClients;        // Old: "InputClients"
+        private const string SheetInputAlt = SuiteKeywords.Sheet_InputClient;      // New: "InputClient"
+        private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;  // Old: "OutputClients"
+        private const string SheetOutClientsAlt = SuiteKeywords.Sheet_OutputClient;// New: "OutputClient"
+        private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;  // Old: "OutputServers"
+        private const string SheetOutServersAlt = SuiteKeywords.Sheet_OutputServer;// New: "OutputServer"
         
         // Maximum length for expected/actual values displayed in ErrorReport sheet
         private const int ErrorReportMaxValueLength = 100;
@@ -78,6 +82,29 @@ namespace SolutionGrader.Core.Services
             _run = run;
         }
 
+        /// <summary>
+        /// Helper method to try getting a worksheet by name, supporting both old (plural) and new (singular) formats.
+        /// </summary>
+        private bool TryGetWorksheetFlexible(string primaryName, string alternateName, out IXLWorksheet? worksheet)
+        {
+            if (_wb == null)
+            {
+                worksheet = null;
+                return false;
+            }
+            
+            // Try primary name first (new format)
+            if (_wb.Worksheets.TryGetWorksheet(primaryName, out worksheet))
+                return true;
+            
+            // Try alternate name (old format)
+            if (_wb.Worksheets.TryGetWorksheet(alternateName, out worksheet))
+                return true;
+            
+            worksheet = null;
+            return false;
+        }
+
         public void BeginCase(string outFolder, string questionCode, string detailTemplatePath, double pointsPossible)
         {
             _files.EnsureDirectory(outFolder);
@@ -97,14 +124,24 @@ namespace SolutionGrader.Core.Services
 
             _wb = new XLWorkbook(detailTemplatePath);
 
-            foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
+            // Try both old (plural) and new (singular) sheet name formats
+            var sheetsToCheck = new[]
             {
-                if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
+                (Primary: SheetInputAlt, Alternate: SheetInput),
+                (Primary: SheetOutClientsAlt, Alternate: SheetOutClients),
+                (Primary: SheetOutServersAlt, Alternate: SheetOutServers)
+            };
+
+            foreach (var (primary, alternate) in sheetsToCheck)
+            {
+                if (!TryGetWorksheetFlexible(primary, alternate, out var ws) || ws == null) continue;
 
                 EnsureColumns(ws, BaseColumns);
                 EnsureColumns(ws, ResultColumns);
 
-                if (!sheetName.Equals(SheetInput, StringComparison.OrdinalIgnoreCase))
+                // Skip InputClient/InputClients sheet for counting compare steps
+                if (!string.Equals(ws.Name, SheetInput, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(ws.Name, SheetInputAlt, StringComparison.OrdinalIgnoreCase))
                 {
                     var rng = ws.RangeUsed();
                     if (rng != null)
@@ -124,9 +161,16 @@ namespace SolutionGrader.Core.Services
             if (_wb == null || _outPath == null) return;
 
             // Award all-or-nothing on each row that has points
-            foreach (var sheetName in new[] { SheetInput, SheetOutClients, SheetOutServers })
+            var sheetsToProcess = new[]
             {
-                if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws)) continue;
+                (Primary: SheetInputAlt, Alternate: SheetInput),
+                (Primary: SheetOutClientsAlt, Alternate: SheetOutClients),
+                (Primary: SheetOutServersAlt, Alternate: SheetOutServers)
+            };
+
+            foreach (var (primary, alternate) in sheetsToProcess)
+            {
+                if (!TryGetWorksheetFlexible(primary, alternate, out var ws) || ws == null) continue;
                 var hdr = GetHeaderIndex(ws);
                 if (!hdr.TryGetValue(GradingKeywords.Col_PointsAwarded, out var awardedCol) ||
                     !hdr.TryGetValue(GradingKeywords.Col_PointsPossible, out var possibleCol))
@@ -210,8 +254,28 @@ namespace SolutionGrader.Core.Services
 
             if (!passed && pointsPossible > 0) _allStepsPassed = false;
 
-            var sheet = ResolveSheet(step, actualPath);
-            if (!_wb.Worksheets.TryGetWorksheet(sheet, out var ws)) return;
+            var sheetHint = ResolveSheet(step, actualPath);
+            
+            // Try to get worksheet - support both old (plural) and new (singular) formats
+            IXLWorksheet? ws = null;
+            if (string.Equals(sheetHint, SheetOutClients, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, out ws))
+                    return;
+            }
+            else if (string.Equals(sheetHint, SheetOutServers, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetWorksheetFlexible(SheetOutServersAlt, SheetOutServers, out ws))
+                    return;
+            }
+            else
+            {
+                // Fallback to exact match for other sheets
+                if (!_wb.Worksheets.TryGetWorksheet(sheetHint, out ws))
+                    return;
+            }
+            
+            if (ws == null) return;
 
             var hdr = GetHeaderIndex(ws);
             var stage = ParseStage(step.Id);
@@ -352,8 +416,10 @@ namespace SolutionGrader.Core.Services
                 if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
                 {
                     var sheetName = ws.Name;
-                    var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
-                    var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                    var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutClientsAlt, StringComparison.OrdinalIgnoreCase);
+                    var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutServersAlt, StringComparison.OrdinalIgnoreCase);
                     
                     // Determine the correct capture key based on validation type
                     var validationType = GetValidationType(stepId);
@@ -409,8 +475,10 @@ namespace SolutionGrader.Core.Services
                 // - OS-REQ- = data request validation -> read from DataRequest column
                 string? expectedOutput = null;
                 var sheetName = ws.Name;
-                var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
-                var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
+                var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(sheetName, SheetOutClientsAlt, StringComparison.OrdinalIgnoreCase);
+                var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(sheetName, SheetOutServersAlt, StringComparison.OrdinalIgnoreCase);
                 
                 // Determine which column to read from based on the validation type
                 var validationType = GetValidationType(stepId);
@@ -777,9 +845,15 @@ namespace SolutionGrader.Core.Services
 
             var failed = new List<(string Sheet, int Row, string Stage, string Result, string Message, string DetailPath)>();
 
-            foreach (var sheetName in new[] { SheetOutClients, SheetOutServers })
+            var sheetsToCheck = new[]
             {
-                if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var worksheet)) continue;
+                (Primary: SheetOutClientsAlt, Alternate: SheetOutClients),
+                (Primary: SheetOutServersAlt, Alternate: SheetOutServers)
+            };
+
+            foreach (var (primary, alternate) in sheetsToCheck)
+            {
+                if (!TryGetWorksheetFlexible(primary, alternate, out var worksheet) || worksheet == null) continue;
                 var hdr = GetHeaderIndex(worksheet);
                 if (!hdr.TryGetValue(GradingKeywords.Col_Result, out var resultCol)) continue;
 
@@ -797,7 +871,7 @@ namespace SolutionGrader.Core.Services
                         var detailCol = hdr.TryGetValue(GradingKeywords.Col_DetailPath, out var dc) ? dc : 0;
 
                         failed.Add((
-                            sheetName,
+                            worksheet.Name,
                             row.RowNumber(),
                             stageCol > 0 ? row.Cell(stageCol).GetString() : string.Empty,
                             result,
@@ -882,8 +956,8 @@ namespace SolutionGrader.Core.Services
                 var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
                                    record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
                                    record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
                                    record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
@@ -997,8 +1071,8 @@ namespace SolutionGrader.Core.Services
                 var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
                                    record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
                                    record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
                                    record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
@@ -1077,19 +1151,31 @@ namespace SolutionGrader.Core.Services
             // Determine which sheet to look in based on the step ID prefix
             // Step IDs follow the convention: "OC-*" for OutputClients, "OS-*" for OutputServers
             // IC- (InputClients) steps don't have expected/actual output, so return null for those
-            if (record.StepId.StartsWith("IC-", StringComparison.OrdinalIgnoreCase))
+            if (record.StepId.StartsWith(GradingKeywords.StepPrefix_InputClient, StringComparison.OrdinalIgnoreCase))
                 return (null, null);
             
-            string sheetName = record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase)
-                ? SheetOutClients
-                : SheetOutServers;
+            // Try to get the appropriate sheet (support both old and new formats)
+            IXLWorksheet? ws = null;
+            bool isClientSheet = false;
+            bool isServerSheet = false;
             
-            if (!_wb.Worksheets.TryGetWorksheet(sheetName, out var ws))
+            if (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, out ws))
+                    return (null, null);
+                isClientSheet = true;
+            }
+            else
+            {
+                if (!TryGetWorksheetFlexible(SheetOutServersAlt, SheetOutServers, out ws))
+                    return (null, null);
+                isServerSheet = true;
+            }
+            
+            if (ws == null)
                 return (null, null);
             
             var hdr = GetHeaderIndex(ws);
-            var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase);
-            var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase);
             
             // Parse the stage number from the Stage string (should be an integer)
             // If parsing fails, we cannot locate the row in the sheet

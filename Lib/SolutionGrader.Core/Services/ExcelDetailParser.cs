@@ -15,14 +15,17 @@ public sealed class ExcelDetailParser : ITestCaseParser
         using var wb = new XLWorkbook(xlsxPath);
         var steps = new List<Step>();
 
-        void ReadSheet(string name, Action<IXLWorksheet> parse)
+        // Helper to try both old (plural) and new (singular) sheet names
+        void ReadSheetFlexible(string primaryName, string alternateName, Action<IXLWorksheet> parse)
         {
-            var w = wb.Worksheets.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+            var w = wb.Worksheets.FirstOrDefault(s => 
+                string.Equals(s.Name, primaryName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.Name, alternateName, StringComparison.OrdinalIgnoreCase));
             if (w != null && w.RangeUsed() != null) parse(w);
         }
 
-        // InputClients
-        ReadSheet(SuiteKeywords.Sheet_InputClients, ws =>
+        // InputClients - try both "InputClient" (new) and "InputClients" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_InputClient, SuiteKeywords.Sheet_InputClients, ws =>
         {
             var map = Header(ws);
             bool isFirstRow = true;
@@ -39,49 +42,54 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 if (string.IsNullOrWhiteSpace(stage) && string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(action))
                     continue;
 
-                // First step with "Connect" action needs to start processes
-                if (isFirstRow && string.Equals(action, "Connect", StringComparison.OrdinalIgnoreCase))
+                // First step with "Connect" (old format) or "Start" (new format) action needs to start processes
+                if (isFirstRow && (string.Equals(action, ActionKeywords.Connect, StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(action, ActionKeywords.Start, StringComparison.OrdinalIgnoreCase)))
                 {
                     isFirstRow = false;
                     
                     // Add server start step
                     steps.Add(new Step
                     {
-                        Id = $"IC-SERVER-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}SERVER-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ServerStart,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add middleware/proxy step
                     steps.Add(new Step
                     {
-                        Id = $"IC-PROXY-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}PROXY-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.TcpRelay,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add client start step
                     steps.Add(new Step
                     {
-                        Id = $"IC-CLIENT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}CLIENT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ClientStart,
-                        Value = null
+                        Value = null,
+                        DataType = dataType
                     });
 
                     // Add wait for processes to initialize
                     steps.Add(new Step
                     {
-                        Id = $"IC-WAIT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}WAIT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000"
+                        Value = "1000",
+                        DataType = dataType
                     });
                 }
                 else if (!string.IsNullOrWhiteSpace(input))
@@ -91,28 +99,30 @@ public sealed class ExcelDetailParser : ITestCaseParser
                     // For other steps with input, send the input to client
                     steps.Add(new Step
                     {
-                        Id = $"IC-INPUT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}INPUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ClientInput,
-                        Value = input
+                        Value = input,
+                        DataType = dataType
                     });
                     
                     // Add a wait after input to let it process (increased for HTTP requests)
                     steps.Add(new Step
                     {
-                        Id = $"IC-WAIT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}WAIT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000"
+                        Value = "1000",
+                        DataType = dataType
                     });
                 }
             }
         });
 
-        // OutputClients
-        ReadSheet(SuiteKeywords.Sheet_OutputClients, ws =>
+        // OutputClients - try both "OutputClient" (new) and "OutputClients" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_OutputClient, SuiteKeywords.Sheet_OutputClients, ws =>
         {
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
@@ -141,14 +151,14 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OC-METHOD-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputClient}METHOD-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = method,
                         HttpMethod = method,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "HTTP_METHOD" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod }
                     });
                 }
 
@@ -157,34 +167,34 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OC-STATUS-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputClient}STATUS-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = statusCode,
                         StatusCode = statusCode,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "STATUS_CODE" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_StatusCode }
                     });
                 }
 
                 // Validate Data Response if provided
                 if (!string.IsNullOrWhiteSpace(dataResponse))
                 {
-                    var action = string.Equals(dataType, "JSON", StringComparison.OrdinalIgnoreCase)
+                    var action = string.Equals(dataType, GradingKeywords.DataType_JSON, StringComparison.OrdinalIgnoreCase)
                         ? ActionKeywords.CompareJson
                         : ActionKeywords.CompareText;
 
                     steps.Add(new Step
                     {
-                        Id = $"OC-DATA-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputClient}DATA-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = action,
                         Target = dataResponse,
                         DataType = dataType,
                         ByteSize = byteSize,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "DATA_RESPONSE" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_DataResponse }
                     });
                 }
                 
@@ -193,14 +203,14 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OC-SIZE-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputClient}SIZE-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = byteSizeStr,
                         ByteSize = byteSize,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "BYTE_SIZE" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_ByteSize }
                     });
                 }
                 
@@ -209,20 +219,20 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OC-OUT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputClient}OUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = output,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "CLIENT_OUTPUT" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_ClientOutput }
                     });
                 }
             }
         });
 
-        // OutputServers
-        ReadSheet(SuiteKeywords.Sheet_OutputServers, ws =>
+        // OutputServers - try both "OutputServer" (new) and "OutputServers" (old)
+        ReadSheetFlexible(SuiteKeywords.Sheet_OutputServer, SuiteKeywords.Sheet_OutputServers, ws =>
         {
             var map = Header(ws);
             foreach (var row in ws.RangeUsed()!.Rows().Skip(1))
@@ -248,14 +258,14 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OS-METHOD-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputServer}METHOD-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = method,
                         HttpMethod = method,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "HTTP_METHOD" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod }
                     });
                 }
 
@@ -264,13 +274,13 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OS-REQ-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputServer}REQ-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = req,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "DATA_REQUEST" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_DataRequest }
                     });
                 }
                 
@@ -279,33 +289,33 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 {
                     steps.Add(new Step
                     {
-                        Id = $"OS-SIZE-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputServer}SIZE-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.CompareText,
                         Target = byteSizeStr,
                         ByteSize = byteSize,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "BYTE_SIZE" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_ByteSize }
                     });
                 }
 
                 // Validate Server Output if provided
                 if (!string.IsNullOrWhiteSpace(output))
                 {
-                    var action = string.Equals(dataType, "JSON", StringComparison.OrdinalIgnoreCase)
+                    var action = string.Equals(dataType, GradingKeywords.DataType_JSON, StringComparison.OrdinalIgnoreCase)
                         ? ActionKeywords.CompareJson
                         : ActionKeywords.CompareText;
 
                     steps.Add(new Step
                     {
-                        Id = $"OS-OUT-{stage}",
+                        Id = $"{GradingKeywords.StepPrefix_OutputServer}OUT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = action,
                         Target = output,
                         DataType = dataType,
-                        Metadata = new Dictionary<string, object> { ["ValidationType"] = "SERVER_OUTPUT" }
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_ServerOutput }
                     });
                 };
             }

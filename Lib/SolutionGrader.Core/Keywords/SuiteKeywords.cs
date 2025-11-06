@@ -6,9 +6,17 @@ public static class SuiteKeywords
     public const string HeaderFileName = "Header.xlsx";  // Same as FileKeywords.FileName_Header
     public const string DetailFileName = "Detail.xlsx";  // Same as FileKeywords.FileName_Detail
 
+    // Sheet names - supporting both old (plural) and new (singular) formats
+    // Old format (plural) - for backward compatibility
     public const string Sheet_InputClients   = "InputClients";
     public const string Sheet_OutputClients  = "OutputClients";
     public const string Sheet_OutputServers  = "OutputServers";
+    
+    // New format (singular) - preferred format from Recorder_NetWorking
+    public const string Sheet_InputClient    = "InputClient";
+    public const string Sheet_OutputClient   = "OutputClient";
+    public const string Sheet_OutputServer   = "OutputServer";
+    
     public const string Sheet_Header         = "Header";        // fallback header
     public const string Sheet_QuestionMark   = "QuestionMark";  // for reading test case marks
 
@@ -17,6 +25,13 @@ public static class SuiteKeywords
     public const string Col_IC_Input    = "Input";
     public const string Col_IC_DataType = "DataType";
     public const string Col_IC_Action   = "Action";
+
+    // Input DataType values - supporting both old and new formats
+    public const string InputDataType_System     = "System";      // New format: for system-generated actions (Start, Connect)
+    public const string InputDataType_UserInput  = "UserInput";   // New format: for user input
+    public const string InputDataType_Integer    = "Integer";     // Old format: specific type
+    public const string InputDataType_String     = "String";      // Old format: specific type
+    public const string InputDataType_Empty      = "";            // Old format: empty for Connect action
 
     // OutputClients
     public const string Col_OC_Stage             = "Stage";
