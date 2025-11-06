@@ -2,6 +2,7 @@ namespace SolutionGrader.Core.Services;
 
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 using Microsoft.Data.SqlClient;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -20,14 +21,14 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
         {
             if (!string.IsNullOrWhiteSpace(serverTemplate) && !string.IsNullOrWhiteSpace(serverExe))
             {
-                var dest = Path.Combine(Path.GetDirectoryName(serverExe)!, "appsettings.json");
+                var dest = Path.Combine(Path.GetDirectoryName(serverExe)!, FileKeywords.FileName_AppSettings);
                 using var src = _files.OpenRead(serverTemplate);
                 using var dst = _files.OpenWrite(dest, overwrite:true);
                 src.CopyTo(dst);
             }
             if (!string.IsNullOrWhiteSpace(clientTemplate) && !string.IsNullOrWhiteSpace(clientExe))
             {
-                var dest = Path.Combine(Path.GetDirectoryName(clientExe)!, "appsettings.json");
+                var dest = Path.Combine(Path.GetDirectoryName(clientExe)!, FileKeywords.FileName_AppSettings);
                 using var src = _files.OpenRead(clientTemplate);
                 using var dst = _files.OpenWrite(dest, overwrite:true);
                 src.CopyTo(dst);
@@ -46,7 +47,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
         try
         {
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Resetting database from script...");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_RESETTING_DATABASE}");
             
             bool success;
             if (useDocker)
@@ -60,16 +61,16 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             
             if (!success)
             {
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Could not execute database reset script");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_DATABASE_RESET_FAILED}");
             }
             else
             {
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Database reset completed successfully");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_DATABASE_RESET_SUCCESS}");
             }
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Database reset failed: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {string.Format(AppsettingKeywords.MSG_DATABASE_RESET_ERROR, ex.Message)}");
             // Don't throw - allow tests to continue even if DB reset fails
         }
     }
@@ -85,7 +86,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             var builder = new SqlConnectionStringBuilder(connectionString);
             if (string.IsNullOrWhiteSpace(builder.InitialCatalog))
             {
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Warning: Connection string does not specify a database name (Initial Catalog).");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_NO_INITIAL_CATALOG}");
                 return false;
             }
 
@@ -104,7 +105,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Local database reset error: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {string.Format(AppsettingKeywords.MSG_LOCAL_DB_RESET_ERROR, ex.Message)}");
             return false;
         }
     }
@@ -177,15 +178,15 @@ END";
         {
             // Default connection string for local SQL Server
             // Note: These defaults are for testing only. For production, configure properly in Header.xlsx
-            builder.DataSource = ".\\SQLEXPRESS";
-            builder.InitialCatalog = "Library";
-            builder.UserID = "sa";
-            builder.Password = "sa";
+            builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE;
+            builder.InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME;
+            builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
+            builder.Password = AppsettingKeywords.DEFAULT_PASSWORD;
             builder.TrustServerCertificate = true;
         }
         else
         {
-            var server = dbConfig.SqlServer ?? "SQLEXPRESS";
+            var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
             // Format SQL Server instance name properly
             if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase))
             {
@@ -193,9 +194,9 @@ END";
             }
 
             builder.DataSource = server;
-            builder.InitialCatalog = dbConfig.Database ?? "Library";
-            builder.UserID = dbConfig.Username ?? "sa";
-            builder.Password = dbConfig.Password ?? "sa";
+            builder.InitialCatalog = dbConfig.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
+            builder.UserID = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
+            builder.Password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
             builder.TrustServerCertificate = true;
         }
 
@@ -206,7 +207,7 @@ END";
     {
         var masterBuilder = new SqlConnectionStringBuilder(builder.ConnectionString)
         {
-            InitialCatalog = "master"
+            InitialCatalog = AppsettingKeywords.MASTER_DATABASE
         };
 
         return masterBuilder.ConnectionString;
@@ -218,13 +219,13 @@ END";
         {
             // Note: For production use, consider using environment variables for the SA password
             // or mounting a secure configuration file instead of passing it via command line
-            var saPassword = "YourStrong@Passw0rd";  // This is visible in process lists
+            var saPassword = AppsettingKeywords.DOCKER_SA_PASSWORD;  // This is visible in process lists
             
             // Copy SQL script to container
             var copyPsi = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "docker",
-                Arguments = $"cp \"{dbScriptPath}\" sqlserver-test:/tmp/db_reset.sql",
+                FileName = AppsettingKeywords.DOCKER_COMMAND,
+                Arguments = $"cp \"{dbScriptPath}\" {AppsettingKeywords.DOCKER_CONTAINER_NAME}:{AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -243,8 +244,8 @@ END";
             // Execute SQL script from file
             var execPsi = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "docker",
-                Arguments = $"exec sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"{saPassword}\" -C -i /tmp/db_reset.sql",
+                FileName = AppsettingKeywords.DOCKER_COMMAND,
+                Arguments = $"exec {AppsettingKeywords.DOCKER_CONTAINER_NAME} {AppsettingKeywords.DOCKER_SQLCMD_PATH} -S {AppsettingKeywords.DOCKER_LOCALHOST} -U sa -P \"{saPassword}\" -C -i {AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -262,10 +263,10 @@ END";
                 var output = await execProcess.StandardOutput.ReadToEndAsync();
                 var error = await execProcess.StandardError.ReadToEndAsync();
                 
-                if (!string.IsNullOrWhiteSpace(error) && error.Contains("Level 16"))
+                if (!string.IsNullOrWhiteSpace(error) && error.Contains(AppsettingKeywords.SQL_ERROR_LEVEL_16))
                 {
                     // Level 16 errors are warnings we can ignore
-                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} SQL execution had warnings (non-fatal)");
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_SQL_WARNINGS_NONFATAL}");
                 }
                 
                 return execProcess.ExitCode == 0;
@@ -273,7 +274,7 @@ END";
         }
         catch (System.Exception ex)
         {
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Docker database reset error: {ex.Message}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {string.Format(AppsettingKeywords.MSG_DOCKER_DB_RESET_ERROR, ex.Message)}");
             return false;
         }
     }
