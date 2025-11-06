@@ -38,7 +38,7 @@ Console.WriteLine($"  Server Port: {serverPort}");
 Console.WriteLine("\nExpected Server appsettings.json structure:");
 Console.WriteLine("{");
 Console.WriteLine("  \"ConnectionStrings\": {");
-Console.WriteLine($"    \"MyCnn\": \"server=.\\\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=True;\"");
+Console.WriteLine($"    \"MyCnn\": \"server=localhost;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true\"");
 Console.WriteLine("  },");
 Console.WriteLine($"  \"IPAddress\": \"http://localhost\",");
 Console.WriteLine($"  \"Port\": \"{serverPort}\"");
