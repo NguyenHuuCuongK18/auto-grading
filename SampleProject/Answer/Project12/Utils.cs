@@ -9,6 +9,14 @@ namespace Project12
 {
     public class Utils
     {
+        public static void StartMessage()
+        {
+            Console.WriteLine("Client application started. Press Enter without input to exit.");
+        }
+        public static void Prompt()
+        {
+            Console.Write("Please enter integer number : ");
+        }
         public static string Stringify<T>(T item)
         {
             return Stringify(item!, new HashSet<object>());

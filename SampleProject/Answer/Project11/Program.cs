@@ -16,14 +16,13 @@ class Program
 
         string ipAddress = config["IpAddress"];
         string port = config["Port"];
-        string serverUrl = $"{ipAddress}{port}/";
+        string serverUrl = $"{ipAddress}:{port}/";
 
         // 2. Khởi tạo HttpListener
         var listener = new HttpListener();
         listener.Prefixes.Add(serverUrl);
         listener.Start();
-        Console.WriteLine($" Server started at {serverUrl}");
-
+        Console.WriteLine($"Server started.");
         while (true)
         {
             var context = await listener.GetContextAsync();

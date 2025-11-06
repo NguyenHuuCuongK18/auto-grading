@@ -2,16 +2,11 @@
 using Project12;
 using System.Net.Http;
 using System.Text.Json;
+using Project12.Models;
 
 // Tương đương với cấu trúc dữ liệu JSON trả về từ Server
 // Cần khớp với object ẩn danh trong Server
-public class BookDto
-{
-    public int BookId { get; set; }
-    public string Title { get; set; }
-    public int PublicationYear { get; set; }
-    public string GenreName { get; set; }
-}
+
 
 
 class Program
@@ -27,13 +22,12 @@ class Program
 
         string ipAddress = config["IpAddress"];
         string port = config["Port"];
-        string baseUrl = $"{ipAddress}{port}/";
+        string baseUrl = $"{ipAddress}:{port}/";
 
-        Console.WriteLine($"Client started, connecting to Server at {baseUrl}");
-
+        Utils.StartMessage();
         while (true)
         {
-            Console.Write("Please enter integer number : ");
+            Utils.Prompt();
             string input = Console.ReadLine();
 
             if (string.IsNullOrEmpty(input))
@@ -93,7 +87,6 @@ class Program
                 Console.WriteLine("\n\u274C Error parsing server response (Invalid JSON format).\n");
             }
 
-            Console.WriteLine("\n" + new string('-', 40) + "\n");
         }
     }
 }
