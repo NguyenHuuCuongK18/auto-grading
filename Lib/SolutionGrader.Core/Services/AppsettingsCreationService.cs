@@ -155,9 +155,24 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
         var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
         // Format SQL Server instance name properly
-        if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", StringComparison.OrdinalIgnoreCase))
+        // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
+        // - localhost, 127.0.0.1, or hostnames/IPs
+        // - Already formatted instances (.\SQLEXPRESS)
+        // - (local) keyword
+        // - Server with port specification (server:port)
+        if (!server.StartsWith(".\\") && 
+            !server.Contains("\\") && 
+            !server.Equals("(local)", StringComparison.OrdinalIgnoreCase) &&
+            !server.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
+            !server.Contains(":") &&   // Avoid prefixing server with port (server:port)
+            !IPAddress.TryParse(server, out _)) // Don't prefix valid IP addresses
         {
-            server = $".\\{server}";
+            // Check if it looks like a hostname (contains dots for FQDN or computer.instance format)
+            // Only add prefix if it's a simple instance name without dots
+            if (!server.Contains("."))
+            {
+                server = $".\\{server}";
+            }
         }
 
         var database = dbConfig.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
