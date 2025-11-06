@@ -50,7 +50,7 @@ namespace SolutionGrader.Core.Services
                 Console.WriteLine($"\n[TestCase] Starting: {q.Name} (Mark: {q.Mark})");
 
                 _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
-                await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, ct);
+                await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, def.DatabaseConfig, args.UseDatabaseDockerReset, ct);
 
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
                 _files.EnsureDirectory(outDir);
