@@ -162,7 +162,12 @@ Performs Docker-based database reset:
 2. **Permissions**: Ensure the SQL Server user has appropriate permissions to drop/create databases
 3. **Timeouts**: Database operations can be slow; ensure adequate timeout settings
 4. **Docker**: Keep Docker containers running during test execution
-5. **Security**: Use strong passwords and avoid hardcoding credentials in scripts
+5. **Security**: 
+   - Use strong passwords and avoid hardcoding credentials in scripts
+   - Configure database credentials properly in Header.xlsx for production use
+   - The default 'sa'/'sa' credentials are for testing only
+   - For Docker mode, consider using environment variables for the SA password instead of command-line arguments
+   - Connection strings are built using SqlConnectionStringBuilder to prevent injection vulnerabilities
 
 ## Troubleshooting
 

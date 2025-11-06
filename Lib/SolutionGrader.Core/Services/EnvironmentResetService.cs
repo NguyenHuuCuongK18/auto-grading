@@ -171,24 +171,35 @@ END";
 
     private static string BuildConnectionString(DatabaseConfiguration? dbConfig)
     {
+        var builder = new SqlConnectionStringBuilder();
+        
         if (dbConfig == null)
         {
             // Default connection string for local SQL Server
-            return "server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=True;";
+            // Note: These defaults are for testing only. For production, configure properly in Header.xlsx
+            builder.DataSource = ".\\SQLEXPRESS";
+            builder.InitialCatalog = "Library";
+            builder.UserID = "sa";
+            builder.Password = "sa";
+            builder.TrustServerCertificate = true;
         }
-
-        var server = dbConfig.SqlServer ?? "SQLEXPRESS";
-        // Format SQL Server instance name properly
-        if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase))
+        else
         {
-            server = $".\\{server}";
+            var server = dbConfig.SqlServer ?? "SQLEXPRESS";
+            // Format SQL Server instance name properly
+            if (!server.StartsWith(".\\") && !server.Contains("\\") && !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase))
+            {
+                server = $".\\{server}";
+            }
+
+            builder.DataSource = server;
+            builder.InitialCatalog = dbConfig.Database ?? "Library";
+            builder.UserID = dbConfig.Username ?? "sa";
+            builder.Password = dbConfig.Password ?? "sa";
+            builder.TrustServerCertificate = true;
         }
 
-        var database = dbConfig.Database ?? "Library";
-        var username = dbConfig.Username ?? "sa";
-        var password = dbConfig.Password ?? "sa";
-
-        return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=True;";
+        return builder.ConnectionString;
     }
 
     private static string BuildMasterConnectionString(SqlConnectionStringBuilder builder)
@@ -205,6 +216,10 @@ END";
     {
         try
         {
+            // Note: For production use, consider using environment variables for the SA password
+            // or mounting a secure configuration file instead of passing it via command line
+            var saPassword = "YourStrong@Passw0rd";  // This is visible in process lists
+            
             // Copy SQL script to container
             var copyPsi = new System.Diagnostics.ProcessStartInfo
             {
@@ -229,7 +244,7 @@ END";
             var execPsi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "docker",
-                Arguments = "exec sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"YourStrong@Passw0rd\" -C -i /tmp/db_reset.sql",
+                Arguments = $"exec sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"{saPassword}\" -C -i /tmp/db_reset.sql",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -256,8 +271,9 @@ END";
                 return execProcess.ExitCode == 0;
             }
         }
-        catch
+        catch (System.Exception ex)
         {
+            Console.WriteLine($"[Database] Docker database reset error: {ex.Message}");
             return false;
         }
     }
