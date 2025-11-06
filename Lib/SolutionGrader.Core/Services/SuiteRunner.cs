@@ -147,7 +147,7 @@ namespace SolutionGrader.Core.Services
                         string.Equals(step.Action, ActionKeywords.CompareText, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(step.Action, ActionKeywords.CompareJson, StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(step.Action, ActionKeywords.CompareCsv, StringComparison.OrdinalIgnoreCase)
-                    ) && !step.Id.StartsWith("IC-", StringComparison.OrdinalIgnoreCase);
+                    ) && !step.Id.StartsWith(GradingKeywords.StepPrefix_InputClient, StringComparison.OrdinalIgnoreCase);
                     
                     // Determine error code from step action and result using action keywords
                     string errorCode = Domain.Errors.ErrorCodes.NONE;

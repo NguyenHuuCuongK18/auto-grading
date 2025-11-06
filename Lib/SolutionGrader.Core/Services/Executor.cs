@@ -309,21 +309,21 @@ namespace SolutionGrader.Core.Services
                     return actual;
 
                 // OC-DATA- steps should read from server response (data sent from server to client)
-                if (step.Id.StartsWith("OC-DATA-", StringComparison.OrdinalIgnoreCase))
+                if (step.Id.StartsWith($"{GradingKeywords.StepPrefix_OutputClient}DATA-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
 
                 // Other OC- steps read from client output
-                if (step.Id.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
+                if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
 
-                if (step.Id.StartsWith("OS-REQ-", StringComparison.OrdinalIgnoreCase))
+                if (step.Id.StartsWith($"{GradingKeywords.StepPrefix_OutputServer}REQ-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
 
-                if (step.Id.StartsWith("OS-OUT-", StringComparison.OrdinalIgnoreCase))
+                if (step.Id.StartsWith($"{GradingKeywords.StepPrefix_OutputServer}OUT-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
 
                 // Fallback for other OS- prefixed steps
-                if (step.Id.StartsWith("OS-", StringComparison.OrdinalIgnoreCase))
+                if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputServer, StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
 
                 return actual;

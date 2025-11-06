@@ -956,8 +956,8 @@ namespace SolutionGrader.Core.Services
                 var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
                                    record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
                                    record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
                                    record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
@@ -1071,8 +1071,8 @@ namespace SolutionGrader.Core.Services
                 var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
                                    record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
                                    record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith("OC-") ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
+                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
                                    record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
@@ -1151,7 +1151,7 @@ namespace SolutionGrader.Core.Services
             // Determine which sheet to look in based on the step ID prefix
             // Step IDs follow the convention: "OC-*" for OutputClients, "OS-*" for OutputServers
             // IC- (InputClients) steps don't have expected/actual output, so return null for those
-            if (record.StepId.StartsWith("IC-", StringComparison.OrdinalIgnoreCase))
+            if (record.StepId.StartsWith(GradingKeywords.StepPrefix_InputClient, StringComparison.OrdinalIgnoreCase))
                 return (null, null);
             
             // Try to get the appropriate sheet (support both old and new formats)
@@ -1159,7 +1159,7 @@ namespace SolutionGrader.Core.Services
             bool isClientSheet = false;
             bool isServerSheet = false;
             
-            if (record.StepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
+            if (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, out ws))
                     return (null, null);

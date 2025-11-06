@@ -90,6 +90,14 @@ public static class GradingKeywords
     public const string Col_ByteSize = "ByteSize";
     public const string Col_PointsLost = "PointsLost";
 
+    // Metadata keys
+    public const string MetadataKey_ValidationType = "ValidationType";
+
+    // Step ID prefixes
+    public const string StepPrefix_InputClient = "IC-";
+    public const string StepPrefix_OutputClient = "OC-";
+    public const string StepPrefix_OutputServer = "OS-";
+
     // Tolerance values
     public const int ByteSizeTolerance = 10; // Allow ±10 bytes difference
     public const double ByteSizeTolerancePercent = 0.05; // Allow ±5% difference
