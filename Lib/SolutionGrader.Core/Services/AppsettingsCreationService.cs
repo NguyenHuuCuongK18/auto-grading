@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
@@ -144,7 +145,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         if (dbConfig == null)
         {
             // Default connection string using SqlConnectionStringBuilder
-            var defaultBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder
+            var defaultBuilder = new SqlConnectionStringBuilder
             {
                 DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
                 InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME,
@@ -184,7 +185,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
 
         // Build connection string with SqlConnectionStringBuilder for consistency and better defaults
-        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder
+        var builder = new SqlConnectionStringBuilder
         {
             DataSource = server,
             InitialCatalog = database,
