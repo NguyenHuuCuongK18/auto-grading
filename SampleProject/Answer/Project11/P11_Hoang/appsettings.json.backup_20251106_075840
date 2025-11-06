@@ -3,5 +3,5 @@
     "MyCnn": "server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=True;"
   },
   "IPAddress": "http://localhost:",
-  "Port": "8001"
+  "Port": "5001"
 }
