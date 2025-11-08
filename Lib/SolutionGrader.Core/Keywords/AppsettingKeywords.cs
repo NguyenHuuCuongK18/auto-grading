@@ -27,6 +27,18 @@ public static class AppsettingKeywords
     public const string TRUST_SERVER_CERTIFICATE = "TrustServerCertificate";
     public const string APPSETTINGS = "appsettings";
     
+    // Connection string format: lowercase keywords for consistency with SqlClient
+    public const string CONN_STR_SERVER = "server";
+    public const string CONN_STR_DATABASE = "database";
+    public const string CONN_STR_UID = "uid";
+    public const string CONN_STR_PWD = "pwd";
+    public const string CONN_STR_TRUST_CERT = "TrustServerCertificate";
+    
+    // Server instance keywords
+    public const string SERVER_LOCAL_PREFIX = ".\\";
+    public const string SERVER_LOCAL_KEYWORD = "(local)";
+    public const string SERVER_LOCALHOST = "localhost";
+    
     // Database defaults
     public const string DEFAULT_SQL_SERVER_INSTANCE = ".\\SQLEXPRESS";
     public const string DEFAULT_DATABASE_NAME = "Library";

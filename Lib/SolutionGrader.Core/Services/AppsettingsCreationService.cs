@@ -3,7 +3,6 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
-using Microsoft.Data.SqlClient;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
@@ -126,7 +125,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             {
                 MyCnn = connectionString
             },
-            IPAddress = ipAddress,
+            IpAddress = ipAddress,
             Port = port.ToString()
         };
     }
@@ -135,7 +134,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         return new
         {
-            IPAddress = ipAddress,
+            IpAddress = ipAddress,
             Port = port.ToString()
         };
     }
@@ -144,17 +143,14 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         if (dbConfig == null)
         {
-            // Default connection string using SqlConnectionStringBuilder
-            var defaultBuilder = new SqlConnectionStringBuilder
-            {
-                DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
-                InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME,
-                UserID = AppsettingKeywords.DEFAULT_USERNAME,
-                Password = AppsettingKeywords.DEFAULT_PASSWORD,
-                TrustServerCertificate = true,
-                ConnectTimeout = 30
-            };
-            return defaultBuilder.ConnectionString;
+            // Default connection string using template
+            return string.Format(
+                AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
+                AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
+                AppsettingKeywords.DEFAULT_DATABASE_NAME,
+                AppsettingKeywords.DEFAULT_USERNAME,
+                AppsettingKeywords.DEFAULT_PASSWORD
+            );
         }
 
         var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
@@ -164,10 +160,10 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         // - Already formatted instances (.\SQLEXPRESS)
         // - (local) keyword
         // - Server with port specification (server:port or server,port)
-        if (!server.StartsWith(".\\") && 
+        if (!server.StartsWith(AppsettingKeywords.SERVER_LOCAL_PREFIX) && 
             !server.Contains("\\") && 
-            !server.Equals("(local)", StringComparison.OrdinalIgnoreCase) &&
-            !server.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
+            !server.Equals(AppsettingKeywords.SERVER_LOCAL_KEYWORD, StringComparison.OrdinalIgnoreCase) &&
+            !server.Equals(AppsettingKeywords.SERVER_LOCALHOST, StringComparison.OrdinalIgnoreCase) &&
             !server.Contains(":") &&   // Avoid prefixing server with port (server:port)
             !server.Contains(",") &&   // Avoid prefixing server with port (server,port)
             !IPAddress.TryParse(server, out _)) // Don't prefix valid IP addresses
@@ -176,7 +172,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             // Only add prefix if it's a simple instance name without dots
             if (!server.Contains("."))
             {
-                server = $".\\{server}";
+                server = $"{AppsettingKeywords.SERVER_LOCAL_PREFIX}{server}";
             }
         }
 
@@ -184,17 +180,13 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         var username = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
         var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
 
-        // Build connection string with SqlConnectionStringBuilder for consistency and better defaults
-        var builder = new SqlConnectionStringBuilder
-        {
-            DataSource = server,
-            InitialCatalog = database,
-            UserID = username,
-            Password = password,
-            TrustServerCertificate = true,
-            ConnectTimeout = 30
-        };
-
-        return builder.ConnectionString;
+        // Build connection string using simple template for consistent lowercase formatting
+        return string.Format(
+            AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
+            server,
+            database,
+            username,
+            password
+        );
     }
 }
