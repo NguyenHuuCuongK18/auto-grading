@@ -28,6 +28,13 @@ namespace SolutionGrader.Core.Services
 
         public DataComparisonService(IRunContext run) => _run = run;
 
+        /// <summary>
+        /// Compares two files for equality using normalized content comparison.
+        /// This comparison is case-insensitive to prevent capitalization differences from causing failures.
+        /// </summary>
+        /// <param name="expectedPath">Path to the expected file</param>
+        /// <param name="actualPath">Path to the actual file</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
             if (IsMissing(expectedPath) || !SafeFileExists(expectedPath!))
@@ -42,14 +49,24 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: Actual output not available (ignored)");
             }
 
-            var exp = Normalize(File.ReadAllText(expectedPath!), false);
-            var act = Normalize(File.ReadAllText(actualPath!), false);
+            // Use case-insensitive normalization (true) to ignore capitalization differences
+            var exp = Normalize(File.ReadAllText(expectedPath!), true);
+            var act = Normalize(File.ReadAllText(actualPath!), true);
 
             if (exp == act) return (true, "Files match exactly");
             var (idx, _, _, _, _) = FirstDiff(exp, act);
             return (false, idx >= 0 ? $"Content differs (first diff at idx {idx})" : "Content differs");
         }
 
+        /// <summary>
+        /// Compares text content between expected and actual outputs with advanced normalization.
+        /// This method is case-insensitive by default to prevent capitalization differences from causing failures.
+        /// Uses multiple comparison strategies (exact match, contains, aggressive normalization) for robust validation.
+        /// </summary>
+        /// <param name="expectedPath">Path to expected content or inline content</param>
+        /// <param name="actualPath">Path to actual content or memory:// URI</param>
+        /// <param name="caseInsensitive">Whether to ignore case differences (default: true)</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareText(string? expectedPath, string? actualPath, bool caseInsensitive = true)
         {
             var isClientOutput = ContainsScope(actualPath, FileKeywords.Folder_Clients);
@@ -167,6 +184,14 @@ namespace SolutionGrader.Core.Services
             }
         }
 
+        /// <summary>
+        /// Compares CSV content between expected and actual outputs.
+        /// This comparison is case-insensitive to prevent capitalization differences from causing failures.
+        /// </summary>
+        /// <param name="expectedPath">Path to expected CSV content</param>
+        /// <param name="actualPath">Path to actual CSV content</param>
+        /// <param name="ignoreOrder">Whether to ignore row order (currently not implemented)</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
         {
             if (IsMissing(expectedPath))
@@ -246,26 +271,46 @@ namespace SolutionGrader.Core.Services
                 || path.IndexOf($"memory://{scope}/", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        /// <summary>
+        /// Normalizes text for comparison by removing/normalizing whitespace and special characters.
+        /// This method performs aggressive whitespace normalization to prevent false failures due to
+        /// spacing, line ending, or formatting differences between expected and actual output.
+        /// 
+        /// Normalization steps:
+        /// 1. Remove BOM (Byte Order Mark)
+        /// 2. Unescape Unicode escape sequences (\uXXXX)
+        /// 3. Normalize smart quotes and dashes to ASCII equivalents
+        /// 4. Attempt JSON canonicalization for JSON content
+        /// 5. Normalize all line endings to \n
+        /// 6. Convert all Unicode whitespace variants to regular spaces
+        /// 7. Trim whitespace from each line
+        /// 8. Remove empty lines completely
+        /// 9. Collapse multiple consecutive spaces into single space
+        /// 10. Final trim of entire string
+        /// </summary>
+        /// <param name="s">The string to normalize</param>
+        /// <param name="ci">Whether to perform case-insensitive comparison (convert to lowercase)</param>
+        /// <returns>Normalized string ready for comparison</returns>
         private static string Normalize(string s, bool ci)
         {
             if (string.IsNullOrWhiteSpace(s)) return string.Empty;
 
-            // Strip BOM
+            // 1. Strip BOM (Byte Order Mark)
             if (s.Length > 0 && s[0] == '\uFEFF') s = s.Substring(1);
 
-            // Unescape \uXXXX
+            // 2. Unescape Unicode escape sequences (\uXXXX)
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
             {
                 var code = Convert.ToInt32(m.Groups[1].Value, 16);
                 return char.ConvertFromUtf32(code);
             });
 
-            // Smart quotes / dashes
+            // 3. Normalize smart quotes and dashes to ASCII equivalents
             s = s.Replace("\u2018", "'").Replace("\u2019", "'")
                  .Replace("\u201C", "\"").Replace("\u201D", "\"")
                  .Replace("\u2013", "-").Replace("\u2014", "-");
 
-            // Try JSON canonicalization
+            // 4. Try JSON canonicalization for JSON content
             if ((s.TrimStart().StartsWith("{") || s.TrimStart().StartsWith("[")))
             {
                 try
@@ -277,14 +322,13 @@ namespace SolutionGrader.Core.Services
                         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                     });
                 }
-                catch { }
+                catch { /* Not valid JSON, continue with text normalization */ }
             }
 
-            // More aggressive whitespace normalization (but preserve structure):
-            // 1. Convert all line endings to \n for consistency
+            // 5. Convert all line endings to \n for consistency
             s = s.Replace("\r\n", "\n").Replace("\r", "\n");
             
-            // 2. Replace all Unicode whitespace variants with regular spaces
+            // 6. Replace all Unicode whitespace variants with regular spaces
             s = s.Replace("\u00A0", " ")  // Non-breaking space
                  .Replace("\u2002", " ")  // En space
                  .Replace("\u2003", " ")  // Em space
@@ -295,30 +339,40 @@ namespace SolutionGrader.Core.Services
                  .Replace("\u3000", " ")  // Ideographic space
                  .Replace("\t", " ");      // Tab to space
 
-            // 3. Strip leading/trailing whitespace from each line BUT preserve line breaks
+            // 7. Trim leading/trailing whitespace from each line
             var lines = s.Split('\n');
             for (int i = 0; i < lines.Length; i++)
             {
                 lines[i] = lines[i].Trim();
             }
-            s = string.Join("\n", lines);
             
-            // 4. Collapse multiple consecutive spaces into single space (but keep newlines)
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"[ ]+", " ");
+            // 8. Remove empty lines completely to prevent whitespace/newline mismatches
+            // This is the key fix: empty lines and extra newlines will no longer cause comparison failures
+            lines = lines.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
+            s = string.Join(" ", lines); // Join with single space instead of newline
             
-            // 5. Remove extra blank lines (more than 2 consecutive newlines)
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\n{3,}", "\n\n");
+            // 9. Collapse multiple consecutive spaces into single space
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
             
-            // 6. Final trim
+            // 10. Final trim
             s = s.Trim();
 
             return ci ? s.ToLowerInvariant() : s;
         }
 
+        /// <summary>
+        /// Performs ultra-aggressive normalization by removing ALL whitespace and punctuation.
+        /// This is used as a last-resort fallback when standard normalization still shows differences.
+        /// Useful for catching content matches where only formatting differs significantly.
+        /// </summary>
+        /// <param name="s">The string to aggressively normalize</param>
+        /// <returns>String with all whitespace and common punctuation removed</returns>
         private static string StripAggressive(string s)
         {
             if (string.IsNullOrEmpty(s)) return string.Empty;
+            // Remove all whitespace characters
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", "");
+            // Remove common punctuation that may vary in output formatting
             s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
             return s;
         }

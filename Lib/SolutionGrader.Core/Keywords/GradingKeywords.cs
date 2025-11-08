@@ -89,6 +89,8 @@ public static class GradingKeywords
     public const string Col_StatusCode = "StatusCode";
     public const string Col_ByteSize = "ByteSize";
     public const string Col_PointsLost = "PointsLost";
+    public const string Col_ErrorNotes = "ErrorNotes";
+    public const string Col_FailedStages = "FailedStages";
 
     // Metadata keys
     public const string MetadataKey_ValidationType = "ValidationType";
