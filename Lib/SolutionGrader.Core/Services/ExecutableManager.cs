@@ -90,7 +90,7 @@ namespace SolutionGrader.Core.Services
         {
             if (_client == null || _client.HasExited)
             {
-                Console.WriteLine($"[ClientInput] Cannot send input - client not running");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_INPUT_NOT_RUNNING}");
                 return;
             }
 
@@ -98,11 +98,11 @@ namespace SolutionGrader.Core.Services
             {
                 _client.StandardInput.WriteLine(input);
                 _client.StandardInput.Flush();
-                Console.WriteLine($"[ClientInput] Sent: {input}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_SENT, input)}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ClientInput] Error sending input: {ex.Message}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_ERROR, ex.Message)}");
             }
         }
         
@@ -130,7 +130,7 @@ namespace SolutionGrader.Core.Services
                 // Check if process exited
                 if (_client.HasExited)
                 {
-                    Console.WriteLine($"[ClientInput] Client process exited");
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_PROCESS_EXITED}");
                     return false;
                 }
                 
@@ -138,7 +138,7 @@ namespace SolutionGrader.Core.Services
                 var currentOutputLength = GetClientOutput().Length;
                 if (currentOutputLength > initialOutputLength)
                 {
-                    Console.WriteLine($"[ClientInput] Client produced output ({currentOutputLength - initialOutputLength} bytes)");
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_PRODUCED_OUTPUT, currentOutputLength - initialOutputLength)}");
                     // Give a little more time for buffered output
                     await Task.Delay(100, ct);
                     return true;
@@ -150,11 +150,11 @@ namespace SolutionGrader.Core.Services
             
             if (ct.IsCancellationRequested)
             {
-                Console.WriteLine($"[ClientInput] Wait cancelled");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_INPUT_WAIT_CANCELLED}");
             }
             else
             {
-                Console.WriteLine($"[ClientInput] Wait timed out after {timeoutSeconds}s");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_WAIT_TIMEOUT, timeoutSeconds)}");
             }
             
             return false;
@@ -337,7 +337,7 @@ namespace SolutionGrader.Core.Services
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[PumpAsync] Error reading stream: {ex.Message}");
+                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PUMP_ASYNC} {string.Format(LoggingKeywords.MSG_PUMP_ERROR_READING_STREAM, ex.Message)}");
                     }
                 }
 
@@ -380,13 +380,13 @@ namespace SolutionGrader.Core.Services
                 if (!p.WaitForExit(1000))
                 {
                     // If still running after 1 second, use TaskKill as fallback
-                    Console.WriteLine($"[Process] Process {processId} did not exit gracefully, using TaskKill...");
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} {string.Format(LoggingKeywords.MSG_PROCESS_TASKKILL_USED, processId)}");
                     TryTaskKill(processId);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Process] Error killing process: {ex.Message}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} {string.Format(LoggingKeywords.MSG_PROCESS_KILL_ERROR, ex.Message)}");
             }
             finally 
             { 
@@ -443,7 +443,7 @@ namespace SolutionGrader.Core.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Process] TaskKill/kill failed: {ex.Message}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} {string.Format(LoggingKeywords.MSG_PROCESS_TASKKILL_FAILED, ex.Message)}");
             }
         }
     }

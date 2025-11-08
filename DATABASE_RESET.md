@@ -44,11 +44,22 @@ await suiteRunner.ExecuteSuiteAsync(args);
 
 ### How It Works
 
+The database reset process automatically detects whether the SQL script manages the database lifecycle itself:
+
+**For scripts WITH database management commands** (DROP DATABASE, CREATE DATABASE, or USE):
+1. **Read Configuration**: Extracts database configuration from the suite's Header.xlsx (or uses defaults)
+2. **Build Connection String**: Creates SQL Server connection string from configuration
+3. **Detect Script Type**: Analyzes the SQL script to detect database management commands
+4. **Execute from Master**: Runs the entire script from the `master` database context, allowing the script to drop, create, and populate the database itself
+
+**For scripts WITHOUT database management commands**:
 1. **Read Configuration**: Extracts database configuration from the suite's Header.xlsx (or uses defaults)
 2. **Build Connection String**: Creates SQL Server connection string from configuration
 3. **Drop Database**: If the database exists, it's set to single-user mode and dropped
 4. **Create Database**: A fresh database is created
 5. **Apply Script**: The SQL script is split by `GO` statements and executed in batches
+
+This dual approach ensures compatibility with both self-contained database scripts and simple schema/data scripts.
 
 ### Default Configuration
 
@@ -74,7 +85,50 @@ The database configuration can be specified in the Excel Header file under a "Co
 
 ### SQL Script Format
 
-The SQL script should contain standard T-SQL commands. Use `GO` to separate batches:
+The SQL script can be written in two ways:
+
+#### Self-Contained Scripts (Recommended for provided SQL files)
+
+Scripts that manage their own database lifecycle (e.g., scripts from instructors or sample projects):
+
+```sql
+-- Check and drop existing database
+IF DB_ID(N'Library') IS NOT NULL
+BEGIN
+    ALTER DATABASE [Library] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE [Library];
+END
+GO
+
+-- Create new database
+CREATE DATABASE [Library];
+GO
+
+-- Switch to the database
+USE [Library];
+GO
+
+-- Create tables and insert data
+CREATE TABLE Users (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    Name NVARCHAR(100)
+);
+GO
+
+INSERT INTO Users (Name) VALUES ('Alice');
+INSERT INTO Users (Name) VALUES ('Bob');
+GO
+```
+
+**Advantages:**
+- Works directly in SQL Server Management Studio (SSMS)
+- Guaranteed to reset the database to a clean state
+- No conflicts with the grader's database management
+- Prevents SQL Server connection errors
+
+#### Simple Schema Scripts (For basic scenarios)
+
+Scripts without database management commands:
 
 ```sql
 CREATE TABLE Users (
@@ -87,6 +141,8 @@ INSERT INTO Users (Name) VALUES ('Alice');
 INSERT INTO Users (Name) VALUES ('Bob');
 GO
 ```
+
+**Note:** For simple scripts, the grader will automatically drop/create the database before applying the script.
 
 ## Docker Database Reset
 
@@ -182,6 +238,17 @@ Performs Docker-based database reset:
 **Permission Errors**:
 - User must have CREATE DATABASE and DROP DATABASE permissions
 - Usually requires `sysadmin` or `dbcreator` role
+
+**"Cannot drop database because it is currently in use" or "Database already exists" errors**:
+- **Solution**: This issue has been fixed! The grader now automatically detects if your SQL script contains database management commands (DROP DATABASE, CREATE DATABASE, or USE)
+- If your script manages the database itself, the grader executes it from the `master` database context to avoid conflicts
+- For existing scripts: Ensure your SQL script includes DROP DATABASE at the beginning (as shown in the "Self-Contained Scripts" example above)
+- The sample script `PE PRN222 sp25.sql` already follows this pattern and will work correctly
+
+**SQL Server enters weird error state after reset attempt**:
+- This was caused by the grader trying to drop/create the database while also running a script that drops/creates the same database
+- **Fixed**: The grader now detects self-managing scripts and runs them appropriately
+- If you encounter this with an old installation, restart SQL Server service to clear the state
 
 ### Docker Reset Issues
 

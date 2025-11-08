@@ -38,18 +38,18 @@ namespace SolutionGrader.Core.Services
 
         public async Task<int> ExecuteSuiteAsync(ExecuteSuiteArgs args, CancellationToken ct = default)
         {
-            Console.WriteLine($"[Suite] Loading test suite from: {args.SuitePath}");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_LOADING, args.SuitePath)}");
             var def = _suite.Load(args.SuitePath);
             args.Protocol = def.Protocol;
-            Console.WriteLine($"[Suite] Protocol: {args.Protocol}");
-            Console.WriteLine($"[Suite] Found {def.Cases.Count} test case(s)");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_PROTOCOL, args.Protocol)}");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_CASES_FOUND, def.Cases.Count)}");
             _files.EnsureDirectory(args.ResultRoot);
 
             foreach (var q in def.Cases)
             {
                 ct.ThrowIfCancellationRequested();
 
-                Console.WriteLine($"\n[TestCase] Starting: {q.Name} (Mark: {q.Mark})");
+                Console.WriteLine($"\n{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_STARTING, q.Name, q.Mark)}");
 
                 // Generate appsettings if templates are not provided
                 if (string.IsNullOrWhiteSpace(args.ClientAppSettingsTemplate) && string.IsNullOrWhiteSpace(args.ServerAppSettingsTemplate))
@@ -77,7 +77,7 @@ namespace SolutionGrader.Core.Services
 
                 var steps = _parser.ParseDetail(q.DetailPath, q.Name);
                 if (steps.Count == 0) throw new InvalidOperationException("Test case does not contain any steps.");
-                Console.WriteLine($"[TestCase] Loaded {steps.Count} step(s)");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_LOADED_STEPS, steps.Count)}");
 
                 _run.ResultRoot = outDir;
 
@@ -136,7 +136,7 @@ namespace SolutionGrader.Core.Services
                     
                     if (isComparison && hasSeenInputStep && !hasAddedComparisonDelay)
                     {
-                        Console.WriteLine("[TestCase] Adding extra delay before comparisons to ensure async output is captured...");
+                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {LoggingKeywords.MSG_TESTCASE_EXTRA_DELAY}");
                         await Task.Delay(1000, ct); // Extra delay for HTTP responses
                         hasAddedComparisonDelay = true;
                     }
@@ -147,7 +147,7 @@ namespace SolutionGrader.Core.Services
                     _run.CurrentStage = currentStage;
                     _run.CurrentStageLabel = step.Stage;
 
-                    Console.WriteLine($"[Step] Executing: {step.Action} (Stage: {step.Stage}, ID: {step.Id})");
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_STEP} {string.Format(LoggingKeywords.MSG_STEP_EXECUTING, step.Action, step.Stage, step.Id)}");
 
                     var sw = Stopwatch.StartNew();
                     var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);
@@ -187,21 +187,21 @@ namespace SolutionGrader.Core.Services
                     _log.LogStepGrade(step, ok, msg, 0, pointsPossible, sw.Elapsed.TotalMilliseconds, 
                         errorCode, null, null);
                     
-                    Console.WriteLine($"[Step] Result: {(ok ? "PASS" : "FAIL")} - {msg} ({sw.Elapsed.TotalMilliseconds:F0}ms)");
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_STEP} {string.Format(LoggingKeywords.MSG_STEP_RESULT, ok ? LoggingKeywords.RESULT_PASS : LoggingKeywords.RESULT_FAIL, msg, sw.Elapsed.TotalMilliseconds)}");
                 }
 
-                Console.WriteLine($"[TestCase] Writing results to: {outDir}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_WRITING_RESULTS, outDir)}");
                 await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
 
                 _log.EndCase();
 
-                Console.WriteLine($"[TestCase] Cleaning up processes...");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {LoggingKeywords.MSG_TESTCASE_CLEANING_PROCESSES}");
                 try { await _proc.StopAllAsync(); } catch { }
                 try { await _mw.StopAsync(); } catch { }
-                Console.WriteLine($"[TestCase] Completed: {q.Name}\n");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_COMPLETED, q.Name)}\n");
             }
 
-            Console.WriteLine("[Suite] All test cases completed successfully");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} All test cases completed successfully");
             return 1;
         }
 
