@@ -34,7 +34,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
                 src.CopyTo(dst);
             }
         }
-        catch (System.Exception ex) { throw new System.InvalidOperationException("Failed to replace appsettings.", ex); }
+        catch (System.Exception ex) { throw new System.InvalidOperationException(AppsettingKeywords.MSG_APPSETTINGS_REPLACE_FAILED, ex); }
     }
 
     public async System.Threading.Tasks.Task RunDatabaseResetAsync(string? dbScriptPath, DatabaseConfiguration? dbConfig, bool useDocker, System.Threading.CancellationToken ct)
@@ -100,13 +100,13 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             {
                 // Script contains DROP/CREATE DATABASE commands
                 // Execute the entire script from master database context
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Script contains database management commands, executing from master context...");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_SCRIPT_SELF_MANAGING}");
                 await ExecuteScriptFromMasterAsync(builder, dbScriptPath, ct);
             }
             else
             {
                 // Script doesn't manage database, use manual drop/create/apply
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Using manual database drop/create/apply...");
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_MANUAL_DB_MANAGEMENT}");
                 
                 // Drop the database if it exists
                 await DropDatabaseAsync(builder, databaseName, ct);
