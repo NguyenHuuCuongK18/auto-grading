@@ -18,6 +18,8 @@ public static class FileKeywords
     public const string FileName_Header = "Header.xlsx";
     public const string FileName_Detail = "Detail.xlsx";
     public const string FileName_GradeDetail = "GradeDetail.xlsx";
+    // Deprecated: FailedTestDetail.xlsx is no longer created; error details are now in OverallSummary.xlsx
+    [System.Obsolete("FailedTestDetail.xlsx is deprecated. Error details are now included in OverallSummary.xlsx")]
     public const string FileName_FailedTestDetail = "FailedTestDetail.xlsx";
     public const string FileName_OverallSummary = "OverallSummary.xlsx";
     public const string FileName_AppSettings = "appsettings.json";

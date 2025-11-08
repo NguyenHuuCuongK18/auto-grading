@@ -33,7 +33,6 @@ namespace SolutionGrader.Core.Services
         private int _totalCompareSteps;
         private readonly List<StepGradeRecord> _records = new();
         private bool _allStepsPassed = true;
-        private string? _failedTestDetailPath;
 
         // we keep summaries in-memory too, for end-of-suite WriteOverallSummary if the runner calls it
         private readonly List<TestCaseSummary> _caseSummaries = new();
@@ -111,7 +110,6 @@ namespace SolutionGrader.Core.Services
 
             _questionCode = questionCode;
             _outPath = Path.Combine(outFolder, FileKeywords.FileName_GradeDetail);
-            _failedTestDetailPath = Path.Combine(outFolder, FileKeywords.FileName_FailedTestDetail);
 
             // result root is parent of the case folder; that's where OverallSummary.xlsx lives
             var resultRoot = Path.GetDirectoryName(outFolder);
@@ -216,18 +214,18 @@ namespace SolutionGrader.Core.Services
                 _wb.SaveAs(s);
 
             // 🔁 NEW: make sure the overall summary exists/updates after **every** case
+            // Now includes error details directly in the summary
             if (!string.IsNullOrEmpty(_overallSummaryPath) && _questionCode != null)
             {
+                var errorNotes = CollectErrorNotes();
                 UpsertOverallSummaryRow(
                     _overallSummaryPath!,
                     _questionCode,
                     casePassed,
                     Math.Round(totalAwarded, 2),
-                    Math.Round(totalPossible, 2));
+                    Math.Round(totalPossible, 2),
+                    errorNotes);
             }
-
-            // Optionally create a compact FailedTestDetail.xlsx (only when there are failures)
-            WriteFailedTestDetailIfAny();
 
             // dispose workbook to avoid file locks between cases
             _wb.Dispose();
@@ -694,7 +692,61 @@ namespace SolutionGrader.Core.Services
             return (passed, awarded, possible);
         }
 
-        private void UpsertOverallSummaryRow(string summaryPath, string testCase, bool passed, double pointsAwarded, double pointsPossible)
+        /// <summary>
+        /// Collects error notes from all failed test steps to include in the OverallSummary.
+        /// This replaces the need for a separate FailedTestDetail.xlsx file.
+        /// </summary>
+        /// <returns>A summary string of all errors, or empty string if all tests passed</returns>
+        private string CollectErrorNotes()
+        {
+            if (_allStepsPassed) return string.Empty;
+
+            var failedRecords = _records.Where(r => !r.Passed).ToList();
+            if (failedRecords.Count == 0) return string.Empty;
+
+            var notes = new StringBuilder();
+            notes.AppendLine($"Failed {failedRecords.Count} step(s):");
+
+            // Group failures by stage for better readability
+            var groupedByStage = failedRecords.GroupBy(r => r.Stage).OrderBy(g => g.Key);
+            
+            foreach (var stageGroup in groupedByStage)
+            {
+                notes.AppendLine($"  Stage {stageGroup.Key}:");
+                foreach (var record in stageGroup)
+                {
+                    // Extract validation type for clarity
+                    var validationType = record.StepId.Contains("-METHOD-") ? "HTTP Method" :
+                                       record.StepId.Contains("-STATUS-") ? "Status Code" :
+                                       record.StepId.Contains("-SIZE-") ? "Byte Size" :
+                                       record.StepId.Contains("-DATA-") ? "Data" :
+                                       record.StepId.Contains("-OUT-") ? "Output" :
+                                       record.StepId.Contains("-REQ-") ? "Request" : "Unknown";
+                    
+                    // Create concise error message
+                    var message = record.Message ?? "Unknown error";
+                    // Truncate long messages for summary
+                    if (message.Length > 100)
+                        message = message.Substring(0, 97) + "...";
+                    
+                    notes.AppendLine($"    - {validationType}: {message}");
+                }
+            }
+
+            return notes.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Updates or inserts a row in the OverallSummary.xlsx file with test case results and error details.
+        /// This method is called after each test case completes, ensuring incremental summary updates.
+        /// </summary>
+        /// <param name="summaryPath">Path to the OverallSummary.xlsx file</param>
+        /// <param name="testCase">Test case identifier (e.g., "TC01", "TC02")</param>
+        /// <param name="passed">Whether the test case passed all validations</param>
+        /// <param name="pointsAwarded">Points awarded for this test case</param>
+        /// <param name="pointsPossible">Maximum points possible for this test case</param>
+        /// <param name="errorNotes">Detailed error notes to include for failed tests (empty for passed tests)</param>
+        private void UpsertOverallSummaryRow(string summaryPath, string testCase, bool passed, double pointsAwarded, double pointsPossible, string errorNotes)
         {
             using XLWorkbook wb = File.Exists(summaryPath) ? LoadExistingWorkbook(summaryPath) : CreateNewWorkbook();
             var ws = wb.Worksheets.FirstOrDefault() ?? wb.AddWorksheet(GradingKeywords.Sheet_Summary);
@@ -715,12 +767,20 @@ namespace SolutionGrader.Core.Services
             ws.Cell(row, 2).Value = passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
             ws.Cell(row, 3).Value = pointsAwarded;
             ws.Cell(row, 4).Value = pointsPossible;
+            
+            // Add error notes column (column 5) - only for failed tests
+            if (!passed && !string.IsNullOrEmpty(errorNotes))
+            {
+                ws.Cell(row, 5).Value = errorNotes;
+                ws.Cell(row, 5).Style.Alignment.WrapText = true;
+                ws.Cell(row, 5).Style.Fill.BackgroundColor = XLColor.LightPink;
+            }
 
             // Autofit & wrap for readability
-            for (int c = 1; c <= 4; c++)
+            for (int c = 1; c <= 5; c++)
             {
                 ws.Column(c).Style.Alignment.WrapText = true;
-                ws.Column(c).AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 60);
+                ws.Column(c).AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 100);
             }
 
             using (var sw = _files.OpenWrite(summaryPath))
@@ -738,6 +798,11 @@ namespace SolutionGrader.Core.Services
             return new XLWorkbook(ms);
         }
 
+        /// <summary>
+        /// Creates a new workbook for OverallSummary.xlsx with appropriate column headers.
+        /// Includes an ErrorNotes column to display failure details inline (replacing FailedTestDetail.xlsx).
+        /// </summary>
+        /// <returns>A new XLWorkbook with the Summary sheet and column headers</returns>
         private static XLWorkbook CreateNewWorkbook()
         {
             var wb = new XLWorkbook();
@@ -746,6 +811,7 @@ namespace SolutionGrader.Core.Services
             ws.Cell(1, 2).Value = "Passed";
             ws.Cell(1, 3).Value = "PointsAwarded";
             ws.Cell(1, 4).Value = "PointsPossible";
+            ws.Cell(1, 5).Value = GradingKeywords.Col_ErrorNotes;
             ws.Row(1).Style.Font.Bold = true;
             return wb;
         }
@@ -836,81 +902,6 @@ namespace SolutionGrader.Core.Services
         {
             var m = System.Text.RegularExpressions.Regex.Match(message ?? string.Empty, @"(\d+)");
             return m.Success ? int.Parse(m.Value) : -1;
-        }
-
-        private void WriteFailedTestDetailIfAny()
-        {
-            // Only create the file if the test case actually failed
-            if (_wb == null || string.IsNullOrEmpty(_failedTestDetailPath) || _allStepsPassed) return;
-
-            var failed = new List<(string Sheet, int Row, string Stage, string Result, string Message, string DetailPath)>();
-
-            var sheetsToCheck = new[]
-            {
-                (Primary: SheetOutClientsAlt, Alternate: SheetOutClients),
-                (Primary: SheetOutServersAlt, Alternate: SheetOutServers)
-            };
-
-            foreach (var (primary, alternate) in sheetsToCheck)
-            {
-                if (!TryGetWorksheetFlexible(primary, alternate, out var worksheet) || worksheet == null) continue;
-                var hdr = GetHeaderIndex(worksheet);
-                if (!hdr.TryGetValue(GradingKeywords.Col_Result, out var resultCol)) continue;
-
-                var rng = worksheet.RangeUsed();
-                if (rng == null) continue;
-
-                foreach (var row in rng.RowsUsed().Skip(1)
-                )
-                {
-                    var result = row.Cell(resultCol).GetString();
-                    if (!result.Equals(GradingKeywords.Result_Pass, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var stageCol = hdr.TryGetValue(GradingKeywords.Col_Stage, out var sc) ? sc : 0;
-                        var messageCol = hdr.TryGetValue(GradingKeywords.Col_Message, out var mc) ? mc : 0;
-                        var detailCol = hdr.TryGetValue(GradingKeywords.Col_DetailPath, out var dc) ? dc : 0;
-
-                        failed.Add((
-                            worksheet.Name,
-                            row.RowNumber(),
-                            stageCol > 0 ? row.Cell(stageCol).GetString() : string.Empty,
-                            result,
-                            messageCol > 0 ? row.Cell(messageCol).GetString() : string.Empty,
-                            detailCol > 0 ? row.Cell(detailCol).GetString() : string.Empty
-                        ));
-                    }
-                }
-            }
-
-            if (failed.Count == 0) return;
-
-            using var workbook = new XLWorkbook();
-            var failedSheet = workbook.AddWorksheet(GradingKeywords.Sheet_FailedTests);
-
-            failedSheet.Cell(1, 1).Value = "Sheet";
-            failedSheet.Cell(1, 2).Value = "Row";
-            failedSheet.Cell(1, 3).Value = GradingKeywords.Col_Stage;
-            failedSheet.Cell(1, 4).Value = GradingKeywords.Col_Result;
-            failedSheet.Cell(1, 5).Value = GradingKeywords.Col_Message;
-            failedSheet.Cell(1, 6).Value = GradingKeywords.Col_DetailPath;
-            failedSheet.Row(1).Style.Font.Bold = true;
-
-            int r = 2;
-            foreach (var f in failed)
-            {
-                failedSheet.Cell(r, 1).Value = f.Sheet;
-                failedSheet.Cell(r, 2).Value = f.Row;
-                failedSheet.Cell(r, 3).Value = f.Stage;
-                failedSheet.Cell(r, 4).Value = f.Result;
-                failedSheet.Cell(r, 5).Value = f.Message;
-                failedSheet.Cell(r, 6).Value = f.DetailPath;
-                r++;
-            }
-
-            failedSheet.Columns().AdjustToContents(1, failedSheet.LastRowUsed().RowNumber(), 5, 80);
-
-            using var s = _files.OpenWrite(_failedTestDetailPath!);
-            workbook.SaveAs(s);
         }
 
         /// <summary>
