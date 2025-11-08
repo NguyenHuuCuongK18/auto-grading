@@ -92,14 +92,31 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
             var databaseName = builder.InitialCatalog;
             
-            // Drop the database if it exists
-            await DropDatabaseAsync(builder, databaseName, ct);
+            // Read the SQL script to check if it manages the database itself
+            var script = await File.ReadAllTextAsync(dbScriptPath, ct);
+            var scriptManagesDatabase = ScriptContainsDatabaseManagement(script, databaseName);
             
-            // Create a new database
-            await CreateDatabaseAsync(builder, databaseName, ct);
-            
-            // Apply the SQL script to the new database
-            await ApplyScriptAsync(builder, databaseName, dbScriptPath, ct);
+            if (scriptManagesDatabase)
+            {
+                // Script contains DROP/CREATE DATABASE commands
+                // Execute the entire script from master database context
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Script contains database management commands, executing from master context...");
+                await ExecuteScriptFromMasterAsync(builder, dbScriptPath, ct);
+            }
+            else
+            {
+                // Script doesn't manage database, use manual drop/create/apply
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} Using manual database drop/create/apply...");
+                
+                // Drop the database if it exists
+                await DropDatabaseAsync(builder, databaseName, ct);
+                
+                // Create a new database
+                await CreateDatabaseAsync(builder, databaseName, ct);
+                
+                // Apply the SQL script to the new database
+                await ApplyScriptAsync(builder, databaseName, dbScriptPath, ct);
+            }
             
             return true;
         }
@@ -229,6 +246,71 @@ END";
         };
 
         return masterBuilder.ConnectionString;
+    }
+
+    private static bool ScriptContainsDatabaseManagement(string script, string databaseName)
+    {
+        // Check if the script contains DROP DATABASE, CREATE DATABASE, or USE commands
+        // This indicates the script manages the database lifecycle itself
+        
+        // Patterns to check (case-insensitive):
+        // - DROP DATABASE [DatabaseName] or DROP DATABASE DatabaseName
+        // - CREATE DATABASE [DatabaseName] or CREATE DATABASE DatabaseName
+        // - USE [DatabaseName] or USE DatabaseName
+        
+        var scriptUpper = script.ToUpperInvariant();
+        var dbNameUpper = databaseName.ToUpperInvariant();
+        var dbNameBracketed = $"[{dbNameUpper}]";
+        
+        // Check for DROP DATABASE
+        if (scriptUpper.Contains($"DROP DATABASE {dbNameBracketed}") || 
+            scriptUpper.Contains($"DROP DATABASE [{dbNameUpper}]") ||
+            Regex.IsMatch(scriptUpper, $@"\bDROP\s+DATABASE\s+{Regex.Escape(dbNameUpper)}\b"))
+        {
+            return true;
+        }
+        
+        // Check for CREATE DATABASE
+        if (scriptUpper.Contains($"CREATE DATABASE {dbNameBracketed}") || 
+            scriptUpper.Contains($"CREATE DATABASE [{dbNameUpper}]") ||
+            Regex.IsMatch(scriptUpper, $@"\bCREATE\s+DATABASE\s+{Regex.Escape(dbNameUpper)}\b"))
+        {
+            return true;
+        }
+        
+        // Check for USE
+        if (scriptUpper.Contains($"USE {dbNameBracketed}") || 
+            scriptUpper.Contains($"USE [{dbNameUpper}]") ||
+            Regex.IsMatch(scriptUpper, $@"\bUSE\s+{Regex.Escape(dbNameUpper)}\b"))
+        {
+            return true;
+        }
+        
+        return false;
+    }
+
+    private async System.Threading.Tasks.Task ExecuteScriptFromMasterAsync(SqlConnectionStringBuilder builder, string scriptPath, System.Threading.CancellationToken ct)
+    {
+        // Execute the entire script from the master database context
+        // This allows the script to manage database drop/create/use operations itself
+        
+        var script = await File.ReadAllTextAsync(scriptPath, ct);
+        var batches = SplitSqlBatches(script);
+
+        // Connect to master database
+        var masterConnectionString = BuildMasterConnectionString(builder);
+        using var connection = new SqlConnection(masterConnectionString);
+        await connection.OpenAsync(ct);
+
+        foreach (var batch in batches)
+        {
+            using var command = new SqlCommand(batch, connection)
+            {
+                CommandType = CommandType.Text
+            };
+
+            await command.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private async System.Threading.Tasks.Task<bool> ExecuteSqlViaDockerAsync(string dbScriptPath, System.Threading.CancellationToken ct)
