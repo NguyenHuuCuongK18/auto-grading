@@ -28,6 +28,13 @@ namespace SolutionGrader.Core.Services
 
         public DataComparisonService(IRunContext run) => _run = run;
 
+        /// <summary>
+        /// Compares two files for equality using normalized content comparison.
+        /// This comparison is case-insensitive to prevent capitalization differences from causing failures.
+        /// </summary>
+        /// <param name="expectedPath">Path to the expected file</param>
+        /// <param name="actualPath">Path to the actual file</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareFile(string? expectedPath, string? actualPath)
         {
             if (IsMissing(expectedPath) || !SafeFileExists(expectedPath!))
@@ -42,14 +49,24 @@ namespace SolutionGrader.Core.Services
                 return (true, $"{info.Title}: Actual output not available (ignored)");
             }
 
-            var exp = Normalize(File.ReadAllText(expectedPath!), false);
-            var act = Normalize(File.ReadAllText(actualPath!), false);
+            // Use case-insensitive normalization (true) to ignore capitalization differences
+            var exp = Normalize(File.ReadAllText(expectedPath!), true);
+            var act = Normalize(File.ReadAllText(actualPath!), true);
 
             if (exp == act) return (true, "Files match exactly");
             var (idx, _, _, _, _) = FirstDiff(exp, act);
             return (false, idx >= 0 ? $"Content differs (first diff at idx {idx})" : "Content differs");
         }
 
+        /// <summary>
+        /// Compares text content between expected and actual outputs with advanced normalization.
+        /// This method is case-insensitive by default to prevent capitalization differences from causing failures.
+        /// Uses multiple comparison strategies (exact match, contains, aggressive normalization) for robust validation.
+        /// </summary>
+        /// <param name="expectedPath">Path to expected content or inline content</param>
+        /// <param name="actualPath">Path to actual content or memory:// URI</param>
+        /// <param name="caseInsensitive">Whether to ignore case differences (default: true)</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareText(string? expectedPath, string? actualPath, bool caseInsensitive = true)
         {
             var isClientOutput = ContainsScope(actualPath, FileKeywords.Folder_Clients);
@@ -167,6 +184,14 @@ namespace SolutionGrader.Core.Services
             }
         }
 
+        /// <summary>
+        /// Compares CSV content between expected and actual outputs.
+        /// This comparison is case-insensitive to prevent capitalization differences from causing failures.
+        /// </summary>
+        /// <param name="expectedPath">Path to expected CSV content</param>
+        /// <param name="actualPath">Path to actual CSV content</param>
+        /// <param name="ignoreOrder">Whether to ignore row order (currently not implemented)</param>
+        /// <returns>Tuple of (success, message) indicating comparison result</returns>
         public (bool, string) CompareCsv(string? expectedPath, string? actualPath, bool ignoreOrder = true)
         {
             if (IsMissing(expectedPath))
