@@ -105,10 +105,10 @@ namespace SolutionGrader.Core.Services
                 _http = new HttpListener();
                 _http.Prefixes.Add($"http://localhost:{_proxyPort}/");
                 _http.Start();
-                Console.WriteLine($"[Proxy] HTTP proxy listening on http://localhost:{_proxyPort}/ -> http://localhost:{_realServerPort}/");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROXY} {string.Format(LoggingKeywords.MSG_PROXY_HTTP_LISTENING, _proxyPort, _realServerPort)}");
                 _listenTask = Task.Run(() => ListenHttpAsync(token), token);
             }
-            catch (Exception ex) { Console.WriteLine($"[HTTP Proxy ERR] {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_HTTP_PROXY_ERR} {string.Format(LoggingKeywords.MSG_PROXY_HTTP_ERROR, ex.Message)}"); }
         }
 
         private async Task ListenHttpAsync(CancellationToken token)
@@ -180,10 +180,10 @@ namespace SolutionGrader.Core.Services
             {
                 _tcp = new TcpListener(IPAddress.Loopback, _proxyPort);
                 _tcp.Start();
-                Console.WriteLine($"[Proxy] TCP proxy listening on 127.0.0.1:{_proxyPort} -> 127.0.0.1:{_realServerPort}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROXY} {string.Format(LoggingKeywords.MSG_PROXY_TCP_LISTENING, _proxyPort, _realServerPort)}");
                 _listenTask = Task.Run(() => ListenTcpAsync(token), token);
             }
-            catch (Exception ex) { Console.WriteLine($"[TCP Proxy ERR] {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TCP_PROXY_ERR} {string.Format(LoggingKeywords.MSG_PROXY_TCP_ERROR, ex.Message)}"); }
         }
 
         private async Task ListenTcpAsync(CancellationToken token)

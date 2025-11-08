@@ -3,6 +3,7 @@ namespace SolutionGrader.Core.Services;
 using ClosedXML.Excel;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 using System.Globalization;
 using System.IO;
 
@@ -124,7 +125,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
         catch (System.Exception ex)
         {
-            System.Console.WriteLine($"[DatabaseConfig] Error reading database config: {ex.Message}");
+            System.Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_DATABASE_CONFIG} {string.Format(LoggingKeywords.MSG_DB_CONFIG_ERROR, ex.Message)}");
             return null;
         }
     }

@@ -43,7 +43,7 @@ namespace SolutionGrader.Core.Services
                 {
                     case var a when a == ActionKeywords.ServerStart:
                         {
-                            Console.WriteLine($"[Action] ServerStart: Starting server application...");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_START}");
                             
                             try
                             {
@@ -93,7 +93,7 @@ namespace SolutionGrader.Core.Services
                             
                             if (!serverReady)
                             {
-                                Console.WriteLine("[Action] ServerStart: Warning - Server may not be fully initialized");
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_NOT_INITIALIZED}");
                             }
                             
                             // Get initial output for logging
@@ -103,14 +103,14 @@ namespace SolutionGrader.Core.Services
                                 ? serverOutput.Substring(0, 100) + "..." 
                                 : serverOutput;
                             
-                            Console.WriteLine($"[Action] ServerStart: Server output: {outputPreview}");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_SERVER_OUTPUT, outputPreview)}");
                             result = (true, $"Server started successfully. Process running: {_proc.IsServerRunning}");
                             break;
                         }
 
                     case var a when a == ActionKeywords.ClientStart:
                         {
-                            Console.WriteLine($"[Action] ClientStart: Starting client application...");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_CLIENT_START}");
                             
                             try
                             {
@@ -140,14 +140,14 @@ namespace SolutionGrader.Core.Services
                                 ? clientOutput.Substring(0, 100) + "..." 
                                 : clientOutput;
                             
-                            Console.WriteLine($"[Action] ClientStart: Client output: {outputPreview}");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_CLIENT_OUTPUT, outputPreview)}");
                             result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
                             break;
                         }
 
                     case var a when a == ActionKeywords.ClientInput:
                         {
-                            Console.WriteLine($"[Action] ClientInput: Sending input to client: {step.Value}");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_CLIENT_INPUT_SENDING, step.Value)}");
                             _proc.SendClientInput(step.Value ?? "");
                             
                             // Wait for client to process input and respond, or timeout (default 15 seconds)
@@ -277,7 +277,7 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.TcpRelay:
                         {
-                            Console.WriteLine($"[Action] TcpRelay: Starting middleware proxy (protocol: {args.Protocol})...");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_TCP_RELAY_STARTING, args.Protocol)}");
                             bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
                             await _mw.StartAsync(useHttp, ct);
                             result = (true, $"Middleware proxy started ({args.Protocol} mode)");
