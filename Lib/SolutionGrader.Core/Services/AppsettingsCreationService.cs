@@ -159,17 +159,11 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         if (dbConfig == null)
         {
-            // Default connection string using template
-            return string.Format(
-                AppsettingKeywords.DEFAULT_CONNECTION_STRING_TEMPLATE,
-                AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE,
-                AppsettingKeywords.DEFAULT_DATABASE_NAME,
-                AppsettingKeywords.DEFAULT_USERNAME,
-                AppsettingKeywords.DEFAULT_PASSWORD
-            );
+            // Default connection string using localhost:1433 for Docker
+            return $"server=localhost,1433;database=Library;uid=sa;pwd=YourStrong@Passw0rd;TrustServerCertificate=true";
         }
 
-        var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
+        var server = dbConfig.SqlServer ?? "localhost,1433";
         // Format SQL Server instance name properly
         // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
         // - localhost, 127.0.0.1, or hostnames/IPs
@@ -192,9 +186,9 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             }
         }
 
-        var database = dbConfig.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
-        var username = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
-        var password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
+        var database = dbConfig.Database ?? "Library";
+        var username = dbConfig.Username ?? "sa";
+        var password = dbConfig.Password ?? "YourStrong@Passw0rd";
 
         // Build connection string using simple template for consistent lowercase formatting
         return string.Format(
