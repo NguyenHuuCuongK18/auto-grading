@@ -17,6 +17,12 @@ namespace SolutionGrader.Core.Services
         private readonly IRunContext _run;
         private readonly StringBuilder _clientOutputBuffer = new();
         private readonly StringBuilder _serverOutputBuffer = new();
+        
+        // Capture context at process start time to ensure output is stored with correct stage
+        private string? _clientStartQuestionCode;
+        private string? _clientStartStageLabel;
+        private string? _serverStartQuestionCode;
+        private string? _serverStartStageLabel;
 
         public ExecutableManager(IRunContext run) { _run = run; }
 
@@ -30,6 +36,10 @@ namespace SolutionGrader.Core.Services
             _client = null; _server = null;
             _clientOutputBuffer.Clear();
             _serverOutputBuffer.Clear();
+            _clientStartQuestionCode = null;
+            _clientStartStageLabel = null;
+            _serverStartQuestionCode = null;
+            _serverStartStageLabel = null;
         }
 
         public void StartServer()
@@ -38,6 +48,10 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(_serverPath) || !File.Exists(_serverPath))
                 throw new FileNotFoundException($"Server executable not found: {_serverPath}");
 
+            // Capture context at start time
+            _serverStartQuestionCode = _run.CurrentQuestionCode;
+            _serverStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+            
             _server = Create(_serverPath);
             _server.Start();
             _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
@@ -49,6 +63,10 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(_clientPath) || !File.Exists(_clientPath))
                 throw new FileNotFoundException($"Client executable not found: {_clientPath}");
 
+            // Capture context at start time
+            _clientStartQuestionCode = _run.CurrentQuestionCode;
+            _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+            
             _client = Create(_clientPath);
             _client.Start();
             _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
@@ -359,8 +377,21 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+                // Use captured context from process start time, not current context
+                string? question;
+                string? stage;
+                
+                if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
+                {
+                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                }
+                else
+                {
+                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                }
+                
                 var payload = line + Environment.NewLine;
 
                 // Only store in memory - no txt file writes
@@ -369,7 +400,10 @@ namespace SolutionGrader.Core.Services
                 else
                     _run.AppendClientOutput(question, stage, payload);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error] AppendActual Exception: {ex.Message}");
+            }
         }
 
         private static void TryKill(Process? p)

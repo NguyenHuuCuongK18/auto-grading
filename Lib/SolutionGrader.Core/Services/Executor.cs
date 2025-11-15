@@ -317,6 +317,10 @@ namespace SolutionGrader.Core.Services
                 // Other OC- steps read from client output
                 if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
+                    
+                // Legacy: CLIENT- prefix (same as OC-)
+                if (step.Id.StartsWith("CLIENT-", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
 
                 if (step.Id.StartsWith($"{GradingKeywords.StepPrefix_OutputServer}REQ-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
@@ -326,6 +330,10 @@ namespace SolutionGrader.Core.Services
 
                 // Fallback for other OS- prefixed steps
                 if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputServer, StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
+                    
+                // Legacy: SERVER- prefix (same as OS-)
+                if (step.Id.StartsWith("SERVER-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerCaptureKey(step.QuestionCode, stageLabel);
 
                 return actual;
