@@ -84,10 +84,11 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     private static string DetermineIpAddress(string type)
     {
-        // HTTP uses localhost, TCP uses 127.0.0.1
-        return type.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) 
-            ? AppsettingKeywords.HTTP_LOCALHOST 
-            : AppsettingKeywords.TCP_LOCALHOST;
+        // TCP uses 127.0.0.1, everything else (HTTP, CONSOLE, etc.) uses http://localhost
+        // CONSOLE protocol uses HTTP for network communication
+        return type.Equals(AppsettingKeywords.PROTOCOL_TCP, StringComparison.OrdinalIgnoreCase) 
+            ? AppsettingKeywords.TCP_LOCALHOST 
+            : AppsettingKeywords.HTTP_LOCALHOST;
     }
 
     private static int FindAvailablePort()

@@ -38,8 +38,10 @@ public static class LoggingKeywords
     public const string MSG_ACTION_SERVER_START = "ServerStart: Starting server application...";
     public const string MSG_ACTION_SERVER_NOT_INITIALIZED = "ServerStart: Warning - Server may not be fully initialized";
     public const string MSG_ACTION_SERVER_OUTPUT = "ServerStart: Server output: {0}";
+    public const string MSG_ACTION_SERVER_FULL_LOG_AVAILABLE = "ServerStart: Full error output available in server.log";
     public const string MSG_ACTION_CLIENT_START = "ClientStart: Starting client application...";
     public const string MSG_ACTION_CLIENT_OUTPUT = "ClientStart: Client output: {0}";
+    public const string MSG_ACTION_CLIENT_FULL_LOG_AVAILABLE = "ClientStart: Full error output available in client.log";
     public const string MSG_ACTION_CLIENT_INPUT_SENDING = "ClientInput: Sending input to client: {0}";
     public const string MSG_ACTION_TCP_RELAY_STARTING = "TcpRelay: Starting middleware proxy (protocol: {0})...";
 

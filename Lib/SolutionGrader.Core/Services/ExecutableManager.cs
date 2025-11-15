@@ -59,12 +59,16 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
                 return null;
 
+            // Set working directory to the directory containing the executable
+            var workingDirectory = Path.GetDirectoryName(executablePath);
+
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
                     Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -210,12 +214,17 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
+            // Set working directory to the directory containing the executable
+            // This ensures appsettings.json and other config files are found
+            var workingDirectory = Path.GetDirectoryName(exe);
+            
             return new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = fileName,
                     Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
