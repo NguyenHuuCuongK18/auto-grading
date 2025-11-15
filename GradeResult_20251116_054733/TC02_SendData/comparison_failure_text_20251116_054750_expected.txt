@@ -1,0 +1,8 @@
+[
+  {
+    "BookId": 3,
+    "Title": "The Hobbit",
+    "PublicationYear": 1937,
+    "GenreName": "Fantasy"
+  }
+]
