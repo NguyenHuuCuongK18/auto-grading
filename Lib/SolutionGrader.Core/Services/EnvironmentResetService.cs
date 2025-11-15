@@ -39,6 +39,11 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
     public async System.Threading.Tasks.Task RunDatabaseResetAsync(string? dbScriptPath, DatabaseConfiguration? dbConfig, bool useDocker, System.Threading.CancellationToken ct)
     {
+        await RunDatabaseResetAsync(dbScriptPath, dbConfig, useDocker, null, ct);
+    }
+
+    public async System.Threading.Tasks.Task RunDatabaseResetAsync(string? dbScriptPath, DatabaseConfiguration? dbConfig, bool useDocker, EnvironmentConfiguration? envConfig, System.Threading.CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(dbScriptPath) || !File.Exists(dbScriptPath))
         {
             // No database script provided or file doesn't exist - skip reset
@@ -62,6 +67,13 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             if (!success)
             {
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {AppsettingKeywords.MSG_DATABASE_RESET_FAILED}");
+                
+                // Check if we should stop grading on database reset failure
+                bool stopOnFailure = envConfig?.StopGradingIfResetFails ?? true;
+                if (stopOnFailure)
+                {
+                    throw new System.InvalidOperationException("Database reset failed and StopGradingIfResetFails is enabled");
+                }
             }
             else
             {
@@ -71,7 +83,14 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
         catch (System.Exception ex)
         {
             Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_DATABASE} {string.Format(AppsettingKeywords.MSG_DATABASE_RESET_ERROR, ex.Message)}");
-            // Don't throw - allow tests to continue even if DB reset fails
+            
+            // Check if we should stop grading on database reset error
+            bool stopOnFailure = envConfig?.StopGradingIfResetFails ?? true;
+            if (stopOnFailure)
+            {
+                throw; // Re-throw to stop grading process
+            }
+            // Otherwise, continue with tests even if DB reset fails
         }
     }
 

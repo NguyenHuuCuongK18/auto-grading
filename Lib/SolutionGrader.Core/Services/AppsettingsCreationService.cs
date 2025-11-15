@@ -16,12 +16,27 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath)
     {
-        // Allocate random available ports, ensuring they're different
-        _proxyPort = FindAvailablePort();
-        do
+        return GenerateAppsettings(dbConfig, clientExePath, serverExePath, null);
+    }
+
+    public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig)
+    {
+        // Use ports from environment configuration if available, otherwise find available ports
+        if (envConfig?.MiddlewarePort.HasValue == true && envConfig?.ServerPort.HasValue == true)
         {
-            _serverPort = FindAvailablePort();
-        } while (_serverPort == _proxyPort);
+            _proxyPort = envConfig.MiddlewarePort.Value;
+            _serverPort = envConfig.ServerPort.Value;
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using ports from environment.xlsx: Proxy={_proxyPort}, Server={_serverPort}");
+        }
+        else
+        {
+            // Allocate random available ports, ensuring they're different
+            _proxyPort = FindAvailablePort();
+            do
+            {
+                _serverPort = FindAvailablePort();
+            } while (_serverPort == _proxyPort);
+        }
 
         // Determine IP address based on Type
         var ipAddress = DetermineIpAddress(dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
