@@ -46,7 +46,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
         if (Directory.Exists(input))
         {
+            // Try both Header.xlsx and header.xlsx (case-insensitive search)
             var candidate = Path.Combine(input, "Header.xlsx");
+            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            
+            candidate = Path.Combine(input, "header.xlsx");
             if (File.Exists(candidate)) return Path.GetFullPath(candidate);
         }
 
@@ -334,8 +338,14 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                      }))
         {
             var name = Path.GetFileName(dir);
+            
+            // Check for Detail.xlsx (case-insensitive)
             var detail = Path.Combine(dir, "Detail.xlsx");
-            if (!File.Exists(detail)) continue;
+            if (!File.Exists(detail))
+            {
+                detail = Path.Combine(dir, "detail.xlsx");
+                if (!File.Exists(detail)) continue;
+            }
 
             marks.TryGetValue(name, out var mark);
             
