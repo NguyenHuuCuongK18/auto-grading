@@ -75,11 +75,22 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 startRow = 2; // Skip header row
             }
 
+            // First pass: look for "Protocol" key (higher priority)
             for (int r = startRow; r <= Math.Min(50, ws.RowCount()); r++)
             {
                 var key = ws.Cell(r, 1).GetString().Trim();
-                if (key.Equals("Type", StringComparison.OrdinalIgnoreCase) ||
-                    key.Equals("Protocol", StringComparison.OrdinalIgnoreCase))
+                if (key.Equals("Protocol", StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = ws.Cell(r, 2).GetString().Trim();
+                    if (!string.IsNullOrEmpty(val)) return val.ToUpperInvariant();
+                }
+            }
+            
+            // Second pass: fallback to "Type" key for backward compatibility
+            for (int r = startRow; r <= Math.Min(50, ws.RowCount()); r++)
+            {
+                var key = ws.Cell(r, 1).GetString().Trim();
+                if (key.Equals("Type", StringComparison.OrdinalIgnoreCase))
                 {
                     var val = ws.Cell(r, 2).GetString().Trim();
                     if (!string.IsNullOrEmpty(val)) return val.ToUpperInvariant();

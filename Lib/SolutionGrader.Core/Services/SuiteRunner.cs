@@ -95,7 +95,7 @@ namespace SolutionGrader.Core.Services
 
                 // Always generate appsettings from header
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
-                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment);
+                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment, def.Protocol);
                 
                 // Configure middleware with the generated ports
                 _mw.ConfigurePorts(proxyPort, serverPort);

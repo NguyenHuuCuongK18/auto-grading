@@ -16,10 +16,15 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath)
     {
-        return GenerateAppsettings(dbConfig, clientExePath, serverExePath, null);
+        return GenerateAppsettings(dbConfig, clientExePath, serverExePath, null, null);
     }
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig)
+    {
+        return GenerateAppsettings(dbConfig, clientExePath, serverExePath, envConfig, null);
+    }
+
+    public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig, string? protocol)
     {
         // Use ports from environment configuration if available, otherwise find available ports
         if (envConfig?.MiddlewarePort.HasValue == true && envConfig?.ServerPort.HasValue == true)
@@ -38,8 +43,8 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             } while (_serverPort == _proxyPort);
         }
 
-        // Determine IP address based on Type
-        var ipAddress = DetermineIpAddress(dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
+        // Determine IP address based on protocol (TCP vs HTTP/Console), not database Type
+        var ipAddress = DetermineIpAddress(protocol ?? dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
 
         // Generate server appsettings.json if server path provided
         if (!string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
