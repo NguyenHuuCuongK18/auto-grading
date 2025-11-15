@@ -50,32 +50,12 @@ namespace SolutionGrader.Core.Services
             }
 
             // Use case-insensitive normalization (true) to ignore capitalization differences
-            var expRaw = File.ReadAllText(expectedPath!);
-            var actRaw = File.ReadAllText(actualPath!);
-            var exp = Normalize(expRaw, true);
-            var act = Normalize(actRaw, true);
+            var exp = Normalize(File.ReadAllText(expectedPath!), true);
+            var act = Normalize(File.ReadAllText(actualPath!), true);
 
             if (exp == act) return (true, "Files match exactly");
-            
-            var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
-            
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("file", expRaw, actRaw);
-            
-            // Build detailed error message
-            var errorMessage = new System.Text.StringBuilder();
-            errorMessage.AppendLine($"Content differs (first diff at idx {idx})");
-            errorMessage.AppendLine($"Expected file: {expectedPath}");
-            errorMessage.AppendLine($"Actual file:   {actualPath}");
-            errorMessage.AppendLine($"Expected (first 200 chars): {FormatForDisplay(expRaw, 200)}");
-            errorMessage.AppendLine($"Actual (first 200 chars):   {FormatForDisplay(actRaw, 200)}");
-            
-            if (idx >= 0 && expChar.HasValue && actChar.HasValue)
-            {
-                errorMessage.AppendLine($"First difference at index {idx}: expected '{EscapeChar(expChar.Value)}' but got '{EscapeChar(actChar.Value)}'");
-            }
-            
-            return (false, errorMessage.ToString().TrimEnd());
+            var (idx, _, _, _, _) = FirstDiff(exp, act);
+            return (false, idx >= 0 ? $"Content differs (first diff at idx {idx})" : "Content differs");
         }
 
         /// <summary>
@@ -169,26 +149,11 @@ namespace SolutionGrader.Core.Services
             if (actLoose.Contains(expLoose))
                 return (true, $"Text comparison passed: {outputType} contains expected after aggressive normalization");
 
-            var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
+            var (idx, _, _, _, _) = FirstDiff(exp, act);
             var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.TEXT_MISMATCH);
-            
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("text", expectedRaw, actualRaw);
-            
-            // Build detailed error message with actual vs expected content
-            var errorMessage = new System.Text.StringBuilder();
-            errorMessage.AppendLine($"{infoMismatch.Title}: Content differs at position {idx}");
-            errorMessage.AppendLine($"Expected (normalized): {FormatForDisplay(expectedRaw, 200)}");
-            errorMessage.AppendLine($"Actual (normalized):   {FormatForDisplay(actualRaw, 200)}");
-            
-            if (idx >= 0 && expChar.HasValue && actChar.HasValue)
-            {
-                errorMessage.AppendLine($"First difference at index {idx}: expected '{EscapeChar(expChar.Value)}' but got '{EscapeChar(actChar.Value)}'");
-                errorMessage.AppendLine($"Expected context: ...{EscapeString(expCtx)}...");
-                errorMessage.AppendLine($"Actual context:   ...{EscapeString(actCtx)}...");
-            }
-            
-            return (false, errorMessage.ToString().TrimEnd());
+            return (false, idx >= 0
+                ? $"{infoMismatch.Title}: Content differs at position {idx}"
+                : $"{infoMismatch.Title}: {infoMismatch.Description}");
         }
 
         public (bool, string) CompareJson(string? expectedPath, string? actualPath, bool ignoreOrder = true)
@@ -209,24 +174,13 @@ namespace SolutionGrader.Core.Services
             {
                 var expNorm = JsonNormalize(JsonDocument.Parse(expectedJson).RootElement, ignoreOrder);
                 var actNorm = JsonNormalize(JsonDocument.Parse(actualJson!).RootElement, ignoreOrder);
-                
-                if (expNorm == actNorm)
-                    return (true, "JSON matches expected");
-                
-                // Write debug files for comparison failure
-                WriteComparisonDebugFiles("json", expectedJson, actualJson);
-                
-                // Build detailed error message
-                var errorMessage = new System.Text.StringBuilder();
-                errorMessage.AppendLine("JSON differs from expected");
-                errorMessage.AppendLine($"Expected JSON: {FormatForDisplay(expectedJson, 200)}");
-                errorMessage.AppendLine($"Actual JSON:   {FormatForDisplay(actualJson, 200)}");
-                
-                return (false, errorMessage.ToString().TrimEnd());
+                return expNorm == actNorm
+                    ? (true, "JSON matches expected")
+                    : (false, "JSON differs from expected");
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                return (false, $"Invalid JSON content for comparison: {ex.Message}");
+                return (false, "Invalid JSON content for comparison");
             }
         }
 
@@ -261,23 +215,8 @@ namespace SolutionGrader.Core.Services
 
             if (exp == act) return (true, "CSV matches expected");
 
-            var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
-            
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("csv", expectedCsv, actualCsv);
-            
-            // Build detailed error message
-            var errorMessage = new System.Text.StringBuilder();
-            errorMessage.AppendLine($"CSV differs (first diff at idx {idx})");
-            errorMessage.AppendLine($"Expected CSV: {FormatForDisplay(expectedCsv, 200)}");
-            errorMessage.AppendLine($"Actual CSV:   {FormatForDisplay(actualCsv, 200)}");
-            
-            if (idx >= 0 && expChar.HasValue && actChar.HasValue)
-            {
-                errorMessage.AppendLine($"First difference at index {idx}: expected '{EscapeChar(expChar.Value)}' but got '{EscapeChar(actChar.Value)}'");
-            }
-            
-            return (false, errorMessage.ToString().TrimEnd());
+            var (idx, _, _, _, _) = FirstDiff(exp, act);
+            return (false, idx >= 0 ? $"CSV differs (first diff at idx {idx})" : "CSV differs");
         }
 
         // ---------------- helpers ----------------
@@ -436,69 +375,6 @@ namespace SolutionGrader.Core.Services
             // Remove common punctuation that may vary in output formatting
             s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
             return s;
-        }
-
-        /// <summary>
-        /// Formats a string for display by truncating if too long and showing ellipsis
-        /// </summary>
-        private static string FormatForDisplay(string s, int maxLength)
-        {
-            if (string.IsNullOrEmpty(s)) return "(empty)";
-            if (s.Length <= maxLength) return EscapeString(s);
-            return EscapeString(s.Substring(0, maxLength)) + "...";
-        }
-
-        /// <summary>
-        /// Escapes special characters in a string for display
-        /// </summary>
-        private static string EscapeString(string s)
-        {
-            return s.Replace("\r", "\\r")
-                    .Replace("\n", "\\n")
-                    .Replace("\t", "\\t");
-        }
-
-        /// <summary>
-        /// Escapes a single character for display
-        /// </summary>
-        private static string EscapeChar(char c)
-        {
-            return c switch
-            {
-                '\r' => "\\r",
-                '\n' => "\\n",
-                '\t' => "\\t",
-                _ => c.ToString()
-            };
-        }
-
-        /// <summary>
-        /// Writes expected and actual content to debug files when a comparison fails.
-        /// This helps instructors and students diagnose what went wrong.
-        /// </summary>
-        private void WriteComparisonDebugFiles(string comparisonType, string expectedContent, string actualContent)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(_run.ResultRoot)) return;
-                
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var baseFileName = $"comparison_failure_{comparisonType}_{timestamp}";
-                
-                var expectedPath = Path.Combine(_run.ResultRoot, $"{baseFileName}_expected.txt");
-                var actualPath = Path.Combine(_run.ResultRoot, $"{baseFileName}_actual.txt");
-                
-                File.WriteAllText(expectedPath, expectedContent ?? "(empty)");
-                File.WriteAllText(actualPath, actualContent ?? "(empty)");
-                
-                Console.WriteLine($"[Comparison] Debug files written:");
-                Console.WriteLine($"[Comparison]   Expected: {expectedPath}");
-                Console.WriteLine($"[Comparison]   Actual:   {actualPath}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Comparison] Warning: Failed to write debug files: {ex.Message}");
-            }
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)
