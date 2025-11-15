@@ -1,4 +1,2 @@
-dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "SampleTestKitsWithData/Testkit_HTTP_1" --out "/tmp/grading-results" --client "path/to/client.exe" --server "path/to/server.exe"
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1" --out "C:\Users\PC\Downloads" --client "path/to/client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project11\Project11.exe"
 
-# Minimal usage (using executables from Meta/Given folder):
-dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "SampleTestKitsWithData/Testkit_HTTP_1" --out "/tmp/grading-results"
