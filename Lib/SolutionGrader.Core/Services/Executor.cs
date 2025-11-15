@@ -321,6 +321,18 @@ namespace SolutionGrader.Core.Services
                 // Legacy: CLIENT- prefix (same as OC-)
                 if (step.Id.StartsWith("CLIENT-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
+                
+                // NETWORK-RESPAYLOAD steps read from server response (HTTP response body)
+                if (step.Id.StartsWith("NETWORK-RESPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
+                
+                // NETWORK-REQPAYLOAD steps read from server request (HTTP request body)
+                if (step.Id.StartsWith("NETWORK-REQPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                    return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
+                
+                // NETWORK-METHOD steps are handled separately (HTTP method comparison)
+                if (step.Id.StartsWith("NETWORK-METHOD", StringComparison.OrdinalIgnoreCase))
+                    return actual; // This is handled by ValidateStep with metadata
 
                 if (step.Id.StartsWith($"{GradingKeywords.StepPrefix_OutputServer}REQ-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);

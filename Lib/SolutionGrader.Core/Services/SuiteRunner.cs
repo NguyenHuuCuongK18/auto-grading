@@ -107,7 +107,9 @@ namespace SolutionGrader.Core.Services
                 // First check test case specific database path
                 if (!string.IsNullOrWhiteSpace(q.Environment?.DatabaseFilePath))
                 {
-                    var testCaseDbPath = Path.Combine(def.RootDirectory, q.Environment.DatabaseFilePath);
+                    // Normalize path separators for cross-platform compatibility
+                    var normalizedPath = q.Environment.DatabaseFilePath.Replace('\\', Path.DirectorySeparatorChar);
+                    var testCaseDbPath = Path.Combine(def.RootDirectory, normalizedPath);
                     if (File.Exists(testCaseDbPath))
                     {
                         dbScriptPath = testCaseDbPath;
@@ -118,7 +120,9 @@ namespace SolutionGrader.Core.Services
                 // If not found, try suite environment database path
                 if (string.IsNullOrWhiteSpace(dbScriptPath) && !string.IsNullOrWhiteSpace(def.Environment?.DatabaseFilePath))
                 {
-                    var suiteDbPath = Path.Combine(def.RootDirectory, def.Environment.DatabaseFilePath);
+                    // Normalize path separators for cross-platform compatibility
+                    var normalizedPath = def.Environment.DatabaseFilePath.Replace('\\', Path.DirectorySeparatorChar);
+                    var suiteDbPath = Path.Combine(def.RootDirectory, normalizedPath);
                     if (File.Exists(suiteDbPath))
                     {
                         dbScriptPath = suiteDbPath;
