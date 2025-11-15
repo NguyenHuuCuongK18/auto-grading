@@ -39,11 +39,6 @@ public class Program
             ResultRoot = timestampedResultRoot,
             ClientExePath = a.GetValueOrDefault("client"),
             ServerExePath = a.GetValueOrDefault("server"),
-            ClientAppSettingsTemplate = a.GetValueOrDefault("client-appsettings"),
-            ServerAppSettingsTemplate = a.GetValueOrDefault("server-appsettings"),
-            DatabaseScriptPath = a.GetValueOrDefault("db-script"),
-            UseDatabaseDockerReset = a.TryGetValue("db-docker", out var dbDocker) && bool.TryParse(dbDocker, out var useDocker) && useDocker,
-            StageTimeoutSeconds = a.TryGetValue("timeout", out var t) && int.TryParse(t, out var sec) ? Math.Max(1, sec) : 10,
         };
 
         IFileService files = new FileService();
@@ -59,16 +54,8 @@ public class Program
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
 
-        // Configure grading options - can be toggled based on command line args or config file
-        // Options: GradingConfig.Default (all enabled), .ClientOnly, .ServerOnly, .ConsoleOutputOnly, .HttpTrafficOnly
-        var gradingConfig = a.TryGetValue("grading-mode", out var mode) ? mode.ToUpperInvariant() switch
-        {
-            "CLIENT" => GradingConfig.ClientOnly,
-            "SERVER" => GradingConfig.ServerOnly,
-            "CONSOLE" => GradingConfig.ConsoleOutputOnly,
-            "HTTP" => GradingConfig.HttpTrafficOnly,
-            _ => GradingConfig.Default
-        } : GradingConfig.Default;
+        // Use default grading configuration
+        var gradingConfig = GradingConfig.Default;
 
         IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
@@ -106,23 +93,25 @@ public class Program
 Usage:
   SolutionGrader.Cli ExecuteSuite --suite <suiteFolder|Header.xlsx> --out <resultRoot>
                                 [--client <client.exe>] [--server <server.exe>]
-                                [--client-appsettings <path>] [--server-appsettings <path>]
-                                [--db-script <sql>] [--db-docker <true|false>] [--timeout <sec>]
-                                [--grading-mode <mode>]
 
-Grading Modes:
-  DEFAULT - Validate all aspects (client output, server output, HTTP traffic, etc.)
-  CLIENT  - Validate only client-side (client output and data responses)
-  SERVER  - Validate only server-side (server output and data requests)
-  CONSOLE - Validate only console outputs (no HTTP validation)
-  HTTP    - Validate only HTTP traffic (no console output validation)
+Required Arguments:
+  --suite   Path to test suite folder or Header.xlsx file
+  --out     Output directory for grading results
 
-Notes:
-  - Protocol (HTTP/TCP) is read from Header.xlsx (if provided by the suite); no CLI flag needed.
-  - Grading mode allows easy toggling of validations for debugging purposes.
-  - Database reset: By default, uses local SQL Server connection. Set --db-docker true to use Docker environment.
-  - Appsettings: If not provided, appsettings.json files are automatically generated from Header.xlsx with random ports.
-    Database configuration (server, database, username, password) is read from Header.xlsx.
+Optional Arguments:
+  --client  Path to client executable (overrides Meta/Given/Client if provided)
+  --server  Path to server executable (overrides Meta/Given/Server if provided)
+
+Configuration:
+  All other configuration (database script, ports, timeouts, etc.) is read from:
+  - environment.xlsx: Database script path, given executables, ports
+  - Header.xlsx: Protocol, database configuration, test case marks
+  
+  The grading system will:
+  - Use executables from Meta/Given folder when --client/--server not specified
+  - Auto-generate appsettings.json from Header.xlsx with database configuration
+  - Use database script from environment.xlsx (Default_Database_File_Path)
+  - Use default timeout of 10 seconds per stage
 ");
         return -1;
     }

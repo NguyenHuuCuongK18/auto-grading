@@ -46,7 +46,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
         if (Directory.Exists(input))
         {
+            // Try both Header.xlsx and header.xlsx (case-insensitive search)
             var candidate = Path.Combine(input, "Header.xlsx");
+            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            
+            candidate = Path.Combine(input, "header.xlsx");
             if (File.Exists(candidate)) return Path.GetFullPath(candidate);
         }
 
@@ -267,6 +271,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             var metaDir = Path.Combine(suiteRoot, "Meta", "Given");
             if (Directory.Exists(metaDir))
             {
+                // Try standard naming first (Server/Client)
                 var serverDir = Path.Combine(metaDir, "Server");
                 var clientDir = Path.Combine(metaDir, "Client");
                 
@@ -280,6 +285,35 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 {
                     var clientExe = Directory.GetFiles(clientDir, "*.exe").FirstOrDefault();
                     if (clientExe != null) config.GivenClientPath = clientExe;
+                }
+                
+                // If not found, search all subdirectories for executables
+                if (string.IsNullOrEmpty(config.GivenServerPath) || string.IsNullOrEmpty(config.GivenClientPath))
+                {
+                    var allExes = Directory.GetFiles(metaDir, "*.exe", SearchOption.AllDirectories).ToList();
+                    
+                    // Heuristic: Look for common server/client naming patterns
+                    if (string.IsNullOrEmpty(config.GivenServerPath))
+                    {
+                        // Look for executables with "Server", "Project11", or in a Server-like directory
+                        var serverExe = allExes.FirstOrDefault(e => 
+                            Path.GetFileNameWithoutExtension(e).Contains("Server", StringComparison.OrdinalIgnoreCase) ||
+                            Path.GetFileNameWithoutExtension(e).Contains("Project11", StringComparison.OrdinalIgnoreCase) ||
+                            e.Contains(Path.DirectorySeparatorChar + "Server" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        );
+                        if (serverExe != null) config.GivenServerPath = serverExe;
+                    }
+                    
+                    if (string.IsNullOrEmpty(config.GivenClientPath))
+                    {
+                        // Look for executables with "Client", "Project12", or in a Client-like directory
+                        var clientExe = allExes.FirstOrDefault(e => 
+                            Path.GetFileNameWithoutExtension(e).Contains("Client", StringComparison.OrdinalIgnoreCase) ||
+                            Path.GetFileNameWithoutExtension(e).Contains("Project12", StringComparison.OrdinalIgnoreCase) ||
+                            e.Contains(Path.DirectorySeparatorChar + "Client" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        );
+                        if (clientExe != null) config.GivenClientPath = clientExe;
+                    }
                 }
             }
 
@@ -304,8 +338,14 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                      }))
         {
             var name = Path.GetFileName(dir);
+            
+            // Check for Detail.xlsx (case-insensitive)
             var detail = Path.Combine(dir, "Detail.xlsx");
-            if (!File.Exists(detail)) continue;
+            if (!File.Exists(detail))
+            {
+                detail = Path.Combine(dir, "detail.xlsx");
+                if (!File.Exists(detail)) continue;
+            }
 
             marks.TryGetValue(name, out var mark);
             
