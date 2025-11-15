@@ -51,10 +51,24 @@ namespace SolutionGrader.Core.Services
 
                 Console.WriteLine($"\n{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_STARTING, q.Name, q.Mark)}");
 
-                // Handle Grade_Content field to determine which executable to use
+                // Use command-line executables if provided, otherwise use from environment
                 string? clientExePath = args.ClientExePath;
                 string? serverExePath = args.ServerExePath;
                 
+                // If not provided via command-line, try to use from environment
+                if (string.IsNullOrWhiteSpace(clientExePath) && !string.IsNullOrWhiteSpace(def.Environment?.GivenClientPath))
+                {
+                    clientExePath = def.Environment.GivenClientPath;
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using client from environment: {clientExePath}");
+                }
+                
+                if (string.IsNullOrWhiteSpace(serverExePath) && !string.IsNullOrWhiteSpace(def.Environment?.GivenServerPath))
+                {
+                    serverExePath = def.Environment.GivenServerPath;
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using server from environment: {serverExePath}");
+                }
+                
+                // Handle Grade_Content field to determine which executable to use
                 if (!string.IsNullOrWhiteSpace(q.GradeContent))
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Grade_Content: {q.GradeContent}");
@@ -79,24 +93,18 @@ namespace SolutionGrader.Core.Services
                     }
                 }
 
-                // Generate appsettings if templates are not provided
-                if (string.IsNullOrWhiteSpace(args.ClientAppSettingsTemplate) && string.IsNullOrWhiteSpace(args.ServerAppSettingsTemplate))
-                {
-                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
-                    var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment);
-                    
-                    // Configure middleware with the generated ports
-                    _mw.ConfigurePorts(proxyPort, serverPort);
-                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {string.Format(AppsettingKeywords.MSG_CONFIGURED_MIDDLEWARE, proxyPort, serverPort)}");
-                }
-                else
-                {
-                    // Use provided template files
-                    _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, clientExePath, serverExePath);
-                }
+                // Always generate appsettings from header
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
+                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment);
                 
-                // Determine database script path - use test case specific if available
-                var dbScriptPath = args.DatabaseScriptPath;
+                // Configure middleware with the generated ports
+                _mw.ConfigurePorts(proxyPort, serverPort);
+                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {string.Format(AppsettingKeywords.MSG_CONFIGURED_MIDDLEWARE, proxyPort, serverPort)}");
+                
+                // Determine database script path - use from environment or test case specific
+                string? dbScriptPath = null;
+                
+                // First check test case specific database path
                 if (!string.IsNullOrWhiteSpace(q.Environment?.DatabaseFilePath))
                 {
                     var testCaseDbPath = Path.Combine(def.RootDirectory, q.Environment.DatabaseFilePath);
@@ -107,7 +115,19 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                await _env.RunDatabaseResetAsync(dbScriptPath, def.DatabaseConfig, args.UseDatabaseDockerReset, q.Environment, ct);
+                // If not found, try suite environment database path
+                if (string.IsNullOrWhiteSpace(dbScriptPath) && !string.IsNullOrWhiteSpace(def.Environment?.DatabaseFilePath))
+                {
+                    var suiteDbPath = Path.Combine(def.RootDirectory, def.Environment.DatabaseFilePath);
+                    if (File.Exists(suiteDbPath))
+                    {
+                        dbScriptPath = suiteDbPath;
+                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using suite database script: {dbScriptPath}");
+                    }
+                }
+                
+                // Default timeout to 10 seconds, and database reset to false (local)
+                await _env.RunDatabaseResetAsync(dbScriptPath, def.DatabaseConfig, false, q.Environment, ct);
 
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
                 _files.EnsureDirectory(outDir);
@@ -149,7 +169,7 @@ namespace SolutionGrader.Core.Services
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    stepCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, args.StageTimeoutSeconds)));
+                    stepCts.CancelAfter(TimeSpan.FromSeconds(10)); // Default timeout: 10 seconds
 
                     var currentStage = TryParseStage(step.Id);
                     

@@ -151,7 +151,7 @@ namespace SolutionGrader.Core.Services
                             _proc.SendClientInput(step.Value ?? "");
                             
                             // Wait for client to process input and respond, or timeout (default 15 seconds)
-                            var timeoutSeconds = args.StageTimeoutSeconds > 0 ? args.StageTimeoutSeconds : 15;
+                            const int timeoutSeconds = 15;
                             var gotOutput = await _proc.WaitForClientOutputAsync(timeoutSeconds, ct);
                             
                             if (gotOutput)

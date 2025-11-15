@@ -7,12 +7,7 @@ public sealed class ExecuteSuiteArgs
 
     public string Protocol { get; set; } = "HTTP";    // set from header
 
+    // Optional: Override executables from environment.xlsx Meta/Given folder
     public string? ClientExePath { get; init; }
     public string? ServerExePath { get; init; }
-    public string? ClientAppSettingsTemplate { get; init; }
-    public string? ServerAppSettingsTemplate { get; init; }
-    public string? DatabaseScriptPath { get; init; }
-    public bool UseDatabaseDockerReset { get; init; } = false;  // Default to local reset
-
-    public int StageTimeoutSeconds { get; init; } = 10;
 }
