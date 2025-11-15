@@ -15,6 +15,16 @@ public sealed class ExcelDetailParser : ITestCaseParser
         using var wb = new XLWorkbook(xlsxPath);
         var steps = new List<Step>();
 
+        // Check if this is the new format (User/Client/Server/Network sheets) or old format (InputClients/OutputClients)
+        bool hasNewFormat = wb.Worksheets.Any(s => s.Name.Equals("User", StringComparison.OrdinalIgnoreCase));
+
+        if (hasNewFormat)
+        {
+            // Use new format parser
+            return NewFormatDetailParser.ParseDetail(wb, questionCode);
+        }
+
+        // Old format parsing below
         // Helper to try both old (plural) and new (singular) sheet names
         void ReadSheetFlexible(string primaryName, string alternateName, Action<IXLWorksheet> parse)
         {

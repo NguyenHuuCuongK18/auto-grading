@@ -6,5 +6,6 @@ public sealed class SuiteDefinition
     public required string Protocol { get; init; }
     public required System.Collections.Generic.IReadOnlyList<TestCaseDefinition> Cases { get; init; }
     public DatabaseConfiguration? DatabaseConfig { get; init; }
+    public EnvironmentConfiguration? Environment { get; init; }
     public string RootDirectory => System.IO.Path.GetDirectoryName(HeaderPath)!;
 }

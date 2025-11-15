@@ -11,4 +11,7 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="9.0.10" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProcessLauncher\ProcessLauncher.csproj" />
+  </ItemGroup>
 </Project>

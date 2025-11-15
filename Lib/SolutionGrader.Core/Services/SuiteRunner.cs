@@ -51,11 +51,39 @@ namespace SolutionGrader.Core.Services
 
                 Console.WriteLine($"\n{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_STARTING, q.Name, q.Mark)}");
 
+                // Handle Grade_Content field to determine which executable to use
+                string? clientExePath = args.ClientExePath;
+                string? serverExePath = args.ServerExePath;
+                
+                if (!string.IsNullOrWhiteSpace(q.GradeContent))
+                {
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Grade_Content: {q.GradeContent}");
+                    
+                    if (q.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Grading client only - use given/reference server if available
+                        if (!string.IsNullOrWhiteSpace(q.Environment?.GivenServerPath))
+                        {
+                            serverExePath = q.Environment.GivenServerPath;
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server: {serverExePath}");
+                        }
+                    }
+                    else if (q.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Grading server only - use given/reference client if available
+                        if (!string.IsNullOrWhiteSpace(q.Environment?.GivenClientPath))
+                        {
+                            clientExePath = q.Environment.GivenClientPath;
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client: {clientExePath}");
+                        }
+                    }
+                }
+
                 // Generate appsettings if templates are not provided
                 if (string.IsNullOrWhiteSpace(args.ClientAppSettingsTemplate) && string.IsNullOrWhiteSpace(args.ServerAppSettingsTemplate))
                 {
                     Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
-                    var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, args.ClientExePath, args.ServerExePath);
+                    var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment);
                     
                     // Configure middleware with the generated ports
                     _mw.ConfigurePorts(proxyPort, serverPort);
@@ -64,16 +92,28 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     // Use provided template files
-                    _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, args.ClientExePath, args.ServerExePath);
+                    _env.ReplaceAppsettings(args.ClientAppSettingsTemplate, args.ServerAppSettingsTemplate, clientExePath, serverExePath);
                 }
                 
-                await _env.RunDatabaseResetAsync(args.DatabaseScriptPath, def.DatabaseConfig, args.UseDatabaseDockerReset, ct);
+                // Determine database script path - use test case specific if available
+                var dbScriptPath = args.DatabaseScriptPath;
+                if (!string.IsNullOrWhiteSpace(q.Environment?.DatabaseFilePath))
+                {
+                    var testCaseDbPath = Path.Combine(def.RootDirectory, q.Environment.DatabaseFilePath);
+                    if (File.Exists(testCaseDbPath))
+                    {
+                        dbScriptPath = testCaseDbPath;
+                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using test case database script: {dbScriptPath}");
+                    }
+                }
+                
+                await _env.RunDatabaseResetAsync(dbScriptPath, def.DatabaseConfig, args.UseDatabaseDockerReset, q.Environment, ct);
 
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
                 _files.EnsureDirectory(outDir);
                 _env.ClearFolder(outDir);
 
-                _proc.Init(args.ClientExePath, args.ServerExePath);
+                _proc.Init(clientExePath!, serverExePath!);
 
                 var steps = _parser.ParseDetail(q.DetailPath, q.Name);
                 if (steps.Count == 0) throw new InvalidOperationException("Test case does not contain any steps.");

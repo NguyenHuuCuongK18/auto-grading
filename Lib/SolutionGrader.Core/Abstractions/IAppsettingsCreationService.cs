@@ -17,6 +17,16 @@ public interface IAppsettingsCreationService
     (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath);
 
     /// <summary>
+    /// Generates client and server appsettings.json files based on database and environment configuration
+    /// </summary>
+    /// <param name="dbConfig">Database configuration from Header.xlsx</param>
+    /// <param name="clientExePath">Path to client executable (appsettings.json will be generated in same directory)</param>
+    /// <param name="serverExePath">Path to server executable (appsettings.json will be generated in same directory)</param>
+    /// <param name="envConfig">Environment configuration from environment.xlsx (optional)</param>
+    /// <returns>Tuple containing proxy port and server port</returns>
+    (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig);
+
+    /// <summary>
     /// Gets the currently allocated ports
     /// </summary>
     (int ProxyPort, int ServerPort) GetPorts();

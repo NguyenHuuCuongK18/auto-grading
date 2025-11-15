@@ -12,15 +12,29 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
     public SuiteDefinition Load(string suitePathOrHeaderXlsx)
     {
         var headerPath = ResolveHeaderPath(suitePathOrHeaderXlsx);
+        var suiteRoot = Path.GetDirectoryName(headerPath)!;
+        
+        // Read protocol from Config sheet in header.xlsx
         var protocol = ReadProtocolFromHeader(headerPath);
+        
+        // Read database config from header.xlsx (legacy support)
         var dbConfig = ReadDatabaseConfigFromHeader(headerPath);
+        
+        // Read marks from QuestionMark sheet in header.xlsx
         var marks = ReadMarksFromHeader(headerPath);
-        var cases = BuildCasesFromDirectory(Path.GetDirectoryName(headerPath)!, marks);
+        
+        // Read environment configuration from outermost environment.xlsx
+        var envConfig = ReadEnvironmentConfig(suiteRoot);
+        
+        // Build test cases from directories
+        var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig);
+        
         return new SuiteDefinition
         {
             HeaderPath = headerPath,
             Protocol = protocol,
             DatabaseConfig = dbConfig,
+            Environment = envConfig,
             Cases = cases
         };
     }
@@ -44,11 +58,20 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         try
         {
             using var wb = new XLWorkbook(headerPath);
-            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+            // NEW: Look for Config sheet first (new format)
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Config", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
                      ?? wb.Worksheet(1);
 
-            // Look for a cell in the first column named "Type" or "Protocol"
-            for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+            // Look for Protocol in key-value pairs
+            int startRow = 1;
+            var firstRowCol1 = ws.Cell(1, 1).GetString().Trim();
+            if (firstRowCol1.Equals("Key", StringComparison.OrdinalIgnoreCase))
+            {
+                startRow = 2; // Skip header row
+            }
+
+            for (int r = startRow; r <= Math.Min(50, ws.RowCount()); r++)
             {
                 var key = ws.Cell(r, 1).GetString().Trim();
                 if (key.Equals("Type", StringComparison.OrdinalIgnoreCase) ||
@@ -134,65 +157,202 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
-        using var wb = new XLWorkbook(headerPath);
-        var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
-                 ?? wb.Worksheet(1);
-
-        // Find the row that contains "TestCase" and "Mark" headers
-        int headerRow = -1, tcCol = -1, markCol = -1;
-        for (int r = 1; r <= Math.Min(100, ws.RowCount()); r++)
+        try
         {
-            var row = ws.Row(r);
-            var cells = row.CellsUsed().ToList();
-            if (cells.Count == 0) continue;
+            using var wb = new XLWorkbook(headerPath);
+            // NEW: Look for QuestionMark sheet (new format)
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("QuestionMark", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Header", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheet(1);
 
-            for (int c = 1; c <= Math.Min(50, ws.ColumnCount()); c++)
+            // Find the row that contains "Cases" and "Mark" headers (new format)
+            // or "TestCase" and "Mark" headers (old format)
+            int headerRow = -1, tcCol = -1, markCol = -1;
+            for (int r = 1; r <= Math.Min(100, ws.RowCount()); r++)
             {
-                var text = ws.Cell(r, c).GetString().Trim();
-                if (text.Equals("TestCase", StringComparison.OrdinalIgnoreCase)) tcCol = c;
-                if (text.Equals("Mark", StringComparison.OrdinalIgnoreCase)) markCol = c;
+                var row = ws.Row(r);
+                var cells = row.CellsUsed().ToList();
+                if (cells.Count == 0) continue;
+
+                for (int c = 1; c <= Math.Min(50, ws.ColumnCount()); c++)
+                {
+                    var text = ws.Cell(r, c).GetString().Trim();
+                    if (text.Equals("TestCase", StringComparison.OrdinalIgnoreCase) ||
+                        text.Equals("Cases", StringComparison.OrdinalIgnoreCase)) tcCol = c;
+                    if (text.Equals("Mark", StringComparison.OrdinalIgnoreCase)) markCol = c;
+                }
+
+                if (tcCol > 0 && markCol > 0) { headerRow = r; break; }
+                tcCol = markCol = -1;
             }
 
-            if (tcCol > 0 && markCol > 0) { headerRow = r; break; }
-            tcCol = markCol = -1;
+            if (headerRow < 0) return result; // none found; marks default to 0
+
+            // Read until a blank TestCase cell
+            for (int r = headerRow + 1; r <= ws.RowCount(); r++)
+            {
+                var tc = ws.Cell(r, tcCol).GetString().Trim();
+                if (string.IsNullOrEmpty(tc)) break;
+
+                var markStr = ws.Cell(r, markCol).GetString().Trim();
+                if (!double.TryParse(markStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var mark))
+                    mark = 0;
+
+                result[tc] = mark;
+            }
         }
-
-        if (headerRow < 0) return result; // none found; marks default to 0
-
-        // Read until a blank TestCase cell
-        for (int r = headerRow + 1; r <= ws.RowCount(); r++)
+        catch (Exception ex)
         {
-            var tc = ws.Cell(r, tcCol).GetString().Trim();
-            if (string.IsNullOrEmpty(tc)) break;
-
-            var markStr = ws.Cell(r, markCol).GetString().Trim();
-            if (!double.TryParse(markStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var mark))
-                mark = 0;
-
-            result[tc] = mark;
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} Warning: Could not read marks from header: {ex.Message}");
         }
 
         return result;
     }
 
-    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks)
+    private static EnvironmentConfiguration? ReadEnvironmentConfig(string suiteRoot)
+    {
+        var envPath = Path.Combine(suiteRoot, "environment.xlsx");
+        if (!File.Exists(envPath)) return null;
+
+        try
+        {
+            using var wb = new XLWorkbook(envPath);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Config", StringComparison.OrdinalIgnoreCase));
+            if (ws == null) return null;
+
+            var config = new EnvironmentConfiguration();
+            
+            // Read key-value pairs
+            int startRow = 1;
+            var firstRowCol1 = ws.Cell(1, 1).GetString().Trim();
+            if (firstRowCol1.Equals("Key", StringComparison.OrdinalIgnoreCase))
+            {
+                startRow = 2; // Skip header row
+            }
+
+            for (int r = startRow; r <= Math.Min(100, ws.RowCount()); r++)
+            {
+                var key = ws.Cell(r, 1).GetString().Trim();
+                var value = ws.Cell(r, 2).GetString().Trim();
+
+                if (string.IsNullOrEmpty(key)) continue;
+
+                if (key.Equals("Code_Container_Internal_Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(value, out var port)) config.MiddlewarePort = port;
+                }
+                else if (key.Equals("Code_Container_Host_Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(value, out var port)) config.ServerPort = port;
+                }
+                else if (key.Equals("Default_Database_File_Path", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabaseFilePath = value;
+                }
+                else if (key.Equals("Default_Database_Name", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabaseName = value;
+                }
+                else if (key.Equals("Database_Username", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabaseUsername = value;
+                }
+                else if (key.Equals("Database_Password", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabasePassword = value;
+                }
+            }
+
+            // Look for Given server/client paths in Meta directory
+            var metaDir = Path.Combine(suiteRoot, "Meta", "Given");
+            if (Directory.Exists(metaDir))
+            {
+                var serverDir = Path.Combine(metaDir, "Server");
+                var clientDir = Path.Combine(metaDir, "Client");
+                
+                if (Directory.Exists(serverDir))
+                {
+                    var serverExe = Directory.GetFiles(serverDir, "*.exe").FirstOrDefault();
+                    if (serverExe != null) config.GivenServerPath = serverExe;
+                }
+                
+                if (Directory.Exists(clientDir))
+                {
+                    var clientExe = Directory.GetFiles(clientDir, "*.exe").FirstOrDefault();
+                    if (clientExe != null) config.GivenClientPath = clientExe;
+                }
+            }
+
+            return config;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} Warning: Could not read environment config: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks, EnvironmentConfiguration? suiteEnv)
     {
         var list = new List<TestCaseDefinition>();
 
         foreach (var dir in Directory.EnumerateDirectories(root)
-                     .Where(p => !Path.GetFileName(p).Equals("mismatches", StringComparison.OrdinalIgnoreCase)))
+                     .Where(p => {
+                         var name = Path.GetFileName(p);
+                         return !name.Equals("mismatches", StringComparison.OrdinalIgnoreCase) &&
+                                !name.Equals("Meta", StringComparison.OrdinalIgnoreCase);
+                     }))
         {
             var name = Path.GetFileName(dir);
             var detail = Path.Combine(dir, "Detail.xlsx");
             if (!File.Exists(detail)) continue;
 
             marks.TryGetValue(name, out var mark);
+            
+            // Read test case specific header for GradeContent
+            var tcHeaderPath = Path.Combine(dir, "header.xlsx");
+            string? gradeContent = null;
+            EnvironmentConfiguration? tcEnv = null;
+            
+            if (File.Exists(tcHeaderPath))
+            {
+                try
+                {
+                    using var wb = new XLWorkbook(tcHeaderPath);
+                    var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Testcase_Property", StringComparison.OrdinalIgnoreCase));
+                    if (ws != null)
+                    {
+                        // Look for Grade_Content
+                        for (int r = 1; r <= Math.Min(20, ws.RowCount()); r++)
+                        {
+                            var key = ws.Cell(r, 1).GetString().Trim();
+                            if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                            {
+                                gradeContent = ws.Cell(r, 2).GetString().Trim();
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+                
+                // Read test case specific environment.xlsx
+                var tcEnvPath = Path.Combine(dir, "environment.xlsx");
+                if (File.Exists(tcEnvPath))
+                {
+                    tcEnv = ReadTestCaseEnvironment(tcEnvPath, suiteEnv);
+                }
+            }
+            
             list.Add(new TestCaseDefinition
             {
                 Name = name,
                 Mark = mark,
                 DirectoryPath = dir,
-                DetailPath = detail
+                DetailPath = detail,
+                InnerHeaderPath = File.Exists(tcHeaderPath) ? tcHeaderPath : null,
+                GradeContent = gradeContent,
+                Environment = tcEnv ?? suiteEnv
             });
         }
 
@@ -200,5 +360,59 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             throw new InvalidDataException("No test cases found under: " + root);
 
         return list;
+    }
+
+    private static EnvironmentConfiguration? ReadTestCaseEnvironment(string envPath, EnvironmentConfiguration? suiteEnv)
+    {
+        try
+        {
+            using var wb = new XLWorkbook(envPath);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Config", StringComparison.OrdinalIgnoreCase));
+            if (ws == null) return suiteEnv;
+
+            // Start with suite environment or create new
+            var config = new EnvironmentConfiguration
+            {
+                MiddlewarePort = suiteEnv?.MiddlewarePort,
+                ServerPort = suiteEnv?.ServerPort,
+                GivenServerPath = suiteEnv?.GivenServerPath,
+                GivenClientPath = suiteEnv?.GivenClientPath,
+                DatabaseFilePath = suiteEnv?.DatabaseFilePath,
+                DatabaseName = suiteEnv?.DatabaseName,
+                DatabaseUsername = suiteEnv?.DatabaseUsername,
+                DatabasePassword = suiteEnv?.DatabasePassword
+            };
+            
+            // Override with test case specific values
+            int startRow = 1;
+            var firstRowCol1 = ws.Cell(1, 1).GetString().Trim();
+            if (firstRowCol1.Equals("Key", StringComparison.OrdinalIgnoreCase))
+            {
+                startRow = 2;
+            }
+
+            for (int r = startRow; r <= Math.Min(100, ws.RowCount()); r++)
+            {
+                var key = ws.Cell(r, 1).GetString().Trim();
+                var value = ws.Cell(r, 2).GetString().Trim();
+
+                if (string.IsNullOrEmpty(key)) continue;
+
+                if (key.Equals("Default_Database_File_Path", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabaseFilePath = value;
+                }
+                else if (key.Equals("Default_Database_Name", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.DatabaseName = value;
+                }
+            }
+
+            return config;
+        }
+        catch
+        {
+            return suiteEnv;
+        }
     }
 }
