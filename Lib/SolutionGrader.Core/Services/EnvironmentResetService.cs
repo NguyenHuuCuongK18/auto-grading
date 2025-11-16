@@ -153,7 +153,11 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
     private static async System.Threading.Tasks.Task DropDatabaseAsync(SqlConnectionStringBuilder builder, string databaseName, System.Threading.CancellationToken ct)
     {
-        using var connection = new SqlConnection(BuildMasterConnectionString(builder));
+        // Clear any connection pool for this connection string to avoid stale connections
+        var masterConnectionString = BuildMasterConnectionString(builder);
+        SqlConnection.ClearPool(new SqlConnection(masterConnectionString));
+        
+        using var connection = new SqlConnection(masterConnectionString);
         await connection.OpenAsync(ct);
 
         var commandText = $@"
@@ -173,7 +177,11 @@ END";
 
     private static async System.Threading.Tasks.Task CreateDatabaseAsync(SqlConnectionStringBuilder builder, string databaseName, System.Threading.CancellationToken ct)
     {
-        using var connection = new SqlConnection(BuildMasterConnectionString(builder));
+        // Clear any connection pool for this connection string to avoid stale connections
+        var masterConnectionString = BuildMasterConnectionString(builder);
+        SqlConnection.ClearPool(new SqlConnection(masterConnectionString));
+        
+        using var connection = new SqlConnection(masterConnectionString);
         await connection.OpenAsync(ct);
 
         using var command = new SqlCommand($"CREATE DATABASE [{databaseName}]", connection)
@@ -190,7 +198,12 @@ END";
         var batches = SplitSqlBatches(script);
 
         builder.InitialCatalog = databaseName;
-        using var connection = new SqlConnection(builder.ConnectionString);
+        var connectionString = builder.ConnectionString;
+        
+        // Clear any connection pool for this connection string to avoid stale connections
+        SqlConnection.ClearPool(new SqlConnection(connectionString));
+        
+        using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(ct);
 
         foreach (var batch in batches)
@@ -235,6 +248,8 @@ END";
             }
             builder.InitialCatalog = "Library";
             builder.ConnectTimeout = 30;
+            builder.Pooling = false; // Disable connection pooling to avoid stale connections
+            builder.PersistSecurityInfo = true; // Keep credentials in connection string for reconnection
         }
         else
         {
@@ -293,6 +308,8 @@ END";
             
             builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
+            builder.Pooling = false; // Disable connection pooling to avoid stale connections
+            builder.PersistSecurityInfo = true; // Keep credentials in connection string for reconnection
         }
 
         return builder.ConnectionString;
@@ -359,6 +376,10 @@ END";
 
         // Connect to master database
         var masterConnectionString = BuildMasterConnectionString(builder);
+        
+        // Clear any connection pool for this connection string to avoid stale connections
+        SqlConnection.ClearPool(new SqlConnection(masterConnectionString));
+        
         using var connection = new SqlConnection(masterConnectionString);
         await connection.OpenAsync(ct);
 
