@@ -204,14 +204,15 @@ namespace SolutionGrader.Core.Services
                     var requestCapture = new List<byte>();
                     var responseCapture = new List<byte>();
                     
-                    // Start both relay tasks simultaneously
+                    // Start both relay tasks - they must run concurrently
                     var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, token);
                     var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, token);
                     
-                    // Wait for either to complete
+                    // Wait for either direction to complete (typically client closes first after getting response)
                     await Task.WhenAny(c2s, s2c);
                     
-                    // Give a moment for any in-flight data to be processed
+                    // Give time for the other relay to capture its data
+                    // The server keeps connection open, so we need to wait for data, not connection close
                     await Task.Delay(500, token);
                     
                     // Store captured data
