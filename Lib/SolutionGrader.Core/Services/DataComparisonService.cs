@@ -59,9 +59,6 @@ namespace SolutionGrader.Core.Services
             
             var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
             
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("file", expRaw, actRaw);
-            
             // Build detailed error message
             var errorMessage = new System.Text.StringBuilder();
             errorMessage.AppendLine($"Content differs (first diff at idx {idx})");
@@ -172,9 +169,6 @@ namespace SolutionGrader.Core.Services
             var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
             var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.TEXT_MISMATCH);
             
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("text", expectedRaw, actualRaw);
-            
             // Build detailed error message with actual vs expected content
             var errorMessage = new System.Text.StringBuilder();
             errorMessage.AppendLine($"{infoMismatch.Title}: Content differs at position {idx}");
@@ -212,9 +206,6 @@ namespace SolutionGrader.Core.Services
                 
                 if (expNorm == actNorm)
                     return (true, "JSON matches expected");
-                
-                // Write debug files for comparison failure
-                WriteComparisonDebugFiles("json", expectedJson, actualJson);
                 
                 // Build detailed error message
                 var errorMessage = new System.Text.StringBuilder();
@@ -262,9 +253,6 @@ namespace SolutionGrader.Core.Services
             if (exp == act) return (true, "CSV matches expected");
 
             var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
-            
-            // Write debug files for comparison failure
-            WriteComparisonDebugFiles("csv", expectedCsv, actualCsv);
             
             // Build detailed error message
             var errorMessage = new System.Text.StringBuilder();
@@ -470,35 +458,6 @@ namespace SolutionGrader.Core.Services
                 '\t' => "\\t",
                 _ => c.ToString()
             };
-        }
-
-        /// <summary>
-        /// Writes expected and actual content to debug files when a comparison fails.
-        /// This helps instructors and students diagnose what went wrong.
-        /// </summary>
-        private void WriteComparisonDebugFiles(string comparisonType, string expectedContent, string actualContent)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(_run.ResultRoot)) return;
-                
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var baseFileName = $"comparison_failure_{comparisonType}_{timestamp}";
-                
-                var expectedPath = Path.Combine(_run.ResultRoot, $"{baseFileName}_expected.txt");
-                var actualPath = Path.Combine(_run.ResultRoot, $"{baseFileName}_actual.txt");
-                
-                File.WriteAllText(expectedPath, expectedContent ?? "(empty)");
-                File.WriteAllText(actualPath, actualContent ?? "(empty)");
-                
-                Console.WriteLine($"[Comparison] Debug files written:");
-                Console.WriteLine($"[Comparison]   Expected: {expectedPath}");
-                Console.WriteLine($"[Comparison]   Actual:   {actualPath}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Comparison] Warning: Failed to write debug files: {ex.Message}");
-            }
         }
 
         private static (int idx, char? e, char? a, string eCtx, string aCtx) FirstDiff(string e, string a, int context = 24)

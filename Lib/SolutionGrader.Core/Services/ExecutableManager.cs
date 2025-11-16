@@ -118,9 +118,15 @@ namespace SolutionGrader.Core.Services
 
             try
             {
-                _client.StandardInput.WriteLine(input);
+                // Handle empty or null input by sending just a newline (blank Enter)
+                // This allows test cases to send empty input when the value cell is blank
+                var inputToSend = input ?? string.Empty;
+                _client.StandardInput.WriteLine(inputToSend);
                 _client.StandardInput.Flush();
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_SENT, input)}");
+                
+                // Log what was actually sent
+                var displayInput = string.IsNullOrEmpty(inputToSend) ? "(empty line)" : inputToSend;
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_SENT, displayInput)}");
             }
             catch (Exception ex)
             {
