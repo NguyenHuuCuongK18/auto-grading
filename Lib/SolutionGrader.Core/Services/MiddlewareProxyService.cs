@@ -199,11 +199,144 @@ namespace SolutionGrader.Core.Services
                     await server.ConnectAsync(IPAddress.Loopback, _realServerPort, token);
                     using var cs = client.GetStream();
                     using var ss = server.GetStream();
-                    var c2s = RelayAsync(cs, ss, token);
-                    var s2c = RelayAsync(ss, cs, token);
-                    await Task.WhenAny(c2s, s2c);
+                    
+                    // Capture request and response data for TCP connections
+                    var requestCapture = new List<byte>();
+                    var responseCapture = new List<byte>();
+                    
+                    // Client-to-Server: Read request with timeout pattern
+                    // The client writes request then waits for response without closing
+                    var c2sTask = Task.Run(async () =>
+                    {
+                        var buffer = new byte[8192];
+                        try
+                        {
+                            //Read initial data from client
+                            while (true)
+                            {
+                                // Check if data is available before trying to read
+                                if (cs.DataAvailable)
+                                {
+                                    int read = await cs.ReadAsync(buffer, 0, buffer.Length, token);
+                                    if (read > 0)
+                                    {
+                                        lock (requestCapture)
+                                        {
+                                            requestCapture.AddRange(buffer.Take(read));
+                                        }
+                                        await ss.WriteAsync(buffer, 0, read, token);
+                                        await ss.FlushAsync(token);
+                                    }
+                                    else
+                                    {
+                                        // Client closed connection
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    // No data available - wait a bit and check again
+                                    await Task.Delay(10, token);
+                                    
+                                    // If still no data after delay, assume request is complete
+                                    if (!cs.DataAvailable)
+                                    {
+                                        // Request complete - client is now waiting for response
+                                        // Signal end-of-request to server using half-close
+                                        try
+                                        {
+                                            server.Client.Shutdown(SocketShutdown.Send);
+                                            Console.WriteLine($"[TCP Relay c2s] Signaled end-of-request to server (half-close)");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"[TCP Relay c2s] Half-close failed: {ex.Message}");
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            Console.WriteLine($"[TCP Relay c2s] Request relay complete. Total: {requestCapture.Count} bytes");
+                        }
+                        catch (OperationCanceledException) { }
+                        catch (Exception ex) { Console.WriteLine($"[TCP Relay c2s] Error: {ex.Message}"); }
+                    }, token);
+                    
+                    // Server-to-Client: Read response and forward to client
+                    var s2cTask = Task.Run(async () =>
+                    {
+                        var buffer = new byte[8192];
+                        try
+                        {
+                            // Wait for server to start sending response
+                            var maxWait = 5000; // 5 seconds to wait for server to start responding
+                            var waited = 0;
+                            Console.WriteLine($"[TCP Relay s2c] Waiting for server response...");
+                            while (!ss.DataAvailable && waited < maxWait)
+                            {
+                                await Task.Delay(50, token);
+                                waited += 50;
+                            }
+                            
+                            Console.WriteLine($"[TCP Relay s2c] Server data available after {waited}ms");
+                            
+                            // Now read all response data
+                            while (true)
+                            {
+                                if (ss.DataAvailable)
+                                {
+                                    int read = await ss.ReadAsync(buffer, 0, buffer.Length, token);
+                                    Console.WriteLine($"[TCP Relay s2c] Read {read} bytes from server");
+                                    if (read > 0)
+                                    {
+                                        lock (responseCapture)
+                                        {
+                                            responseCapture.AddRange(buffer.Take(read));
+                                        }
+                                        await cs.WriteAsync(buffer, 0, read, token);
+                                        await cs.FlushAsync(token);
+                                    }
+                                    else
+                                    {
+                                        // Server closed connection
+                                        Console.WriteLine($"[TCP Relay s2c] Server closed connection");
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    // No more data - wait a bit to see if more is coming
+                                    await Task.Delay(10, token);
+                                    
+                                    // If still no data, response is complete
+                                    if (!ss.DataAvailable)
+                                    {
+                                        Console.WriteLine($"[TCP Relay s2c] No more data available, response complete");
+                                        break;
+                                    }
+                                }
+                            }
+                            Console.WriteLine($"[TCP Relay s2c] Total response captured: {responseCapture.Count} bytes");
+                        }
+                        catch (OperationCanceledException) { }
+                        catch (Exception ex) { Console.WriteLine($"[TCP Relay s2c] Error: {ex.Message}"); }
+                    }, token);
+                    
+                    // Wait for both request and response to complete
+                    await Task.WhenAll(c2sTask, s2cTask);
+                    
+                    // Store captured data
+                    byte[] reqBytes, respBytes;
+                    lock (requestCapture) { reqBytes = requestCapture.ToArray(); }
+                    lock (responseCapture) { respBytes = responseCapture.ToArray(); }
+                    
+                    if (reqBytes.Length > 0 || respBytes.Length > 0)
+                    {
+                        StoreTcpCapture(reqBytes, respBytes);
+                    }
                 }
             }
+            catch (OperationCanceledException) { }
             catch { }
         }
 
@@ -214,6 +347,54 @@ namespace SolutionGrader.Core.Services
             while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                 await to.WriteAsync(buffer, 0, read, token);
         }
+
+        private static async Task RelayAndCaptureAsync(NetworkStream from, NetworkStream to, List<byte> capture, string label, CancellationToken token)
+        {
+            var buffer = new byte[8192];
+            int read;
+            try
+            {
+                // NetworkStream.ReadAsync will block until data is available or stream closes
+                // It returns 0 only when the stream is actually closed
+                while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                {
+                    // Capture the data
+                    lock (capture)
+                    {
+                        capture.AddRange(buffer.Take(read));
+                    }
+                    await to.WriteAsync(buffer, 0, read, token);
+                    await to.FlushAsync(token); // Ensure data is sent immediately for both TCP and HTTP
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Task was cancelled, stop relaying
+            }
+            catch (IOException)
+            {
+                // Socket closed or connection lost
+            }
+        }
+
+        private void StoreTcpCapture(byte[] requestBytes, byte[] responseBytes)
+        {
+            try
+            {
+                var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+                
+                // Convert bytes to string (assuming UTF-8 encoding for TCP data)
+                var requestText = requestBytes.Length > 0 ? Encoding.UTF8.GetString(requestBytes) : string.Empty;
+                var responseText = responseBytes.Length > 0 ? Encoding.UTF8.GetString(responseBytes) : string.Empty;
+
+                // Store TCP request and response
+                _run.SetServerRequest(question, stage, requestText);
+                _run.SetServerResponse(question, stage, responseText);
+            }
+            catch { }
+        }
+
 
         private void TryAppendServerActual(string requestBody, byte[] responseBytes, string httpMethod = "GET", int statusCode = 200)
         {

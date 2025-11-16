@@ -212,18 +212,28 @@ END";
         
         if (dbConfig == null)
         {
-            // Default connection string for local SQL Server
-            // Note: These defaults are for testing only. For production, configure properly in Header.xlsx
-            builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE;
-            builder.InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME;
-            builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
-            builder.Password = AppsettingKeywords.DEFAULT_PASSWORD;
-            builder.TrustServerCertificate = true;
+            // Default connection string based on platform
+            // On Windows: use local SQL Server Express
+            // On Linux/Mac: use Docker SQL Server
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            {
+                builder.DataSource = ".\\SQLEXPRESS";
+                builder.IntegratedSecurity = true;
+            }
+            else
+            {
+                // Docker SQL Server for Linux/Mac (used for development/debugging)
+                builder.DataSource = "localhost,1433";
+                builder.UserID = "sa";
+                builder.Password = "YourStrong@Passw0rd";
+                builder.TrustServerCertificate = true;
+            }
+            builder.InitialCatalog = "Library";
             builder.ConnectTimeout = 30;
         }
         else
         {
-            var server = dbConfig.SqlServer ?? AppsettingKeywords.SQL_EXPRESS;
+            var server = dbConfig.SqlServer ?? (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".\\SQLEXPRESS" : "localhost,1433");
             // Format SQL Server instance name properly
             // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
             // - localhost, 127.0.0.1, or hostnames/IPs
@@ -247,9 +257,9 @@ END";
             }
 
             builder.DataSource = server;
-            builder.InitialCatalog = dbConfig.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
-            builder.UserID = dbConfig.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
-            builder.Password = dbConfig.Password ?? AppsettingKeywords.DEFAULT_PASSWORD;
+            builder.InitialCatalog = dbConfig.Database ?? "Library";
+            builder.UserID = dbConfig.Username ?? "sa";
+            builder.Password = dbConfig.Password ?? "YourStrong@Passw0rd";
             builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
         }
