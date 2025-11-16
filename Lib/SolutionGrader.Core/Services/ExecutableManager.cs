@@ -118,6 +118,11 @@ namespace SolutionGrader.Core.Services
 
             try
             {
+                // Update the client stage label to current stage before sending input
+                // This ensures that the response output is attributed to the current stage (where input was sent)
+                // rather than the stage where the client was started
+                _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel);
+                
                 // Handle empty or null input by sending just a newline (blank Enter)
                 // This allows test cases to send empty input when the value cell is blank
                 var inputToSend = input ?? string.Empty;
@@ -470,20 +475,22 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Use CURRENT stage context to properly attribute output to the stage when it was produced
-                // This fixes the issue where output was being attributed to the stage when the process started
-                // instead of the stage when the output actually occurred (e.g., after sending input).
+                // Use captured context from process start time or last input time, not always current context
+                // The stage label is updated when actions like SendClientInput occur, ensuring output
+                // is attributed to the stage where the interaction happened, not where output arrives
                 string? question;
                 string? stage;
                 
-                // Always use current context from RunContext to ensure output is attributed to the correct stage
-                question = _run.CurrentQuestionCode ?? 
-                          (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase) 
-                              ? _serverStartQuestionCode 
-                              : _clientStartQuestionCode) ?? 
-                          FileKeywords.Value_UnknownQuestion;
-                
-                stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+                if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
+                {
+                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                }
+                else
+                {
+                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                }
                 
                 var payload = line + Environment.NewLine;
 
