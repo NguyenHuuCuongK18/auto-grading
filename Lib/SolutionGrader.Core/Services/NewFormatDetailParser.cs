@@ -22,7 +22,9 @@ public sealed class NewFormatDetailParser
         var serverSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Server", StringComparison.OrdinalIgnoreCase));
         var networkSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Network", StringComparison.OrdinalIgnoreCase));
 
-        // Track whether middleware has been started to ensure it only starts once
+        // Track whether client and server have been started to inject middleware after both are running
+        bool clientStarted = false;
+        bool serverStarted = false;
         bool middlewareStarted = false;
 
         // Parse User sheet to determine process start/stop and input actions
@@ -40,34 +42,6 @@ public sealed class NewFormatDetailParser
                 // Handle different action types
                 if (action.Equals("StartClient", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Start middleware BEFORE starting client if not already started
-                    // This ensures the middleware is ready to intercept connections when the client starts
-                    if (!middlewareStarted)
-                    {
-                        steps.Add(new Step
-                        {
-                            Id = $"USER-PROXY-{stage}",
-                            QuestionCode = questionCode,
-                            Stage = stage,
-                            Action = ActionKeywords.TcpRelay,
-                            Value = null,
-                            DataType = null
-                        });
-                        
-                        // Add wait for middleware to initialize
-                        steps.Add(new Step
-                        {
-                            Id = $"USER-MIDDLEWAIT-{stage}",
-                            QuestionCode = questionCode,
-                            Stage = stage,
-                            Action = ActionKeywords.Wait,
-                            Value = "1000", // Increased to 1 second for middleware to be fully ready
-                            DataType = null
-                        });
-                        
-                        middlewareStarted = true;
-                    }
-                    
                     steps.Add(new Step
                     {
                         Id = $"USER-STARTCLIENT-{stage}",
@@ -77,12 +51,11 @@ public sealed class NewFormatDetailParser
                         Value = null,
                         DataType = null
                     });
-                }
-                else if (action.Equals("StartServer", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Start middleware BEFORE starting server if not already started
-                    // This ensures the middleware is ready to intercept connections when the server starts
-                    if (!middlewareStarted)
+                    clientStarted = true;
+                    
+                    // Start middleware after BOTH client and server are started
+                    // This ensures proper exception handling when connections are attempted
+                    if (serverStarted && !middlewareStarted)
                     {
                         steps.Add(new Step
                         {
@@ -101,13 +74,15 @@ public sealed class NewFormatDetailParser
                             QuestionCode = questionCode,
                             Stage = stage,
                             Action = ActionKeywords.Wait,
-                            Value = "1000", // Increased to 1 second for middleware to be fully ready
+                            Value = "500", // Wait for middleware to be ready
                             DataType = null
                         });
                         
                         middlewareStarted = true;
                     }
-                    
+                }
+                else if (action.Equals("StartServer", StringComparison.OrdinalIgnoreCase))
+                {
                     steps.Add(new Step
                     {
                         Id = $"USER-STARTSERVER-{stage}",
@@ -117,8 +92,37 @@ public sealed class NewFormatDetailParser
                         Value = null,
                         DataType = null
                     });
+                    serverStarted = true;
                     
-                    // Add wait for server to initialize
+                    // Start middleware after BOTH client and server are started
+                    // This ensures proper exception handling when connections are attempted
+                    if (clientStarted && !middlewareStarted)
+                    {
+                        steps.Add(new Step
+                        {
+                            Id = $"USER-PROXY-{stage}",
+                            QuestionCode = questionCode,
+                            Stage = stage,
+                            Action = ActionKeywords.TcpRelay,
+                            Value = null,
+                            DataType = null
+                        });
+                        
+                        // Add wait for middleware to initialize
+                        steps.Add(new Step
+                        {
+                            Id = $"USER-MIDDLEWAIT-{stage}",
+                            QuestionCode = questionCode,
+                            Stage = stage,
+                            Action = ActionKeywords.Wait,
+                            Value = "500", // Wait for middleware to be ready
+                            DataType = null
+                        });
+                        
+                        middlewareStarted = true;
+                    }
+                    
+                    // Add wait for processes to initialize
                     steps.Add(new Step
                     {
                         Id = $"USER-WAIT-{stage}",
