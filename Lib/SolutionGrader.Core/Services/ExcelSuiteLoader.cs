@@ -9,7 +9,7 @@ using System.IO;
 
 public sealed class ExcelSuiteLoader : ITestSuiteLoader
 {
-    public SuiteDefinition Load(string suitePathOrHeaderXlsx)
+    public SuiteDefinition Load(string suitePathOrHeaderXlsx, bool useInnerTestCaseEnvironment = false)
     {
         var headerPath = ResolveHeaderPath(suitePathOrHeaderXlsx);
         var suiteRoot = Path.GetDirectoryName(headerPath)!;
@@ -30,7 +30,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         var envConfig = ReadEnvironmentConfig(suiteRoot);
         
         // Build test cases from directories
-        var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig);
+        var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment);
         
         return new SuiteDefinition
         {
@@ -392,7 +392,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
     }
 
-    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks, EnvironmentConfiguration? suiteEnv)
+    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks, EnvironmentConfiguration? suiteEnv, bool useInnerTestCaseEnvironment)
     {
         var list = new List<TestCaseDefinition>();
 
@@ -442,11 +442,15 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 }
                 catch { }
                 
-                // Read test case specific environment.xlsx
-                var tcEnvPath = Path.Combine(dir, "environment.xlsx");
-                if (File.Exists(tcEnvPath))
+                // Read test case specific environment.xlsx only if flag is enabled
+                if (useInnerTestCaseEnvironment)
                 {
-                    tcEnv = ReadTestCaseEnvironment(tcEnvPath, suiteEnv);
+                    var tcEnvPath = Path.Combine(dir, "environment.xlsx");
+                    if (File.Exists(tcEnvPath))
+                    {
+                        tcEnv = ReadTestCaseEnvironment(tcEnvPath, suiteEnv);
+                        Console.WriteLine($"[Suite] Using inner test case environment for {name}: {tcEnvPath}");
+                    }
                 }
             }
             
