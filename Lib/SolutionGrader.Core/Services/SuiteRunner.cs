@@ -41,6 +41,13 @@ namespace SolutionGrader.Core.Services
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_LOADING, args.SuitePath)}");
             var def = _suite.Load(args.SuitePath);
             args.Protocol = def.Protocol;
+            
+            // Set datetime format in RunContext if available from header
+            if (!string.IsNullOrWhiteSpace(def.DateTimeFormat))
+            {
+                _run.DateTimeFormat = def.DateTimeFormat;
+            }
+            
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_PROTOCOL, args.Protocol)}");
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} {string.Format(LoggingKeywords.MSG_SUITE_CASES_FOUND, def.Cases.Count)}");
             _files.EnsureDirectory(args.ResultRoot);
