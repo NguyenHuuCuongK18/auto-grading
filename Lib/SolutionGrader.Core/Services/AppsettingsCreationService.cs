@@ -164,8 +164,18 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
     {
         if (dbConfig == null && envConfig == null)
         {
-            // Default connection string using .\SQLEXPRESS for Windows (most common dev environment)
-            return $"server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true";
+            // Default connection string based on platform
+            // On Windows: use local SQL Server Express
+            // On Linux/Mac: use Docker SQL Server
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            {
+                return $"server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true";
+            }
+            else
+            {
+                // Docker SQL Server for Linux/Mac
+                return $"server=localhost,1433;database=Library;uid=sa;pwd=YourStrong@Passw0rd;TrustServerCertificate=true";
+            }
         }
 
         // Priority order for SQL Server:
