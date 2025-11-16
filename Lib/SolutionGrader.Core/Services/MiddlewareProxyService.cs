@@ -261,7 +261,7 @@ namespace SolutionGrader.Core.Services
                         try
                         {
                             // Wait for server to start sending response
-                            var maxWait = 5000; // 5 seconds to wait for server to start responding
+                            var maxWait = 2000; // 5 seconds to wait for server to start responding
                             var waited = 0;
                             Console.WriteLine($"[TCP Relay s2c] Waiting for server response...");
                             while (!ss.DataAvailable && waited < maxWait)
