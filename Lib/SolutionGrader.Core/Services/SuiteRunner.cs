@@ -95,7 +95,7 @@ namespace SolutionGrader.Core.Services
 
                 // Always generate appsettings from header
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
-                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment);
+                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(def.DatabaseConfig, clientExePath, serverExePath, q.Environment, def.Protocol);
                 
                 // Configure middleware with the generated ports
                 _mw.ConfigurePorts(proxyPort, serverPort);
@@ -107,7 +107,9 @@ namespace SolutionGrader.Core.Services
                 // First check test case specific database path
                 if (!string.IsNullOrWhiteSpace(q.Environment?.DatabaseFilePath))
                 {
-                    var testCaseDbPath = Path.Combine(def.RootDirectory, q.Environment.DatabaseFilePath);
+                    // Normalize path separators for cross-platform compatibility
+                    var normalizedPath = q.Environment.DatabaseFilePath.Replace('\\', Path.DirectorySeparatorChar);
+                    var testCaseDbPath = Path.Combine(def.RootDirectory, normalizedPath);
                     if (File.Exists(testCaseDbPath))
                     {
                         dbScriptPath = testCaseDbPath;
@@ -118,7 +120,9 @@ namespace SolutionGrader.Core.Services
                 // If not found, try suite environment database path
                 if (string.IsNullOrWhiteSpace(dbScriptPath) && !string.IsNullOrWhiteSpace(def.Environment?.DatabaseFilePath))
                 {
-                    var suiteDbPath = Path.Combine(def.RootDirectory, def.Environment.DatabaseFilePath);
+                    // Normalize path separators for cross-platform compatibility
+                    var normalizedPath = def.Environment.DatabaseFilePath.Replace('\\', Path.DirectorySeparatorChar);
+                    var suiteDbPath = Path.Combine(def.RootDirectory, normalizedPath);
                     if (File.Exists(suiteDbPath))
                     {
                         dbScriptPath = suiteDbPath;
@@ -165,6 +169,27 @@ namespace SolutionGrader.Core.Services
                 int? previousStage = null;
                 bool hasSeenInputStep = false;
                 bool hasAddedComparisonDelay = false;
+                
+                // Start a background task to monitor process status and stop middleware if either process exits
+                var monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var monitorTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (!monitorCts.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(500, monitorCts.Token); // Check every 500ms
+                            
+                            // If either client or server has exited, stop the middleware
+                            if (!_proc.IsClientRunning || !_proc.IsServerRunning)
+                            {
+                                try { await _mw.StopAsync(); } catch { }
+                                break;
+                            }
+                        }
+                    }
+                    catch { }
+                }, monitorCts.Token);
                 
                 foreach (var step in steps)
                 {
@@ -249,6 +274,10 @@ namespace SolutionGrader.Core.Services
                     
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_STEP} {string.Format(LoggingKeywords.MSG_STEP_RESULT, ok ? LoggingKeywords.RESULT_PASS : LoggingKeywords.RESULT_FAIL, msg, sw.Elapsed.TotalMilliseconds)}");
                 }
+                
+                // Stop the process monitoring task
+                monitorCts.Cancel();
+                try { await monitorTask; } catch { }
 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_WRITING_RESULTS, outDir)}");
                 await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
