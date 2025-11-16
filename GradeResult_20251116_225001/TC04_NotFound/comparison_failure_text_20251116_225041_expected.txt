@@ -1,2 +1,0 @@
-No books found by genre ID 100
-Please enter integer number :
