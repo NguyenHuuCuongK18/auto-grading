@@ -242,16 +242,8 @@ namespace SolutionGrader.Core.Services
                                     if (!cs.DataAvailable)
                                     {
                                         // Request complete - client is now waiting for response
-                                        // Signal end-of-request to server using half-close
-                                        try
-                                        {
-                                            server.Client.Shutdown(SocketShutdown.Send);
-                                            Console.WriteLine($"[TCP Relay c2s] Signaled end-of-request to server (half-close)");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            Console.WriteLine($"[TCP Relay c2s] Half-close failed: {ex.Message}");
-                                        }
+                                        // Don't close the connection - let the server respond
+                                        Console.WriteLine($"[TCP Relay c2s] Request complete, waiting for server response");
                                         break;
                                     }
                                 }
