@@ -204,16 +204,49 @@ namespace SolutionGrader.Core.Services
                     var requestCapture = new List<byte>();
                     var responseCapture = new List<byte>();
                     
-                    // Start both relay tasks - they must run concurrently
-                    var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, "c2s", token);
-                    var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, "s2c", token);
+                    // Start s2c relay first so it's ready to receive response
+                    var s2c = Task.Run(() => RelayAndCaptureAsync(ss, cs, responseCapture, "s2c", token));
                     
-                    // Wait for either direction to complete (typically client closes first after getting response)
-                    await Task.WhenAny(c2s, s2c);
+                    // Relay client request to server, then signal end of request by closing send side
+                    var c2s = Task.Run(async () =>
+                    {
+                        var buffer = new byte[8192];
+                        int read;
+                        int totalRead = 0;
+                        try
+                        {
+                            // Read all data from client
+                            while ((read = await cs.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                            {
+                                totalRead += read;
+                                lock (requestCapture)
+                                {
+                                    requestCapture.AddRange(buffer.Take(read));
+                                }
+                                await ss.WriteAsync(buffer, 0, read, token);
+                                await ss.FlushAsync(token);
+                                
+                                // After writing, check if there's more data immediately available
+                                // If not, the client is likely waiting for a response
+                                await Task.Delay(50, token); // Small delay to let any buffered data arrive
+                                if (!cs.DataAvailable)
+                                {
+                                    // Close the send side of server connection to signal end of request
+                                    // This makes the server's Read() return 0, allowing it to process and respond
+                                    server.Client.Shutdown(SocketShutdown.Send);
+                                    break; // Exit loop but keep s2c running to receive response
+                                }
+                            }
+                        }
+                        catch { }
+                    });
                     
-                    // Give time for the other relay to capture its data
-                    // The server keeps connection open, so we need to wait for data, not connection close
-                    await Task.Delay(500, token);
+                    // Wait for c2s to complete (client done sending, or server send side shut down)
+                    await c2s;
+                    
+                    // Wait for s2c to receive response or timeout
+                    var delayTask = Task.Delay(2000, token);
+                    await Task.WhenAny(s2c, delayTask);
                     
                     // Store captured data
                     byte[] reqBytes, respBytes;
