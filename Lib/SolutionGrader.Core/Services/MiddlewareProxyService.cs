@@ -205,8 +205,8 @@ namespace SolutionGrader.Core.Services
                     var responseCapture = new List<byte>();
                     
                     // Start both relay tasks - they must run concurrently
-                    var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, token);
-                    var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, token);
+                    var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, "c2s", token);
+                    var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, "s2c", token);
                     
                     // Wait for either direction to complete (typically client closes first after getting response)
                     await Task.WhenAny(c2s, s2c);
@@ -233,12 +233,14 @@ namespace SolutionGrader.Core.Services
                 await to.WriteAsync(buffer, 0, read, token);
         }
 
-        private static async Task RelayAndCaptureAsync(NetworkStream from, NetworkStream to, List<byte> capture, CancellationToken token)
+        private static async Task RelayAndCaptureAsync(NetworkStream from, NetworkStream to, List<byte> capture, string label, CancellationToken token)
         {
             var buffer = new byte[8192];
             int read;
             try
             {
+                // NetworkStream.ReadAsync will block until data is available or stream closes
+                // It returns 0 only when the stream is actually closed
                 while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                 {
                     // Capture the data
@@ -247,11 +249,16 @@ namespace SolutionGrader.Core.Services
                         capture.AddRange(buffer.Take(read));
                     }
                     await to.WriteAsync(buffer, 0, read, token);
+                    await to.FlushAsync(token); // Ensure data is sent immediately for both TCP and HTTP
                 }
             }
             catch (OperationCanceledException)
             {
                 // Task was cancelled, stop relaying
+            }
+            catch (IOException)
+            {
+                // Socket closed or connection lost
             }
         }
 
