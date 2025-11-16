@@ -212,17 +212,28 @@ END";
         
         if (dbConfig == null)
         {
-            // Default connection string for Docker SQL Server
-            builder.DataSource = "localhost,1433";
+            // Default connection string based on platform
+            // On Windows: use local SQL Server Express
+            // On Linux/Mac: use Docker SQL Server
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            {
+                builder.DataSource = ".\\SQLEXPRESS";
+                builder.IntegratedSecurity = true;
+            }
+            else
+            {
+                // Docker SQL Server for Linux/Mac (used for development/debugging)
+                builder.DataSource = "localhost,1433";
+                builder.UserID = "sa";
+                builder.Password = "YourStrong@Passw0rd";
+                builder.TrustServerCertificate = true;
+            }
             builder.InitialCatalog = "Library";
-            builder.UserID = "sa";
-            builder.Password = "YourStrong@Passw0rd";
-            builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
         }
         else
         {
-            var server = dbConfig.SqlServer ?? "localhost,1433";
+            var server = dbConfig.SqlServer ?? (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".\\SQLEXPRESS" : "localhost,1433");
             // Format SQL Server instance name properly
             // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
             // - localhost, 127.0.0.1, or hostnames/IPs
