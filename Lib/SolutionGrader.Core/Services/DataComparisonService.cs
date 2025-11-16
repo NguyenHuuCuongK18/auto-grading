@@ -330,17 +330,18 @@ namespace SolutionGrader.Core.Services
         /// 2. Unescape Unicode escape sequences (\uXXXX)
         /// 3. Normalize smart quotes and dashes to ASCII equivalents
         /// 4. Attempt JSON canonicalization for JSON content
-        /// 5. Normalize all line endings to \n
-        /// 6. Convert all Unicode whitespace variants to regular spaces
-        /// 7. Trim whitespace from each line
-        /// 8. Remove empty lines completely
-        /// 9. Collapse multiple consecutive spaces into single space
-        /// 10. Final trim of entire string
+        /// 5. Normalize datetime strings (handle different separators like / vs -)
+        /// 6. Normalize all line endings to \n
+        /// 7. Convert all Unicode whitespace variants to regular spaces
+        /// 8. Trim whitespace from each line
+        /// 9. Remove empty lines completely
+        /// 10. Collapse multiple consecutive spaces into single space
+        /// 11. Final trim of entire string
         /// </summary>
         /// <param name="s">The string to normalize</param>
         /// <param name="ci">Whether to perform case-insensitive comparison (convert to lowercase)</param>
         /// <returns>Normalized string ready for comparison</returns>
-        private static string Normalize(string s, bool ci)
+        private string Normalize(string s, bool ci)
         {
             if (string.IsNullOrWhiteSpace(s)) return string.Empty;
 
@@ -374,10 +375,14 @@ namespace SolutionGrader.Core.Services
                 catch { /* Not valid JSON, continue with text normalization */ }
             }
 
-            // 5. Convert all line endings to \n for consistency
+            // 5. Normalize datetime strings - convert various date separators to a consistent format
+            // This handles cases where student code uses dashes (MM-dd-yyyy) instead of slashes (MM/dd/yyyy)
+            s = NormalizeDateTimes(s);
+            
+            // 6. Convert all line endings to \n for consistency
             s = s.Replace("\r\n", "\n").Replace("\r", "\n");
             
-            // 6. Replace all Unicode whitespace variants with regular spaces
+            // 7. Replace all Unicode whitespace variants with regular spaces
             s = s.Replace("\u00A0", " ")  // Non-breaking space
                  .Replace("\u2002", " ")  // En space
                  .Replace("\u2003", " ")  // Em space
@@ -388,25 +393,67 @@ namespace SolutionGrader.Core.Services
                  .Replace("\u3000", " ")  // Ideographic space
                  .Replace("\t", " ");      // Tab to space
 
-            // 7. Trim leading/trailing whitespace from each line
+            // 8. Trim leading/trailing whitespace from each line
             var lines = s.Split('\n');
             for (int i = 0; i < lines.Length; i++)
             {
                 lines[i] = lines[i].Trim();
             }
             
-            // 8. Remove empty lines completely to prevent whitespace/newline mismatches
+            // 9. Remove empty lines completely to prevent whitespace/newline mismatches
             // This is the key fix: empty lines and extra newlines will no longer cause comparison failures
             lines = lines.Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
             s = string.Join(" ", lines); // Join with single space instead of newline
             
-            // 9. Collapse multiple consecutive spaces into single space
+            // 10. Collapse multiple consecutive spaces into single space
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
             
-            // 10. Final trim
+            // 11. Final trim
             s = s.Trim();
 
             return ci ? s.ToLowerInvariant() : s;
+        }
+
+        /// <summary>
+        /// Normalizes datetime strings by detecting and standardizing date separators.
+        /// Handles both slash (/) and dash (-) separators in various datetime formats.
+        /// This allows comparison between dates like "10/10/2024" and "10-10-2024".
+        /// </summary>
+        /// <param name="s">String potentially containing datetime values</param>
+        /// <returns>String with normalized datetime separators</returns>
+        private string NormalizeDateTimes(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return s;
+
+            // Common datetime patterns with various separators
+            // Matches formats like:
+            // - MM/dd/yyyy, dd/MM/yyyy, yyyy/MM/dd (with slashes)
+            // - MM-dd-yyyy, dd-MM-yyyy, yyyy-MM-dd (with dashes)
+            // - With or without time components (hh:mm:ss, hh:mm:ss tt)
+            
+            // Pattern to match dates with separators (/, -, or .)
+            // Captures: digit(s) separator digit(s) separator digit(s) [optional time]
+            var dateTimePattern = @"\b(\d{1,4})([-/\.])(\d{1,2})\2(\d{1,4})(\s+\d{1,2}:\d{2}:\d{2}(\s+[AP]M)?)?\b";
+            
+            // Replace all date separators with forward slash for consistency
+            s = System.Text.RegularExpressions.Regex.Replace(s, dateTimePattern, match =>
+            {
+                var part1 = match.Groups[1].Value;
+                var sep = match.Groups[2].Value;
+                var part2 = match.Groups[3].Value;
+                var part3 = match.Groups[4].Value;
+                var timePart = match.Groups[5].Value;
+                
+                // If the separator is not a slash, replace it with slash
+                if (sep != "/")
+                {
+                    return $"{part1}/{part2}/{part3}{timePart}";
+                }
+                
+                return match.Value;
+            });
+
+            return s;
         }
 
         /// <summary>

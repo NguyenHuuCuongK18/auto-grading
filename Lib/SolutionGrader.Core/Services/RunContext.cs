@@ -12,6 +12,7 @@ namespace SolutionGrader.Core.Services
         public string ResultRoot { get; set; } = "";
         public string? CurrentQuestionCode { get; set; }
         public int? CurrentStage { get; set; }
+        public string? DateTimeFormat { get; set; }
 
         private string? _serverExecutablePath;
 

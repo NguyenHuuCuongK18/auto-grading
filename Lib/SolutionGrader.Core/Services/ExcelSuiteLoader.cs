@@ -23,6 +23,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         // Read marks from QuestionMark sheet in header.xlsx
         var marks = ReadMarksFromHeader(headerPath);
         
+        // Read datetime format from DataPattern sheet in header.xlsx
+        var dateTimeFormat = ReadDateTimeFormatFromHeader(headerPath);
+        
         // Read environment configuration from outermost environment.xlsx
         var envConfig = ReadEnvironmentConfig(suiteRoot);
         
@@ -35,6 +38,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             Protocol = protocol,
             DatabaseConfig = dbConfig,
             Environment = envConfig,
+            DateTimeFormat = dateTimeFormat,
             Cases = cases
         };
     }
@@ -222,6 +226,57 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
 
         return result;
+    }
+
+    private static string? ReadDateTimeFormatFromHeader(string headerPath)
+    {
+        try
+        {
+            using var wb = new XLWorkbook(headerPath);
+            // Look for DataPattern sheet
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("DataPattern", StringComparison.OrdinalIgnoreCase));
+            if (ws == null) return null;
+
+            // Find the row with "Data Type" and "Pattern" headers
+            int headerRow = -1, typeCol = -1, patternCol = -1;
+            for (int r = 1; r <= Math.Min(10, ws.RowCount()); r++)
+            {
+                for (int c = 1; c <= Math.Min(10, ws.ColumnCount()); c++)
+                {
+                    var text = ws.Cell(r, c).GetString().Trim();
+                    if (text.Equals("Data Type", StringComparison.OrdinalIgnoreCase) ||
+                        text.Equals("DataType", StringComparison.OrdinalIgnoreCase)) typeCol = c;
+                    if (text.Equals("Pattern", StringComparison.OrdinalIgnoreCase)) patternCol = c;
+                }
+
+                if (typeCol > 0 && patternCol > 0) { headerRow = r; break; }
+                typeCol = patternCol = -1;
+            }
+
+            if (headerRow < 0) return null;
+
+            // Find the DateTime row
+            for (int r = headerRow + 1; r <= Math.Min(50, ws.RowCount()); r++)
+            {
+                var dataType = ws.Cell(r, typeCol).GetString().Trim();
+                if (dataType.Equals("DateTime", StringComparison.OrdinalIgnoreCase) ||
+                    dataType.Equals("Date Time", StringComparison.OrdinalIgnoreCase))
+                {
+                    var pattern = ws.Cell(r, patternCol).GetString().Trim();
+                    if (!string.IsNullOrWhiteSpace(pattern))
+                    {
+                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} DateTime format from header: {pattern}");
+                        return pattern;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} Warning: Could not read datetime format from header: {ex.Message}");
+        }
+
+        return null;
     }
 
     private static EnvironmentConfiguration? ReadEnvironmentConfig(string suiteRoot)
