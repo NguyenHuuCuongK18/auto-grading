@@ -204,29 +204,17 @@ namespace SolutionGrader.Core.Services
                     var requestCapture = new List<byte>();
                     var responseCapture = new List<byte>();
                     
+                    // Start both relay tasks simultaneously
                     var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, token);
                     var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, token);
                     
-                    // Wait for either direction to complete (typically client finishes sending first)
-                    var completed = await Task.WhenAny(c2s, s2c);
+                    // Wait for either to complete
+                    await Task.WhenAny(c2s, s2c);
                     
-                    // Give time for the other direction to complete
-                    // When client finishes sending, server needs time to process and respond
-                    // When server finishes, we're done
-                    if (completed == c2s)
-                    {
-                        // Client finished sending, wait up to 2 seconds for server response
-                        var remainingTask = Task.WhenAny(s2c, Task.Delay(2000, token));
-                        await remainingTask;
-                    }
-                    else
-                    {
-                        // Server finished first (connection closed), wait for client with timeout
-                        var remainingTask = Task.WhenAny(c2s, Task.Delay(1000, token));
-                        await remainingTask;
-                    }
+                    // Give a moment for any in-flight data to be processed
+                    await Task.Delay(500, token);
                     
-                    // Store captured data - use lock when converting to array for thread safety
+                    // Store captured data
                     byte[] reqBytes, respBytes;
                     lock (requestCapture) { reqBytes = requestCapture.ToArray(); }
                     lock (responseCapture) { respBytes = responseCapture.ToArray(); }
@@ -248,14 +236,21 @@ namespace SolutionGrader.Core.Services
         {
             var buffer = new byte[8192];
             int read;
-            while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+            try
             {
-                // Capture the data
-                lock (capture)
+                while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                 {
-                    capture.AddRange(buffer.Take(read));
+                    // Capture the data
+                    lock (capture)
+                    {
+                        capture.AddRange(buffer.Take(read));
+                    }
+                    await to.WriteAsync(buffer, 0, read, token);
                 }
-                await to.WriteAsync(buffer, 0, read, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Task was cancelled, stop relaying
             }
         }
 
