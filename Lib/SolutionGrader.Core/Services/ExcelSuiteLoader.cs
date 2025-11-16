@@ -455,7 +455,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 }
                 else if (key.Equals("Default_Database_Name", StringComparison.OrdinalIgnoreCase))
                 {
-                    config.DatabaseName = value;
+                    // Only override if not a placeholder value "database"
+                    if (!value.Equals("database", StringComparison.OrdinalIgnoreCase))
+                    {
+                        config.DatabaseName = value;
+                    }
                 }
             }
 
