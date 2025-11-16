@@ -1,3 +1,4 @@
 #HTTP
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project12\Project12.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project11\Project11.exe"
 #TCP
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Client\Client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Server\Server.exe"
