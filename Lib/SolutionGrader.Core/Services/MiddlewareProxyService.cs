@@ -199,9 +199,17 @@ namespace SolutionGrader.Core.Services
                     await server.ConnectAsync(IPAddress.Loopback, _realServerPort, token);
                     using var cs = client.GetStream();
                     using var ss = server.GetStream();
-                    var c2s = RelayAsync(cs, ss, token);
-                    var s2c = RelayAsync(ss, cs, token);
+                    
+                    // Capture request and response data for TCP connections
+                    var requestCapture = new List<byte>();
+                    var responseCapture = new List<byte>();
+                    
+                    var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, token);
+                    var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, token);
                     await Task.WhenAny(c2s, s2c);
+                    
+                    // Store captured data after relay completes
+                    StoreTcpCapture(requestCapture.ToArray(), responseCapture.ToArray());
                 }
             }
             catch { }
@@ -214,6 +222,37 @@ namespace SolutionGrader.Core.Services
             while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                 await to.WriteAsync(buffer, 0, read, token);
         }
+
+        private static async Task RelayAndCaptureAsync(NetworkStream from, NetworkStream to, List<byte> capture, CancellationToken token)
+        {
+            var buffer = new byte[8192];
+            int read;
+            while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+            {
+                // Capture the data
+                capture.AddRange(buffer.Take(read));
+                await to.WriteAsync(buffer, 0, read, token);
+            }
+        }
+
+        private void StoreTcpCapture(byte[] requestBytes, byte[] responseBytes)
+        {
+            try
+            {
+                var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
+
+                // Convert bytes to string (assuming UTF-8 encoding for TCP data)
+                var requestText = requestBytes.Length > 0 ? Encoding.UTF8.GetString(requestBytes) : string.Empty;
+                var responseText = responseBytes.Length > 0 ? Encoding.UTF8.GetString(responseBytes) : string.Empty;
+
+                // Store TCP request and response
+                _run.SetServerRequest(question, stage, requestText);
+                _run.SetServerResponse(question, stage, responseText);
+            }
+            catch { }
+        }
+
 
         private void TryAppendServerActual(string requestBody, byte[] responseBytes, string httpMethod = "GET", int statusCode = 200)
         {
