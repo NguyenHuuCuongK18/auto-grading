@@ -16,6 +16,8 @@ public sealed class ExcelDetailParser : ITestCaseParser
         var steps = new List<Step>();
 
         // Check if this is the new format (User/Client/Server/Network sheets) or old format (InputClients/OutputClients)
+        // NEW format: Uses User, Client, Server, Network sheets
+        // OLD format: Uses InputClients/OutputClients/OutputServers (or singular variations)
         bool hasNewFormat = wb.Worksheets.Any(s => s.Name.Equals("User", StringComparison.OrdinalIgnoreCase));
 
         if (hasNewFormat)
@@ -25,7 +27,10 @@ public sealed class ExcelDetailParser : ITestCaseParser
         }
 
         // Old format parsing below
-        // Helper to try both old (plural) and new (singular) sheet names
+        // The OLD format has two variations:
+        // 1. Plural: InputClients, OutputClients, OutputServers
+        // 2. Singular: InputClient, OutputClient, OutputServer
+        // This helper tries both variations for backward compatibility
         void ReadSheetFlexible(string primaryName, string alternateName, Action<IXLWorksheet> parse)
         {
             var w = wb.Worksheets.FirstOrDefault(s => 
@@ -34,7 +39,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
             if (w != null && w.RangeUsed() != null) parse(w);
         }
 
-        // InputClients - try both "InputClient" (new) and "InputClients" (old)
+        // InputClients - try both "InputClient" (singular variation) and "InputClients" (plural variation)
         ReadSheetFlexible(SuiteKeywords.Sheet_InputClient, SuiteKeywords.Sheet_InputClients, ws =>
         {
             var map = Header(ws);
@@ -131,7 +136,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
             }
         });
 
-        // OutputClients - try both "OutputClient" (new) and "OutputClients" (old)
+        // OutputClients - try both "OutputClient" (singular variation) and "OutputClients" (plural variation)
         ReadSheetFlexible(SuiteKeywords.Sheet_OutputClient, SuiteKeywords.Sheet_OutputClients, ws =>
         {
             var map = Header(ws);
@@ -241,7 +246,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
             }
         });
 
-        // OutputServers - try both "OutputServer" (new) and "OutputServers" (old)
+        // OutputServers - try both "OutputServer" (singular variation) and "OutputServers" (plural variation)
         ReadSheetFlexible(SuiteKeywords.Sheet_OutputServer, SuiteKeywords.Sheet_OutputServers, ws =>
         {
             var map = Header(ws);
