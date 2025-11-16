@@ -6,6 +6,7 @@
         string? CurrentQuestionCode { get; set; }
         int? CurrentStage { get; set; }
         string? CurrentStageLabel { get; set; }
+        string? DateTimeFormat { get; set; }
         string? ResolveServerExecutable();
 
         string GetClientCaptureKey(string questionCode, string stage);
