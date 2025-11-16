@@ -61,7 +61,7 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             }
             else
             {
-                success = await ExecuteSqlViaLocalConnectionAsync(dbScriptPath, dbConfig, ct);
+                success = await ExecuteSqlViaLocalConnectionAsync(dbScriptPath, dbConfig, envConfig, ct);
             }
             
             if (!success)
@@ -96,10 +96,15 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
 
     private async System.Threading.Tasks.Task<bool> ExecuteSqlViaLocalConnectionAsync(string dbScriptPath, DatabaseConfiguration? dbConfig, System.Threading.CancellationToken ct)
     {
+        return await ExecuteSqlViaLocalConnectionAsync(dbScriptPath, dbConfig, null, ct);
+    }
+
+    private async System.Threading.Tasks.Task<bool> ExecuteSqlViaLocalConnectionAsync(string dbScriptPath, DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig, System.Threading.CancellationToken ct)
+    {
         try
         {
-            // Build connection string from DatabaseConfiguration
-            var connectionString = BuildConnectionString(dbConfig);
+            // Build connection string from DatabaseConfiguration and EnvironmentConfiguration
+            var connectionString = BuildConnectionString(dbConfig, envConfig);
             
             // Extract database name from connection string
             var builder = new SqlConnectionStringBuilder(connectionString);
@@ -206,11 +211,11 @@ END";
             .Where(batch => !string.IsNullOrWhiteSpace(batch));
     }
 
-    private static string BuildConnectionString(DatabaseConfiguration? dbConfig)
+    private static string BuildConnectionString(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
         var builder = new SqlConnectionStringBuilder();
         
-        if (dbConfig == null)
+        if (dbConfig == null && envConfig == null)
         {
             // Default connection string based on platform
             // On Windows: use local SQL Server Express
@@ -233,7 +238,17 @@ END";
         }
         else
         {
-            var server = dbConfig.SqlServer ?? (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? ".\\SQLEXPRESS" : "localhost,1433");
+            // Priority order for SQL Server:
+            // 1. DatabaseConfiguration.SqlServer (from header.xlsx)
+            // 2. Platform default (.\SQLEXPRESS on Windows, localhost,1433 on Linux)
+            var server = dbConfig?.SqlServer;
+            if (string.IsNullOrWhiteSpace(server))
+            {
+                server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
+                    ? ".\\SQLEXPRESS" 
+                    : "localhost,1433";
+            }
+            
             // Format SQL Server instance name properly
             // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
             // - localhost, 127.0.0.1, or hostnames/IPs
@@ -257,9 +272,25 @@ END";
             }
 
             builder.DataSource = server;
-            builder.InitialCatalog = dbConfig.Database ?? "Library";
-            builder.UserID = dbConfig.Username ?? "sa";
-            builder.Password = dbConfig.Password ?? "YourStrong@Passw0rd";
+            
+            // Priority order for Database:
+            // 1. EnvironmentConfiguration.DatabaseName (from environment.xlsx)
+            // 2. DatabaseConfiguration.Database (from header.xlsx)
+            // 3. Default "Library"
+            builder.InitialCatalog = envConfig?.DatabaseName ?? dbConfig?.Database ?? "Library";
+            
+            // Priority order for Username:
+            // 1. EnvironmentConfiguration.DatabaseUsername (from environment.xlsx)
+            // 2. DatabaseConfiguration.Username (from header.xlsx)
+            // 3. Default "sa"
+            builder.UserID = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? "sa";
+            
+            // Priority order for Password:
+            // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
+            // 2. DatabaseConfiguration.Password (from header.xlsx)
+            // 3. Default "YourStrong@Passw0rd"
+            builder.Password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? "YourStrong@Passw0rd";
+            
             builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
         }

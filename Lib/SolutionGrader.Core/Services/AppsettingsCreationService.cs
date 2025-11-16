@@ -53,7 +53,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             if (!string.IsNullOrEmpty(serverDir))
             {
                 var serverAppsettingsPath = Path.Combine(serverDir, FileKeywords.FileName_AppSettings);
-                var serverConfig = CreateServerAppsettings(ipAddress, _serverPort, dbConfig);
+                var serverConfig = CreateServerAppsettings(ipAddress, _serverPort, dbConfig, envConfig);
                 File.WriteAllText(serverAppsettingsPath, JsonSerializer.Serialize(serverConfig, new JsonSerializerOptions 
                 { 
                     WriteIndented = true 
@@ -136,9 +136,9 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         }
     }
 
-    private static object CreateServerAppsettings(string ipAddress, int port, DatabaseConfiguration? dbConfig)
+    private static object CreateServerAppsettings(string ipAddress, int port, DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
-        var connectionString = BuildConnectionString(dbConfig);
+        var connectionString = BuildConnectionString(dbConfig, envConfig);
         
         return new
         {
@@ -160,15 +160,25 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         };
     }
 
-    private static string BuildConnectionString(DatabaseConfiguration? dbConfig)
+    private static string BuildConnectionString(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
-        if (dbConfig == null)
+        if (dbConfig == null && envConfig == null)
         {
-            // Default connection string using localhost:1433 for Docker
+            // Default connection string using .\SQLEXPRESS for Windows (most common dev environment)
             return $"server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true";
         }
 
-        var server = dbConfig.SqlServer ?? "localhost,1433";
+        // Priority order for SQL Server:
+        // 1. DatabaseConfiguration.SqlServer (from header.xlsx)
+        // 2. Platform default (.\SQLEXPRESS on Windows, localhost,1433 on Linux)
+        var server = dbConfig?.SqlServer;
+        if (string.IsNullOrWhiteSpace(server))
+        {
+            server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
+                ? ".\\SQLEXPRESS" 
+                : "localhost,1433";
+        }
+        
         // Format SQL Server instance name properly
         // Only add .\ prefix for named instances (e.g., SQLEXPRESS), not for:
         // - localhost, 127.0.0.1, or hostnames/IPs
@@ -191,9 +201,23 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             }
         }
 
-        var database = dbConfig.Database ?? "Library";
-        var username = dbConfig.Username ?? "sa";
-        var password = dbConfig.Password ?? "YourStrong@Passw0rd";
+        // Priority order for Database:
+        // 1. EnvironmentConfiguration.DatabaseName (from environment.xlsx)
+        // 2. DatabaseConfiguration.Database (from header.xlsx)
+        // 3. Default "Library"
+        var database = envConfig?.DatabaseName ?? dbConfig?.Database ?? "Library";
+        
+        // Priority order for Username:
+        // 1. EnvironmentConfiguration.DatabaseUsername (from environment.xlsx)
+        // 2. DatabaseConfiguration.Username (from header.xlsx)
+        // 3. Default "sa"
+        var username = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? "sa";
+        
+        // Priority order for Password:
+        // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
+        // 2. DatabaseConfiguration.Password (from header.xlsx)
+        // 3. Default "YourStrong@Passw0rd"
+        var password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? "YourStrong@Passw0rd";
 
         // Build connection string using simple template for consistent lowercase formatting
         return string.Format(
