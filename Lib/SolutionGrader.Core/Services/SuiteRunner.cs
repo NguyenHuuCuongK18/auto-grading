@@ -101,6 +101,9 @@ namespace SolutionGrader.Core.Services
                 _mw.ConfigurePorts(proxyPort, serverPort);
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {string.Format(AppsettingKeywords.MSG_CONFIGURED_MIDDLEWARE, proxyPort, serverPort)}");
                 
+                // Configure executor with the server port for health checks
+                _exec.ConfigureServerPort(serverPort);
+                
                 // Determine database script path - use from environment or test case specific
                 string? dbScriptPath = null;
                 

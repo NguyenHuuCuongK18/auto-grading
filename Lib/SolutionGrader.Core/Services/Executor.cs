@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Sockets;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Errors;
 using SolutionGrader.Core.Domain.Models;
@@ -20,7 +21,7 @@ namespace SolutionGrader.Core.Services
 
         private const int ServerReadyTimeoutSeconds = 5;
         private const int ServerReadyPollIntervalMs = 100;
-        private const int RealServerPort = 5001;
+        private int _configuredServerPort = 5001; // Default fallback port
 
         public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
         {
@@ -30,6 +31,28 @@ namespace SolutionGrader.Core.Services
             _log = log;
             _run = run;
             _gradingConfig = gradingConfig ?? GradingConfig.Default;
+        }
+
+        public void ConfigureServerPort(int serverPort)
+        {
+            _configuredServerPort = serverPort;
+        }
+
+        /// <summary>
+        /// Checks if a TCP port is listening and accepting connections
+        /// </summary>
+        private static bool IsTcpPortListening(int port)
+        {
+            try
+            {
+                using var client = new TcpClient();
+                client.Connect("127.0.0.1", port);
+                return true;
+            }
+            catch (SocketException)
+            {
+                return false;
+            }
         }
 
         public async Task<(bool, string)> ExecuteAsync(Step step, ExecuteSuiteArgs args, CancellationToken ct)
@@ -59,22 +82,36 @@ namespace SolutionGrader.Core.Services
                             // Wait for server to be ready
                             var t0 = Environment.TickCount;
                             bool serverReady = false;
+                            bool isHttpProtocol = args.Protocol?.Equals("HTTP", StringComparison.OrdinalIgnoreCase) == true;
+                            
                             while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
                             {
-                                try
+                                // First check if the process has crashed
+                                if (!_proc.IsServerRunning)
                                 {
-                                    var res = await _http.GetAsync($"http://127.0.0.1:{RealServerPort}/healthz", ct);
-                                    if (res.IsSuccessStatusCode)
-                                    {
-                                        serverReady = true;
-                                        break;
-                                    }
+                                    // Process exited early - wait a bit for output then fail
+                                    await Task.Delay(200, ct);
+                                    break;
                                 }
-                                catch { /* wait */ }
                                 
-                                if (_proc.IsServerRunning)
+                                // For HTTP servers, try HTTP health check
+                                if (isHttpProtocol)
                                 {
-                                    // Server process is running, even if health check fails
+                                    try
+                                    {
+                                        var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
+                                        if (res.IsSuccessStatusCode)
+                                        {
+                                            serverReady = true;
+                                            break;
+                                        }
+                                    }
+                                    catch { /* HTTP health check failed, will retry */ }
+                                }
+                                
+                                // For TCP servers (or if HTTP health check failed), try TCP port check
+                                if (IsTcpPortListening(_configuredServerPort))
+                                {
                                     serverReady = true;
                                     break;
                                 }
@@ -185,13 +222,13 @@ namespace SolutionGrader.Core.Services
                             if (string.IsNullOrWhiteSpace(serverPath) || !File.Exists(serverPath))
                             { errCode = ErrorCodes.FILE_NOT_FOUND; return (false, "Server executable not found"); }
 
-                            var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{RealServerPort}", ct);
+                            var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{_configuredServerPort}", ct);
                             var t0 = Environment.TickCount;
                             while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
                             {
                                 try
                                 {
-                                    var res = await _http.GetAsync($"http://127.0.0.1:{RealServerPort}/healthz", ct);
+                                    var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
                                     if (res.IsSuccessStatusCode) break;
                                 }
                                 catch { /* wait */ }
