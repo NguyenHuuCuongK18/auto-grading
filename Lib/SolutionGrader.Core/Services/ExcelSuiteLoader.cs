@@ -455,8 +455,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 }
                 else if (key.Equals("Default_Database_Name", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Only override if not a placeholder value "database"
-                    if (!value.Equals("database", StringComparison.OrdinalIgnoreCase))
+                    // Skip overriding if value is "database" - this is a placeholder value
+                    // commonly used in test case environment.xlsx files to indicate "use suite default".
+                    // Test cases should only override this when they need a specific different database.
+                    if (!string.IsNullOrWhiteSpace(value) && 
+                        !value.Equals("database", StringComparison.OrdinalIgnoreCase))
                     {
                         config.DatabaseName = value;
                     }
