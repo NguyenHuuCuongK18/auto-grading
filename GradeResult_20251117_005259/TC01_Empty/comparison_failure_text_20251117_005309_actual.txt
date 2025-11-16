@@ -1,1 +1,0 @@
-Enter customer name (or press 0 to exit): 
