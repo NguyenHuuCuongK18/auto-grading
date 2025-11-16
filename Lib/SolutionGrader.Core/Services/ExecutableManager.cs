@@ -152,7 +152,10 @@ namespace SolutionGrader.Core.Services
             // 3. Timeout
             // 4. Cancellation requested
             
-            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            // Increased stabilization time to 1000ms (1 second) to ensure all console output is captured.
+            // This is especially important when applications use multiple Console.Write/WriteLine calls
+            // that may be buffered or delayed, preventing premature stage cutoff.
+            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
             const int pollIntervalMs = 50; // Check for new output every 50ms
             
             var startTime = DateTime.UtcNow;
@@ -245,7 +248,7 @@ namespace SolutionGrader.Core.Services
         {
             if (_server == null) return false;
             
-            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
             const int pollIntervalMs = 50; // Check for new output every 50ms
             
             var startTime = DateTime.UtcNow;
@@ -467,20 +470,20 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Use captured context from process start time, not current context
+                // Use CURRENT stage context to properly attribute output to the stage when it was produced
+                // This fixes the issue where output was being attributed to the stage when the process started
+                // instead of the stage when the output actually occurred (e.g., after sending input).
                 string? question;
                 string? stage;
                 
-                if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
-                {
-                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
-                }
-                else
-                {
-                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
-                }
+                // Always use current context from RunContext to ensure output is attributed to the correct stage
+                question = _run.CurrentQuestionCode ?? 
+                          (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase) 
+                              ? _serverStartQuestionCode 
+                              : _clientStartQuestionCode) ?? 
+                          FileKeywords.Value_UnknownQuestion;
+                
+                stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
                 
                 var payload = line + Environment.NewLine;
 
