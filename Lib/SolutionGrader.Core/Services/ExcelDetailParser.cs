@@ -74,24 +74,25 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         DataType = dataType
                     });
 
-                    // Add middleware/proxy step
-                    steps.Add(new Step
-                    {
-                        Id = $"{GradingKeywords.StepPrefix_InputClient}PROXY-{stage}",
-                        QuestionCode = qcode,
-                        Stage = stage,
-                        Action = ActionKeywords.TcpRelay,
-                        Value = null,
-                        DataType = dataType
-                    });
-
-                    // Add client start step
+                    // Add client start step (before middleware to ensure both processes are running)
                     steps.Add(new Step
                     {
                         Id = $"{GradingKeywords.StepPrefix_InputClient}CLIENT-{stage}",
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.ClientStart,
+                        Value = null,
+                        DataType = dataType
+                    });
+
+                    // Add middleware/proxy step after BOTH client and server have started
+                    // This ensures proper exception handling when connections are attempted
+                    steps.Add(new Step
+                    {
+                        Id = $"{GradingKeywords.StepPrefix_InputClient}PROXY-{stage}",
+                        QuestionCode = qcode,
+                        Stage = stage,
+                        Action = ActionKeywords.TcpRelay,
                         Value = null,
                         DataType = dataType
                     });
