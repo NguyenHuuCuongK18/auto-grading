@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # SQL Server for Windows containers
+  # Note: This requires Docker Desktop on Windows with Windows container mode enabled
+  # For Linux/Mac development, use the commented-out Linux container configuration below
+  sqlserver-test:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver-test
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Passw0rd
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Alternative: SQL Server for Windows containers (requires Windows container mode)
+  # Uncomment this section and comment out the above section to use Windows containers
+  # Note: Windows containers are only supported on Windows hosts with Docker Desktop in Windows container mode
+  # sqlserver-test-windows:
+  #   image: mcr.microsoft.com/mssql/server:2022-latest-windows-ltsc2022
+  #   container_name: sqlserver-test
+  #   environment:
+  #     - ACCEPT_EULA=Y
+  #     - SA_PASSWORD=YourStrong@Passw0rd
+  #     - MSSQL_PID=Developer
+  #   ports:
+  #     - "1433:1433"
+  #   volumes:
+  #     - sqlserver-data:C:\\var\\opt\\mssql
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "sqlcmd -S localhost -U sa -P YourStrong@Passw0rd -Q \"SELECT 1\" || exit 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+
+volumes:
+  sqlserver-data:
+    driver: local

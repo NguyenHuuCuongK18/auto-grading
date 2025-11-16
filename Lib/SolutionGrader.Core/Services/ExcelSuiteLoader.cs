@@ -276,6 +276,13 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 {
                     config.DatabasePassword = value;
                 }
+                else if (key.Equals("UseDocker", StringComparison.OrdinalIgnoreCase) ||
+                         key.Equals("Use_Docker", StringComparison.OrdinalIgnoreCase))
+                {
+                    config.UseDocker = value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Equals("1", StringComparison.OrdinalIgnoreCase);
+                }
             }
 
             // Look for Given server/client paths in Meta directory
@@ -431,7 +438,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 DatabaseFilePath = suiteEnv?.DatabaseFilePath,
                 DatabaseName = suiteEnv?.DatabaseName,
                 DatabaseUsername = suiteEnv?.DatabaseUsername,
-                DatabasePassword = suiteEnv?.DatabasePassword
+                DatabasePassword = suiteEnv?.DatabasePassword,
+                UseDocker = suiteEnv?.UseDocker ?? false,
+                StopGradingIfResetFails = suiteEnv?.StopGradingIfResetFails ?? false
             };
             
             // Override with test case specific values

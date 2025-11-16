@@ -39,6 +39,7 @@ public class Program
             ResultRoot = timestampedResultRoot,
             ClientExePath = a.GetValueOrDefault("client"),
             ServerExePath = a.GetValueOrDefault("server"),
+            UseDocker = a.ContainsKey("useDocker") || a.ContainsKey("usedocker"),
         };
 
         IFileService files = new FileService();
@@ -93,18 +94,21 @@ public class Program
 Usage:
   SolutionGrader.Cli ExecuteSuite --suite <suiteFolder|Header.xlsx> --out <resultRoot>
                                 [--client <client.exe>] [--server <server.exe>]
+                                [--useDocker]
 
 Required Arguments:
   --suite   Path to test suite folder or Header.xlsx file
   --out     Output directory for grading results
 
 Optional Arguments:
-  --client  Path to client executable (overrides Meta/Given/Client if provided)
-  --server  Path to server executable (overrides Meta/Given/Server if provided)
+  --client    Path to client executable (overrides Meta/Given/Client if provided)
+  --server    Path to server executable (overrides Meta/Given/Server if provided)
+  --useDocker Use Docker SQL Server container for database operations
+              (requires running SQL Server container named 'sqlserver-test')
 
 Configuration:
   All other configuration (database script, ports, timeouts, etc.) is read from:
-  - environment.xlsx: Database script path, given executables, ports
+  - environment.xlsx: Database script path, given executables, ports, UseDocker
   - Header.xlsx: Protocol, database configuration, test case marks
   
   The grading system will:
@@ -112,6 +116,7 @@ Configuration:
   - Auto-generate appsettings.json from Header.xlsx with database configuration
   - Use database script from environment.xlsx (Default_Database_File_Path)
   - Use default timeout of 10 seconds per stage
+  - Connect to local SQL Server by default, or Docker container if --useDocker is specified
 ");
         return -1;
     }

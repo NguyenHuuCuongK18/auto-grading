@@ -133,8 +133,12 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Default timeout to 10 seconds, and database reset to false (local)
-                await _env.RunDatabaseResetAsync(dbScriptPath, def.DatabaseConfig, false, q.Environment, ct);
+                // Determine whether to use Docker for database operations
+                // Priority: command-line flag > environment configuration > default (false)
+                bool useDocker = args.UseDocker || (q.Environment?.UseDocker ?? false);
+                
+                // Execute database reset with the determined useDocker flag
+                await _env.RunDatabaseResetAsync(dbScriptPath, def.DatabaseConfig, useDocker, q.Environment, ct);
 
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
                 _files.EnsureDirectory(outDir);

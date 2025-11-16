@@ -49,4 +49,10 @@ public sealed class EnvironmentConfiguration
     /// Stop grading if database reset fails (default: true)
     /// </summary>
     public bool StopGradingIfResetFails { get; set; } = false;
+
+    /// <summary>
+    /// Use Docker for database operations instead of local SQL Server (default: false)
+    /// When true, database reset operations will be executed via Docker container
+    /// </summary>
+    public bool UseDocker { get; set; } = false;
 }

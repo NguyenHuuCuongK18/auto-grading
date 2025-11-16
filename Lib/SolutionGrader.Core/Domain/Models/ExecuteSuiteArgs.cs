@@ -10,4 +10,10 @@ public sealed class ExecuteSuiteArgs
     // Optional: Override executables from environment.xlsx Meta/Given folder
     public string? ClientExePath { get; init; }
     public string? ServerExePath { get; init; }
+    
+    /// <summary>
+    /// Use Docker for database operations instead of local SQL Server
+    /// When true, database reset operations will be executed via Docker container
+    /// </summary>
+    public bool UseDocker { get; init; } = false;
 }
