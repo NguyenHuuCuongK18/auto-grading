@@ -206,7 +206,26 @@ namespace SolutionGrader.Core.Services
                     
                     var c2s = RelayAndCaptureAsync(cs, ss, requestCapture, token);
                     var s2c = RelayAndCaptureAsync(ss, cs, responseCapture, token);
-                    await Task.WhenAny(c2s, s2c);
+                    
+                    // Wait for either direction to complete
+                    var completed = await Task.WhenAny(c2s, s2c);
+                    
+                    // Give additional time for the other direction to receive and capture data
+                    // This is important because the server may send a response after client finishes sending
+                    try
+                    {
+                        if (completed == c2s)
+                        {
+                            // Client finished sending, wait for server response with timeout
+                            await Task.WhenAny(s2c, Task.Delay(1000, token));
+                        }
+                        else
+                        {
+                            // Server finished, wait for client with timeout
+                            await Task.WhenAny(c2s, Task.Delay(1000, token));
+                        }
+                    }
+                    catch { }
                     
                     // Store captured data after relay completes
                     StoreTcpCapture(requestCapture.ToArray(), responseCapture.ToArray());
@@ -227,12 +246,16 @@ namespace SolutionGrader.Core.Services
         {
             var buffer = new byte[8192];
             int read;
+            int totalCaptured = 0;
             while ((read = await from.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
             {
                 // Capture the data
                 capture.AddRange(buffer.Take(read));
+                totalCaptured += read;
+                Console.WriteLine($"[Relay] Captured {read} bytes (total: {totalCaptured})");
                 await to.WriteAsync(buffer, 0, read, token);
             }
+            Console.WriteLine($"[Relay] Stream ended. Total captured: {totalCaptured} bytes");
         }
 
         private void StoreTcpCapture(byte[] requestBytes, byte[] responseBytes)
@@ -242,6 +265,8 @@ namespace SolutionGrader.Core.Services
                 var question = _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
                 var stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
 
+                Console.WriteLine($"[TCP Capture] Request size: {requestBytes.Length}, Response size: {responseBytes.Length}");
+                
                 // Convert bytes to string (assuming UTF-8 encoding for TCP data)
                 var requestText = requestBytes.Length > 0 ? Encoding.UTF8.GetString(requestBytes) : string.Empty;
                 var responseText = responseBytes.Length > 0 ? Encoding.UTF8.GetString(responseBytes) : string.Empty;

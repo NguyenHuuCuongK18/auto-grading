@@ -170,6 +170,27 @@ namespace SolutionGrader.Core.Services
                 bool hasSeenInputStep = false;
                 bool hasAddedComparisonDelay = false;
                 
+                // Start a background task to monitor process status and stop middleware if either process exits
+                var monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var monitorTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (!monitorCts.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(500, monitorCts.Token); // Check every 500ms
+                            
+                            // If either client or server has exited, stop the middleware
+                            if (!_proc.IsClientRunning || !_proc.IsServerRunning)
+                            {
+                                try { await _mw.StopAsync(); } catch { }
+                                break;
+                            }
+                        }
+                    }
+                    catch { }
+                }, monitorCts.Token);
+                
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -253,6 +274,10 @@ namespace SolutionGrader.Core.Services
                     
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_STEP} {string.Format(LoggingKeywords.MSG_STEP_RESULT, ok ? LoggingKeywords.RESULT_PASS : LoggingKeywords.RESULT_FAIL, msg, sw.Elapsed.TotalMilliseconds)}");
                 }
+                
+                // Stop the process monitoring task
+                monitorCts.Cancel();
+                try { await monitorTask; } catch { }
 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_WRITING_RESULTS, outDir)}");
                 await _report.WriteQuestionResultAsync(outDir, steps[0].QuestionCode, results, ct);
