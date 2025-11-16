@@ -16,6 +16,7 @@ public interface IExecutableManager
     
     void SendClientInput(string input);
     System.Threading.Tasks.Task<bool> WaitForClientOutputAsync(int timeoutSeconds = 15, System.Threading.CancellationToken ct = default);
+    System.Threading.Tasks.Task<bool> WaitForServerOutputAsync(int timeoutSeconds = 5, System.Threading.CancellationToken ct = default);
     string GetClientOutput();
     string GetServerOutput();
 }

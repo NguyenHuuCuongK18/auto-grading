@@ -129,7 +129,9 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Waits for the client process to produce output or exit.
+        /// Waits for the client process to produce output or exit, with stabilization detection.
+        /// This method waits until output stabilizes (no new output for a period) to ensure
+        /// all console output from multiple Write/WriteLine calls is captured.
         /// </summary>
         /// <param name="timeoutSeconds">Maximum time to wait in seconds (default: 15)</param>
         /// <param name="ct">Cancellation token</param>
@@ -140,46 +142,74 @@ namespace SolutionGrader.Core.Services
             
             // Wait for client to either:
             // 1. Exit (finished processing)
-            // 2. Produce output (response received)
+            // 2. Produce output and stabilize (no new output for stabilization period)
             // 3. Timeout
             // 4. Cancellation requested
             
+            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            const int pollIntervalMs = 50; // Check for new output every 50ms
+            
             var startTime = DateTime.UtcNow;
             var initialOutputLength = GetClientOutput().Length;
+            var lastOutputLength = initialOutputLength;
+            var lastOutputTime = DateTime.UtcNow;
+            bool hasReceivedOutput = false;
             
             while (!ct.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalSeconds < timeoutSeconds)
             {
                 // Check if process exited
                 if (_client.HasExited)
                 {
+                    // Process exited - wait a bit more for any buffered output to flush
+                    await Task.Delay(200, ct);
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_PROCESS_EXITED}");
-                    return false;
+                    return hasReceivedOutput;
                 }
                 
-                // Check if new output was produced
+                // Check current output length
                 var currentOutputLength = GetClientOutput().Length;
-                if (currentOutputLength > initialOutputLength)
+                
+                // If we received new output, update tracking
+                if (currentOutputLength > lastOutputLength)
                 {
-                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_PRODUCED_OUTPUT, currentOutputLength - initialOutputLength)}");
-                    // Give a little more time for buffered output
-                    await Task.Delay(100, ct);
+                    hasReceivedOutput = true;
+                    lastOutputLength = currentOutputLength;
+                    lastOutputTime = DateTime.UtcNow;
+                }
+                
+                // If we have received output and it has stabilized (no new output for stabilization period)
+                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= stabilizationMs)
+                {
+                    var totalOutputReceived = currentOutputLength - initialOutputLength;
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_PRODUCED_OUTPUT, totalOutputReceived)} (stabilized)");
                     return true;
                 }
                 
                 // Short delay before checking again
-                await Task.Delay(100, ct);
+                await Task.Delay(pollIntervalMs, ct);
             }
             
+            // Timeout or cancellation
             if (ct.IsCancellationRequested)
             {
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_INPUT_WAIT_CANCELLED}");
             }
             else
             {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_WAIT_TIMEOUT, timeoutSeconds)}");
+                var finalOutputLength = GetClientOutput().Length;
+                if (finalOutputLength > initialOutputLength)
+                {
+                    var totalOutputReceived = finalOutputLength - initialOutputLength;
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_WAIT_TIMEOUT, timeoutSeconds)} but received {totalOutputReceived} chars");
+                    return true; // We did receive output, even if not fully stabilized
+                }
+                else
+                {
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_WAIT_TIMEOUT, timeoutSeconds)}");
+                }
             }
             
-            return false;
+            return hasReceivedOutput;
         }
 
         public string GetClientOutput()
@@ -196,6 +226,60 @@ namespace SolutionGrader.Core.Services
             {
                 return _serverOutputBuffer.ToString();
             }
+        }
+        
+        /// <summary>
+        /// Waits for the server process to produce output or exit, with stabilization detection.
+        /// Similar to WaitForClientOutputAsync but for server process.
+        /// </summary>
+        /// <param name="timeoutSeconds">Maximum time to wait in seconds (default: 5)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if new output was produced, false if process exited or timed out</returns>
+        public async Task<bool> WaitForServerOutputAsync(int timeoutSeconds = 5, CancellationToken ct = default)
+        {
+            if (_server == null) return false;
+            
+            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            const int pollIntervalMs = 50; // Check for new output every 50ms
+            
+            var startTime = DateTime.UtcNow;
+            var initialOutputLength = GetServerOutput().Length;
+            var lastOutputLength = initialOutputLength;
+            var lastOutputTime = DateTime.UtcNow;
+            bool hasReceivedOutput = false;
+            
+            while (!ct.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalSeconds < timeoutSeconds)
+            {
+                // Check if process exited
+                if (_server.HasExited)
+                {
+                    // Process exited - wait a bit more for any buffered output to flush
+                    await Task.Delay(200, ct);
+                    return hasReceivedOutput;
+                }
+                
+                // Check current output length
+                var currentOutputLength = GetServerOutput().Length;
+                
+                // If we received new output, update tracking
+                if (currentOutputLength > lastOutputLength)
+                {
+                    hasReceivedOutput = true;
+                    lastOutputLength = currentOutputLength;
+                    lastOutputTime = DateTime.UtcNow;
+                }
+                
+                // If we have received output and it has stabilized (no new output for stabilization period)
+                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= stabilizationMs)
+                {
+                    return true;
+                }
+                
+                // Short delay before checking again
+                await Task.Delay(pollIntervalMs, ct);
+            }
+            
+            return hasReceivedOutput;
         }
 
         private static Process Create(string exe)

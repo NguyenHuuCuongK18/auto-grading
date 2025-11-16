@@ -98,7 +98,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000",
+                        Value = "2000", // Increased to 2 seconds for better output capture
                         DataType = dataType
                     });
                 }
@@ -124,7 +124,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         QuestionCode = qcode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "1000",
+                        Value = "2000", // Increased to 2 seconds for better output capture
                         DataType = dataType
                     });
                 }
