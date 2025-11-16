@@ -321,6 +321,16 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.TcpRelay:
                         {
+                            // Check if both client and server are currently running before starting middleware
+                            // This ensures middleware only operates when both endpoints are available
+                            if (!_proc.IsClientRunning || !_proc.IsServerRunning)
+                            {
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Skipping middleware start - both client and server must be running");
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Client running: {_proc.IsClientRunning}, Server running: {_proc.IsServerRunning}");
+                                result = (true, "Middleware start skipped - waiting for both processes");
+                                break;
+                            }
+                            
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_TCP_RELAY_STARTING, args.Protocol)}");
                             bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
                             await _mw.StartAsync(useHttp, ct);

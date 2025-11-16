@@ -144,6 +144,10 @@ public sealed class NewFormatDetailParser
                         Value = null,
                         DataType = null
                     });
+                    
+                    // Mark client as stopped - if it restarts, middleware can be re-injected
+                    clientStarted = false;
+                    middlewareStarted = false; // Allow middleware to be re-injected if both processes start again
                 }
                 else if (action.Equals("CloseServer", StringComparison.OrdinalIgnoreCase))
                 {
@@ -156,6 +160,10 @@ public sealed class NewFormatDetailParser
                         Value = null,
                         DataType = null
                     });
+                    
+                    // Mark server as stopped - if it restarts, middleware can be re-injected
+                    serverStarted = false;
+                    middlewareStarted = false; // Allow middleware to be re-injected if both processes start again
                 }
                 else if (action.Equals("Input", StringComparison.OrdinalIgnoreCase))
                 {
