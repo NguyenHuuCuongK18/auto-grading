@@ -39,6 +39,9 @@ public class Program
             ResultRoot = timestampedResultRoot,
             ClientExePath = a.GetValueOrDefault("client"),
             ServerExePath = a.GetValueOrDefault("server"),
+            UseInnerTestCaseEnvironment = a.ContainsKey("use-inner-env") && 
+                                         (a["use-inner-env"].Equals("true", StringComparison.OrdinalIgnoreCase) || 
+                                          a["use-inner-env"].Equals("1"))
         };
 
         IFileService files = new FileService();
@@ -93,6 +96,7 @@ public class Program
 Usage:
   SolutionGrader.Cli ExecuteSuite --suite <suiteFolder|Header.xlsx> --out <resultRoot>
                                 [--client <client.exe>] [--server <server.exe>]
+                                [--use-inner-env]
 
 Required Arguments:
   --suite   Path to test suite folder or Header.xlsx file
@@ -101,6 +105,9 @@ Required Arguments:
 Optional Arguments:
   --client  Path to client executable (overrides Meta/Given/Client if provided)
   --server  Path to server executable (overrides Meta/Given/Server if provided)
+  --use-inner-env  Enable test case-specific environment.xlsx files
+                   When specified, each test case can have its own environment.xlsx
+                   to override database paths and configurations (default: false)
 
 Configuration:
   All other configuration (database script, ports, timeouts, etc.) is read from:
@@ -112,6 +119,7 @@ Configuration:
   - Auto-generate appsettings.json from Header.xlsx with database configuration
   - Use database script from environment.xlsx (Default_Database_File_Path)
   - Use default timeout of 10 seconds per stage
+  - Use suite-level environment.xlsx by default (unless --use-inner-env is specified)
 ");
         return -1;
     }
