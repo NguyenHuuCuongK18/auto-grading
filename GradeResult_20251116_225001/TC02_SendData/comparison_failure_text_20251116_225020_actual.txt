@@ -1,0 +1,5 @@
+Client application started. Press Enter without input to exit.
+Please enter integer number : 
+
+ Server returned an error: BadGateway - Bad Gateway
+Please enter integer number : 

@@ -48,5 +48,5 @@ public sealed class EnvironmentConfiguration
     /// <summary>
     /// Stop grading if database reset fails (default: true)
     /// </summary>
-    public bool StopGradingIfResetFails { get; set; } = true;
+    public bool StopGradingIfResetFails { get; set; } = false;
 }

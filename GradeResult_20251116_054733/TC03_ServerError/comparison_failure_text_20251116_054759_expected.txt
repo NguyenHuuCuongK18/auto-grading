@@ -1,2 +1,0 @@
-Server is not running. Please try again later.
-Please enter integer number :

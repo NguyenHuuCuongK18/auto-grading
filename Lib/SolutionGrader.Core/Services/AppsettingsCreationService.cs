@@ -165,7 +165,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         if (dbConfig == null)
         {
             // Default connection string using localhost:1433 for Docker
-            return $"server=localhost,1433;database=Library;uid=sa;pwd=YourStrong@Passw0rd;TrustServerCertificate=true";
+            return $"server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true";
         }
 
         var server = dbConfig.SqlServer ?? "localhost,1433";

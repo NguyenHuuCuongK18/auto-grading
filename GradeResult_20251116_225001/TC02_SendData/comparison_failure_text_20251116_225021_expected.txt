@@ -1,0 +1,14 @@
+[
+  {
+    "BookId": 1,
+    "Title": "Harry Potter and the Philosopher's Stone",
+    "PublicationYear": 1997,
+    "GenreName": "Fantasy"
+  },
+  {
+    "BookId": 3,
+    "Title": "The Hobbit",
+    "PublicationYear": 1937,
+    "GenreName": "Fantasy"
+  }
+]
