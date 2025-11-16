@@ -105,16 +105,16 @@ public sealed class NewFormatDetailParser
                         DataType = null
                     });
                 }
-                else if (action.Equals("Input", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(input))
+                else if (action.Equals("Input", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Send input to client
+                    // Send input to client (including empty input for validation testing)
                     steps.Add(new Step
                     {
                         Id = $"USER-INPUT-{stage}",
                         QuestionCode = questionCode,
                         Stage = stage,
                         Action = ActionKeywords.ClientInput,
-                        Value = input,
+                        Value = input ?? string.Empty, // Allow empty input
                         DataType = null
                     });
                     

@@ -150,8 +150,12 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.ClientInput:
                         {
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_CLIENT_INPUT_SENDING, step.Value)}");
-                            _proc.SendClientInput(step.Value ?? "");
+                            // Support empty/blank input - if step.Value is null or empty, send empty line
+                            var inputValue = step.Value ?? string.Empty;
+                            var displayInput = string.IsNullOrEmpty(inputValue) ? "(empty)" : inputValue;
+                            
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_CLIENT_INPUT_SENDING, displayInput)}");
+                            _proc.SendClientInput(inputValue);
                             
                             // Wait for client to process input and respond, or timeout (default 15 seconds)
                             const int timeoutSeconds = 15;
@@ -159,18 +163,18 @@ namespace SolutionGrader.Core.Services
                             
                             if (gotOutput)
                             {
-                                result = (true, $"Sent input: {step.Value}, received response");
+                                result = (true, $"Sent input: {displayInput}, received response");
                             }
                             else if (_proc.IsClientRunning)
                             {
                                 // Client still running but no output - might be waiting for more input
-                                result = (true, $"Sent input: {step.Value}, no response yet (client still running)");
+                                result = (true, $"Sent input: {displayInput}, no response yet (client still running)");
                             }
                             else
                             {
                                 // Client exited - might be an error
                                 errCode = ErrorCodes.PROCESS_CRASHED;
-                                result = (false, $"Sent input: {step.Value}, but client process exited");
+                                result = (false, $"Sent input: {displayInput}, but client process exited");
                             }
                             break;
                         }

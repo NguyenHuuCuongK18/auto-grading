@@ -118,9 +118,20 @@ namespace SolutionGrader.Core.Services
 
             try
             {
-                _client.StandardInput.WriteLine(input);
+                // Update the client stage label to current stage before sending input
+                // This ensures that the response output is attributed to the current stage (where input was sent)
+                // rather than the stage where the client was started
+                _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel);
+                
+                // Handle empty or null input by sending just a newline (blank Enter)
+                // This allows test cases to send empty input when the value cell is blank
+                var inputToSend = input ?? string.Empty;
+                _client.StandardInput.WriteLine(inputToSend);
                 _client.StandardInput.Flush();
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_SENT, input)}");
+                
+                // Log what was actually sent
+                var displayInput = string.IsNullOrEmpty(inputToSend) ? "(empty line)" : inputToSend;
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_INPUT_SENT, displayInput)}");
             }
             catch (Exception ex)
             {
@@ -146,7 +157,10 @@ namespace SolutionGrader.Core.Services
             // 3. Timeout
             // 4. Cancellation requested
             
-            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            // Increased stabilization time to 1000ms (1 second) to ensure all console output is captured.
+            // This is especially important when applications use multiple Console.Write/WriteLine calls
+            // that may be buffered or delayed, preventing premature stage cutoff.
+            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
             const int pollIntervalMs = 50; // Check for new output every 50ms
             
             var startTime = DateTime.UtcNow;
@@ -239,7 +253,7 @@ namespace SolutionGrader.Core.Services
         {
             if (_server == null) return false;
             
-            const int stabilizationMs = 500; // Wait 500ms with no new output to consider stable
+            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
             const int pollIntervalMs = 50; // Check for new output every 50ms
             
             var startTime = DateTime.UtcNow;
@@ -461,7 +475,9 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Use captured context from process start time, not current context
+                // Use captured context from process start time or last input time, not always current context
+                // The stage label is updated when actions like SendClientInput occur, ensuring output
+                // is attributed to the stage where the interaction happened, not where output arrives
                 string? question;
                 string? stage;
                 
