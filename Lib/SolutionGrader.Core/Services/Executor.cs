@@ -97,8 +97,9 @@ namespace SolutionGrader.Core.Services
                                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_NOT_INITIALIZED}");
                             }
                             
-                            // Get initial output for logging
-                            await Task.Delay(500, ct); // Give server time to output startup messages
+                            // Wait for server output to stabilize after startup
+                            await _proc.WaitForServerOutputAsync(3, ct);
+                            
                             var serverOutput = _proc.GetServerOutput();
                             var outputPreview = serverOutput.Length > 100 
                                 ? serverOutput.Substring(0, 100) + "..." 
@@ -124,8 +125,8 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Give client time to start and output initial messages
-                            await Task.Delay(500, ct);
+                            // Wait for client output to stabilize after startup
+                            await _proc.WaitForClientOutputAsync(3, ct);
                             
                             if (!_proc.IsClientRunning)
                             {
