@@ -204,14 +204,15 @@ namespace SolutionGrader.Core.Services
                     var requestCapture = new List<byte>();
                     var responseCapture = new List<byte>();
                     
-                    // Run both relays concurrently for true bidirectional communication
+                    // For persistent TCP connections, we need to keep relaying until connection closes
+                    // The pattern: client sends request -> server processes -> server sends response -> loop continues
                     var c2sTask = Task.Run(async () =>
                     {
                         var buffer = new byte[8192];
                         int read;
                         try
                         {
-                            // Read all data from client until they stop sending
+                            // Keep relaying from client to server until connection closes
                             while ((read = await cs.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                             {
                                 lock (requestCapture)
@@ -220,18 +221,9 @@ namespace SolutionGrader.Core.Services
                                 }
                                 await ss.WriteAsync(buffer, 0, read, token);
                                 await ss.FlushAsync(token);
-                                
-                                // After writing each chunk, check if there's more data immediately available
-                                // If not, the client is likely waiting for a response - don't block forever
-                                await Task.Delay(50, token); // Small delay to let any buffered data arrive
-                                if (!cs.DataAvailable)
-                                {
-                                    // Client has stopped sending for now (likely waiting for response)
-                                    // Don't close anything - just stop reading from client for now
-                                    break;
-                                }
                             }
                         }
+                        catch (OperationCanceledException) { }
                         catch { }
                     }, token);
                     
@@ -241,7 +233,7 @@ namespace SolutionGrader.Core.Services
                         int read;
                         try
                         {
-                            // Wait for server to send response
+                            // Keep relaying from server to client until connection closes
                             while ((read = await ss.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                             {
                                 lock (responseCapture)
@@ -250,30 +242,30 @@ namespace SolutionGrader.Core.Services
                                 }
                                 await cs.WriteAsync(buffer, 0, read, token);
                                 await cs.FlushAsync(token);
-                                
-                                // After writing each chunk, check if there's more data immediately available
-                                await Task.Delay(50, token); // Small delay to let any buffered data arrive
-                                if (!ss.DataAvailable)
-                                {
-                                    // Server has stopped sending for now
-                                    break;
-                                }
                             }
                         }
+                        catch (OperationCanceledException) { }
                         catch { }
                     }, token);
                     
-                    // Wait for both request and response to complete, or timeout
-                    var delayTask = Task.Delay(5000, token); // 5 second timeout for full exchange
-                    await Task.WhenAny(Task.WhenAll(c2sTask, s2cTask), delayTask);
+                    // Wait for either direction to close or be cancelled
+                    await Task.WhenAny(c2sTask, s2cTask);
+                    
+                    // One direction closed, give a moment for any final data, then stop
+                    await Task.Delay(100, token);
                     
                     // Store captured data
                     byte[] reqBytes, respBytes;
                     lock (requestCapture) { reqBytes = requestCapture.ToArray(); }
                     lock (responseCapture) { respBytes = responseCapture.ToArray(); }
-                    StoreTcpCapture(reqBytes, respBytes);
+                    
+                    if (reqBytes.Length > 0 || respBytes.Length > 0)
+                    {
+                        StoreTcpCapture(reqBytes, respBytes);
+                    }
                 }
             }
+            catch (OperationCanceledException) { }
             catch { }
         }
 
