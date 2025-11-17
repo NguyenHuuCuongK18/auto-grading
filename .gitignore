@@ -571,3 +571,7 @@ coverage*[.json, .xml, .info]
 # End of https://www.toptal.com/developers/gitignore/api/dotnetcore,csharp,vs
 # Auto-generated appsettings.json files
 **/Meta/Given/**/appsettings.json
+
+# Grading result directories
+GradeResult_*/
+TestResult_*/

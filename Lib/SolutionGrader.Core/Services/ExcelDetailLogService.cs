@@ -847,11 +847,30 @@ namespace SolutionGrader.Core.Services
         private static string ResolveSheet(Step step, string? actualPath)
         {
             // PRIMARY: Use Step ID prefix to determine sheet (most reliable)
-            // Step IDs follow convention: OC- = OutputClient, OS- = OutputServer, IC- = InputClient
-            if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputServer, StringComparison.OrdinalIgnoreCase))
+            // OLD format: OC- = OutputClient, OS- = OutputServer, IC- = InputClient
+            // NEW format: SERVER- = Server sheet, CLIENT- = Client sheet, USER- = User sheet
+            
+            var stepId = step.Id.ToUpperInvariant();
+            
+            // Check OLD format prefixes (OS-, OC-, IC-)
+            if (stepId.StartsWith(GradingKeywords.StepPrefix_OutputServer.ToUpperInvariant()))
                 return SheetOutServers;
             
-            if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
+            if (stepId.StartsWith(GradingKeywords.StepPrefix_OutputClient.ToUpperInvariant()))
+                return SheetOutClients;
+            
+            // Check NEW format prefixes (SERVER-, CLIENT-, NETWORK-)
+            // SERVER-CONSOLE, SERVER-REQUEST, etc. should go to Server sheet
+            if (stepId.StartsWith("SERVER-"))
+                return SheetOutServers;
+            
+            // CLIENT-CONSOLE, CLIENT-DATA, etc. should go to Client sheet
+            if (stepId.StartsWith("CLIENT-"))
+                return SheetOutClients;
+            
+            // NETWORK- steps (HTTP method, status code) should go to Client sheet by default
+            // as they represent client-side validation of network behavior
+            if (stepId.StartsWith("NETWORK-"))
                 return SheetOutClients;
             
             // SECONDARY: Check actual path hint (for backward compatibility)
@@ -866,7 +885,7 @@ namespace SolutionGrader.Core.Services
             if (action.Contains("SERVER"))
                 return SheetOutServers;
             
-            // DEFAULT: Client sheet (for input steps and others)
+            // DEFAULT: Client sheet (for input steps and others like USER-)
             return SheetOutClients;
         }
 
