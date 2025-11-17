@@ -481,15 +481,18 @@ namespace SolutionGrader.Core.Services
                 string? question;
                 string? stage;
                 
+                // Use CURRENT stage context, not captured start-time stage
+                // This ensures output is attributed to the stage that's currently executing
+                // Fallback to start-time stage only if no current stage is available
                 if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
                 {
-                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                    question = _run.CurrentQuestionCode ?? _serverStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _serverStartStageLabel ?? "0");
                 }
                 else
                 {
-                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
+                    question = _run.CurrentQuestionCode ?? _clientStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel ?? "0");
                 }
                 
                 var payload = line + Environment.NewLine;

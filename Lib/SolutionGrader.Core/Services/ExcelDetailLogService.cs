@@ -846,14 +846,46 @@ namespace SolutionGrader.Core.Services
 
         private static string ResolveSheet(Step step, string? actualPath)
         {
-            // prefer actual path hint to decide client/server
+            // PRIMARY: Use Step ID prefix to determine sheet (most reliable)
+            // OLD format: OC- = OutputClient, OS- = OutputServer, IC- = InputClient
+            // NEW format: SERVER- = Server sheet, CLIENT- = Client sheet, USER- = User sheet
+            
+            var stepId = step.Id.ToUpperInvariant();
+            
+            // Check OLD format prefixes (OS-, OC-, IC-)
+            if (stepId.StartsWith(GradingKeywords.StepPrefix_OutputServer.ToUpperInvariant()))
+                return SheetOutServers;
+            
+            if (stepId.StartsWith(GradingKeywords.StepPrefix_OutputClient.ToUpperInvariant()))
+                return SheetOutClients;
+            
+            // Check NEW format prefixes (SERVER-, CLIENT-, NETWORK-)
+            // SERVER-CONSOLE, SERVER-REQUEST, etc. should go to Server sheet
+            if (stepId.StartsWith("SERVER-"))
+                return SheetOutServers;
+            
+            // CLIENT-CONSOLE, CLIENT-DATA, etc. should go to Client sheet
+            if (stepId.StartsWith("CLIENT-"))
+                return SheetOutClients;
+            
+            // NETWORK- steps (HTTP method, status code) should go to Client sheet by default
+            // as they represent client-side validation of network behavior
+            if (stepId.StartsWith("NETWORK-"))
+                return SheetOutClients;
+            
+            // SECONDARY: Check actual path hint (for backward compatibility)
             var lower = (actualPath ?? string.Empty).Replace('\\', '/').ToLowerInvariant();
-            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Clients}/")) return SheetOutClients;
-            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/")) return SheetOutServers;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/"))
+                return SheetOutServers;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Clients}/"))
+                return SheetOutClients;
 
-            // fallback by action
+            // TERTIARY: Fallback by action (least reliable)
             var action = (step.Action ?? string.Empty).ToUpperInvariant();
-            if (action.Contains("SERVER")) return SheetOutServers;
+            if (action.Contains("SERVER"))
+                return SheetOutServers;
+            
+            // DEFAULT: Client sheet (for input steps and others like USER-)
             return SheetOutClients;
         }
 
