@@ -3,6 +3,7 @@ using System.Text.Json;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Errors;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
 {
@@ -22,8 +23,8 @@ namespace SolutionGrader.Core.Services
             _caseOutFolder = outFolder; _questionCode = questionCode; _detailTemplatePath = detailTemplatePath;
             _files.EnsureDirectory(outFolder);
 
-            _gradesCsvPath = System.IO.Path.Combine(outFolder, "grades.csv");
-            _jsonlPath = System.IO.Path.Combine(outFolder, "detailed_log.jsonl");
+            _gradesCsvPath = System.IO.Path.Combine(outFolder, FileKeywords.FileName_Grades);
+            _jsonlPath = System.IO.Path.Combine(outFolder, FileKeywords.FileName_DetailedLog);
 
             if (!File.Exists(_gradesCsvPath))
             {

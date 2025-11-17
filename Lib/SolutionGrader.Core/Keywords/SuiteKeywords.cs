@@ -23,6 +23,12 @@ public static class SuiteKeywords
     public const string Sheet_Header         = "Header";        // fallback header
     public const string Sheet_QuestionMark   = "QuestionMark";  // for reading test case marks
 
+    // New format sheet names (for NewFormatDetailParser)
+    public const string Sheet_User           = "User";
+    public const string Sheet_Client         = "Client";
+    public const string Sheet_Server         = "Server";
+    public const string Sheet_Network        = "Network";
+
     // InputClients
     public const string Col_IC_Stage    = "Stage";
     public const string Col_IC_Input    = "Input";

@@ -18,7 +18,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
         // Check if this is the new format (User/Client/Server/Network sheets) or old format (InputClients/OutputClients)
         // NEW format: Uses User, Client, Server, Network sheets
         // OLD format: Uses InputClients/OutputClients/OutputServers (or singular variations)
-        bool hasNewFormat = wb.Worksheets.Any(s => s.Name.Equals("User", StringComparison.OrdinalIgnoreCase));
+        bool hasNewFormat = wb.Worksheets.Any(s => s.Name.Equals(SuiteKeywords.Sheet_User, StringComparison.OrdinalIgnoreCase));
 
         if (hasNewFormat)
         {

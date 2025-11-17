@@ -304,13 +304,13 @@ namespace SolutionGrader.Core.Services
             string arguments = "";
             
             // If it's a .dll or if it's an .exe on a non-Windows platform, use dotnet
-            if (exe.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                (exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !OperatingSystem.IsWindows()))
+            if (exe.EndsWith(FileKeywords.Extension_Dll, StringComparison.OrdinalIgnoreCase) ||
+                (exe.EndsWith(FileKeywords.Extension_Exe, StringComparison.OrdinalIgnoreCase) && !OperatingSystem.IsWindows()))
             {
                 // If .exe is provided on non-Windows, try to find the .dll instead
-                if (exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                if (exe.EndsWith(FileKeywords.Extension_Exe, StringComparison.OrdinalIgnoreCase))
                 {
-                    var dllPath = Path.ChangeExtension(exe, ".dll");
+                    var dllPath = Path.ChangeExtension(exe, FileKeywords.Extension_Dll);
                     if (File.Exists(dllPath))
                     {
                         fileName = "dotnet";

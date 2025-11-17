@@ -64,6 +64,13 @@ public static class AppsettingKeywords
     public const string DOCKER_TMP_SCRIPT_PATH = "/tmp/db_reset.sql";
     public const string DOCKER_SA_PASSWORD = "YourStrong@Passw0rd";
     
+    // SQL command flags
+    public const string SQL_FLAG_SERVER = "-S";
+    public const string SQL_FLAG_USER = "-U";
+    public const string SQL_FLAG_PASSWORD = "-P";
+    public const string SQL_FLAG_TRUST_CERT = "-C";
+    public const string SQL_FLAG_INPUT_FILE = "-i";
+    
     // SQL error levels
     public const string SQL_ERROR_LEVEL_16 = "Level 16";
     

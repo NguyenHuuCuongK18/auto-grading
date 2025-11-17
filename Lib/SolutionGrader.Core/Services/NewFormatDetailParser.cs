@@ -17,10 +17,10 @@ public sealed class NewFormatDetailParser
         var steps = new List<Step>();
 
         // Parse User sheet for actions and inputs
-        var userSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("User", StringComparison.OrdinalIgnoreCase));
-        var clientSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Client", StringComparison.OrdinalIgnoreCase));
-        var serverSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Server", StringComparison.OrdinalIgnoreCase));
-        var networkSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals("Network", StringComparison.OrdinalIgnoreCase));
+        var userSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals(SuiteKeywords.Sheet_User, StringComparison.OrdinalIgnoreCase));
+        var clientSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals(SuiteKeywords.Sheet_Client, StringComparison.OrdinalIgnoreCase));
+        var serverSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals(SuiteKeywords.Sheet_Server, StringComparison.OrdinalIgnoreCase));
+        var networkSheet = wb.Worksheets.FirstOrDefault(s => s.Name.Equals(SuiteKeywords.Sheet_Network, StringComparison.OrdinalIgnoreCase));
 
         // Track whether client and server have been started to inject middleware after both are running
         bool clientStarted = false;

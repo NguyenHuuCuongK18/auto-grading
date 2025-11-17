@@ -44,10 +44,10 @@ namespace SolutionGrader.Core.Services
         private const string SheetInputAlt = SuiteKeywords.Sheet_InputClient;      // Old singular: "InputClient"
         private const string SheetOutClients = SuiteKeywords.Sheet_OutputClients;  // Old: "OutputClients"
         private const string SheetOutClientsAlt = SuiteKeywords.Sheet_OutputClient;// Old singular: "OutputClient"
-        private const string SheetOutClientsNew = "Client";                        // NEW format: "Client"
+        private const string SheetOutClientsNew = SuiteKeywords.Sheet_Client;     // NEW format: "Client"
         private const string SheetOutServers = SuiteKeywords.Sheet_OutputServers;  // Old: "OutputServers"
         private const string SheetOutServersAlt = SuiteKeywords.Sheet_OutputServer;// Old singular: "OutputServer"
-        private const string SheetOutServersNew = "Server";                        // NEW format: "Server"
+        private const string SheetOutServersNew = SuiteKeywords.Sheet_Server;     // NEW format: "Server"
         
         // Maximum length for expected/actual values displayed in ErrorReport sheet
         private const int ErrorReportMaxValueLength = 100;
@@ -137,7 +137,7 @@ namespace SolutionGrader.Core.Services
             // Try OLD format (plural/singular) and NEW format sheet names
             var sheetsToCheck = new[]
             {
-                (Primary: SheetInputAlt, Alternate: SheetInput, NewFormat: "User"),
+                (Primary: SheetInputAlt, Alternate: SheetInput, NewFormat: SuiteKeywords.Sheet_User),
                 (Primary: SheetOutClientsAlt, Alternate: SheetOutClients, NewFormat: SheetOutClientsNew),
                 (Primary: SheetOutServersAlt, Alternate: SheetOutServers, NewFormat: SheetOutServersNew)
             };
@@ -155,7 +155,7 @@ namespace SolutionGrader.Core.Services
                 // Skip InputClient/InputClients/User sheet for counting compare steps
                 if (!string.Equals(ws.Name, SheetInput, StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(ws.Name, SheetInputAlt, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(ws.Name, "User", StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(ws.Name, SuiteKeywords.Sheet_User, StringComparison.OrdinalIgnoreCase))
                 {
                     var rng = ws.RangeUsed();
                     if (rng != null)
@@ -177,7 +177,7 @@ namespace SolutionGrader.Core.Services
             // Award all-or-nothing on each row that has points
             var sheetsToProcess = new[]
             {
-                (Primary: SheetInputAlt, Alternate: SheetInput, NewFormat: "User"),
+                (Primary: SheetInputAlt, Alternate: SheetInput, NewFormat: SuiteKeywords.Sheet_User),
                 (Primary: SheetOutClientsAlt, Alternate: SheetOutClients, NewFormat: SheetOutClientsNew),
                 (Primary: SheetOutServersAlt, Alternate: SheetOutServers, NewFormat: SheetOutServersNew)
             };

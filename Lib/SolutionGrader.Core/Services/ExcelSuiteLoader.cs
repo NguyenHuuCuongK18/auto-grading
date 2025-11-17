@@ -45,13 +45,13 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
     private static string ResolveHeaderPath(string input)
     {
-        if (File.Exists(input) && Path.GetFileName(input).Equals("Header.xlsx", StringComparison.OrdinalIgnoreCase))
+        if (File.Exists(input) && Path.GetFileName(input).Equals(FileKeywords.FileName_Header, StringComparison.OrdinalIgnoreCase))
             return Path.GetFullPath(input);
 
         if (Directory.Exists(input))
         {
             // Try both Header.xlsx and header.xlsx (case-insensitive search)
-            var candidate = Path.Combine(input, "Header.xlsx");
+            var candidate = Path.Combine(input, FileKeywords.FileName_Header);
             if (File.Exists(candidate)) return Path.GetFullPath(candidate);
             
             candidate = Path.Combine(input, "header.xlsx");
@@ -281,7 +281,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
     private static EnvironmentConfiguration? ReadEnvironmentConfig(string suiteRoot)
     {
-        var envPath = Path.Combine(suiteRoot, "environment.xlsx");
+        var envPath = Path.Combine(suiteRoot, FileKeywords.FileName_Environment);
         if (!File.Exists(envPath)) return null;
 
         try
@@ -338,8 +338,8 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             if (Directory.Exists(metaDir))
             {
                 // Try standard naming first (Server/Client)
-                var serverDir = Path.Combine(metaDir, "Server");
-                var clientDir = Path.Combine(metaDir, "Client");
+                var serverDir = Path.Combine(metaDir, FileKeywords.Pattern_ServerName);
+                var clientDir = Path.Combine(metaDir, FileKeywords.Pattern_ClientName);
                 
                 if (Directory.Exists(serverDir))
                 {
@@ -363,9 +363,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                     {
                         // Look for executables with "Server", "Project11", or in a Server-like directory
                         var serverExe = allExes.FirstOrDefault(e => 
-                            Path.GetFileNameWithoutExtension(e).Contains("Server", StringComparison.OrdinalIgnoreCase) ||
+                            Path.GetFileNameWithoutExtension(e).Contains(FileKeywords.Pattern_ServerName, StringComparison.OrdinalIgnoreCase) ||
                             Path.GetFileNameWithoutExtension(e).Contains("Project11", StringComparison.OrdinalIgnoreCase) ||
-                            e.Contains(Path.DirectorySeparatorChar + "Server" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                            e.Contains(Path.DirectorySeparatorChar + FileKeywords.Pattern_ServerName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                         );
                         if (serverExe != null) config.GivenServerPath = serverExe;
                     }
@@ -374,9 +374,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                     {
                         // Look for executables with "Client", "Project12", or in a Client-like directory
                         var clientExe = allExes.FirstOrDefault(e => 
-                            Path.GetFileNameWithoutExtension(e).Contains("Client", StringComparison.OrdinalIgnoreCase) ||
+                            Path.GetFileNameWithoutExtension(e).Contains(FileKeywords.Pattern_ClientName, StringComparison.OrdinalIgnoreCase) ||
                             Path.GetFileNameWithoutExtension(e).Contains("Project12", StringComparison.OrdinalIgnoreCase) ||
-                            e.Contains(Path.DirectorySeparatorChar + "Client" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                            e.Contains(Path.DirectorySeparatorChar + FileKeywords.Pattern_ClientName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                         );
                         if (clientExe != null) config.GivenClientPath = clientExe;
                     }
@@ -445,7 +445,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 // Read test case specific environment.xlsx only if flag is enabled
                 if (useInnerTestCaseEnvironment)
                 {
-                    var tcEnvPath = Path.Combine(dir, "environment.xlsx");
+                    var tcEnvPath = Path.Combine(dir, FileKeywords.FileName_Environment);
                     if (File.Exists(tcEnvPath))
                     {
                         tcEnv = ReadTestCaseEnvironment(tcEnvPath, suiteEnv);
