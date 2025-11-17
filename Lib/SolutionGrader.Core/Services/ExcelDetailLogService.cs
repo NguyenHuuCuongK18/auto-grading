@@ -51,6 +51,10 @@ namespace SolutionGrader.Core.Services
         
         // Maximum length for expected/actual values displayed in ErrorReport sheet
         private const int ErrorReportMaxValueLength = 100;
+        
+        // Cache for expected values from the template (preserved before any modifications)
+        // Key: "SheetName_Stage_ColumnName" -> Value: expected value from template
+        private readonly Dictionary<string, string> _expectedValuesCache = new();
 
         // Columns we always ensure exist
         private static readonly string[] BaseColumns =
@@ -126,6 +130,7 @@ namespace SolutionGrader.Core.Services
             _totalCompareSteps = 0;
             _allStepsPassed = true;
             _records.Clear();
+            _expectedValuesCache.Clear(); // Clear cache for new test case
 
             _wb = new XLWorkbook(detailTemplatePath);
 
@@ -143,6 +148,9 @@ namespace SolutionGrader.Core.Services
 
                 EnsureColumns(ws, BaseColumns);
                 EnsureColumns(ws, ResultColumns);
+                
+                // Cache expected values from template BEFORE any modifications
+                CacheExpectedValues(ws);
 
                 // Skip InputClient/InputClients/User sheet for counting compare steps
                 if (!string.Equals(ws.Name, SheetInput, StringComparison.OrdinalIgnoreCase) &&
@@ -475,7 +483,7 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Get expected output from the Detail.xlsx template
+                // Get expected output from the cached template values (preserved before any modifications)
                 // The column to read from depends on the validation type, which is determined by the StepId:
                 // - OC-OUT- = console output validation -> read from Output column
                 // - OC-DATA- = data response validation -> read from DataResponse column
@@ -499,26 +507,22 @@ namespace SolutionGrader.Core.Services
                     switch (validationType)
                     {
                         case StepValidationType.DataResponse:
-                            if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                                expectedOutput = ws.Cell(rowNum, dataResponseCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_DataResponse);
                             break;
                         case StepValidationType.ConsoleOutput:
                             // NEW format uses "Console", OLD format uses "Output"
-                            if (hdr.TryGetValue("Console", out var consoleCol))
-                                expectedOutput = ws.Cell(rowNum, consoleCol).GetString();
-                            else if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                                expectedOutput = ws.Cell(rowNum, ocOutCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, "Console");
+                            if (string.IsNullOrEmpty(expectedOutput))
+                                expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_Output);
                             break;
                         default:
                             // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output/Console
-                            if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataRespCol))
-                                expectedOutput = ws.Cell(rowNum, dataRespCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_DataResponse);
                             if (string.IsNullOrEmpty(expectedOutput))
                             {
-                                if (hdr.TryGetValue("Console", out var consoleCol2))
-                                    expectedOutput = ws.Cell(rowNum, consoleCol2).GetString();
-                                else if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var outCol))
-                                    expectedOutput = ws.Cell(rowNum, outCol).GetString();
+                                expectedOutput = GetCachedExpectedValue(sheetName, stage, "Console");
+                                if (string.IsNullOrEmpty(expectedOutput))
+                                    expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_Output);
                             }
                             break;
                     }
@@ -530,26 +534,22 @@ namespace SolutionGrader.Core.Services
                     switch (validationType)
                     {
                         case StepValidationType.DataRequest:
-                            if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                                expectedOutput = ws.Cell(rowNum, dataRequestCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_DataRequest);
                             break;
                         case StepValidationType.ConsoleOutput:
                             // NEW format uses "Console", OLD format uses "Output"
-                            if (hdr.TryGetValue("Console", out var consoleCol))
-                                expectedOutput = ws.Cell(rowNum, consoleCol).GetString();
-                            else if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                                expectedOutput = ws.Cell(rowNum, osOutCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, "Console");
+                            if (string.IsNullOrEmpty(expectedOutput))
+                                expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_Output);
                             break;
                         default:
                             // For other validation types (METHOD, SIZE), try DataRequest first, then Output/Console
-                            if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataReqCol))
-                                expectedOutput = ws.Cell(rowNum, dataReqCol).GetString();
+                            expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_DataRequest);
                             if (string.IsNullOrEmpty(expectedOutput))
                             {
-                                if (hdr.TryGetValue("Console", out var consoleCol2))
-                                    expectedOutput = ws.Cell(rowNum, consoleCol2).GetString();
-                                else if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var outCol))
-                                    expectedOutput = ws.Cell(rowNum, outCol).GetString();
+                                expectedOutput = GetCachedExpectedValue(sheetName, stage, "Console");
+                                if (string.IsNullOrEmpty(expectedOutput))
+                                    expectedOutput = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_Output);
                             }
                             break;
                     }
@@ -1208,27 +1208,33 @@ namespace SolutionGrader.Core.Services
             string? expectedValue = null;
             string? actualValue = null;
             
-            // Get expected value from the Detail.xlsx template columns based on validation type
+            // Get expected value from the cached template values (preserved before any modifications)
+            // This ensures we get the original expected values even if the worksheet was modified during grading
             var validationType = GetValidationType(record.StepId);
+            var sheetName = ws.Name;
             
             if (isClientSheet)
             {
                 switch (validationType)
                 {
                     case StepValidationType.DataResponse:
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataResponseCol))
-                            expectedValue = ws.Cell(rowNum.Value, dataResponseCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_DataResponse);
                         break;
                     case StepValidationType.ConsoleOutput:
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var ocOutCol))
-                            expectedValue = ws.Cell(rowNum.Value, ocOutCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_Output);
+                        // Try NEW format Console column if Output not found
+                        if (string.IsNullOrEmpty(expectedValue))
+                            expectedValue = GetCachedExpectedValue(sheetName, stage, "Console");
                         break;
                     default:
                         // For other validation types (METHOD, STATUS, SIZE), try DataResponse first, then Output
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OC_DataResponse, out var dataRespCol))
-                            expectedValue = ws.Cell(rowNum.Value, dataRespCol).GetString();
-                        if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OC_Output, out var outCol))
-                            expectedValue = ws.Cell(rowNum.Value, outCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_DataResponse);
+                        if (string.IsNullOrEmpty(expectedValue))
+                        {
+                            expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OC_Output);
+                            if (string.IsNullOrEmpty(expectedValue))
+                                expectedValue = GetCachedExpectedValue(sheetName, stage, "Console");
+                        }
                         break;
                 }
             }
@@ -1237,19 +1243,23 @@ namespace SolutionGrader.Core.Services
                 switch (validationType)
                 {
                     case StepValidationType.DataRequest:
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataRequestCol))
-                            expectedValue = ws.Cell(rowNum.Value, dataRequestCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_DataRequest);
                         break;
                     case StepValidationType.ConsoleOutput:
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var osOutCol))
-                            expectedValue = ws.Cell(rowNum.Value, osOutCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_Output);
+                        // Try NEW format Console column if Output not found
+                        if (string.IsNullOrEmpty(expectedValue))
+                            expectedValue = GetCachedExpectedValue(sheetName, stage, "Console");
                         break;
                     default:
                         // For other validation types (METHOD, SIZE), try DataRequest first, then Output
-                        if (hdr.TryGetValue(SuiteKeywords.Col_OS_DataRequest, out var dataReqCol))
-                            expectedValue = ws.Cell(rowNum.Value, dataReqCol).GetString();
-                        if (string.IsNullOrEmpty(expectedValue) && hdr.TryGetValue(SuiteKeywords.Col_OS_Output, out var outCol))
-                            expectedValue = ws.Cell(rowNum.Value, outCol).GetString();
+                        expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_DataRequest);
+                        if (string.IsNullOrEmpty(expectedValue))
+                        {
+                            expectedValue = GetCachedExpectedValue(sheetName, stage, SuiteKeywords.Col_OS_Output);
+                            if (string.IsNullOrEmpty(expectedValue))
+                                expectedValue = GetCachedExpectedValue(sheetName, stage, "Console");
+                        }
                         break;
                 }
             }
@@ -1361,6 +1371,87 @@ namespace SolutionGrader.Core.Services
             
             // If the stepId doesn't follow expected format, treat as Other
             return StepValidationType.Other;
+        }
+        
+        /// <summary>
+        /// Retrieves a cached expected value from the template.
+        /// </summary>
+        /// <param name="sheetName">Name of the sheet</param>
+        /// <param name="stage">Stage number</param>
+        /// <param name="columnName">Column name (e.g., DataResponse, Output, DataRequest)</param>
+        /// <returns>Cached expected value or null if not found</returns>
+        private string? GetCachedExpectedValue(string sheetName, int stage, string columnName)
+        {
+            var cacheKey = $"{sheetName}_{stage}_{columnName}";
+            return _expectedValuesCache.TryGetValue(cacheKey, out var value) ? value : null;
+        }
+        
+        /// <summary>
+        /// Caches expected values from the Detail.xlsx template before any modifications.
+        /// This ensures we preserve the original expected values even if the worksheet is modified during grading.
+        /// </summary>
+        /// <param name="ws">The worksheet to cache expected values from</param>
+        private void CacheExpectedValues(IXLWorksheet ws)
+        {
+            if (ws == null) return;
+            
+            var hdr = GetHeaderIndex(ws);
+            if (!hdr.TryGetValue(GradingKeywords.Col_Stage, out var stageCol)) return;
+            
+            var sheetName = ws.Name;
+            var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(sheetName, SheetOutClientsAlt, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(sheetName, SheetOutClientsNew, StringComparison.OrdinalIgnoreCase);
+            var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(sheetName, SheetOutServersAlt, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(sheetName, SheetOutServersNew, StringComparison.OrdinalIgnoreCase);
+            
+            // Only cache for output sheets (Client and Server)
+            if (!isClientSheet && !isServerSheet) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Determine which columns to cache based on sheet type
+            var columnsToCacheClient = new[] 
+            { 
+                SuiteKeywords.Col_OC_DataResponse,
+                SuiteKeywords.Col_OC_Output,
+                "Console" // NEW format
+            };
+            
+            var columnsToCacheServer = new[] 
+            { 
+                SuiteKeywords.Col_OS_DataRequest,
+                SuiteKeywords.Col_OS_Output,
+                "Console" // NEW format
+            };
+            
+            var columnsToCache = isClientSheet ? columnsToCacheClient : columnsToCacheServer;
+            
+            // Iterate through all data rows (skip header)
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                var rowNum = row.RowNumber();
+                
+                // Get stage number for this row
+                if (!int.TryParse(ws.Cell(rowNum, stageCol).GetString(), out var stage))
+                    continue;
+                
+                // Cache each expected value column
+                foreach (var columnName in columnsToCache)
+                {
+                    if (hdr.TryGetValue(columnName, out var colIndex))
+                    {
+                        var value = ws.Cell(rowNum, colIndex).GetString();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            var cacheKey = $"{sheetName}_{stage}_{columnName}";
+                            _expectedValuesCache[cacheKey] = value;
+                        }
+                    }
+                }
+            }
         }
 
         public void Dispose() => _wb?.Dispose();

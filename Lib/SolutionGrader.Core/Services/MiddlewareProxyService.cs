@@ -122,7 +122,7 @@ namespace SolutionGrader.Core.Services
                 string body; using (var reader = new StreamReader(req.InputStream, req.ContentEncoding)) body = reader.ReadToEnd();
 
                 // Build complete URL with query string using localhost (not 127.0.0.1) to match Host header
-                var urlBuilder = new UriBuilder(AppsettingKeywords.PROTOCOL_HTTP, "localhost", _realServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
+                var urlBuilder = new UriBuilder(AppsettingKeywords.PROTOCOL_HTTP, AppsettingKeywords.SERVER_LOCALHOST, _realServerPort, req.Url?.AbsolutePath ?? "/", req.Url?.Query ?? "");
                 var targetUrl = urlBuilder.ToString();
 
                 var forward = new HttpRequestMessage(new HttpMethod(req.HttpMethod), targetUrl);

@@ -406,7 +406,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             var name = Path.GetFileName(dir);
             
             // Check for Detail.xlsx (case-insensitive)
-            var detail = Path.Combine(dir, "Detail.xlsx");
+            var detail = Path.Combine(dir, FileKeywords.FileName_Detail);
             if (!File.Exists(detail))
             {
                 detail = Path.Combine(dir, "detail.xlsx");
