@@ -62,7 +62,6 @@ public static class AppsettingKeywords
     public const string DOCKER_SQLCMD_PATH = "/opt/mssql-tools18/bin/sqlcmd";
     public const string DOCKER_TMP_SCRIPT_PATH = "/tmp/db_reset.sql";
     public const string DOCKER_SA_PASSWORD = "YourStrong@Passw0rd";
-    public const string DOCKER_LOCALHOST = "localhost";
     
     // SQL error levels
     public const string SQL_ERROR_LEVEL_16 = "Level 16";

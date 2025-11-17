@@ -46,7 +46,7 @@ namespace SolutionGrader.Core.Services
             try
             {
                 using var client = new TcpClient();
-                client.Connect("127.0.0.1", port);
+                client.Connect(AppsettingKeywords.TCP_LOCALHOST, port);
                 return true;
             }
             catch (SocketException)
@@ -82,7 +82,7 @@ namespace SolutionGrader.Core.Services
                             // Wait for server to be ready
                             var t0 = Environment.TickCount;
                             bool serverReady = false;
-                            bool isHttpProtocol = args.Protocol?.Equals("HTTP", StringComparison.OrdinalIgnoreCase) == true;
+                            bool isHttpProtocol = args.Protocol?.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) == true;
                             
                             while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
                             {
@@ -332,7 +332,7 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_TCP_RELAY_STARTING, args.Protocol)}");
-                            bool useHttp = !string.Equals(args.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+                            bool useHttp = !string.Equals(args.Protocol, AppsettingKeywords.PROTOCOL_TCP, StringComparison.OrdinalIgnoreCase);
                             await _mw.StartAsync(useHttp, ct);
                             result = (true, $"Middleware proxy started ({args.Protocol} mode)");
                             break;

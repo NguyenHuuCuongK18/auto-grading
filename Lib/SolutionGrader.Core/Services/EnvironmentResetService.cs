@@ -235,18 +235,18 @@ END";
             // On Linux/Mac: use Docker SQL Server
             if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
             {
-                builder.DataSource = ".\\SQLEXPRESS";
+                builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE;
                 builder.IntegratedSecurity = true;
             }
             else
             {
                 // Docker SQL Server for Linux/Mac (used for development/debugging)
                 builder.DataSource = "localhost,1433";
-                builder.UserID = "sa";
-                builder.Password = "YourStrong@Passw0rd";
+                builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
+                builder.Password = AppsettingKeywords.DOCKER_SA_PASSWORD;
                 builder.TrustServerCertificate = true;
             }
-            builder.InitialCatalog = "Library";
+            builder.InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME;
             builder.ConnectTimeout = 30;
             builder.Pooling = false; // Disable connection pooling to avoid stale connections
             builder.PersistSecurityInfo = true; // Keep credentials in connection string for reconnection
@@ -260,7 +260,7 @@ END";
             if (string.IsNullOrWhiteSpace(server))
             {
                 server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
-                    ? ".\\SQLEXPRESS" 
+                    ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE 
                     : "localhost,1433";
             }
             
@@ -270,10 +270,10 @@ END";
             // - Already formatted instances (.\SQLEXPRESS)
             // - (local) keyword
             // - Server with port specification (server:port or server,port)
-            if (!server.StartsWith(".\\") && 
+            if (!server.StartsWith(AppsettingKeywords.SERVER_LOCAL_PREFIX) && 
                 !server.Contains("\\") && 
-                !server.Equals("(local)", System.StringComparison.OrdinalIgnoreCase) &&
-                !server.Equals("localhost", System.StringComparison.OrdinalIgnoreCase) &&
+                !server.Equals(AppsettingKeywords.SERVER_LOCAL_KEYWORD, System.StringComparison.OrdinalIgnoreCase) &&
+                !server.Equals(AppsettingKeywords.SERVER_LOCALHOST, System.StringComparison.OrdinalIgnoreCase) &&
                 !server.Contains(":") &&   // Avoid prefixing server with port (server:port)
                 !server.Contains(",") &&   // Avoid prefixing server with port (server,port)
                 !System.Net.IPAddress.TryParse(server, out _)) // Don't prefix valid IP addresses
@@ -282,7 +282,7 @@ END";
                 // Only add prefix if it's a simple instance name without dots
                 if (!server.Contains("."))
                 {
-                    server = $".\\{server}";
+                    server = $"{AppsettingKeywords.SERVER_LOCAL_PREFIX}{server}";
                 }
             }
 
@@ -292,19 +292,19 @@ END";
             // 1. EnvironmentConfiguration.DatabaseName (from environment.xlsx)
             // 2. DatabaseConfiguration.Database (from header.xlsx)
             // 3. Default "Library"
-            builder.InitialCatalog = envConfig?.DatabaseName ?? dbConfig?.Database ?? "Library";
+            builder.InitialCatalog = envConfig?.DatabaseName ?? dbConfig?.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
             
             // Priority order for Username:
             // 1. EnvironmentConfiguration.DatabaseUsername (from environment.xlsx)
             // 2. DatabaseConfiguration.Username (from header.xlsx)
             // 3. Default "sa"
-            builder.UserID = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? "sa";
+            builder.UserID = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
             
             // Priority order for Password:
             // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
             // 2. DatabaseConfiguration.Password (from header.xlsx)
             // 3. Default "YourStrong@Passw0rd"
-            builder.Password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? "YourStrong@Passw0rd";
+            builder.Password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
             
             builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
@@ -426,7 +426,7 @@ END";
             var execPsi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = AppsettingKeywords.DOCKER_COMMAND,
-                Arguments = $"exec {AppsettingKeywords.DOCKER_CONTAINER_NAME} {AppsettingKeywords.DOCKER_SQLCMD_PATH} -S {AppsettingKeywords.DOCKER_LOCALHOST} -U sa -P \"{saPassword}\" -C -i {AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
+                Arguments = $"exec {AppsettingKeywords.DOCKER_CONTAINER_NAME} {AppsettingKeywords.DOCKER_SQLCMD_PATH} -S {AppsettingKeywords.SERVER_LOCALHOST} -U sa -P \"{saPassword}\" -C -i {AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

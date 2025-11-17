@@ -169,12 +169,12 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             // On Linux/Mac: use Docker SQL Server
             if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
             {
-                return $"server=.\\SQLEXPRESS;database=Library;uid=sa;pwd=sa;TrustServerCertificate=true";
+                return $"{AppsettingKeywords.CONN_STR_SERVER}={AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE};{AppsettingKeywords.CONN_STR_DATABASE}={AppsettingKeywords.DEFAULT_DATABASE_NAME};{AppsettingKeywords.CONN_STR_UID}={AppsettingKeywords.DEFAULT_USERNAME};{AppsettingKeywords.CONN_STR_PWD}={AppsettingKeywords.DEFAULT_USERNAME};{AppsettingKeywords.CONN_STR_TRUST_CERT}=true";
             }
             else
             {
                 // Docker SQL Server for Linux/Mac
-                return $"server=localhost,1433;database=Library;uid=sa;pwd=YourStrong@Passw0rd;TrustServerCertificate=true";
+                return $"{AppsettingKeywords.CONN_STR_SERVER}=localhost,1433;{AppsettingKeywords.CONN_STR_DATABASE}={AppsettingKeywords.DEFAULT_DATABASE_NAME};{AppsettingKeywords.CONN_STR_UID}={AppsettingKeywords.DEFAULT_USERNAME};{AppsettingKeywords.CONN_STR_PWD}={AppsettingKeywords.DOCKER_SA_PASSWORD};{AppsettingKeywords.CONN_STR_TRUST_CERT}=true";
             }
         }
 
@@ -215,19 +215,19 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         // 1. EnvironmentConfiguration.DatabaseName (from environment.xlsx)
         // 2. DatabaseConfiguration.Database (from header.xlsx)
         // 3. Default "Library"
-        var database = envConfig?.DatabaseName ?? dbConfig?.Database ?? "Library";
+        var database = envConfig?.DatabaseName ?? dbConfig?.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
         
         // Priority order for Username:
         // 1. EnvironmentConfiguration.DatabaseUsername (from environment.xlsx)
         // 2. DatabaseConfiguration.Username (from header.xlsx)
         // 3. Default "sa"
-        var username = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? "sa";
+        var username = envConfig?.DatabaseUsername ?? dbConfig?.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
         
         // Priority order for Password:
         // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
         // 2. DatabaseConfiguration.Password (from header.xlsx)
         // 3. Default "YourStrong@Passw0rd"
-        var password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? "YourStrong@Passw0rd";
+        var password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
 
         // Build connection string using simple template for consistent lowercase formatting
         return string.Format(
