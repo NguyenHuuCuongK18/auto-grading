@@ -13,10 +13,13 @@ public static class FileKeywords
     public const string Extension_Diff = ".diff.txt";
     public const string Extension_Log = ".log";
     public const string Extension_Jsonl = ".jsonl";
+    public const string Extension_Dll = ".dll";
+    public const string Extension_Exe = ".exe";
 
     // Standard File Names
     public const string FileName_Header = "Header.xlsx";
     public const string FileName_Detail = "Detail.xlsx";
+    public const string FileName_Environment = "environment.xlsx";
     public const string FileName_GradeDetail = "GradeDetail.xlsx";
     // Deprecated: FailedTestDetail.xlsx is no longer created; error details are now in OverallSummary.xlsx
     [System.Obsolete("FailedTestDetail.xlsx is deprecated. Error details are now included in OverallSummary.xlsx")]
@@ -36,6 +39,10 @@ public static class FileKeywords
     public const string Folder_ServersRequest = "servers-req";
     public const string Folder_ServersResponse = "servers-resp";
     public const string Folder_Mismatches = "mismatches";
+    
+    // Name patterns for executable/folder matching (singular, capitalized)
+    public const string Pattern_ServerName = "Server";
+    public const string Pattern_ClientName = "Client";
 
     // File Name Patterns
     public const string Pattern_Result = "{0}_Result.xlsx";

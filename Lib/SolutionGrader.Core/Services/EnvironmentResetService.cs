@@ -241,7 +241,7 @@ END";
             else
             {
                 // Docker SQL Server for Linux/Mac (used for development/debugging)
-                builder.DataSource = "localhost,1433";
+                builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
                 builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
                 builder.Password = AppsettingKeywords.DOCKER_SA_PASSWORD;
                 builder.TrustServerCertificate = true;
@@ -261,7 +261,7 @@ END";
             {
                 server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
                     ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE 
-                    : "localhost,1433";
+                    : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
             }
             
             // Format SQL Server instance name properly
@@ -426,7 +426,7 @@ END";
             var execPsi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = AppsettingKeywords.DOCKER_COMMAND,
-                Arguments = $"exec {AppsettingKeywords.DOCKER_CONTAINER_NAME} {AppsettingKeywords.DOCKER_SQLCMD_PATH} -S {AppsettingKeywords.SERVER_LOCALHOST} -U sa -P \"{saPassword}\" -C -i {AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
+                Arguments = $"exec {AppsettingKeywords.DOCKER_CONTAINER_NAME} {AppsettingKeywords.DOCKER_SQLCMD_PATH} {AppsettingKeywords.SQL_FLAG_SERVER} {AppsettingKeywords.SERVER_LOCALHOST} {AppsettingKeywords.SQL_FLAG_USER} {AppsettingKeywords.DEFAULT_USERNAME} {AppsettingKeywords.SQL_FLAG_PASSWORD} \"{saPassword}\" {AppsettingKeywords.SQL_FLAG_TRUST_CERT} {AppsettingKeywords.SQL_FLAG_INPUT_FILE} {AppsettingKeywords.DOCKER_TMP_SCRIPT_PATH}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

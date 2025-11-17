@@ -41,6 +41,7 @@ public static class AppsettingKeywords
     
     // Database defaults
     public const string DEFAULT_SQL_SERVER_INSTANCE = ".\\SQLEXPRESS";
+    public const string DEFAULT_SQL_SERVER_DOCKER = "localhost,1433";
     public const string DEFAULT_DATABASE_NAME = "Library";
     public const string DEFAULT_USERNAME = "sa";
     public const string DEFAULT_PASSWORD = "sa";
@@ -62,6 +63,13 @@ public static class AppsettingKeywords
     public const string DOCKER_SQLCMD_PATH = "/opt/mssql-tools18/bin/sqlcmd";
     public const string DOCKER_TMP_SCRIPT_PATH = "/tmp/db_reset.sql";
     public const string DOCKER_SA_PASSWORD = "YourStrong@Passw0rd";
+    
+    // SQL command flags
+    public const string SQL_FLAG_SERVER = "-S";
+    public const string SQL_FLAG_USER = "-U";
+    public const string SQL_FLAG_PASSWORD = "-P";
+    public const string SQL_FLAG_TRUST_CERT = "-C";
+    public const string SQL_FLAG_INPUT_FILE = "-i";
     
     // SQL error levels
     public const string SQL_ERROR_LEVEL_16 = "Level 16";

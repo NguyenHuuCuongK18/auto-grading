@@ -95,7 +95,7 @@ namespace SolutionGrader.Core.Services
             try
             {
                 _http = new HttpListener();
-                _http.Prefixes.Add($"http://localhost:{_proxyPort}/");
+                _http.Prefixes.Add($"{AppsettingKeywords.HTTP_LOCALHOST}:{_proxyPort}/");
                 _http.Start();
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROXY} {string.Format(LoggingKeywords.MSG_PROXY_HTTP_LISTENING, _proxyPort, _realServerPort)}");
                 _listenTask = Task.Run(() => ListenHttpAsync(token), token);
