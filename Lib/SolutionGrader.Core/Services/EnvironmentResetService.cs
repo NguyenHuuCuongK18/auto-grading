@@ -241,7 +241,7 @@ END";
             else
             {
                 // Docker SQL Server for Linux/Mac (used for development/debugging)
-                builder.DataSource = "localhost,1433";
+                builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
                 builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
                 builder.Password = AppsettingKeywords.DOCKER_SA_PASSWORD;
                 builder.TrustServerCertificate = true;
@@ -261,7 +261,7 @@ END";
             {
                 server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
                     ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE 
-                    : "localhost,1433";
+                    : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
             }
             
             // Format SQL Server instance name properly

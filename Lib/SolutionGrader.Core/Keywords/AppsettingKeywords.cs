@@ -41,6 +41,7 @@ public static class AppsettingKeywords
     
     // Database defaults
     public const string DEFAULT_SQL_SERVER_INSTANCE = ".\\SQLEXPRESS";
+    public const string DEFAULT_SQL_SERVER_DOCKER = "localhost,1433";
     public const string DEFAULT_DATABASE_NAME = "Library";
     public const string DEFAULT_USERNAME = "sa";
     public const string DEFAULT_PASSWORD = "sa";

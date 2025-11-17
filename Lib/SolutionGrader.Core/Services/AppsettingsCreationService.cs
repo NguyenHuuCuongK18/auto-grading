@@ -174,7 +174,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             else
             {
                 // Docker SQL Server for Linux/Mac
-                return $"{AppsettingKeywords.CONN_STR_SERVER}=localhost,1433;{AppsettingKeywords.CONN_STR_DATABASE}={AppsettingKeywords.DEFAULT_DATABASE_NAME};{AppsettingKeywords.CONN_STR_UID}={AppsettingKeywords.DEFAULT_USERNAME};{AppsettingKeywords.CONN_STR_PWD}={AppsettingKeywords.DOCKER_SA_PASSWORD};{AppsettingKeywords.CONN_STR_TRUST_CERT}=true";
+                return $"{AppsettingKeywords.CONN_STR_SERVER}={AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER};{AppsettingKeywords.CONN_STR_DATABASE}={AppsettingKeywords.DEFAULT_DATABASE_NAME};{AppsettingKeywords.CONN_STR_UID}={AppsettingKeywords.DEFAULT_USERNAME};{AppsettingKeywords.CONN_STR_PWD}={AppsettingKeywords.DOCKER_SA_PASSWORD};{AppsettingKeywords.CONN_STR_TRUST_CERT}=true";
             }
         }
 
@@ -185,8 +185,8 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         if (string.IsNullOrWhiteSpace(server))
         {
             server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
-                ? ".\\SQLEXPRESS" 
-                : "localhost,1433";
+                ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE 
+                : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
         }
         
         // Format SQL Server instance name properly
