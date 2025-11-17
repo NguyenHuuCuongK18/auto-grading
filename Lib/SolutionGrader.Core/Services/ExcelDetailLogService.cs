@@ -846,14 +846,27 @@ namespace SolutionGrader.Core.Services
 
         private static string ResolveSheet(Step step, string? actualPath)
         {
-            // prefer actual path hint to decide client/server
+            // PRIMARY: Use Step ID prefix to determine sheet (most reliable)
+            // Step IDs follow convention: OC- = OutputClient, OS- = OutputServer, IC- = InputClient
+            if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputServer, StringComparison.OrdinalIgnoreCase))
+                return SheetOutServers;
+            
+            if (step.Id.StartsWith(GradingKeywords.StepPrefix_OutputClient, StringComparison.OrdinalIgnoreCase))
+                return SheetOutClients;
+            
+            // SECONDARY: Check actual path hint (for backward compatibility)
             var lower = (actualPath ?? string.Empty).Replace('\\', '/').ToLowerInvariant();
-            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Clients}/")) return SheetOutClients;
-            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/")) return SheetOutServers;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Servers}/"))
+                return SheetOutServers;
+            if (lower.Contains($"/{FileKeywords.Folder_Actual}/{FileKeywords.Folder_Clients}/"))
+                return SheetOutClients;
 
-            // fallback by action
+            // TERTIARY: Fallback by action (least reliable)
             var action = (step.Action ?? string.Empty).ToUpperInvariant();
-            if (action.Contains("SERVER")) return SheetOutServers;
+            if (action.Contains("SERVER"))
+                return SheetOutServers;
+            
+            // DEFAULT: Client sheet (for input steps and others)
             return SheetOutClients;
         }
 
