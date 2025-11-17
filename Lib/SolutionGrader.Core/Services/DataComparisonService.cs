@@ -154,8 +154,12 @@ namespace SolutionGrader.Core.Services
             if (exp == act)
                 return (true, $"Text comparison passed: {outputType} matches exactly");
 
-            if ((isClientOutput || isServerOutput) && act.Contains(exp))
-                return (true, $"Text comparison passed: {outputType} contains expected (loose match)");
+            // Removed the "contains" fallback for client/server output to ensure strict validation.
+            // This prevents false positives where extra data in output would incorrectly pass tests.
+            // For example, if expected output shows BookId 1 and 3, but actual shows BookId 1, 2, and 3,
+            // the test should fail because the student's code didn't filter correctly.
+            // The normalization and aggressive normalization below already handle formatting differences
+            // and async output variations through stage aggregation (ReadAllStagesFromMemory).
 
             var expLoose = StripAggressive(exp);
             var actLoose = StripAggressive(act);
@@ -163,8 +167,10 @@ namespace SolutionGrader.Core.Services
             if (expLoose == actLoose)
                 return (true, $"Text comparison passed: {outputType} matches after aggressive normalization");
 
-            if (actLoose.Contains(expLoose))
-                return (true, $"Text comparison passed: {outputType} contains expected after aggressive normalization");
+            // Removed the "contains" check after aggressive normalization to prevent false positives.
+            // We require exact match even after aggressive normalization to ensure data integrity.
+            // This ensures that if expected data has N records, actual must have exactly N records,
+            // not N+ records where extra records would pass the "contains" check.
 
             var (idx, expChar, actChar, expCtx, actCtx) = FirstDiff(exp, act);
             var infoMismatch = ErrorCodes.GetInfo(ErrorCodes.TEXT_MISMATCH);
