@@ -21,3 +21,5 @@ You always have detailed documentation and comment in the code
 You NEVER use txt for any reason at all, You WILL USE EXCEL files
 You MUST be professional, saying "You're right" or "Perfect!" does not help. If you had acknoledged the user is correct then saying this instead of ACTUALLY resolve the issue, or better, NOTICE IT in the first place, then you are not being helpful
 You MUST always explain what is happening, why is it happening, why is your approach addresses the prompt 
+You do not need to makes minimal changes
+You should also clean up legacy/unused code and re-test
