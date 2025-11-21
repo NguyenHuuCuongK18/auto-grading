@@ -45,23 +45,29 @@ namespace SolutionGrader.Core.Services
         /// This prevents triggering "Client connected/disconnected" messages on the server
         /// that should only appear when actual client connections occur in later stages.
         /// 
-        /// Implementation: Attempts to bind to the port. If binding fails with AddressAlreadyInUse,
-        /// it means another process (our server) is already listening on that port.
+        /// Implementation: Attempts to bind to the port using a test listener.
+        /// - If binding SUCCEEDS: Port was available (not in use) -> returns false
+        /// - If binding FAILS with AddressAlreadyInUse: Port is occupied by our server -> returns true
+        /// 
+        /// This approach avoids connecting to the server while still verifying it's listening.
         /// </summary>
         private static bool IsTcpPortInListeningState(int port)
         {
             try
             {
-                // Try to bind to the port - if it fails with AddressAlreadyInUse, the port is listening
+                // Try to bind to the port with a test listener
                 using var testListener = new TcpListener(IPAddress.Loopback, port);
-                testListener.Start();
+                testListener.Start();  // This will succeed if port is available
                 testListener.Stop();
-                // If we got here, port is NOT in use
+                
+                // If we got here, we successfully bound to the port
+                // This means the port was NOT in use (server not listening yet)
                 return false;
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
-                // Port is already in use, which means server is listening
+                // Failed to bind because port is already in use
+                // This means our server is listening on this port
                 return true;
             }
             catch (SocketException ex)
