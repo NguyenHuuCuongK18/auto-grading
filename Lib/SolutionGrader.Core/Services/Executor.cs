@@ -21,6 +21,7 @@ namespace SolutionGrader.Core.Services
 
         private const int ServerReadyTimeoutSeconds = 5;
         private const int ServerReadyPollIntervalMs = 100;
+        private const int ConnectionOutputWaitSeconds = 2; // Wait time for server output after connection-triggering actions
         private int _configuredServerPort = 5001; // Default fallback port
 
         public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
@@ -181,6 +182,11 @@ namespace SolutionGrader.Core.Services
                                 : clientOutput;
                             
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_CLIENT_OUTPUT, outputPreview)}");
+                            
+                            // Wait for server output after client starts (in case connection triggers server messages)
+                            // This allows "client connected" messages to be captured in the correct stage
+                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
+                            
                             result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
                             break;
                         }
@@ -334,6 +340,11 @@ namespace SolutionGrader.Core.Services
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_TCP_RELAY_STARTING, args.Protocol)}");
                             bool useHttp = !string.Equals(args.Protocol, AppsettingKeywords.PROTOCOL_TCP, StringComparison.OrdinalIgnoreCase);
                             await _mw.StartAsync(useHttp, ct);
+                            
+                            // Wait for server output after middleware starts and connection is established
+                            // This allows "client connected" messages to be captured in the correct stage
+                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
+                            
                             result = (true, $"Middleware proxy started ({args.Protocol} mode)");
                             break;
                         }
