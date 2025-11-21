@@ -21,6 +21,7 @@ namespace SolutionGrader.Core.Services
 
         private const int ServerReadyTimeoutSeconds = 5;
         private const int ServerReadyPollIntervalMs = 100;
+        private const int ConnectionOutputWaitSeconds = 2; // Wait time for server output after connection-triggering actions
         private int _configuredServerPort = 5001; // Default fallback port
 
         public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
@@ -184,7 +185,7 @@ namespace SolutionGrader.Core.Services
                             
                             // Wait for server output after client starts (in case connection triggers server messages)
                             // This allows "client connected" messages to be captured in the correct stage
-                            await _proc.WaitForServerOutputAsync(2, ct);
+                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
                             
                             result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
                             break;
@@ -342,7 +343,7 @@ namespace SolutionGrader.Core.Services
                             
                             // Wait for server output after middleware starts and connection is established
                             // This allows "client connected" messages to be captured in the correct stage
-                            await _proc.WaitForServerOutputAsync(2, ct);
+                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
                             
                             result = (true, $"Middleware proxy started ({args.Protocol} mode)");
                             break;
