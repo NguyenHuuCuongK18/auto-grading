@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using SolutionGrader.Core.Abstractions;
@@ -40,7 +41,54 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Checks if a TCP port is listening and accepting connections
+        /// Checks if a TCP port is in listening state WITHOUT establishing a connection.
+        /// This prevents triggering "Client connected/disconnected" messages on the server
+        /// that should only appear when actual client connections occur in later stages.
+        /// 
+        /// Implementation: Attempts to bind to the port using a test listener.
+        /// - If binding SUCCEEDS: Port was available (not in use) -> returns false
+        /// - If binding FAILS with AddressAlreadyInUse: Port is occupied by our server -> returns true
+        /// 
+        /// This approach avoids connecting to the server while still verifying it's listening.
+        /// </summary>
+        private static bool IsTcpPortInListeningState(int port)
+        {
+            try
+            {
+                // Try to bind to the port with a test listener
+                using var testListener = new TcpListener(IPAddress.Loopback, port);
+                testListener.Start();  // This will succeed if port is available
+                testListener.Stop();
+                
+                // If we got here, we successfully bound to the port
+                // This means the port was NOT in use (server not listening yet)
+                return false;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                // Failed to bind because port is already in use
+                // This means our server is listening on this port
+                return true;
+            }
+            catch (SocketException ex)
+            {
+                // Other socket errors (e.g., permission denied, invalid port)
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Port check failed: {ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Unexpected errors
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Unexpected error in port check: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Checks if a TCP port is listening and accepting connections.
+        /// WARNING: This method establishes a connection which may trigger server logging.
+        /// Use IsTcpPortInListeningState for health checks during ServerStart to avoid
+        /// premature "Client connected" messages.
         /// </summary>
         private static bool IsTcpPortListening(int port)
         {
@@ -85,6 +133,9 @@ namespace SolutionGrader.Core.Services
                             bool serverReady = false;
                             bool isHttpProtocol = args.Protocol?.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) == true;
                             
+                            // For TCP servers, we use a non-connecting health check to avoid triggering
+                            // "Client connected/disconnected" messages that should appear in later stages
+                            // For HTTP servers, we use HTTP health checks that don't trigger TCP connection events
                             while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
                             {
                                 // First check if the process has crashed
@@ -109,12 +160,15 @@ namespace SolutionGrader.Core.Services
                                     }
                                     catch { /* HTTP health check failed, will retry */ }
                                 }
-                                
-                                // For TCP servers (or if HTTP health check failed), try TCP port check
-                                if (IsTcpPortListening(_configuredServerPort))
+                                else
                                 {
-                                    serverReady = true;
-                                    break;
+                                    // For TCP servers, use non-connecting port check to avoid triggering connection messages
+                                    // We check if the port is in listening state without establishing a connection
+                                    if (IsTcpPortInListeningState(_configuredServerPort))
+                                    {
+                                        serverReady = true;
+                                        break;
+                                    }
                                 }
                                 
                                 await Task.Delay(ServerReadyPollIntervalMs, ct);
@@ -136,7 +190,9 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             // Wait for server output to stabilize after startup
-                            await _proc.WaitForServerOutputAsync(3, ct);
+                            // Use shorter wait time to capture only initial startup messages
+                            // Connection-related messages will be captured when actual connections occur
+                            await _proc.WaitForServerOutputAsync(1, ct);
                             
                             var serverOutput = _proc.GetServerOutput();
                             var outputPreview = serverOutput.Length > 100 
