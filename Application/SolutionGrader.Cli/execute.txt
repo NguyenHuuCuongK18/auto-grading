@@ -2,3 +2,7 @@
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project12\Project12.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project11\Project11.exe"
 #TCP
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Client\Client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Server\Server.exe"
+
+#NEW
+#De1
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Answer\1\Project12\Client\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Answer\1\Project11\Server\Project11.exe"

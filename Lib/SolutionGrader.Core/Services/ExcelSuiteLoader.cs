@@ -307,11 +307,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
                 if (string.IsNullOrEmpty(key)) continue;
 
-                if (key.Equals("Code_Container_Internal_Port", StringComparison.OrdinalIgnoreCase))
+                if (key.Equals("Port Middleware", StringComparison.OrdinalIgnoreCase))
                 {
                     if (int.TryParse(value, out var port)) config.MiddlewarePort = port;
                 }
-                else if (key.Equals("Code_Container_Host_Port", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals("Port Server", StringComparison.OrdinalIgnoreCase))
                 {
                     if (int.TryParse(value, out var port)) config.ServerPort = port;
                 }

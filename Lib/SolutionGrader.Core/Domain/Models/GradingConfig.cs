@@ -9,7 +9,7 @@ namespace SolutionGrader.Core.Domain.Models
     /// - CLIENT: Grade only OutputClients sheet (all validations on that sheet)
     /// - SERVER: Grade only OutputServers sheet (all validations on that sheet)
     /// - CONSOLE: Grade only console output columns from both sheets
-    /// - HTTP: Grade only HTTP-related columns from both sheets
+    /// - Network: Grade only Network-related columns from both sheets
     /// </summary>
     public sealed class GradingConfig
     {
