@@ -352,6 +352,25 @@ public sealed class ExcelDetailParser : ITestCaseParser
         return map;
     }
 
+    /// <summary>
+    /// Gets a cell value from a row, with special handling for Input columns.
+    /// For Input columns, preserve leading/trailing spaces to allow testing space handling.
+    /// For other columns, trim spaces as before for consistency.
+    /// </summary>
     private static string Get(IXLRangeRow row, Dictionary<string, int> map, string key)
-        => map.TryGetValue(key, out var c) ? row.Cell(c).GetString().Trim() : "";
+    {
+        if (!map.TryGetValue(key, out var c)) return "";
+        
+        var value = row.Cell(c).GetString();
+        
+        // Preserve spaces for Input column to allow testing with space inputs like " A ^ B" or " "
+        // This is critical for validating input handling in test cases
+        if (string.Equals(key, SuiteKeywords.Col_IC_Input, StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+        
+        // For all other columns, trim as before for consistency
+        return value.Trim();
+    }
 }

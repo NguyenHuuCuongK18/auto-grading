@@ -67,6 +67,10 @@ namespace SolutionGrader.Core.Services
             _clientStartQuestionCode = _run.CurrentQuestionCode;
             _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
             
+            // Update server stage label to current stage when client starts
+            // This ensures server messages like "client connected" are attributed to the correct stage
+            _serverStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _serverStartStageLabel ?? "0");
+            
             _client = Create(_clientPath);
             _client.Start();
             _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
@@ -122,6 +126,10 @@ namespace SolutionGrader.Core.Services
                 // This ensures that the response output is attributed to the current stage (where input was sent)
                 // rather than the stage where the client was started
                 _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel);
+                
+                // Also update server stage label when input is sent
+                // This ensures server responses to input are attributed to the correct stage
+                _serverStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _serverStartStageLabel ?? "0");
                 
                 // Handle empty or null input by sending just a newline (blank Enter)
                 // This allows test cases to send empty input when the value cell is blank
@@ -481,16 +489,17 @@ namespace SolutionGrader.Core.Services
                 string? question;
                 string? stage;
                 
-                // Use CURRENT stage context, not captured start-time stage
-                // This ensures output is attributed to the stage that's currently executing
-                // Fallback to start-time stage only if no current stage is available
+                // For server output, use the captured start-time stage to ensure proper stage separation
+                // Server startup messages (like "client connected") should be attributed to the stage
+                // where the server started, not the current stage when the message is read
                 if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
                 {
-                    question = _run.CurrentQuestionCode ?? _serverStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _serverStartStageLabel ?? "0");
+                    question = _serverStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _serverStartStageLabel ?? "0";
                 }
                 else
                 {
+                    // For client output, use current stage (updated on input) to attribute output correctly
                     question = _run.CurrentQuestionCode ?? _clientStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
                     stage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel ?? "0");
                 }
