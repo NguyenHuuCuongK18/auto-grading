@@ -351,6 +351,7 @@ public sealed class NewFormatDetailParser
         
         // Preserve spaces for Input column to allow testing with space inputs like " A ^ B" or " "
         // This is critical for validating input handling in test cases
+        // Using the same constant as ExcelDetailParser for consistency
         if (string.Equals(key, "Input", StringComparison.OrdinalIgnoreCase))
         {
             return value;
