@@ -138,25 +138,28 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     private static object CreateServerAppsettings(string ipAddress, int port, DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
+        // Server expects a raw IP/host (no scheme) for IPAddress.Parse; strip scheme if present
+        var hostOnly = ipAddress;
+        if (hostOnly.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) hostOnly = hostOnly.Substring("http://".Length);
+        if (hostOnly.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) hostOnly = hostOnly.Substring("https://".Length);
+        // In case hostOnly still contains trailing '/', remove
+        hostOnly = hostOnly.TrimEnd('/');
         var connectionString = BuildConnectionString(dbConfig, envConfig);
-        
         return new
         {
-            ConnectionStrings = new
-            {
-                MyCnn = connectionString
-            },
-            IpAddress = ipAddress,
-            Port = port.ToString()
+            ConnectionStrings = new { MyCnn = connectionString },
+            IpAddress = hostOnly,
+            Port = port.ToString(),
         };
     }
 
     private static object CreateClientAppsettings(string ipAddress, int port)
     {
+        // Client previously relied on IpAddress holding scheme; keep as-is
         return new
         {
             IpAddress = ipAddress,
-            Port = port.ToString()
+            Port = port.ToString(),
         };
     }
 

@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "SolutionGrader.Cli": {
+      "commandName": "Project",
+      "commandLineArgs": "executepaper --submission-root C:\\Users\\NPC\\Documents\\FPT\\Capstone\\Code\\Sample\\PE_Construct\\StudentSolution --suite C:\\Users\\NPC\\Documents\\FPT\\Capstone\\TestSuit\\Testkit_HTTP_1_TestDocker\\Q11 --out C:\\Res  --use-docker",
+      "hotReloadEnabled": true
+    }
+  }
+}

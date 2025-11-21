@@ -8,5 +8,6 @@ public sealed class SuiteDefinition
     public DatabaseConfiguration? DatabaseConfig { get; init; }
     public EnvironmentConfiguration? Environment { get; init; }
     public string? DateTimeFormat { get; init; }
+    public global::Domain.Entities.Main.Environment? DomainEnvironment { get; init; }
     public string RootDirectory => System.IO.Path.GetDirectoryName(HeaderPath)!;
 }

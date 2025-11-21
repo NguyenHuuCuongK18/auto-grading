@@ -29,6 +29,9 @@ namespace SolutionGrader.Core.Services
         public bool IsServerRunning => _server is { HasExited: false };
         public bool IsClientRunning => _client is { HasExited: false };
 
+        // Docker single-container support (no-op for process mode)
+        public void ConfigureDockerLogs(string? clientLogPath, string? serverLogPath) { /* no-op */ }
+
         public void Init(string? clientPath, string? serverPath)
         {
             _clientPath = clientPath;

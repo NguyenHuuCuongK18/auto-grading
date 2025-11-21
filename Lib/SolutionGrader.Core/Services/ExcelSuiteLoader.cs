@@ -28,6 +28,9 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         
         // Read environment configuration from outermost environment.xlsx
         var envConfig = ReadEnvironmentConfig(suiteRoot);
+
+        // Build a Domain.Entities.Main.Environment structure from environment.xlsx for other modules
+        var domainEnv = BuildDomainEnvironment(suiteRoot);
         
         // Build test cases from directories
         var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment);
@@ -39,8 +42,58 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             DatabaseConfig = dbConfig,
             Environment = envConfig,
             DateTimeFormat = dateTimeFormat,
-            Cases = cases
+            Cases = cases,
+            DomainEnvironment = domainEnv
         };
+    }
+
+    private static global::Domain.Entities.Main.Environment? BuildDomainEnvironment(string suiteRoot)
+    {
+        try
+        {
+            var envPath = Path.Combine(suiteRoot, FileKeywords.FileName_Environment);
+            if (!File.Exists(envPath)) return null;
+
+            using var wb = new XLWorkbook(envPath);
+            var env = new global::Domain.Entities.Main.Environment
+            {
+                Configs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                Steps = new List<string>()
+            };
+
+            var wsConfig = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Config", StringComparison.OrdinalIgnoreCase));
+            if (wsConfig != null)
+            {
+                int startRow = 1;
+                if (wsConfig.Cell(1, 1).GetString().Trim().Equals("Key", StringComparison.OrdinalIgnoreCase)) startRow = 2;
+                for (int r = startRow; r <= wsConfig.RowCount(); r++)
+                {
+                    var key = wsConfig.Cell(r, 1).GetString().Trim();
+                    var val = wsConfig.Cell(r, 2).GetString().Trim();
+                    if (!string.IsNullOrEmpty(key)) env.Configs[key] = val ?? string.Empty;
+                }
+            }
+
+            var wsRun = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Run", StringComparison.OrdinalIgnoreCase));
+            if (wsRun != null)
+            {
+                int headerRow = 1;
+                var c1 = wsRun.Cell(1, 1).GetString().Trim();
+                var c2 = wsRun.Cell(1, 2).GetString().Trim();
+                if (c1.Equals("Step", StringComparison.OrdinalIgnoreCase) || c2.Equals("Keyword action", StringComparison.OrdinalIgnoreCase)) headerRow = 2;
+                for (int r = headerRow; r <= wsRun.RowCount(); r++)
+                {
+                    var keyword = wsRun.Cell(r, 2).GetString().Trim();
+                    if (!string.IsNullOrWhiteSpace(keyword)) env.Steps.Add(keyword);
+                }
+            }
+
+            return env;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string ResolveHeaderPath(string input)
@@ -387,7 +440,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} Warning: Could not read environment config: {ex.Message}");
+            //Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} Warning: Could not read environment config: {ex.Message}");
             return null;
         }
     }

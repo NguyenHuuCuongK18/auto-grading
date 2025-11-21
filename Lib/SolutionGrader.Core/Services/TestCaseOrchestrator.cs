@@ -113,7 +113,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Reset database
-                await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, false, testCase.Environment, ct);
+                await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, args.UseDockerContainers, testCase.Environment, ct);
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 1] Environment setup completed");
                 return (true, "Environment setup successful");
@@ -187,11 +187,19 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         public (bool Success, string Message) InitializeProcesses(
             string? clientExePath,
-            string? serverExePath)
+            string? serverExePath,
+            bool dockerMode)
         {
             try
             {
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Initializing processes...");
+                
+                // Docker mode: do NOT re-init with executable paths (would overwrite container name with path)
+                if (dockerMode && _proc is DockerExecutableManager)
+                {
+                    Console.WriteLine("[TestCase] Docker mode detected - skipping executable Init() reuse; will tail logs when start actions occur.");
+                    return (true, "Docker log monitoring active");
+                }
                 
                 if (string.IsNullOrWhiteSpace(clientExePath))
                 {
