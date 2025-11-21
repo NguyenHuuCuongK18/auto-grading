@@ -44,34 +44,36 @@ namespace SolutionGrader.Core.Services
         /// Checks if a TCP port is in listening state WITHOUT establishing a connection.
         /// This prevents triggering "Client connected/disconnected" messages on the server
         /// that should only appear when actual client connections occur in later stages.
+        /// 
+        /// Implementation: Attempts to bind to the port. If binding fails with AddressAlreadyInUse,
+        /// it means another process (our server) is already listening on that port.
         /// </summary>
         private static bool IsTcpPortInListeningState(int port)
         {
             try
             {
-                // On Windows and Linux, we can check TCP connection table to see if port is in LISTENING state
-                // without actually connecting. This is a non-intrusive check.
-                
-                // Use netstat-style approach: check if the port appears in the local endpoint list
-                // Create a temporary TCP listener to see if the port is already in use
-                // If it's in use, it means another process (our server) is listening on it
-                try
-                {
-                    // Try to bind to the port - if it fails with AddressInUse, the port is listening
-                    using var testListener = new TcpListener(IPAddress.Loopback, port);
-                    testListener.Start();
-                    testListener.Stop();
-                    // If we got here, port is NOT in use
-                    return false;
-                }
-                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
-                {
-                    // Port is already in use, which means server is listening
-                    return true;
-                }
+                // Try to bind to the port - if it fails with AddressAlreadyInUse, the port is listening
+                using var testListener = new TcpListener(IPAddress.Loopback, port);
+                testListener.Start();
+                testListener.Stop();
+                // If we got here, port is NOT in use
+                return false;
             }
-            catch
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
+                // Port is already in use, which means server is listening
+                return true;
+            }
+            catch (SocketException ex)
+            {
+                // Other socket errors (e.g., permission denied, invalid port)
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Port check failed: {ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                // Unexpected errors
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Unexpected error in port check: {ex.Message}");
                 return false;
             }
         }
