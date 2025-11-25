@@ -432,13 +432,25 @@ namespace SolutionGrader.Core.Services
                 if (step.Id.StartsWith("CLIENT-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
                 
-                // NETWORK-RESPAYLOAD steps read from server response (HTTP response body)
+                // NETWORK-RESPAYLOAD steps read from network response body capture
                 if (step.Id.StartsWith("NETWORK-RESPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    // First try the dedicated body capture, then fall back to full response
+                    var bodyKey = $"network.{stageLabel}.res.body";
+                    if (_run.TryGetCapturedOutput(bodyKey, out _))
+                        return bodyKey;
                     return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
+                }
                 
-                // NETWORK-REQPAYLOAD steps read from server request (HTTP request body)
+                // NETWORK-REQPAYLOAD steps read from network request body capture
                 if (step.Id.StartsWith("NETWORK-REQPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    // First try the dedicated body capture, then fall back to full request
+                    var bodyKey = $"network.{stageLabel}.req.body";
+                    if (_run.TryGetCapturedOutput(bodyKey, out _))
+                        return bodyKey;
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
+                }
                 
                 // NETWORK-METHOD steps are handled separately (HTTP method comparison)
                 if (step.Id.StartsWith("NETWORK-METHOD", StringComparison.OrdinalIgnoreCase))

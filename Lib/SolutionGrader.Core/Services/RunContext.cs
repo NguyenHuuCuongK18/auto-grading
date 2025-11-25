@@ -80,7 +80,20 @@ namespace SolutionGrader.Core.Services
         public void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize)
         {
             var key = $"{questionCode}-{stage}";
-            _httpMetadata[key] = (httpMethod, statusCode, byteSize);
+            
+            // Merge with existing metadata to preserve both request method and response status
+            if (_httpMetadata.TryGetValue(key, out var existing))
+            {
+                // Preserve existing non-empty values
+                var newMethod = !string.IsNullOrEmpty(httpMethod) ? httpMethod : existing.HttpMethod;
+                var newStatus = statusCode != 0 ? statusCode : existing.StatusCode;
+                var newSize = byteSize != 0 ? byteSize : existing.ByteSize;
+                _httpMetadata[key] = (newMethod, newStatus, newSize);
+            }
+            else
+            {
+                _httpMetadata[key] = (httpMethod, statusCode, byteSize);
+            }
         }
 
         public bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize)

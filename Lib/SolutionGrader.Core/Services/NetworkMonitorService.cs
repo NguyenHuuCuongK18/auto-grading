@@ -231,6 +231,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // Extract payload data
             var payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
             
+            // Debug: log captured packet summary
+            var payloadPreview = payload.Length > 100 ? payload.Substring(0, 100) + "..." : payload;
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} ({srcPort}->{dstPort}): {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}");
+            
             // Store in RunContext for comparison
             StoreInRunContext(srcRole, payload);
         }
