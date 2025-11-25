@@ -328,17 +328,16 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                     Console.WriteLine($"[Environment] Parsing: {key} = {value}");
                 }
 
-                // NEW: MonitorPort is the preferred single port configuration
-                // Server listens on this port, client connects to this port
-                // Network monitor sniffs traffic on this port
+                // MonitorPort: Legacy configuration from environment.xlsx
+                // NOTE: GraderPort from GradingConfig is now the primary port configuration
+                // MonitorPort in environment.xlsx is kept for backward compatibility only
                 if (key.Equals("MonitorPort", StringComparison.OrdinalIgnoreCase) ||
-                    key.Equals("Monitor_Port", StringComparison.OrdinalIgnoreCase) ||
-                    key.Equals("Port", StringComparison.OrdinalIgnoreCase))
+                    key.Equals("Monitor_Port", StringComparison.OrdinalIgnoreCase))
                 {
                     if (int.TryParse(value, out var port)) 
                     {
                         config.MonitorPort = port;
-                        Console.WriteLine($"[Environment] MonitorPort set to {port}");
+                        Console.WriteLine($"[Environment] MonitorPort set to {port} (note: GraderPort in GradingConfig takes precedence)");
                     }
                 }
                 // DEPRECATED: Legacy middleware/server port config (kept for backward compatibility)

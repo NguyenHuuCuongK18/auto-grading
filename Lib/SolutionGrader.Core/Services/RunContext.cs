@@ -112,6 +112,31 @@ namespace SolutionGrader.Core.Services
             byteSize = null;
             return false;
         }
+        
+        /// <summary>
+        /// Clears all captured network data and HTTP metadata.
+        /// Used to flush health check traffic before executing actual test steps.
+        /// This ensures only the actual client-server communication is captured for grading.
+        /// </summary>
+        public void ClearNetworkCaptures()
+        {
+            // Clear network-related captures (network.*.req.*, network.*.res.*, servers_request/*, servers_response/*)
+            var keysToRemove = _captures.Keys
+                .Where(k => k.Contains("network.") || 
+                           k.Contains(FileKeywords.Folder_ServersRequest) || 
+                           k.Contains(FileKeywords.Folder_ServersResponse))
+                .ToList();
+            
+            foreach (var key in keysToRemove)
+            {
+                _captures.TryRemove(key, out _);
+            }
+            
+            // Clear HTTP metadata
+            _httpMetadata.Clear();
+            
+            Console.WriteLine($"[RunContext] Cleared network captures (removed {keysToRemove.Count} captures)");
+        }
 
         private void AppendCapture(string scope, string questionCode, string stage, string content)
         {

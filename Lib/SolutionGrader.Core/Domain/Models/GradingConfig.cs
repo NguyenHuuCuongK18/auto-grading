@@ -16,6 +16,21 @@ namespace SolutionGrader.Core.Domain.Models
     /// </summary>
     public sealed class GradingConfig
     {
+        #region Port Configuration
+        
+        /// <summary>
+        /// The single port used for all grading communication:
+        /// - Server listens on this port
+        /// - Client connects to this port
+        /// - Network monitor captures traffic on this port
+        /// 
+        /// This is a fixed port to ensure consistent grading behavior.
+        /// Default: 8888
+        /// </summary>
+        public int GraderPort { get; set; } = 8888;
+        
+        #endregion
+        
         #region Sheet Grading Toggles
         
         /// <summary>
@@ -203,9 +218,13 @@ namespace SolutionGrader.Core.Domain.Models
         /// <summary>
         /// Default configuration with all validations enabled.
         /// Time column and DateTime values are excluded from grading.
+        /// GraderPort is set to 8888 for consistent port usage.
         /// </summary>
         public static GradingConfig Default => new GradingConfig
         {
+            // Port configuration
+            GraderPort = 8888,
+            
             // Sheet grading
             GradeClientSheet = true,
             GradeServerSheet = true,

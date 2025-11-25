@@ -32,5 +32,11 @@
         bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize);
 
         bool TryGetCapturedOutput(string captureKey, out string? content);
+        
+        /// <summary>
+        /// Clears all captured network data and HTTP metadata.
+        /// Used to flush health check traffic before executing actual test steps.
+        /// </summary>
+        void ClearNetworkCaptures();
     }
 }

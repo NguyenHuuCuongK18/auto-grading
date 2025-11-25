@@ -48,7 +48,12 @@ public class Program
         var env = new EnvironmentResetService(files);
         var suite = new ExcelSuiteLoader();
         var parse = new ExcelDetailParser();
-        var appsettings = new AppsettingsCreationService();
+
+        // Use default grading configuration (DateTime/Time excluded from grading, GraderPort = 8888)
+        var gradingConfig = GradingConfig.Default;
+
+        // AppsettingsCreationService now uses GraderPort from GradingConfig
+        var appsettings = new AppsettingsCreationService(gradingConfig);
 
         IRunContext runctx = new RunContext();
 
@@ -60,9 +65,6 @@ public class Program
         
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
-
-        // Use default grading configuration (DateTime/Time excluded from grading)
-        var gradingConfig = GradingConfig.Default;
 
         IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);

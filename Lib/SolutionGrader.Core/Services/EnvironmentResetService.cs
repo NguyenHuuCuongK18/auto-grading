@@ -303,8 +303,22 @@ END";
             // Priority order for Password:
             // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
             // 2. DatabaseConfiguration.Password (from header.xlsx)
-            // 3. Default "YourStrong@Passw0rd"
-            builder.Password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
+            // 3. Platform-specific default:
+            //    - Windows: "sa" (local SQL Server often has simpler password requirements)
+            //    - Linux/Docker: Strong password (SQL Server 2019+ requires complex password)
+            var password = envConfig?.DatabasePassword ?? dbConfig?.Password;
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                {
+                    password = AppsettingKeywords.DEFAULT_PASSWORD;
+                }
+                else
+                {
+                    password = AppsettingKeywords.DOCKER_SA_PASSWORD;
+                }
+            }
+            builder.Password = password;
             
             builder.TrustServerCertificate = true;
             builder.ConnectTimeout = 30;
