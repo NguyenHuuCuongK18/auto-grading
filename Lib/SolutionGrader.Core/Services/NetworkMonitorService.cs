@@ -312,7 +312,12 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     // Store HTTP body separately for response payload comparison
                     if (!string.IsNullOrEmpty(httpData.Body))
                     {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} Storing response body ({httpData.Body.Length} chars) to network.{_currentStage}.res.body");
                         _run.SetCapturedOutput($"network.{_currentStage}.res.body", httpData.Body);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} Response body is empty or null");
                     }
                 }
             }

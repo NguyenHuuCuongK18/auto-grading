@@ -438,7 +438,7 @@ namespace SolutionGrader.Core.Services
                     // First try the dedicated body capture, then fall back to full response
                     var bodyKey = $"network.{stageLabel}.res.body";
                     if (_run.TryGetCapturedOutput(bodyKey, out _))
-                        return bodyKey;
+                        return $"memory://{bodyKey}";
                     return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
                 }
                 
@@ -448,7 +448,7 @@ namespace SolutionGrader.Core.Services
                     // First try the dedicated body capture, then fall back to full request
                     var bodyKey = $"network.{stageLabel}.req.body";
                     if (_run.TryGetCapturedOutput(bodyKey, out _))
-                        return bodyKey;
+                        return $"memory://{bodyKey}";
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
                 }
                 

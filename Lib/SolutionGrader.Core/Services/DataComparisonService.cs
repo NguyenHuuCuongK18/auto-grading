@@ -284,8 +284,12 @@ namespace SolutionGrader.Core.Services
             content = string.Empty;
             if (string.IsNullOrWhiteSpace(path)) return false;
 
+            // Handle memory:// prefix for RunContext captured output
             if (path.StartsWith("memory://", StringComparison.OrdinalIgnoreCase))
-                return _run.TryGetCapturedOutput(path, out content);
+            {
+                var key = path.Substring("memory://".Length);
+                return _run.TryGetCapturedOutput(key, out content!);
+            }
 
             try
             {
