@@ -82,7 +82,9 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 // Set capture filter for the port we're monitoring (both directions)
                 _device.Filter = $"port {MonitorPort}";
                 
-                _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                // Create internal cancellation token source - NOT linked to external ct
+                // This prevents step-level timeouts from stopping the network monitor prematurely
+                _cts = new CancellationTokenSource();
                 _isCapturing = true;
                 
                 // Start capture in background

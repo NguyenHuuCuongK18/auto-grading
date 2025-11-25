@@ -283,6 +283,8 @@ namespace SolutionGrader.Core.Services
                 
                 // Start a background task to monitor process status
                 var monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                bool processesHaveStarted = false;
+                
                 var monitorTask = Task.Run(async () =>
                 {
                     try
@@ -291,10 +293,17 @@ namespace SolutionGrader.Core.Services
                         {
                             await Task.Delay(500, monitorCts.Token);
                             
-                            if (!_proc.IsClientRunning || !_proc.IsServerRunning)
+                            // Track if processes have been started at least once
+                            if (_proc.IsClientRunning || _proc.IsServerRunning)
                             {
-                                // Stop network monitor if processes exit
-                                try { if (_networkMonitor != null) await _networkMonitor.StopAsync(); } catch { }
+                                processesHaveStarted = true;
+                            }
+                            
+                            // Only check for process exit after they have started
+                            // This prevents premature monitor shutdown before processes begin
+                            if (processesHaveStarted && !_proc.IsClientRunning && !_proc.IsServerRunning)
+                            {
+                                // Both processes have exited after being started
                                 break;
                             }
                         }
