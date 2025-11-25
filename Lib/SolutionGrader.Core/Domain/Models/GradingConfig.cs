@@ -4,215 +4,374 @@ namespace SolutionGrader.Core.Domain.Models
     /// Configuration for controlling which aspects of the test kit to validate during grading.
     /// This allows easy toggling of validation checks for debugging and incremental testing.
     /// 
-    /// Grading modes control which sheets to grade:
-    /// - DEFAULT: Grade both OutputClients and OutputServers sheets (all validations)
-    /// - CLIENT: Grade only OutputClients sheet (all validations on that sheet)
-    /// - SERVER: Grade only OutputServers sheet (all validations on that sheet)
-    /// - CONSOLE: Grade only console output columns from both sheets
-    /// - Network: Grade only Network-related columns from both sheets
+    /// The new test kit format has the following sheets:
+    /// - User: Actions and inputs (Stage, Input, Action)
+    /// - Client: Client console output (Stage, Console)
+    /// - Server: Server console output (Stage, Console)
+    /// - Network: Network traffic data
+    ///   - HTTP: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole
+    ///   - TCP: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
+    /// 
+    /// Note: Time column and DateTime headers are excluded from grading by default as they vary with each run.
     /// </summary>
     public sealed class GradingConfig
     {
+        #region Sheet Grading Toggles
+        
         /// <summary>
-        /// Enable/disable grading of OutputClients sheet (client-side validations).
-        /// When false, all steps from OutputClients sheet are skipped.
+        /// Enable/disable grading of Client sheet (client console output).
+        /// When false, all steps from Client sheet are skipped.
         /// </summary>
-        public bool GradeOutputClientsSheet { get; set; } = true;
+        public bool GradeClientSheet { get; set; } = true;
 
         /// <summary>
-        /// Enable/disable grading of OutputServers sheet (server-side validations).
-        /// When false, all steps from OutputServers sheet are skipped.
+        /// Enable/disable grading of Server sheet (server console output).
+        /// When false, all steps from Server sheet are skipped.
         /// </summary>
-        public bool GradeOutputServersSheet { get; set; } = true;
-
+        public bool GradeServerSheet { get; set; } = true;
+        
+        /// <summary>
+        /// Enable/disable grading of Network sheet data.
+        /// When false, all network validation steps are skipped.
+        /// </summary>
+        public bool GradeNetworkSheet { get; set; } = true;
+        
+        #endregion
+        
+        #region Console Output Validation
+        
         /// <summary>
         /// Enable/disable validation of client console output against expected output.
         /// </summary>
-        public bool ValidateClientOutput { get; set; } = true;
+        public bool ValidateClientConsole { get; set; } = true;
 
         /// <summary>
         /// Enable/disable validation of server console output against expected output.
         /// </summary>
-        public bool ValidateServerOutput { get; set; } = true;
-
+        public bool ValidateServerConsole { get; set; } = true;
+        
+        #endregion
+        
+        #region Network Validation - HTTP Protocol
+        
         /// <summary>
-        /// Enable/disable validation of HTTP data response from server to client.
-        /// </summary>
-        public bool ValidateDataResponse { get; set; } = true;
-
-        /// <summary>
-        /// Enable/disable validation of HTTP data request from client to server.
-        /// </summary>
-        public bool ValidateDataRequest { get; set; } = true;
-
-        /// <summary>
-        /// Enable/disable validation of HTTP method (GET, POST, etc.).
+        /// Enable/disable validation of HTTP method (GET, POST, PUT, DELETE, etc.).
         /// </summary>
         public bool ValidateHttpMethod { get; set; } = true;
 
         /// <summary>
-        /// Enable/disable validation of HTTP status code.
+        /// Enable/disable validation of HTTP status code (200 OK, 404 Not Found, etc.).
         /// </summary>
         public bool ValidateStatusCode { get; set; } = true;
+        
+        /// <summary>
+        /// Enable/disable validation of HTTP body content.
+        /// </summary>
+        public bool ValidateHttpBody { get; set; } = true;
+        
+        /// <summary>
+        /// Enable/disable validation of HTTP headers.
+        /// Note: Date header is excluded by default (see ValidateDateTimeValues).
+        /// </summary>
+        public bool ValidateHttpHeaders { get; set; } = false;
+        
+        /// <summary>
+        /// Enable/disable validation of HTTP URI.
+        /// </summary>
+        public bool ValidateHttpUri { get; set; } = true;
+        
+        #endregion
+        
+        #region Network Validation - TCP Protocol
+        
+        /// <summary>
+        /// Enable/disable validation of raw TCP data payload.
+        /// </summary>
+        public bool ValidateTcpData { get; set; } = true;
+        
+        #endregion
+        
+        #region Network Validation - Common
+        
+        /// <summary>
+        /// Enable/disable validation of network request data (client to server).
+        /// </summary>
+        public bool ValidateNetworkRequest { get; set; } = true;
 
         /// <summary>
-        /// Enable/disable validation of response byte size.
+        /// Enable/disable validation of network response data (server to client).
         /// </summary>
-        public bool ValidateByteSize { get; set; } = false;
-
-        /// <summary>
-        /// Enable/disable validation of data type (JSON, CSV, Text, etc.).
-        /// </summary>
-        public bool ValidateDataType { get; set; } = true;
-
+        public bool ValidateNetworkResponse { get; set; } = true;
+        
+        #endregion
+        
+        #region Time/DateTime Exclusions
+        
         /// <summary>
         /// Enable/disable validation of Time column in Network sheet.
-        /// Time values vary with each run, so this is disabled by default.
+        /// Time values vary with each run, so this is DISABLED by default.
         /// </summary>
         public bool ValidateTimeColumn { get; set; } = false;
 
         /// <summary>
         /// Enable/disable validation of DateTime values and Date headers.
         /// DateTime varies between runs and HTTP Date headers change each request.
-        /// Disabled by default to prevent false failures.
+        /// DISABLED by default to prevent false failures.
         /// </summary>
         public bool ValidateDateTimeValues { get; set; } = false;
-
+        
+        #endregion
+        
+        #region Deprecated - Backward Compatibility
+        
         /// <summary>
-        /// Enable/disable grading of Network sheet data.
+        /// [DEPRECATED] Use GradeClientSheet instead.
         /// </summary>
-        public bool GradeNetworkSheet { get; set; } = true;
+        [Obsolete("Use GradeClientSheet instead. The old OutputClients sheet is now called Client.")]
+        public bool GradeOutputClientsSheet 
+        { 
+            get => GradeClientSheet; 
+            set => GradeClientSheet = value; 
+        }
 
         /// <summary>
-        /// Gets the default configuration with all validations enabled on both sheets.
-        /// DateTime and Time columns are excluded from grading by default.
-        /// Grades both OutputClients and OutputServers sheets with all validations.
+        /// [DEPRECATED] Use GradeServerSheet instead.
+        /// </summary>
+        [Obsolete("Use GradeServerSheet instead. The old OutputServers sheet is now called Server.")]
+        public bool GradeOutputServersSheet 
+        { 
+            get => GradeServerSheet; 
+            set => GradeServerSheet = value; 
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Use ValidateClientConsole instead.
+        /// </summary>
+        [Obsolete("Use ValidateClientConsole instead.")]
+        public bool ValidateClientOutput 
+        { 
+            get => ValidateClientConsole; 
+            set => ValidateClientConsole = value; 
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Use ValidateServerConsole instead.
+        /// </summary>
+        [Obsolete("Use ValidateServerConsole instead.")]
+        public bool ValidateServerOutput 
+        { 
+            get => ValidateServerConsole; 
+            set => ValidateServerConsole = value; 
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Use ValidateNetworkResponse instead.
+        /// </summary>
+        [Obsolete("Use ValidateNetworkResponse instead.")]
+        public bool ValidateDataResponse 
+        { 
+            get => ValidateNetworkResponse; 
+            set => ValidateNetworkResponse = value; 
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Use ValidateNetworkRequest instead.
+        /// </summary>
+        [Obsolete("Use ValidateNetworkRequest instead.")]
+        public bool ValidateDataRequest 
+        { 
+            get => ValidateNetworkRequest; 
+            set => ValidateNetworkRequest = value; 
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Byte size validation is no longer used in new test kit format.
+        /// </summary>
+        [Obsolete("Byte size validation is no longer used in new test kit format.")]
+        public bool ValidateByteSize { get; set; } = false;
+        
+        /// <summary>
+        /// [DEPRECATED] Data type is inferred from content, not explicitly validated.
+        /// </summary>
+        [Obsolete("Data type is inferred from content in new test kit format.")]
+        public bool ValidateDataType { get; set; } = true;
+        
+        #endregion
+        
+        #region Preset Configurations
+        
+        /// <summary>
+        /// Default configuration with all validations enabled.
+        /// Time column and DateTime values are excluded from grading.
         /// </summary>
         public static GradingConfig Default => new GradingConfig
         {
+            // Sheet grading
+            GradeClientSheet = true,
+            GradeServerSheet = true,
+            GradeNetworkSheet = true,
+            
+            // Console validation
+            ValidateClientConsole = true,
+            ValidateServerConsole = true,
+            
+            // HTTP validation
+            ValidateHttpMethod = true,
+            ValidateStatusCode = true,
+            ValidateHttpBody = true,
+            ValidateHttpHeaders = false,  // Headers often contain dynamic data
+            ValidateHttpUri = true,
+            
+            // TCP validation
+            ValidateTcpData = true,
+            
+            // Network validation
+            ValidateNetworkRequest = true,
+            ValidateNetworkResponse = true,
+            
+            // Time exclusions (always off by default)
             ValidateTimeColumn = false,
             ValidateDateTimeValues = false
         };
 
         /// <summary>
-        /// Creates a configuration for grading only OutputClients sheet (client-side).
-        /// Grades client console output, data responses, HTTP methods, status codes, and byte sizes
-        /// from the OutputClients sheet. Skips OutputServers sheet entirely.
+        /// Configuration for grading only Client sheet (client-side).
         /// </summary>
         public static GradingConfig ClientOnly => new GradingConfig
         {
-            GradeOutputClientsSheet = true,
-            GradeOutputServersSheet = false,
-            // Enable all validations for the OutputClients sheet
-            ValidateClientOutput = true,
-            ValidateDataResponse = true,
-            ValidateHttpMethod = true,
-            ValidateStatusCode = true,
-            ValidateByteSize = false,
-            ValidateDataType = true,
-            // Server validations not applicable since OutputServers sheet is skipped
-            ValidateServerOutput = false,
-            ValidateDataRequest = false
+            GradeClientSheet = true,
+            GradeServerSheet = false,
+            GradeNetworkSheet = false,
+            ValidateClientConsole = true,
+            ValidateServerConsole = false,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
         };
 
         /// <summary>
-        /// Creates a configuration for grading only OutputServers sheet (server-side).
-        /// Grades server console output, data requests, HTTP methods, and byte sizes
-        /// from the OutputServers sheet. Skips OutputClients sheet entirely.
+        /// Configuration for grading only Server sheet (server-side).
         /// </summary>
         public static GradingConfig ServerOnly => new GradingConfig
         {
-            GradeOutputClientsSheet = false,
-            GradeOutputServersSheet = true,
-            // Enable all validations for the OutputServers sheet
-            ValidateServerOutput = true,
-            ValidateDataRequest = true,
-            ValidateHttpMethod = true,
-            ValidateByteSize = false,
-            ValidateDataType = true,
-            // Client validations not applicable since OutputClients sheet is skipped
-            ValidateClientOutput = false,
-            ValidateDataResponse = false,
-            ValidateStatusCode = false
+            GradeClientSheet = false,
+            GradeServerSheet = true,
+            GradeNetworkSheet = false,
+            ValidateClientConsole = false,
+            ValidateServerConsole = true,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
         };
 
         /// <summary>
-        /// Creates a configuration for validating only console outputs from both sheets.
-        /// Grades Output columns from both OutputClients and OutputServers sheets.
-        /// Skips HTTP-related validations (methods, status codes, data requests/responses, byte sizes).
+        /// Configuration for validating only console outputs from both Client and Server sheets.
+        /// Network validation is disabled.
         /// </summary>
-        public static GradingConfig ConsoleOutputOnly => new GradingConfig
+        public static GradingConfig ConsoleOnly => new GradingConfig
         {
-            GradeOutputClientsSheet = true,
-            GradeOutputServersSheet = true,
-            ValidateClientOutput = true,
-            ValidateServerOutput = true,
-            ValidateDataResponse = false,
-            ValidateDataRequest = false,
-            ValidateHttpMethod = false,
-            ValidateStatusCode = false,
-            ValidateByteSize = false,
-            ValidateDataType = false
+            GradeClientSheet = true,
+            GradeServerSheet = true,
+            GradeNetworkSheet = false,
+            ValidateClientConsole = true,
+            ValidateServerConsole = true,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
         };
 
         /// <summary>
-        /// Creates a configuration for validating only HTTP traffic from both sheets.
-        /// Grades HTTP-related columns (methods, status codes, data requests/responses, byte sizes)
-        /// from both OutputClients and OutputServers sheets.
-        /// Skips console output validations.
+        /// Configuration for validating only Network sheet data.
+        /// Console output validation is disabled.
         /// </summary>
-        public static GradingConfig HttpTrafficOnly => new GradingConfig
+        public static GradingConfig NetworkOnly => new GradingConfig
         {
-            GradeOutputClientsSheet = true,
-            GradeOutputServersSheet = true,
-            ValidateClientOutput = false,
-            ValidateServerOutput = false,
-            ValidateDataResponse = true,
-            ValidateDataRequest = true,
+            GradeClientSheet = false,
+            GradeServerSheet = false,
+            GradeNetworkSheet = true,
+            ValidateClientConsole = false,
+            ValidateServerConsole = false,
             ValidateHttpMethod = true,
             ValidateStatusCode = true,
-            ValidateByteSize = false,
-            ValidateDataType = true
+            ValidateHttpBody = true,
+            ValidateTcpData = true,
+            ValidateNetworkRequest = true,
+            ValidateNetworkResponse = true,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
         };
-
+        
+        #endregion
+        
+        #region Helper Methods
+        
         /// <summary>
-        /// Checks if a specific validation is enabled based on the step type.
+        /// Checks if a specific validation type is enabled.
         /// </summary>
-        public bool IsEnabled(string stepType)
+        /// <param name="validationType">The validation type from step metadata.</param>
+        /// <returns>True if the validation is enabled, false otherwise.</returns>
+        public bool IsValidationEnabled(string validationType)
         {
-            return stepType?.ToUpperInvariant() switch
+            return validationType?.ToUpperInvariant() switch
             {
-                "CLIENT_OUTPUT" => ValidateClientOutput,
-                "SERVER_OUTPUT" => ValidateServerOutput,
-                "DATA_RESPONSE" => ValidateDataResponse,
-                "DATA_REQUEST" => ValidateDataRequest,
+                "CLIENT_CONSOLE" or "CLIENT_OUTPUT" => ValidateClientConsole,
+                "SERVER_CONSOLE" or "SERVER_OUTPUT" => ValidateServerConsole,
                 "HTTP_METHOD" => ValidateHttpMethod,
                 "STATUS_CODE" => ValidateStatusCode,
-                "BYTE_SIZE" => ValidateByteSize,
-                "DATA_TYPE" => ValidateDataType,
+                "HTTP_BODY" => ValidateHttpBody,
+                "HTTP_HEADERS" => ValidateHttpHeaders,
+                "HTTP_URI" => ValidateHttpUri,
+                "TCP_DATA" or "DATA" => ValidateTcpData,
+                "NETWORK_REQUEST" or "DATA_REQUEST" => ValidateNetworkRequest,
+                "NETWORK_RESPONSE" or "DATA_RESPONSE" => ValidateNetworkResponse,
+                "TIME" => ValidateTimeColumn,
+                "DATETIME" or "DATE" => ValidateDateTimeValues,
                 _ => true
             };
         }
-
+        
         /// <summary>
-        /// Checks if a step should be graded based on its sheet origin (OC- or OS- prefix).
+        /// Checks if a step should be graded based on its sheet origin.
+        /// Step IDs follow the pattern: {SHEET}-{TYPE}-{STAGE}
+        /// e.g., CLIENT-CONSOLE-1, SERVER-CONSOLE-2, NETWORK-METHOD-3
         /// </summary>
-        /// <param name="stepId">The step ID, which should start with OC- or OS-</param>
-        /// <returns>True if the step should be graded, false if it should be skipped</returns>
+        /// <param name="stepId">The step ID.</param>
+        /// <returns>True if the step should be graded, false if it should be skipped.</returns>
         public bool ShouldGradeStep(string stepId)
         {
             if (string.IsNullOrEmpty(stepId)) return true;
             
-            // Steps from OutputClients sheet start with "OC-"
-            if (stepId.StartsWith("OC-", StringComparison.OrdinalIgnoreCase))
-                return GradeOutputClientsSheet;
+            var upperStepId = stepId.ToUpperInvariant();
             
-            // Steps from OutputServers sheet start with "OS-"
-            if (stepId.StartsWith("OS-", StringComparison.OrdinalIgnoreCase))
-                return GradeOutputServersSheet;
+            // Steps from Client sheet
+            if (upperStepId.StartsWith("CLIENT-"))
+                return GradeClientSheet;
             
-            // Steps from other sources (e.g., InputClients) are always graded
+            // Steps from Server sheet
+            if (upperStepId.StartsWith("SERVER-"))
+                return GradeServerSheet;
+            
+            // Steps from Network sheet
+            if (upperStepId.StartsWith("NETWORK-"))
+                return GradeNetworkSheet;
+            
+            // User sheet steps (actions) are always executed
+            if (upperStepId.StartsWith("USER-"))
+                return true;
+            
+            // Legacy format support (OC- and OS- prefixes)
+            if (upperStepId.StartsWith("OC-"))
+                return GradeClientSheet;
+            if (upperStepId.StartsWith("OS-"))
+                return GradeServerSheet;
+            
+            // Unknown prefix - grade by default
             return true;
         }
+        
+        /// <summary>
+        /// [DEPRECATED] Use IsValidationEnabled instead.
+        /// </summary>
+        [Obsolete("Use IsValidationEnabled instead.")]
+        public bool IsEnabled(string stepType) => IsValidationEnabled(stepType);
+        
+        #endregion
     }
 }

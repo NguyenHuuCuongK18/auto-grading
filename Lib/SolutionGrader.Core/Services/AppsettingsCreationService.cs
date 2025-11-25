@@ -194,9 +194,16 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         var server = dbConfig?.SqlServer;
         if (string.IsNullOrWhiteSpace(server))
         {
-            server = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) 
-                ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE 
-                : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            {
+                server = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE;
+            }
+            else
+            {
+                // On Linux, use Docker SQL Server with the configured port
+                var dbPort = envConfig?.DatabaseHostPort ?? 1433;
+                server = $"localhost,{dbPort}";
+            }
         }
         
         // Format SQL Server instance name properly
@@ -236,8 +243,28 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         // Priority order for Password:
         // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
         // 2. DatabaseConfiguration.Password (from header.xlsx)
-        // 3. Default "YourStrong@Passw0rd"
-        var password = envConfig?.DatabasePassword ?? dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
+        // 3. Default strong password for Docker (SQL Server requires complex password)
+        var password = dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
+        
+        // Check if environment password is provided and is strong enough for SQL Server
+        // SQL Server requires at least 8 chars with uppercase, lowercase, digit, and special char
+        if (!string.IsNullOrWhiteSpace(envConfig?.DatabasePassword))
+        {
+            var envPwd = envConfig.DatabasePassword;
+            if (envPwd.Length >= 8 && 
+                envPwd.Any(char.IsUpper) && 
+                envPwd.Any(char.IsLower) && 
+                envPwd.Any(char.IsDigit))
+            {
+                password = envPwd;
+            }
+            else
+            {
+                // Environment password is too simple for SQL Server 2019+
+                // Use Docker default password instead
+                Console.WriteLine($"[Warning] Environment password is too simple for SQL Server. Using default Docker password.");
+            }
+        }
 
         // Build connection string using simple template for consistent lowercase formatting
         return string.Format(

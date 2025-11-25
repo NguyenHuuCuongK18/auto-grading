@@ -81,6 +81,9 @@ namespace SolutionGrader.Core.Services
                 // Store protocol type for network monitoring
                 _protocol = suite.Protocol ?? NetworkKeywords.Protocol_TCP;
                 
+                // Use test case environment if available, otherwise fall back to suite environment
+                var envConfig = testCase.Environment ?? suite.Environment;
+                
                 // Always generate appsettings from header
                 // NEW: This now generates a single port for both client and server
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
@@ -88,7 +91,7 @@ namespace SolutionGrader.Core.Services
                     suite.DatabaseConfig, 
                     clientExePath, 
                     serverExePath, 
-                    testCase.Environment, 
+                    envConfig, 
                     suite.Protocol);
                 
                 // Store the monitor port (same as server port in new architecture)
@@ -132,8 +135,8 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Reset database
-                await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, false, testCase.Environment, ct);
+                // Reset database using effective environment config
+                await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, false, envConfig, ct);
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 1] Environment setup completed");
                 return (true, "Environment setup successful");

@@ -27,7 +27,15 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         var dateTimeFormat = ReadDateTimeFormatFromHeader(headerPath);
         
         // Read environment configuration from outermost environment.xlsx
+        Console.WriteLine($"[Environment] Looking for environment config in: {suiteRoot}");
         var envConfig = ReadEnvironmentConfig(suiteRoot);
+        Console.WriteLine($"[Environment] Environment config loaded: {(envConfig != null ? "Yes" : "No")}");
+        if (envConfig != null)
+        {
+            Console.WriteLine($"[Environment] DatabaseHostPort: {envConfig.DatabaseHostPort}");
+            Console.WriteLine($"[Environment] DatabaseName: {envConfig.DatabaseName}");
+            Console.WriteLine($"[Environment] DatabaseUsername: {envConfig.DatabaseUsername}");
+        }
         
         // Build test cases from directories
         var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment);
@@ -281,8 +289,14 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
     private static EnvironmentConfiguration? ReadEnvironmentConfig(string suiteRoot)
     {
+        // Try both lowercase and uppercase file names (case sensitivity varies by OS)
         var envPath = Path.Combine(suiteRoot, FileKeywords.FileName_Environment);
-        if (!File.Exists(envPath)) return null;
+        if (!File.Exists(envPath))
+        {
+            // Try uppercase "Environment.xlsx" as fallback
+            envPath = Path.Combine(suiteRoot, "Environment.xlsx");
+            if (!File.Exists(envPath)) return null;
+        }
 
         try
         {
@@ -306,6 +320,13 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 var value = ws.Cell(r, 2).GetString().Trim();
 
                 if (string.IsNullOrEmpty(key)) continue;
+                
+                // Debug: Log all keys and values being parsed
+                if (key.Contains("Database", StringComparison.OrdinalIgnoreCase) || 
+                    key.Contains("Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[Environment] Parsing: {key} = {value}");
+                }
 
                 // NEW: MonitorPort is the preferred single port configuration
                 // Server listens on this port, client connects to this port
@@ -346,6 +367,19 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 else if (key.Equals("Database_Password", StringComparison.OrdinalIgnoreCase))
                 {
                     config.DatabasePassword = value;
+                }
+                else if (key.Equals("Database_Container_Host_Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(value, out var port))
+                    {
+                        config.DatabaseHostPort = port;
+                        Console.WriteLine($"[Environment] DatabaseHostPort set to {port}");
+                    }
+                }
+                else if (key.Equals("Database_Container_Internal_Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Just log, we use the host port for connection
+                    Console.WriteLine($"[Environment] DatabaseContainerInternalPort (info only): {value}");
                 }
             }
 

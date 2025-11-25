@@ -66,6 +66,17 @@ public sealed class EnvironmentConfiguration
     /// Database password from environment
     /// </summary>
     public string? DatabasePassword { get; set; }
+    
+    /// <summary>
+    /// Database host port for Docker containers (Database_Container_Host_Port).
+    /// Used to connect to database running in Docker (e.g., localhost,1434).
+    /// </summary>
+    public int? DatabaseHostPort { get; set; }
+    
+    /// <summary>
+    /// Database server hostname or IP address.
+    /// </summary>
+    public string? DatabaseServer { get; set; }
 
     /// <summary>
     /// Stop grading if database reset fails (default: true)
