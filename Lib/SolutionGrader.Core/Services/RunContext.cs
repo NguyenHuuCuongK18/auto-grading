@@ -55,6 +55,15 @@ namespace SolutionGrader.Core.Services
 
         public void SetServerResponse(string questionCode, string stage, string content)
             => SetCapture(FileKeywords.Folder_ServersResponse, questionCode, stage, content);
+        
+        /// <summary>
+        /// Sets captured output for a custom key (e.g., network.{stage}.req.body).
+        /// Used for storing network packet data for comparison.
+        /// </summary>
+        public void SetCapturedOutput(string captureKey, string content)
+        {
+            _captures[captureKey] = new StringBuilder(content);
+        }
 
         public bool TryGetCapturedOutput(string captureKey, out string? content)
         {
@@ -71,7 +80,20 @@ namespace SolutionGrader.Core.Services
         public void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize)
         {
             var key = $"{questionCode}-{stage}";
-            _httpMetadata[key] = (httpMethod, statusCode, byteSize);
+            
+            // Merge with existing metadata to preserve both request method and response status
+            if (_httpMetadata.TryGetValue(key, out var existing))
+            {
+                // Preserve existing non-empty values
+                var newMethod = !string.IsNullOrEmpty(httpMethod) ? httpMethod : existing.HttpMethod;
+                var newStatus = statusCode != 0 ? statusCode : existing.StatusCode;
+                var newSize = byteSize != 0 ? byteSize : existing.ByteSize;
+                _httpMetadata[key] = (newMethod, newStatus, newSize);
+            }
+            else
+            {
+                _httpMetadata[key] = (httpMethod, statusCode, byteSize);
+            }
         }
 
         public bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize)

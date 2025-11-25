@@ -10,11 +10,17 @@ using System;
 using System.IO;
 namespace SolutionGrader.Core.Services
 {
+    /// <summary>
+    /// Executes test steps including process management, data comparisons, and validations.
+    /// 
+    /// NOTE: The Executor no longer depends on IMiddlewareService.
+    /// Network monitoring is now handled by TestCaseOrchestrator using INetworkMonitorService.
+    /// The Executor focuses on step execution and data comparison.
+    /// </summary>
     public sealed class Executor : IExecutor
     {
         private readonly HttpClient _http = new();
         private readonly IExecutableManager _proc;
-        private readonly IMiddlewareService _mw;
         private readonly IDataComparisonService _cmp;
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
@@ -25,10 +31,9 @@ namespace SolutionGrader.Core.Services
         private const int ConnectionOutputWaitSeconds = 2; // Wait time for server output after connection-triggering actions
         private int _configuredServerPort = 5001; // Default fallback port
 
-        public Executor(IExecutableManager proc, IMiddlewareService mw, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
+        public Executor(IExecutableManager proc, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
         {
             _proc = proc;
-            _mw = mw;
             _cmp = cmp;
             _log = log;
             _run = run;
@@ -383,25 +388,11 @@ namespace SolutionGrader.Core.Services
 
                     case var a when a == ActionKeywords.TcpRelay:
                         {
-                            // Check if both client and server are currently running before starting middleware
-                            // This ensures middleware only operates when both endpoints are available
-                            if (!_proc.IsClientRunning || !_proc.IsServerRunning)
-                            {
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Skipping middleware start - both client and server must be running");
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Client running: {_proc.IsClientRunning}, Server running: {_proc.IsServerRunning}");
-                                result = (true, "Middleware start skipped - waiting for both processes");
-                                break;
-                            }
-                            
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_TCP_RELAY_STARTING, args.Protocol)}");
-                            bool useHttp = !string.Equals(args.Protocol, AppsettingKeywords.PROTOCOL_TCP, StringComparison.OrdinalIgnoreCase);
-                            await _mw.StartAsync(useHttp, ct);
-                            
-                            // Wait for server output after middleware starts and connection is established
-                            // This allows "client connected" messages to be captured in the correct stage
-                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
-                            
-                            result = (true, $"Middleware proxy started ({args.Protocol} mode)");
+                            // NOTE: TcpRelay action is now deprecated.
+                            // Network monitoring is handled by TestCaseOrchestrator using INetworkMonitorService.
+                            // This action is kept for backward compatibility but simply logs and continues.
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} TcpRelay action is deprecated - network monitoring handled by orchestrator");
+                            result = (true, "TcpRelay action deprecated - network monitor active");
                             break;
                         }
 
@@ -441,13 +432,25 @@ namespace SolutionGrader.Core.Services
                 if (step.Id.StartsWith("CLIENT-", StringComparison.OrdinalIgnoreCase))
                     return _run.GetClientCaptureKey(step.QuestionCode, stageLabel);
                 
-                // NETWORK-RESPAYLOAD steps read from server response (HTTP response body)
+                // NETWORK-RESPAYLOAD steps read from network response body capture
                 if (step.Id.StartsWith("NETWORK-RESPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    // First try the dedicated body capture, then fall back to full response
+                    var bodyKey = $"network.{stageLabel}.res.body";
+                    if (_run.TryGetCapturedOutput(bodyKey, out _))
+                        return $"memory://{bodyKey}";
                     return _run.GetServerResponseCaptureKey(step.QuestionCode, stageLabel);
+                }
                 
-                // NETWORK-REQPAYLOAD steps read from server request (HTTP request body)
+                // NETWORK-REQPAYLOAD steps read from network request body capture
                 if (step.Id.StartsWith("NETWORK-REQPAYLOAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    // First try the dedicated body capture, then fall back to full request
+                    var bodyKey = $"network.{stageLabel}.req.body";
+                    if (_run.TryGetCapturedOutput(bodyKey, out _))
+                        return $"memory://{bodyKey}";
                     return _run.GetServerRequestCaptureKey(step.QuestionCode, stageLabel);
+                }
                 
                 // NETWORK-METHOD steps are handled separately (HTTP method comparison)
                 if (step.Id.StartsWith("NETWORK-METHOD", StringComparison.OrdinalIgnoreCase))

@@ -53,17 +53,21 @@ public class Program
         IRunContext runctx = new RunContext();
 
         IExecutableManager proc = new ExecutableManager(runctx);
-        IMiddlewareService mw = new MiddlewareProxyService(runctx);
+        
+        // NEW: Use NetworkMonitorService instead of MiddlewareProxyService
+        // The network monitor passively sniffs packets instead of proxying traffic
+        INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
+        
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
 
-        // Use default grading configuration
+        // Use default grading configuration (DateTime/Time excluded from grading)
         var gradingConfig = GradingConfig.Default;
 
-        IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
+        IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx, appsettings);
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
         
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
         

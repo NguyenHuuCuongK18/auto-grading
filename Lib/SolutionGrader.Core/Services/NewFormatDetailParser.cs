@@ -243,70 +243,112 @@ public sealed class NewFormatDetailParser
         }
 
         // Parse Network sheet for expected network payloads (if missing, ignore)
+        // NEW TEST KIT FORMAT: The Network sheet has different columns for HTTP vs TCP:
+        // - HTTP: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole
+        // - TCP: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
+        // Time column is excluded from grading (varies each run)
+        // HTTP Date header is also excluded from grading
         if (networkSheet != null && networkSheet.RangeUsed() != null)
         {
             var map = Header(networkSheet);
+            
+            // Collect all rows with data to validate
+            // We only validate rows that have actual payload data (PSH flag)
             foreach (var row in networkSheet.RangeUsed()!.Rows().Skip(1))
             {
-                var stage = Get(row, map, "Stage");
-                var url = Get(row, map, "Url");
-                var httpMethod = Get(row, map, "HTTP_Method");
-                var reqPayload = Get(row, map, "REQ_Payload");
-                var resPayload = Get(row, map, "RES_Payload");
-
+                var stage = Get(row, map, NetworkKeywords.Col_Stage);
+                var info = Get(row, map, NetworkKeywords.Col_Info);
+                var sourceRole = Get(row, map, NetworkKeywords.Col_SourceRole);
+                var flags = Get(row, map, NetworkKeywords.Col_Flags);
+                
+                // Skip rows without stage or without data transfer
                 if (string.IsNullOrWhiteSpace(stage)) continue;
-
-                // Validate HTTP Method if provided (missing = ignore)
-                if (!string.IsNullOrWhiteSpace(httpMethod))
+                
+                // Only validate rows with PSH flag (data transfer packets)
+                if (!flags.Contains("PSH", StringComparison.OrdinalIgnoreCase)) continue;
+                
+                // Get payload data based on protocol (HTTP vs TCP)
+                var httpBody = Get(row, map, NetworkKeywords.Col_HttpBody);
+                var tcpData = Get(row, map, NetworkKeywords.Col_Data);
+                var method = Get(row, map, NetworkKeywords.Col_Method);
+                var status = Get(row, map, NetworkKeywords.Col_Status);
+                var uri = Get(row, map, NetworkKeywords.Col_URI);
+                
+                // Determine if this is a request or response based on source role
+                bool isRequest = sourceRole.Equals(NetworkKeywords.Role_Client, StringComparison.OrdinalIgnoreCase);
+                bool isResponse = sourceRole.Equals(NetworkKeywords.Role_Server, StringComparison.OrdinalIgnoreCase);
+                
+                // For HTTP protocol
+                if (info.Contains("HTTP", StringComparison.OrdinalIgnoreCase))
                 {
-                    steps.Add(new Step
+                    // Validate HTTP Method for requests (missing = ignore)
+                    if (isRequest && !string.IsNullOrWhiteSpace(method))
                     {
-                        Id = $"NETWORK-METHOD-{stage}",
-                        QuestionCode = questionCode,
-                        Stage = stage,
-                        Action = ActionKeywords.CompareText,
-                        Target = httpMethod,
-                        HttpMethod = httpMethod,
-                        DataType = "TEXT",
-                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod }
-                    });
+                        steps.Add(new Step
+                        {
+                            Id = $"NETWORK-METHOD-{stage}",
+                            QuestionCode = questionCode,
+                            Stage = stage,
+                            Action = ActionKeywords.CompareText,
+                            Target = method,
+                            HttpMethod = method,
+                            DataType = "TEXT",
+                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod }
+                        });
+                    }
+                    
+                    // Validate HTTP Status for responses (missing = ignore)
+                    if (isResponse && !string.IsNullOrWhiteSpace(status))
+                    {
+                        steps.Add(new Step
+                        {
+                            Id = $"NETWORK-STATUS-{stage}",
+                            QuestionCode = questionCode,
+                            Stage = stage,
+                            Action = ActionKeywords.CompareText,
+                            Target = status,
+                            StatusCode = status,
+                            DataType = "TEXT",
+                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_StatusCode }
+                        });
+                    }
+                    
+                    // Validate HTTP Body/Payload (missing = ignore)
+                    if (!string.IsNullOrWhiteSpace(httpBody))
+                    {
+                        var validationType = isRequest ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_DataResponse;
+                        var stepIdPrefix = isRequest ? "NETWORK-REQPAYLOAD" : "NETWORK-RESPAYLOAD";
+                        var action = IsJson(httpBody) ? ActionKeywords.CompareJson : ActionKeywords.CompareText;
+                        
+                        steps.Add(new Step
+                        {
+                            Id = $"{stepIdPrefix}-{stage}",
+                            QuestionCode = questionCode,
+                            Stage = stage,
+                            Action = action,
+                            Target = httpBody,
+                            DataType = IsJson(httpBody) ? "JSON" : "TEXT",
+                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = validationType }
+                        });
+                    }
                 }
-
-                // Validate Request Payload if provided (missing = ignore)
-                if (!string.IsNullOrWhiteSpace(reqPayload))
+                // For TCP protocol
+                else if (!string.IsNullOrWhiteSpace(tcpData))
                 {
-                    var action = IsXml(reqPayload) || IsJson(reqPayload)
-                        ? ActionKeywords.CompareText
-                        : ActionKeywords.CompareText;
-
+                    var validationType = isRequest ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_DataResponse;
+                    var stepIdPrefix = isRequest ? "NETWORK-REQPAYLOAD" : "NETWORK-RESPAYLOAD";
+                    var action = IsXml(tcpData) ? ActionKeywords.CompareText : 
+                                 (IsJson(tcpData) ? ActionKeywords.CompareJson : ActionKeywords.CompareText);
+                    
                     steps.Add(new Step
                     {
-                        Id = $"NETWORK-REQPAYLOAD-{stage}",
+                        Id = $"{stepIdPrefix}-{stage}",
                         QuestionCode = questionCode,
                         Stage = stage,
                         Action = action,
-                        Target = reqPayload,
-                        DataType = IsXml(reqPayload) ? "XML" : (IsJson(reqPayload) ? "JSON" : "TEXT"),
-                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_DataRequest }
-                    });
-                }
-
-                // Validate Response Payload if provided (missing = ignore)
-                if (!string.IsNullOrWhiteSpace(resPayload))
-                {
-                    var action = IsXml(resPayload) || IsJson(resPayload)
-                        ? ActionKeywords.CompareText
-                        : ActionKeywords.CompareText;
-
-                    steps.Add(new Step
-                    {
-                        Id = $"NETWORK-RESPAYLOAD-{stage}",
-                        QuestionCode = questionCode,
-                        Stage = stage,
-                        Action = action,
-                        Target = resPayload,
-                        DataType = IsXml(resPayload) ? "XML" : (IsJson(resPayload) ? "JSON" : "TEXT"),
-                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_DataResponse }
+                        Target = tcpData,
+                        DataType = IsXml(tcpData) ? "XML" : (IsJson(tcpData) ? "JSON" : "TEXT"),
+                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = validationType }
                     });
                 }
             }

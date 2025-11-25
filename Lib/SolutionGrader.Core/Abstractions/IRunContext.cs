@@ -21,6 +21,12 @@
         void SetServerRequest(string questionCode, string stage, string content);
         void SetServerResponse(string questionCode, string stage, string content);
         
+        /// <summary>
+        /// Sets captured output for a custom key (e.g., network.{stage}.req.body).
+        /// Used for storing network packet data for comparison.
+        /// </summary>
+        void SetCapturedOutput(string captureKey, string content);
+        
         // HTTP metadata capture
         void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize);
         bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize);

@@ -15,7 +15,7 @@ namespace SolutionGrader.Core.Services
         private readonly IExecutor _exec;
         private readonly IReportService _report;
         private readonly IExecutableManager _proc;
-        private readonly IMiddlewareService _mw;
+        private readonly INetworkMonitorService? _networkMonitor;
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
         private readonly IAppsettingsCreationService _appsettings;
@@ -29,15 +29,15 @@ namespace SolutionGrader.Core.Services
             IExecutor exec,
             IReportService report,
             IExecutableManager proc,
-            IMiddlewareService mw,
+            INetworkMonitorService? networkMonitor,
             IDetailLogService log,
             IRunContext run,
             IAppsettingsCreationService appsettings)
         {
-            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _mw = mw; _log = log; _run = run; _appsettings = appsettings;
+            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _networkMonitor = networkMonitor; _log = log; _run = run; _appsettings = appsettings;
             
             // Create orchestrator for step-based execution
-            _orchestrator = new TestCaseOrchestrator(files, env, parser, exec, report, proc, mw, log, run, appsettings);
+            _orchestrator = new TestCaseOrchestrator(files, env, parser, exec, report, proc, networkMonitor, log, run, appsettings);
         }
 
         public async Task<int> ExecuteSuiteAsync(ExecuteSuiteArgs args, CancellationToken ct = default)
@@ -125,8 +125,8 @@ namespace SolutionGrader.Core.Services
                     continue;
                 }
 
-                // Step 3: Initialize Processes
-                var (initOk, initMsg) = _orchestrator.InitializeProcesses(clientExePath, serverExePath);
+                // Step 3: Initialize Processes and Start Network Monitor
+                var (initOk, initMsg) = await _orchestrator.InitializeProcessesAsync(clientExePath, serverExePath, ct);
                 if (!initOk)
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Test case failed at process initialization: {initMsg}");
