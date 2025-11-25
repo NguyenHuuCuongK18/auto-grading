@@ -283,6 +283,7 @@ namespace SolutionGrader.Core.Services
                 int? previousStage = null;
                 bool hasSeenInputStep = false;
                 bool hasAddedComparisonDelay = false;
+                bool hasFlushedNetworkCaptures = false; // Track if we've flushed health check garbage
                 
                 // Start a background task to monitor process status
                 var monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -318,6 +319,18 @@ namespace SolutionGrader.Core.Services
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+                    
+                    // FLUSH network captures before the first CLIENT_INPUT step
+                    // This clears any health check traffic captured during server/client startup
+                    // so only the actual test communication is graded
+                    if (!hasFlushedNetworkCaptures && 
+                        string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing network captures before first input step...");
+                        _networkMonitor?.ClearCaptures();
+                        _run.ClearNetworkCaptures();
+                        hasFlushedNetworkCaptures = true;
+                    }
 
                     var currentStage = TryParseStage(step.Id);
                     

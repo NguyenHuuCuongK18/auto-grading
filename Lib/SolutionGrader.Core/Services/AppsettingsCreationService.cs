@@ -13,6 +13,16 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 {
     private int _proxyPort;
     private int _serverPort;
+    private readonly GradingConfig _gradingConfig;
+
+    public AppsettingsCreationService() : this(GradingConfig.Default)
+    {
+    }
+
+    public AppsettingsCreationService(GradingConfig gradingConfig)
+    {
+        _gradingConfig = gradingConfig ?? GradingConfig.Default;
+    }
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath)
     {
@@ -26,32 +36,11 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig, string? protocol)
     {
-        // NEW: Use single port for both client and server (for network monitoring)
-        // The MonitorPort is the port where server listens and client connects
-        // Network monitor sniffs traffic on this port
-        if (envConfig?.MonitorPort.HasValue == true)
-        {
-            _proxyPort = envConfig.MonitorPort.Value;
-            _serverPort = envConfig.MonitorPort.Value;
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using MonitorPort from environment.xlsx: {_proxyPort} (single port mode)");
-        }
-        // BACKWARD COMPATIBILITY: Fall back to old middleware/server port config
-        #pragma warning disable CS0618 // Type or member is obsolete
-        else if (envConfig?.MiddlewarePort.HasValue == true && envConfig?.ServerPort.HasValue == true)
-        {
-            _proxyPort = envConfig.MiddlewarePort.Value;
-            _serverPort = envConfig.ServerPort.Value;
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using legacy ports from environment.xlsx: Proxy={_proxyPort}, Server={_serverPort}");
-        }
-        #pragma warning restore CS0618
-        else
-        {
-            // Allocate single random available port for both
-            // This is the new behavior - client and server share the same port
-            _serverPort = FindAvailablePort();
-            _proxyPort = _serverPort; // Both use same port
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Allocated single port for client/server: {_serverPort}");
-        }
+        // Use GraderPort from GradingConfig - this is THE port for all grading communication
+        // Server listens on this port, client connects to this port, network monitor captures on this port
+        _serverPort = _gradingConfig.GraderPort;
+        _proxyPort = _gradingConfig.GraderPort;
+        Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using GraderPort from config: {_serverPort}");
 
         // Determine IP address based on protocol (TCP vs HTTP/Console), not database Type
         var ipAddress = DetermineIpAddress(protocol ?? dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
@@ -243,26 +232,24 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         // Priority order for Password:
         // 1. EnvironmentConfiguration.DatabasePassword (from environment.xlsx)
         // 2. DatabaseConfiguration.Password (from header.xlsx)
-        // 3. Default strong password for Docker (SQL Server requires complex password)
-        var password = dbConfig?.Password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
+        // 3. Platform-specific default:
+        //    - Windows: "sa" (local SQL Server often has simpler password requirements)
+        //    - Linux/Docker: Strong password (SQL Server 2019+ requires complex password)
+        var password = envConfig?.DatabasePassword ?? dbConfig?.Password;
         
-        // Check if environment password is provided and is strong enough for SQL Server
-        // SQL Server requires at least 8 chars with uppercase, lowercase, digit, and special char
-        if (!string.IsNullOrWhiteSpace(envConfig?.DatabasePassword))
+        // If no password is specified, use platform-appropriate default
+        if (string.IsNullOrWhiteSpace(password))
         {
-            var envPwd = envConfig.DatabasePassword;
-            if (envPwd.Length >= 8 && 
-                envPwd.Any(char.IsUpper) && 
-                envPwd.Any(char.IsLower) && 
-                envPwd.Any(char.IsDigit))
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
             {
-                password = envPwd;
+                // On Windows local machines, use simple default password
+                // as local SQL Server installations may have different password policies
+                password = AppsettingKeywords.DEFAULT_PASSWORD;
             }
             else
             {
-                // Environment password is too simple for SQL Server 2019+
-                // Use Docker default password instead
-                Console.WriteLine($"[Warning] Environment password is too simple for SQL Server. Using default Docker password.");
+                // On Linux/Docker, use strong password as SQL Server 2019+ requires complex password
+                password = AppsettingKeywords.DOCKER_SA_PASSWORD;
             }
         }
 
