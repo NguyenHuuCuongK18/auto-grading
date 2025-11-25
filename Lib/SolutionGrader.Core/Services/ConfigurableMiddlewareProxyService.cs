@@ -94,7 +94,7 @@ namespace SolutionGrader.Core.Services
             try { if (_http != null && _http.IsListening) { _http.Stop(); _http.Close(); } _http = null; } catch { }
             try { _tcp?.Stop(); _tcp = null; } catch { }
 
-            if (taskToWait != null) { try { await Task.WhenAny(taskToWait, Task.Delay(2000)); } catch { } }
+            if (taskToWait != null) { try { await Task.WhenAny(taskToWait, Task.Delay(1000)); } catch { } }
             try { _cts?.Dispose(); _cts = null; } catch { }
         }
 

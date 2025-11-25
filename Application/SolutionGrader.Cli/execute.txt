@@ -4,5 +4,26 @@ dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Client\Client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Server\Server.exe"
 
 #NEW
-#De1
+#De1, happy case
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Answer\1\Project12\Client\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Answer\1\Project11\Server\Project11.exe"
+#De1, Cuong case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\1\cuongnhhe186494\1\solution\Q12\Q12_cuongnhhe186494\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\1\cuongnhhe186494\1\solution\Q11\Q11_cuongnhhe186494\Project11.exe"
+#De1, Hoang case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\1\hoangbsthe186345\1\solution\Q12\Q12_hoangbsthe186345\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\1\hoangbsthe186345\1\solution\Q11\Q11_hoangbsthe186345\Project11.exe"
+
+
+#De2, happy case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Answer\2\Project12\Client\Project12.exe" --server  "C:\Users\PC\Documents\School\NET\NewQ\Answer\2\Project11\Server\Project11.exe"
+
+#De2, hoang case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q2" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\hoangbsthe186345\1\solution\Q12\Q12_hoangbsthe186345\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\hoangbsthe186345\1\solution\Q11\Q11_hoangbsthe186345\Project11.exe"
+
+#De2, cuong case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q2" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\cuongnhhe186494\1\solution\Q12\Q12_cuongnhhe186494\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\cuongnhhe186494\1\solution\Q11\Q11_cuongnhhe186494\Project11.exe"
+
+#De2, huy case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q2" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\huynqhe172314\1\solution\Q12\Q12_huynqhe172314\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\huynqhe172314\1\solution\Q11\Q11_huynqhe172314\Project11.exe"
+
+#De2, nhat case
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\Q2" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\nhatnmhe186348\1\solution\Q12\Q12_nhatnmhe186348\Project12.exe" --server "C:\Users\PC\Documents\School\NET\NewQ\Submit\2\nhatnmhe186348\1\solution\Q11\Q11_nhatnmhe186348\Project11.exe"
+

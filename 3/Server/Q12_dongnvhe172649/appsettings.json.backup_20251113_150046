@@ -1,0 +1,7 @@
+{
+  "ConnectionStrings": {
+    "MyCnn": "server=.\\SQLEXPRESS05;database=TCP_Server_Client;uid=sa;pwd=123;TrustServerCertificate=True;"
+  },
+  "IpAddress": "127.0.0.1",
+  "Port": "5000"
+}

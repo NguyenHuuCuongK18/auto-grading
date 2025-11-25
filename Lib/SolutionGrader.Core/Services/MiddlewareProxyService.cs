@@ -86,7 +86,7 @@ namespace SolutionGrader.Core.Services
             try { if (_http != null && _http.IsListening) { _http.Stop(); _http.Close(); } _http = null; } catch { }
             try { _tcp?.Stop(); _tcp = null; } catch { }
 
-            if (taskToWait != null) { try { await Task.WhenAny(taskToWait, Task.Delay(2000)); } catch { } }
+            if (taskToWait != null) { try { await Task.WhenAny(taskToWait, Task.Delay(1000)); } catch { } }
             try { _cts?.Dispose(); _cts = null; } catch { }
         }
 
@@ -261,7 +261,7 @@ namespace SolutionGrader.Core.Services
                         try
                         {
                             // Wait for server to start sending response
-                            var maxWait = 2000; // 5 seconds to wait for server to start responding
+                            var maxWait = 1000; // 5 seconds to wait for server to start responding
                             var waited = 0;
                             Console.WriteLine($"[TCP Relay s2c] Waiting for server response...");
                             while (!ss.DataAvailable && waited < maxWait)

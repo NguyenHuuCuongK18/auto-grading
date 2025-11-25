@@ -572,7 +572,7 @@ namespace SolutionGrader.Core.Services
                         }
                     };
                     taskKill.Start();
-                    taskKill.WaitForExit(2000); // Wait up to 2 seconds
+                    taskKill.WaitForExit(1000); // Wait up to 2 seconds
                 }
                 else
                 {
@@ -590,7 +590,7 @@ namespace SolutionGrader.Core.Services
                         }
                     };
                     kill.Start();
-                    kill.WaitForExit(2000);
+                    kill.WaitForExit(1000);
                 }
             }
             catch (Exception ex)

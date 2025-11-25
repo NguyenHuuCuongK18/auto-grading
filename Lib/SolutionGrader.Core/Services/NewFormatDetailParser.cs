@@ -129,7 +129,7 @@ public sealed class NewFormatDetailParser
                         QuestionCode = questionCode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "2000", // Increased to 2 seconds for better output capture
+                        Value = "1000", // Increased to 2 seconds for better output capture
                         DataType = null
                     });
                 }
@@ -185,7 +185,7 @@ public sealed class NewFormatDetailParser
                         QuestionCode = questionCode,
                         Stage = stage,
                         Action = ActionKeywords.Wait,
-                        Value = "2000", // Increased to 2 seconds for better output capture
+                        Value = "1000", // Increased to 2 seconds for better output capture
                         DataType = null
                     });
                 }
