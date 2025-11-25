@@ -6,13 +6,18 @@ using System.Diagnostics;
 namespace SolutionGrader.Core.Services
 {
     /// <summary>
-    /// Orchestrates test case execution in discrete steps similar to test-grader flow:
-    /// 1. Environment setup (database reset, appsettings generation)
+    /// Orchestrates test case execution in discrete steps:
+    /// 1. Environment setup (database reset, appsettings generation, port configuration)
     /// 2. Test kit reading (parse detail steps)
-    /// 3. Process execution (start server/client, run middleware)
-    /// 4. Grading (execute steps and comparisons)
-    /// 5. Logging (record results)
-    /// 6. Cleanup (stop processes, finalize)
+    /// 3. Network monitor start (must start BEFORE client/server to capture full network flow)
+    /// 4. Process execution (start server/client)
+    /// 5. Grading (execute steps and comparisons)
+    /// 6. Logging (record results)
+    /// 7. Cleanup (stop processes, stop network monitor, finalize)
+    /// 
+    /// NOTE: Network monitor replaces the old middleware proxy approach.
+    /// The monitor sniffs packets on the configured port without intercepting traffic.
+    /// Both client and server connect directly to each other on the same port.
     /// </summary>
     public sealed class TestCaseOrchestrator
     {
@@ -22,10 +27,14 @@ namespace SolutionGrader.Core.Services
         private readonly IExecutor _exec;
         private readonly IReportService _report;
         private readonly IExecutableManager _proc;
-        private readonly IMiddlewareService _mw;
+        private readonly INetworkMonitorService? _networkMonitor;
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
         private readonly IAppsettingsCreationService _appsettings;
+        
+        // Configured port for all communication (server listen, client connect, monitor sniff)
+        private int _monitorPort;
+        private string _protocol = NetworkKeywords.Protocol_TCP;
 
         public TestCaseOrchestrator(
             IFileService files,
@@ -34,7 +43,7 @@ namespace SolutionGrader.Core.Services
             IExecutor exec,
             IReportService report,
             IExecutableManager proc,
-            IMiddlewareService mw,
+            INetworkMonitorService? networkMonitor,
             IDetailLogService log,
             IRunContext run,
             IAppsettingsCreationService appsettings)
@@ -45,7 +54,7 @@ namespace SolutionGrader.Core.Services
             _exec = exec;
             _report = report;
             _proc = proc;
-            _mw = mw;
+            _networkMonitor = networkMonitor;
             _log = log;
             _run = run;
             _appsettings = appsettings;
@@ -54,8 +63,8 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Step 1: Setup environment for test case
         /// - Reset database with appropriate script
-        /// - Generate appsettings.json files
-        /// - Configure ports for middleware and server
+        /// - Generate appsettings.json files with single port for client and server
+        /// - Configure network monitor port for packet capture
         /// </summary>
         public async Task<(bool Success, string Message)> SetupEnvironmentAsync(
             TestCaseDefinition testCase,
@@ -69,7 +78,11 @@ namespace SolutionGrader.Core.Services
             {
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 1] Setting up environment...");
                 
+                // Store protocol type for network monitoring
+                _protocol = suite.Protocol ?? NetworkKeywords.Protocol_TCP;
+                
                 // Always generate appsettings from header
+                // NEW: This now generates a single port for both client and server
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
                 var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(
                     suite.DatabaseConfig, 
@@ -78,9 +91,16 @@ namespace SolutionGrader.Core.Services
                     testCase.Environment, 
                     suite.Protocol);
                 
-                // Configure middleware with the generated ports
-                _mw.ConfigurePorts(proxyPort, serverPort);
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {string.Format(AppsettingKeywords.MSG_CONFIGURED_MIDDLEWARE, proxyPort, serverPort)}");
+                // Store the monitor port (same as server port in new architecture)
+                _monitorPort = serverPort;
+                
+                // Configure network monitor (replaces middleware proxy)
+                if (_networkMonitor != null)
+                {
+                    _networkMonitor.MonitorPort = _monitorPort;
+                    _networkMonitor.ProtocolType = _protocol;
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Configured for port {_monitorPort} ({_protocol} mode)");
+                }
                 
                 // Configure executor with the server port for health checks
                 _exec.ConfigureServerPort(serverPort);
@@ -182,16 +202,19 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Step 3: Initialize processes
+        /// Step 3: Initialize processes and start network monitor.
+        /// Network monitor MUST start before client/server to capture full network flow.
         /// - Initialize executable manager with client/server paths
+        /// - Start network monitor on configured port
         /// </summary>
-        public (bool Success, string Message) InitializeProcesses(
+        public async Task<(bool Success, string Message)> InitializeProcessesAsync(
             string? clientExePath,
-            string? serverExePath)
+            string? serverExePath,
+            CancellationToken ct = default)
         {
             try
             {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Initializing processes...");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Initializing processes and network monitor...");
                 
                 if (string.IsNullOrWhiteSpace(clientExePath))
                 {
@@ -203,9 +226,19 @@ namespace SolutionGrader.Core.Services
                     return (false, "Server executable path is not specified");
                 }
                 
+                // Initialize executable manager
                 _proc.Init(clientExePath, serverExePath);
                 
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized");
+                // Start network monitor FIRST - before any processes
+                // This ensures we capture the complete network flow from the start
+                if (_networkMonitor != null)
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Starting network monitor before processes...");
+                    _networkMonitor.ClearCaptures();
+                    await _networkMonitor.StartAsync(ct);
+                }
+                
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized, network monitor started");
                 return (true, "Processes initialized");
             }
             catch (Exception ex)
@@ -214,10 +247,23 @@ namespace SolutionGrader.Core.Services
                 return (false, $"Failed to initialize processes: {ex.Message}");
             }
         }
+        
+        /// <summary>
+        /// [DEPRECATED] Synchronous version for backward compatibility.
+        /// Use InitializeProcessesAsync instead.
+        /// </summary>
+        [Obsolete("Use InitializeProcessesAsync instead")]
+        public (bool Success, string Message) InitializeProcesses(
+            string? clientExePath,
+            string? serverExePath)
+        {
+            return InitializeProcessesAsync(clientExePath, serverExePath).GetAwaiter().GetResult();
+        }
 
         /// <summary>
         /// Step 4: Execute and grade test steps
         /// - Run through each test step
+        /// - Update network monitor context for packet association
         /// - Perform comparisons and validations
         /// - Log results for grading
         /// </summary>
@@ -247,7 +293,8 @@ namespace SolutionGrader.Core.Services
                             
                             if (!_proc.IsClientRunning || !_proc.IsServerRunning)
                             {
-                                try { await _mw.StopAsync(); } catch { }
+                                // Stop network monitor if processes exit
+                                try { if (_networkMonitor != null) await _networkMonitor.StopAsync(); } catch { }
                                 break;
                             }
                         }
@@ -261,6 +308,12 @@ namespace SolutionGrader.Core.Services
                     stepCts.CancelAfter(TimeSpan.FromSeconds(10));
 
                     var currentStage = TryParseStage(step.Id);
+                    
+                    // Update network monitor context for packet association
+                    if (_networkMonitor != null)
+                    {
+                        _networkMonitor.SetCurrentContext(step.QuestionCode, step.Stage);
+                    }
                     
                     // Stage change delay
                     if (previousStage.HasValue && currentStage.HasValue && currentStage != previousStage)
@@ -380,9 +433,9 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Step 6: Cleanup processes and middleware
+        /// Step 6: Cleanup processes and network monitor
         /// - Stop all running processes
-        /// - Stop middleware proxy
+        /// - Stop network monitor (finalizes captured data)
         /// </summary>
         public async Task<(bool Success, string Message)> CleanupAsync()
         {
@@ -392,7 +445,12 @@ namespace SolutionGrader.Core.Services
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {LoggingKeywords.MSG_TESTCASE_CLEANING_PROCESSES}");
                 try { await _proc.StopAllAsync(); } catch { }
-                try { await _mw.StopAsync(); } catch { }
+                
+                // Stop network monitor
+                if (_networkMonitor != null)
+                {
+                    try { await _networkMonitor.StopAsync(); } catch { }
+                }
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 6] Cleanup completed");
                 return (true, "Cleanup successful");

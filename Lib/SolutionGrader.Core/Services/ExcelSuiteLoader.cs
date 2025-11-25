@@ -307,7 +307,22 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
                 if (string.IsNullOrEmpty(key)) continue;
 
-                if (key.Equals("Port Middleware", StringComparison.OrdinalIgnoreCase))
+                // NEW: MonitorPort is the preferred single port configuration
+                // Server listens on this port, client connects to this port
+                // Network monitor sniffs traffic on this port
+                if (key.Equals("MonitorPort", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("Monitor_Port", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(value, out var port)) 
+                    {
+                        config.MonitorPort = port;
+                        Console.WriteLine($"[Environment] MonitorPort set to {port}");
+                    }
+                }
+                // DEPRECATED: Legacy middleware/server port config (kept for backward compatibility)
+                #pragma warning disable CS0618 // Type or member is obsolete
+                else if (key.Equals("Port Middleware", StringComparison.OrdinalIgnoreCase))
                 {
                     if (int.TryParse(value, out var port)) config.MiddlewarePort = port;
                 }
@@ -315,6 +330,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                 {
                     if (int.TryParse(value, out var port)) config.ServerPort = port;
                 }
+                #pragma warning restore CS0618
                 else if (key.Equals("Default_Database_File_Path", StringComparison.OrdinalIgnoreCase))
                 {
                     config.DatabaseFilePath = value;

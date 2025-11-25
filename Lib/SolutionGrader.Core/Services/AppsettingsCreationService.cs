@@ -26,21 +26,31 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
     public (int ProxyPort, int ServerPort) GenerateAppsettings(DatabaseConfiguration? dbConfig, string? clientExePath, string? serverExePath, EnvironmentConfiguration? envConfig, string? protocol)
     {
-        // Use ports from environment configuration if available, otherwise find available ports
-        if (envConfig?.MiddlewarePort.HasValue == true && envConfig?.ServerPort.HasValue == true)
+        // NEW: Use single port for both client and server (for network monitoring)
+        // The MonitorPort is the port where server listens and client connects
+        // Network monitor sniffs traffic on this port
+        if (envConfig?.MonitorPort.HasValue == true)
+        {
+            _proxyPort = envConfig.MonitorPort.Value;
+            _serverPort = envConfig.MonitorPort.Value;
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using MonitorPort from environment.xlsx: {_proxyPort} (single port mode)");
+        }
+        // BACKWARD COMPATIBILITY: Fall back to old middleware/server port config
+        #pragma warning disable CS0618 // Type or member is obsolete
+        else if (envConfig?.MiddlewarePort.HasValue == true && envConfig?.ServerPort.HasValue == true)
         {
             _proxyPort = envConfig.MiddlewarePort.Value;
             _serverPort = envConfig.ServerPort.Value;
-            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using ports from environment.xlsx: Proxy={_proxyPort}, Server={_serverPort}");
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Using legacy ports from environment.xlsx: Proxy={_proxyPort}, Server={_serverPort}");
         }
+        #pragma warning restore CS0618
         else
         {
-            // Allocate random available ports, ensuring they're different
-            _proxyPort = FindAvailablePort();
-            do
-            {
-                _serverPort = FindAvailablePort();
-            } while (_serverPort == _proxyPort);
+            // Allocate single random available port for both
+            // This is the new behavior - client and server share the same port
+            _serverPort = FindAvailablePort();
+            _proxyPort = _serverPort; // Both use same port
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Allocated single port for client/server: {_serverPort}");
         }
 
         // Determine IP address based on protocol (TCP vs HTTP/Console), not database Type

@@ -1,18 +1,40 @@
 namespace SolutionGrader.Core.Domain.Models;
 
 /// <summary>
-/// Configuration from environment.xlsx files
+/// Configuration from environment.xlsx files.
+/// 
+/// NOTE: The new test kit format no longer uses separate middleware and server ports.
+/// Instead, a single MonitorPort is used where:
+/// - Server listens on this port
+/// - Client connects to this port  
+/// - Network monitor sniffs traffic on this port
+/// 
+/// The old MiddlewarePort and ServerPort properties are kept for backward compatibility
+/// but MonitorPort should be preferred for new test kits.
 /// </summary>
 public sealed class EnvironmentConfiguration
 {
     /// <summary>
-    /// Port for middleware/proxy (Code_Container_Internal_Port)
+    /// Single port used by both client and server for direct communication.
+    /// The network monitor sniffs traffic on this port.
+    /// This replaces the old middleware proxy approach.
     /// </summary>
+    public int? MonitorPort { get; set; }
+    
+    /// <summary>
+    /// [DEPRECATED] Port for middleware/proxy (Code_Container_Internal_Port).
+    /// Kept for backward compatibility with old test kits.
+    /// Use MonitorPort instead for new test kits.
+    /// </summary>
+    [Obsolete("Use MonitorPort instead. Middleware proxy has been replaced by network monitoring.")]
     public int? MiddlewarePort { get; set; }
 
     /// <summary>
-    /// Port for server (Code_Container_Host_Port)
+    /// [DEPRECATED] Port for server (Code_Container_Host_Port).
+    /// Kept for backward compatibility with old test kits.
+    /// Use MonitorPort instead for new test kits.
     /// </summary>
+    [Obsolete("Use MonitorPort instead. Server port is now the same as MonitorPort.")]
     public int? ServerPort { get; set; }
 
     /// <summary>

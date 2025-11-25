@@ -66,10 +66,33 @@ namespace SolutionGrader.Core.Domain.Models
         public bool ValidateDataType { get; set; } = true;
 
         /// <summary>
+        /// Enable/disable validation of Time column in Network sheet.
+        /// Time values vary with each run, so this is disabled by default.
+        /// </summary>
+        public bool ValidateTimeColumn { get; set; } = false;
+
+        /// <summary>
+        /// Enable/disable validation of DateTime values and Date headers.
+        /// DateTime varies between runs and HTTP Date headers change each request.
+        /// Disabled by default to prevent false failures.
+        /// </summary>
+        public bool ValidateDateTimeValues { get; set; } = false;
+
+        /// <summary>
+        /// Enable/disable grading of Network sheet data.
+        /// </summary>
+        public bool GradeNetworkSheet { get; set; } = true;
+
+        /// <summary>
         /// Gets the default configuration with all validations enabled on both sheets.
+        /// DateTime and Time columns are excluded from grading by default.
         /// Grades both OutputClients and OutputServers sheets with all validations.
         /// </summary>
-        public static GradingConfig Default => new GradingConfig();
+        public static GradingConfig Default => new GradingConfig
+        {
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
+        };
 
         /// <summary>
         /// Creates a configuration for grading only OutputClients sheet (client-side).
