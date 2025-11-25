@@ -1,4 +1,4 @@
-namespace NetworkMonitor.Models;
+namespace Common.Models;
 
 /// <summary>
 /// Represents a TCP network flow with packet capture data.

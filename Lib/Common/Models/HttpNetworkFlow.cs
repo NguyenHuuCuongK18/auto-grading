@@ -1,4 +1,4 @@
-namespace NetworkMonitor.Models;
+namespace Common.Models;
 
 /// <summary>
 /// Represents an HTTP network flow with parsed HTTP request/response data.

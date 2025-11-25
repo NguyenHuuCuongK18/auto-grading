@@ -1,4 +1,4 @@
-﻿using NetworkMonitor.Models;
+﻿using Common.Models;
 using PacketDotNet;
 using SharpPcap;
 
