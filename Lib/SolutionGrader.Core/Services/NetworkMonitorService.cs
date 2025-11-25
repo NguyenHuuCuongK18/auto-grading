@@ -268,57 +268,202 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     
     private void StoreInRunContext(string srcRole, string payload)
     {
-        // Client -> Server is a request
-        if (srcRole == NetworkKeywords.Role_Client)
+        // Parse HTTP data if this is HTTP protocol
+        if (ProtocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
         {
-            _run.SetServerRequest(_currentQuestionCode, _currentStage, payload);
+            var httpData = ParseHttpData(payload);
             
-            // Parse HTTP method if this is HTTP protocol
-            if (ProtocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
+            // Client -> Server is a request
+            if (srcRole == NetworkKeywords.Role_Client)
             {
-                var method = ExtractHttpMethod(payload);
-                if (!string.IsNullOrEmpty(method))
+                // Store the full request payload
+                _run.SetServerRequest(_currentQuestionCode, _currentStage, payload);
+                
+                if (!string.IsNullOrEmpty(httpData.Method))
                 {
-                    _run.SetHttpMetadata(_currentQuestionCode, _currentStage, method, 0, 
+                    // Store method and request body separately for easier comparison
+                    _run.SetHttpMetadata(_currentQuestionCode, _currentStage, httpData.Method, 0, 
                         Encoding.UTF8.GetByteCount(payload));
+                    
+                    // Store HTTP body if present (for request payload comparison)
+                    if (!string.IsNullOrEmpty(httpData.Body))
+                    {
+                        _run.SetCapturedOutput($"network.{_currentStage}.req.body", httpData.Body);
+                    }
+                }
+            }
+            // Server -> Client is a response
+            else if (srcRole == NetworkKeywords.Role_Server)
+            {
+                // Store the full response payload
+                _run.SetServerResponse(_currentQuestionCode, _currentStage, payload);
+                
+                if (!string.IsNullOrEmpty(httpData.Status))
+                {
+                    // Parse status code from status line (e.g., "200 OK" -> 200)
+                    var statusCode = ExtractStatusCode(httpData.Status);
+                    _run.SetHttpMetadata(_currentQuestionCode, _currentStage, "", statusCode,
+                        Encoding.UTF8.GetByteCount(payload));
+                    
+                    // Store HTTP body separately for response payload comparison
+                    if (!string.IsNullOrEmpty(httpData.Body))
+                    {
+                        _run.SetCapturedOutput($"network.{_currentStage}.res.body", httpData.Body);
+                    }
                 }
             }
         }
-        // Server -> Client is a response
-        else if (srcRole == NetworkKeywords.Role_Server)
+        else
         {
-            _run.SetServerResponse(_currentQuestionCode, _currentStage, payload);
-            
-            // Parse HTTP status if this is HTTP protocol
-            if (ProtocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
+            // TCP protocol - store raw data
+            if (srcRole == NetworkKeywords.Role_Client)
             {
-                var status = ExtractHttpStatus(payload);
-                _run.SetHttpMetadata(_currentQuestionCode, _currentStage, "", status,
-                    Encoding.UTF8.GetByteCount(payload));
+                _run.SetServerRequest(_currentQuestionCode, _currentStage, payload);
+                _run.SetCapturedOutput($"network.{_currentStage}.req.data", payload);
+            }
+            else if (srcRole == NetworkKeywords.Role_Server)
+            {
+                _run.SetServerResponse(_currentQuestionCode, _currentStage, payload);
+                _run.SetCapturedOutput($"network.{_currentStage}.res.data", payload);
             }
         }
     }
     
-    private static string? ExtractHttpMethod(string payload)
+    // Regex patterns for HTTP parsing (same as NetworkMonitor library)
+    private static readonly Regex HttpRequestRegex = new(@"^(\S+)\s+(\S+)\s+HTTP/([0-9.]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex HttpResponseRegex = new(@"^HTTP/([0-9.]+)\s+(\d+)\s*(.*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    
+    /// <summary>
+    /// Parses HTTP request/response data to extract method, status, headers, and body.
+    /// Uses the same logic as NetworkMonitor.Services.NetworkFlowConverter.
+    /// </summary>
+    private static HttpData ParseHttpData(string? payload)
     {
-        if (string.IsNullOrEmpty(payload)) return null;
+        var httpData = new HttpData();
         
-        // HTTP methods are at the start: GET, POST, PUT, DELETE, etc.
-        var match = Regex.Match(payload, @"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s");
-        return match.Success ? match.Groups[1].Value : null;
+        if (string.IsNullOrEmpty(payload))
+            return httpData;
+        
+        try
+        {
+            // Split into lines
+            var lines = payload.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0)
+                return httpData;
+            
+            var firstLine = lines[0];
+            
+            // Check if it's a request or response
+            if (firstLine.StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase))
+            {
+                // HTTP Response: HTTP/VERSION STATUS_CODE STATUS_MESSAGE
+                var responseMatch = HttpResponseRegex.Match(firstLine);
+                if (responseMatch.Success)
+                {
+                    httpData.HttpVersion = $"HTTP/{responseMatch.Groups[1].Value}";
+                    httpData.Status = $"{responseMatch.Groups[2].Value} {responseMatch.Groups[3].Value}".Trim();
+                }
+                ParseHeadersAndBody(lines, httpData);
+            }
+            else
+            {
+                // HTTP Request: METHOD URI HTTP/VERSION
+                var requestMatch = HttpRequestRegex.Match(firstLine);
+                if (requestMatch.Success)
+                {
+                    httpData.Method = requestMatch.Groups[1].Value;
+                    httpData.Uri = requestMatch.Groups[2].Value;
+                    httpData.HttpVersion = $"HTTP/{requestMatch.Groups[3].Value}";
+                }
+                ParseHeadersAndBody(lines, httpData);
+            }
+        }
+        catch
+        {
+            // If parsing fails, return what we have
+        }
+        
+        return httpData;
     }
     
-    private static int ExtractHttpStatus(string payload)
+    /// <summary>
+    /// Parses HTTP headers and body from lines.
+    /// </summary>
+    private static void ParseHeadersAndBody(string[] lines, HttpData httpData)
     {
-        if (string.IsNullOrEmpty(payload)) return 0;
+        var headerLines = new List<string>();
+        var bodyLines = new List<string>();
+        bool inBody = false;
         
-        // HTTP response starts with HTTP/X.X STATUS
-        var match = Regex.Match(payload, @"^HTTP/\d\.\d\s+(\d+)");
-        if (match.Success && int.TryParse(match.Groups[1].Value, out var status))
+        for (int i = 1; i < lines.Length; i++)
         {
-            return status;
+            var line = lines[i];
+            
+            if (!inBody)
+            {
+                // Empty line indicates end of headers
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    inBody = true;
+                    continue;
+                }
+                
+                headerLines.Add(line);
+                
+                // Extract Host header if present
+                if (line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))
+                {
+                    int colonIndex = line.IndexOf(':');
+                    if (colonIndex >= 0 && colonIndex < line.Length - 1)
+                    {
+                        httpData.Host = line.Substring(colonIndex + 1).Trim();
+                    }
+                }
+            }
+            else
+            {
+                bodyLines.Add(line);
+            }
+        }
+        
+        if (headerLines.Count > 0)
+        {
+            httpData.Headers = string.Join("; ", headerLines);
+        }
+        
+        if (bodyLines.Count > 0)
+        {
+            httpData.Body = string.Join("\n", bodyLines).Trim();
+        }
+    }
+    
+    /// <summary>
+    /// Extracts numeric status code from status line (e.g., "200 OK" -> 200)
+    /// </summary>
+    private static int ExtractStatusCode(string? status)
+    {
+        if (string.IsNullOrEmpty(status)) return 0;
+        
+        var match = Regex.Match(status, @"^(\d+)");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var code))
+        {
+            return code;
         }
         return 0;
+    }
+    
+    /// <summary>
+    /// Internal class to hold parsed HTTP data.
+    /// </summary>
+    private class HttpData
+    {
+        public string? Method { get; set; }
+        public string? Uri { get; set; }
+        public string? Status { get; set; }
+        public string? HttpVersion { get; set; }
+        public string? Host { get; set; }
+        public string? Headers { get; set; }
+        public string? Body { get; set; }
     }
     
     private static ICaptureDevice? FindLoopbackDevice()

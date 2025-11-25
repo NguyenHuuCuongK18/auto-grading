@@ -55,6 +55,15 @@ namespace SolutionGrader.Core.Services
 
         public void SetServerResponse(string questionCode, string stage, string content)
             => SetCapture(FileKeywords.Folder_ServersResponse, questionCode, stage, content);
+        
+        /// <summary>
+        /// Sets captured output for a custom key (e.g., network.{stage}.req.body).
+        /// Used for storing network packet data for comparison.
+        /// </summary>
+        public void SetCapturedOutput(string captureKey, string content)
+        {
+            _captures[captureKey] = new StringBuilder(content);
+        }
 
         public bool TryGetCapturedOutput(string captureKey, out string? content)
         {
