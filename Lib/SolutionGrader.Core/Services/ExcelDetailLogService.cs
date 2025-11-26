@@ -966,42 +966,37 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Adds STDOUT columns (ClientStdout, ServerStdout, NetworkStdout) to the result sheets.
-        /// This replaces the separate TestRunData sheet, embedding the captured output directly
-        /// next to the expected values for easier comparison.
+        /// Adds STDOUT columns to the appropriate result sheets.
+        /// Each sheet only gets its relevant STDOUT column:
+        /// - Client sheet: ClientStdout only
+        /// - Server sheet: ServerStdout only  
+        /// - Network sheet: NetworkStdout only
+        /// This prevents duplicate/irrelevant data from being shown on each sheet.
         /// </summary>
         private void AddStdoutColumnsToSheets()
         {
             if (_wb == null || _records.Count == 0) return;
-            
-            // Define the STDOUT columns to add
-            var stdoutColumns = new[]
-            {
-                GradingKeywords.Col_ClientStdout,
-                GradingKeywords.Col_ServerStdout,
-                GradingKeywords.Col_NetworkStdout
-            };
 
-            // Add STDOUT columns to Client sheet
+            // Add ClientStdout column to Client sheet ONLY
             if (TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, SheetOutClientsNew, out var clientWs) && clientWs != null)
             {
-                EnsureColumns(clientWs, stdoutColumns);
+                EnsureColumns(clientWs, new[] { GradingKeywords.Col_ClientStdout });
                 var hdr = GetHeaderIndex(clientWs);
                 PopulateStdoutColumns(clientWs, hdr, isClientSheet: true, isServerSheet: false);
             }
 
-            // Add STDOUT columns to Server sheet
+            // Add ServerStdout column to Server sheet ONLY
             if (TryGetWorksheetFlexible(SheetOutServersAlt, SheetOutServers, SheetOutServersNew, out var serverWs) && serverWs != null)
             {
-                EnsureColumns(serverWs, stdoutColumns);
+                EnsureColumns(serverWs, new[] { GradingKeywords.Col_ServerStdout });
                 var hdr = GetHeaderIndex(serverWs);
                 PopulateStdoutColumns(serverWs, hdr, isClientSheet: false, isServerSheet: true);
             }
             
-            // Add STDOUT columns to Network sheet if it exists
+            // Add NetworkStdout column to Network sheet ONLY (if it exists)
             if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out var networkWs))
             {
-                EnsureColumns(networkWs, stdoutColumns);
+                EnsureColumns(networkWs, new[] { GradingKeywords.Col_NetworkStdout });
                 var hdr = GetHeaderIndex(networkWs);
                 PopulateStdoutColumns(networkWs, hdr, isClientSheet: false, isServerSheet: false);
             }
@@ -1009,6 +1004,10 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Populates STDOUT columns with captured output data for each stage in the worksheet.
+        /// Each sheet type only populates its relevant STDOUT column:
+        /// - Client sheet: ClientStdout only
+        /// - Server sheet: ServerStdout only
+        /// - Network sheet: NetworkStdout only (the actual captured network flow data)
         /// </summary>
         private void PopulateStdoutColumns(IXLWorksheet ws, Dictionary<string, int> hdr, bool isClientSheet, bool isServerSheet)
         {
@@ -1017,10 +1016,15 @@ namespace SolutionGrader.Core.Services
             var rng = ws.RangeUsed();
             if (rng == null) return;
             
-            // Get STDOUT column indices
-            hdr.TryGetValue(GradingKeywords.Col_ClientStdout, out var clientStdoutCol);
-            hdr.TryGetValue(GradingKeywords.Col_ServerStdout, out var serverStdoutCol);
-            hdr.TryGetValue(GradingKeywords.Col_NetworkStdout, out var networkStdoutCol);
+            // Get STDOUT column indices - only get the relevant column for this sheet type
+            int clientStdoutCol = 0, serverStdoutCol = 0, networkStdoutCol = 0;
+            
+            if (isClientSheet)
+                hdr.TryGetValue(GradingKeywords.Col_ClientStdout, out clientStdoutCol);
+            else if (isServerSheet)
+                hdr.TryGetValue(GradingKeywords.Col_ServerStdout, out serverStdoutCol);
+            else
+                hdr.TryGetValue(GradingKeywords.Col_NetworkStdout, out networkStdoutCol);
             
             foreach (var row in rng.RowsUsed().Skip(1))
             {
@@ -1029,8 +1033,8 @@ namespace SolutionGrader.Core.Services
                 var stageStr = stage.ToString();
                 var questionCode = _questionCode ?? "";
                 
-                // Populate ClientStdout column
-                if (clientStdoutCol > 0)
+                // Populate ClientStdout column (only on Client sheet)
+                if (isClientSheet && clientStdoutCol > 0)
                 {
                     var clientKey = _run.GetClientCaptureKey(questionCode, stageStr);
                     if (_run.TryGetCapturedOutput(clientKey, out var clientOutput) && !string.IsNullOrEmpty(clientOutput))
@@ -1042,8 +1046,8 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Populate ServerStdout column
-                if (serverStdoutCol > 0)
+                // Populate ServerStdout column (only on Server sheet)
+                if (isServerSheet && serverStdoutCol > 0)
                 {
                     var serverKey = _run.GetServerCaptureKey(questionCode, stageStr);
                     if (_run.TryGetCapturedOutput(serverKey, out var serverOutput) && !string.IsNullOrEmpty(serverOutput))
@@ -1055,37 +1059,46 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Populate NetworkStdout column (network request/response data)
-                if (networkStdoutCol > 0)
+                // Populate NetworkStdout column (only on Network sheet) with full TCP flow data
+                if (!isClientSheet && !isServerSheet && networkStdoutCol > 0)
                 {
-                    // Try to get network response first (more common for grading)
-                    var responseKey = _run.GetServerResponseCaptureKey(questionCode, stageStr);
-                    var requestKey = _run.GetServerRequestCaptureKey(questionCode, stageStr);
-                    
-                    var networkData = new StringBuilder();
-                    
-                    if (_run.TryGetCapturedOutput(requestKey, out var requestData) && !string.IsNullOrEmpty(requestData))
+                    // Get the full captured network flow for this stage using the constant key pattern
+                    var networkFlowKey = string.Format(PortKeywords.NETWORK_FLOW_KEY_PATTERN, stageStr);
+                    if (_run.TryGetCapturedOutput(networkFlowKey, out var networkFlow) && !string.IsNullOrEmpty(networkFlow))
                     {
-                        var truncatedReq = requestData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
-                            ? requestData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
-                            : requestData;
-                        networkData.AppendLine("[REQUEST]");
-                        networkData.AppendLine(truncatedReq);
+                        ws.Cell(row.RowNumber(), networkStdoutCol).Value = networkFlow;
                     }
-                    
-                    if (_run.TryGetCapturedOutput(responseKey, out var responseData) && !string.IsNullOrEmpty(responseData))
+                    else
                     {
-                        var truncatedRes = responseData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
-                            ? responseData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
-                            : responseData;
-                        if (networkData.Length > 0) networkData.AppendLine();
-                        networkData.AppendLine("[RESPONSE]");
-                        networkData.AppendLine(truncatedRes);
-                    }
-                    
-                    if (networkData.Length > 0)
-                    {
-                        ws.Cell(row.RowNumber(), networkStdoutCol).Value = networkData.ToString().Trim();
+                        // Fall back to individual request/response data if full flow is not available
+                        var responseKey = _run.GetServerResponseCaptureKey(questionCode, stageStr);
+                        var requestKey = _run.GetServerRequestCaptureKey(questionCode, stageStr);
+                        
+                        var networkData = new StringBuilder();
+                        
+                        if (_run.TryGetCapturedOutput(requestKey, out var requestData) && !string.IsNullOrEmpty(requestData))
+                        {
+                            var truncatedReq = requestData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                                ? requestData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                                : requestData;
+                            networkData.AppendLine("[REQUEST]");
+                            networkData.AppendLine(truncatedReq);
+                        }
+                        
+                        if (_run.TryGetCapturedOutput(responseKey, out var responseData) && !string.IsNullOrEmpty(responseData))
+                        {
+                            var truncatedRes = responseData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                                ? responseData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                                : responseData;
+                            if (networkData.Length > 0) networkData.AppendLine();
+                            networkData.AppendLine("[RESPONSE]");
+                            networkData.AppendLine(truncatedRes);
+                        }
+                        
+                        if (networkData.Length > 0)
+                        {
+                            ws.Cell(row.RowNumber(), networkStdoutCol).Value = networkData.ToString().Trim();
+                        }
                     }
                 }
             }

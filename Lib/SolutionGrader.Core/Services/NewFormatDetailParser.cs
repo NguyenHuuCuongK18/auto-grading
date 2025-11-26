@@ -242,34 +242,47 @@ public sealed class NewFormatDetailParser
             }
         }
 
-        // Parse Network sheet for expected network payloads (if missing, ignore)
-        // NEW TEST KIT FORMAT: The Network sheet has different columns for HTTP vs TCP:
-        // - HTTP: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole
-        // - TCP: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
-        // Time column is excluded from grading (varies each run)
-        // HTTP Date header is also excluded from grading
+        // Parse Network sheet for expected network flow (ALL rows, not just PSH packets)
+        // The test kit creator intentionally includes/excludes rows to control what should be graded.
+        // If a row exists in the test kit, it MUST be validated against captured network traffic.
+        // 
+        // NEW TEST KIT FORMAT columns:
+        // - Stage: Stage number (matches User sheet)
+        // - Time: Timestamp (excluded from grading - varies each run)
+        // - Info: Protocol type (TCP, HTTP)
+        // - Source: Source IP:Port (excluded from grading - port varies)
+        // - Destination: Destination IP:Port (excluded from grading - port varies)
+        // - Flags: TCP flags (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK) - GRADED
+        // - State: Connection state description - GRADED
+        // - Data: TCP payload data (only for PSH packets) - GRADED
+        // - SourceRole: Client or Server - GRADED
+        // - DestinationRole: Client or Server - GRADED
+        //
+        // HTTP-specific columns (optional):
+        // - URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody
         if (networkSheet != null && networkSheet.RangeUsed() != null)
         {
             var map = Header(networkSheet);
+            int networkRowIndex = 0;
             
-            // Collect all rows with data to validate
-            // We only validate rows that have actual payload data (PSH flag)
             foreach (var row in networkSheet.RangeUsed()!.Rows().Skip(1))
             {
                 var stage = Get(row, map, NetworkKeywords.Col_Stage);
-                var info = Get(row, map, NetworkKeywords.Col_Info);
-                var sourceRole = Get(row, map, NetworkKeywords.Col_SourceRole);
-                var flags = Get(row, map, NetworkKeywords.Col_Flags);
                 
-                // Skip rows without stage or without data transfer
+                // Skip rows without stage
                 if (string.IsNullOrWhiteSpace(stage)) continue;
                 
-                // Only validate rows with PSH flag (data transfer packets)
-                if (!flags.Contains("PSH", StringComparison.OrdinalIgnoreCase)) continue;
+                networkRowIndex++;
                 
-                // Get payload data based on protocol (HTTP vs TCP)
-                var httpBody = Get(row, map, NetworkKeywords.Col_HttpBody);
+                var info = Get(row, map, NetworkKeywords.Col_Info);
+                var flags = Get(row, map, NetworkKeywords.Col_Flags);
+                var state = Get(row, map, NetworkKeywords.Col_State);
+                var sourceRole = Get(row, map, NetworkKeywords.Col_SourceRole);
+                var destRole = Get(row, map, NetworkKeywords.Col_DestinationRole);
                 var tcpData = Get(row, map, NetworkKeywords.Col_Data);
+                
+                // HTTP-specific columns
+                var httpBody = Get(row, map, NetworkKeywords.Col_HttpBody);
                 var method = Get(row, map, NetworkKeywords.Col_Method);
                 var status = Get(row, map, NetworkKeywords.Col_Status);
                 var uri = Get(row, map, NetworkKeywords.Col_URI);
@@ -278,7 +291,41 @@ public sealed class NewFormatDetailParser
                 bool isRequest = sourceRole.Equals(NetworkKeywords.Role_Client, StringComparison.OrdinalIgnoreCase);
                 bool isResponse = sourceRole.Equals(NetworkKeywords.Role_Server, StringComparison.OrdinalIgnoreCase);
                 
-                // For HTTP protocol
+                // IMPORTANT: Create validation steps for EVERY row in the test kit
+                // The test kit creator controls what to grade by including/excluding rows
+                
+                // Create a network flow validation step for this row
+                // This validates Flags, State, SourceRole, DestinationRole
+                // Time and Source/Destination are NOT graded (they vary)
+                var stepId = $"NETWORK-FLOW-{stage}-{networkRowIndex}";
+                var validationMetadata = new Dictionary<string, object>
+                {
+                    [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_NetworkFlow,
+                    ["NetworkRowIndex"] = networkRowIndex,
+                    ["ExpectedFlags"] = flags,
+                    ["ExpectedState"] = state,
+                    ["ExpectedSourceRole"] = sourceRole,
+                    ["ExpectedDestRole"] = destRole
+                };
+                
+                // Add network flow step (validates flags, state, roles)
+                steps.Add(new Step
+                {
+                    Id = stepId,
+                    QuestionCode = questionCode,
+                    Stage = stage,
+                    Action = ActionKeywords.CompareNetworkFlow,
+                    Target = null, // No target - validation uses metadata
+                    TcpFlags = flags,
+                    ConnectionState = state,
+                    SourceRole = sourceRole,
+                    DestinationRole = destRole,
+                    NetworkRowIndex = networkRowIndex,
+                    DataType = "TCP",
+                    Metadata = validationMetadata
+                });
+                
+                // For HTTP protocol, also add HTTP-specific validations
                 if (info.Contains("HTTP", StringComparison.OrdinalIgnoreCase))
                 {
                     // Validate HTTP Method for requests (missing = ignore)
@@ -286,14 +333,19 @@ public sealed class NewFormatDetailParser
                     {
                         steps.Add(new Step
                         {
-                            Id = $"NETWORK-METHOD-{stage}",
+                            Id = $"NETWORK-METHOD-{stage}-{networkRowIndex}",
                             QuestionCode = questionCode,
                             Stage = stage,
                             Action = ActionKeywords.CompareText,
                             Target = method,
                             HttpMethod = method,
+                            NetworkRowIndex = networkRowIndex,
                             DataType = "TEXT",
-                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod }
+                            Metadata = new Dictionary<string, object> 
+                            { 
+                                [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_HttpMethod,
+                                ["NetworkRowIndex"] = networkRowIndex
+                            }
                         });
                     }
                     
@@ -302,14 +354,19 @@ public sealed class NewFormatDetailParser
                     {
                         steps.Add(new Step
                         {
-                            Id = $"NETWORK-STATUS-{stage}",
+                            Id = $"NETWORK-STATUS-{stage}-{networkRowIndex}",
                             QuestionCode = questionCode,
                             Stage = stage,
                             Action = ActionKeywords.CompareText,
                             Target = status,
                             StatusCode = status,
+                            NetworkRowIndex = networkRowIndex,
                             DataType = "TEXT",
-                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_StatusCode }
+                            Metadata = new Dictionary<string, object> 
+                            { 
+                                [GradingKeywords.MetadataKey_ValidationType] = GradingKeywords.Validation_StatusCode,
+                                ["NetworkRowIndex"] = networkRowIndex
+                            }
                         });
                     }
                     
@@ -322,18 +379,23 @@ public sealed class NewFormatDetailParser
                         
                         steps.Add(new Step
                         {
-                            Id = $"{stepIdPrefix}-{stage}",
+                            Id = $"{stepIdPrefix}-{stage}-{networkRowIndex}",
                             QuestionCode = questionCode,
                             Stage = stage,
                             Action = action,
                             Target = httpBody,
+                            NetworkRowIndex = networkRowIndex,
                             DataType = IsJson(httpBody) ? "JSON" : "TEXT",
-                            Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = validationType }
+                            Metadata = new Dictionary<string, object> 
+                            { 
+                                [GradingKeywords.MetadataKey_ValidationType] = validationType,
+                                ["NetworkRowIndex"] = networkRowIndex
+                            }
                         });
                     }
                 }
-                // For TCP protocol
-                else if (!string.IsNullOrWhiteSpace(tcpData))
+                // For TCP protocol with PSH flag (data transfer)
+                else if (flags.Contains("PSH", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(tcpData))
                 {
                     var validationType = isRequest ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_DataResponse;
                     var stepIdPrefix = isRequest ? "NETWORK-REQPAYLOAD" : "NETWORK-RESPAYLOAD";
@@ -342,13 +404,18 @@ public sealed class NewFormatDetailParser
                     
                     steps.Add(new Step
                     {
-                        Id = $"{stepIdPrefix}-{stage}",
+                        Id = $"{stepIdPrefix}-{stage}-{networkRowIndex}",
                         QuestionCode = questionCode,
                         Stage = stage,
                         Action = action,
                         Target = tcpData,
+                        NetworkRowIndex = networkRowIndex,
                         DataType = IsXml(tcpData) ? "XML" : (IsJson(tcpData) ? "JSON" : "TEXT"),
-                        Metadata = new Dictionary<string, object> { [GradingKeywords.MetadataKey_ValidationType] = validationType }
+                        Metadata = new Dictionary<string, object> 
+                        { 
+                            [GradingKeywords.MetadataKey_ValidationType] = validationType,
+                            ["NetworkRowIndex"] = networkRowIndex
+                        }
                     });
                 }
             }

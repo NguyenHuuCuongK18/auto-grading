@@ -15,6 +15,18 @@ public sealed class Step
     public int? ByteSize { get; init; }
     public string? DataType { get; init; }
     public Dictionary<string, object>? Metadata { get; init; }
+    
+    // Network flow validation properties for TCP handshake grading
+    /// <summary>TCP flags expected for this network step (e.g., "SYN", "SYN, ACK", "ACK", "PSH, ACK", "FIN, ACK")</summary>
+    public string? TcpFlags { get; init; }
+    /// <summary>Connection state description expected for this step (e.g., "Client connecting to server (SYN)")</summary>
+    public string? ConnectionState { get; init; }
+    /// <summary>Source role expected for this step (Client or Server)</summary>
+    public string? SourceRole { get; init; }
+    /// <summary>Destination role expected for this step (Client or Server)</summary>
+    public string? DestinationRole { get; init; }
+    /// <summary>Unique row index within the network sheet for this step (used to match captured packets)</summary>
+    public int? NetworkRowIndex { get; init; }
 }
 
 public sealed class StepResult
