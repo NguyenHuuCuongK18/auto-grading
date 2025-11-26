@@ -25,6 +25,13 @@ namespace SolutionGrader.Core.Services
 
         private readonly ConcurrentDictionary<string, StringBuilder> _captures = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, (string HttpMethod, int StatusCode, int ByteSize)> _httpMetadata = new(StringComparer.OrdinalIgnoreCase);
+        
+        /// <summary>
+        /// Storage for captured network packets indexed by question code and stage.
+        /// Key format: "{questionCode}-{stage}"
+        /// This enables grading of TCP handshake (SYN, SYN-ACK, ACK) and connection lifecycle (FIN-ACK).
+        /// </summary>
+        private readonly ConcurrentDictionary<string, List<CapturedNetworkPacket>> _capturedPackets = new(StringComparer.OrdinalIgnoreCase);
 
         public string GetClientCaptureKey(string questionCode, string stage)
             => BuildKey(FileKeywords.Folder_Clients, questionCode, stage);
@@ -135,7 +142,70 @@ namespace SolutionGrader.Core.Services
             // Clear HTTP metadata
             _httpMetadata.Clear();
             
+            // Clear captured network packets
+            _capturedPackets.Clear();
+            
             Console.WriteLine($"[RunContext] Cleared network captures (removed {keysToRemove.Count} captures)");
+        }
+        
+        /// <summary>
+        /// Adds a captured network packet to the list for the current stage.
+        /// Used for grading TCP handshake and connection lifecycle.
+        /// </summary>
+        public void AddCapturedNetworkPacket(string questionCode, string stage, CapturedNetworkPacket packet)
+        {
+            var key = $"{questionCode}-{stage}";
+            var packets = _capturedPackets.GetOrAdd(key, _ => new List<CapturedNetworkPacket>());
+            lock (packets)
+            {
+                packets.Add(packet);
+            }
+            
+            // Also store the flow as a formatted string for display in NetworkStdout column
+            UpdateNetworkFlowDisplay(questionCode, stage, packets);
+        }
+        
+        /// <summary>
+        /// Gets all captured network packets for a specific stage.
+        /// Returns an empty list if no packets were captured.
+        /// </summary>
+        public IReadOnlyList<CapturedNetworkPacket> GetCapturedNetworkPackets(string questionCode, string stage)
+        {
+            var key = $"{questionCode}-{stage}";
+            if (_capturedPackets.TryGetValue(key, out var packets))
+            {
+                lock (packets)
+                {
+                    return packets.ToList().AsReadOnly();
+                }
+            }
+            return Array.Empty<CapturedNetworkPacket>();
+        }
+        
+        /// <summary>
+        /// Updates the network flow display string for the NetworkStdout column in output sheets.
+        /// </summary>
+        private void UpdateNetworkFlowDisplay(string questionCode, string stage, List<CapturedNetworkPacket> packets)
+        {
+            var flowKey = $"network.{stage}.flow";
+            var sb = new StringBuilder();
+            
+            lock (packets)
+            {
+                int index = 0;
+                foreach (var pkt in packets)
+                {
+                    index++;
+                    sb.AppendLine($"[{index}] {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                    if (!string.IsNullOrEmpty(pkt.Data))
+                    {
+                        var dataPreview = pkt.Data.Length > 50 ? pkt.Data.Substring(0, 50) + "..." : pkt.Data;
+                        sb.AppendLine($"    Data: {dataPreview.Replace("\n", "\\n").Replace("\r", "")}");
+                    }
+                }
+            }
+            
+            _captures[flowKey] = new StringBuilder(sb.ToString().TrimEnd());
         }
 
         private void AppendCapture(string scope, string questionCode, string stage, string content)

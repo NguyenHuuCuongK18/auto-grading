@@ -59,6 +59,15 @@ public static class GradingKeywords
     /// <summary>HTTP URI validation</summary>
     public const string Validation_Uri = "URI";
     
+    /// <summary>TCP flags validation (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK)</summary>
+    public const string Validation_TcpFlags = "TCP_FLAGS";
+    
+    /// <summary>Connection state validation (e.g., "Client connecting to server (SYN)")</summary>
+    public const string Validation_ConnectionState = "CONNECTION_STATE";
+    
+    /// <summary>Network flow validation (full TCP handshake)</summary>
+    public const string Validation_NetworkFlow = "NETWORK_FLOW";
+    
     #endregion
     
     #region HTTP Methods

@@ -31,6 +31,10 @@ public static class ActionKeywords
     public const string CompareJson     = "COMPARE_JSON";
     public const string CompareCsv      = "COMPARE_CSV";
     public const string TcpRelay        = "TCP_RELAY";
+    
+    // Network flow validation actions for TCP handshake grading
+    /// <summary>Compare TCP flags (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK)</summary>
+    public const string CompareNetworkFlow = "COMPARE_NETWORK_FLOW";
 
     public static readonly string[] All =
     [
@@ -38,6 +42,7 @@ public static class ActionKeywords
         Connect, Start, Input,
         RunClient, RunServer,
         Wait, HttpRequest, AssertText, AssertFileExists,
-        CaptureFile, CompareFile, CompareText, CompareJson, CompareCsv, TcpRelay
+        CaptureFile, CompareFile, CompareText, CompareJson, CompareCsv, TcpRelay,
+        CompareNetworkFlow
     ];
 }

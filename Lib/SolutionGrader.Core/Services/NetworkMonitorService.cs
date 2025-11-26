@@ -222,36 +222,101 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // Determine roles based on ports
             DetermineRoles(srcPort, dstPort, out var srcRole, out var dstRole);
             
-            // Only process packets with data (PSH flag)
-            if (!tcpPacket.Push || tcpPacket.PayloadData == null || tcpPacket.PayloadData.Length == 0)
+            // Extract TCP flags
+            var flags = ExtractTcpFlags(tcpPacket);
+            
+            // Determine connection state based on flags
+            var state = DetermineConnectionState(flags, srcRole);
+            
+            // Extract payload data if available (PSH packets)
+            string? payload = null;
+            if (tcpPacket.Push && tcpPacket.PayloadData != null && tcpPacket.PayloadData.Length > 0)
             {
-                return;
+                payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
+                
+                // Skip health check packets to reduce log noise
+                if (payload.Contains("/healthz", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
             }
             
-            // Extract payload data
-            var payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
-            
-            // Skip health check packets to reduce log noise
-            // Health check packets contain "/healthz" in the payload
-            if (payload.Contains("/healthz", StringComparison.OrdinalIgnoreCase))
+            // Create captured packet record
+            var capturedPacket = new CapturedNetworkPacket
             {
-                return;
+                Timestamp = rawPacket.Timeval.Date,
+                Flags = flags,
+                State = state,
+                SourceRole = srcRole,
+                DestinationRole = dstRole,
+                Data = payload,
+                SourcePort = srcPort,
+                DestinationPort = dstPort
+            };
+            
+            // Store the captured packet for grading
+            _run.AddCapturedNetworkPacket(_currentQuestionCode, _currentStage, capturedPacket);
+            
+            // Log captured packet summary
+            var logMessage = $"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} [{flags}] {state}";
+            if (!string.IsNullOrEmpty(payload))
+            {
+                var payloadPreview = payload.Length > PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS 
+                    ? payload.Substring(0, PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS) + "..." 
+                    : payload;
+                logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
             }
+            Console.WriteLine(logMessage);
             
-            // Log captured packet summary (reduced verbosity)
-            // Use constant for payload preview length
-            var payloadPreview = payload.Length > PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS 
-                ? payload.Substring(0, PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS) + "..." 
-                : payload;
-            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} ({srcPort}->{dstPort}): {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}");
-            
-            // Store in RunContext for comparison
-            StoreInRunContext(srcRole, payload);
+            // Also store payload in RunContext for backward compatibility (for PSH packets)
+            if (!string.IsNullOrEmpty(payload))
+            {
+                StoreInRunContext(srcRole, payload);
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} Error capturing packet: {ex.Message}");
         }
+    }
+    
+    /// <summary>
+    /// Extracts TCP flags from a TCP packet and returns a human-readable string.
+    /// </summary>
+    private static string ExtractTcpFlags(TcpPacket tcp)
+    {
+        var flags = new List<string>();
+        
+        if (tcp.Synchronize) flags.Add("SYN");
+        if (tcp.Acknowledgment) flags.Add("ACK");
+        if (tcp.Push) flags.Add("PSH");
+        if (tcp.Finished) flags.Add("FIN");
+        if (tcp.Reset) flags.Add("RST");
+        if (tcp.Urgent) flags.Add("URG");
+        
+        return string.Join(", ", flags);
+    }
+    
+    /// <summary>
+    /// Determines the connection state description based on TCP flags and source role.
+    /// </summary>
+    private static string DetermineConnectionState(string flags, string srcRole)
+    {
+        // Standard TCP handshake states
+        if (flags == "SYN" && srcRole == NetworkKeywords.Role_Client)
+            return "Client connecting to server (SYN)";
+        if (flags == "SYN, ACK" && srcRole == NetworkKeywords.Role_Server)
+            return "Server responding (SYN-ACK)";
+        if (flags == "ACK" && !flags.Contains("PSH") && !flags.Contains("FIN"))
+            return "Connection established";
+        if (flags.Contains("PSH"))
+            return "Data transfer in progress";
+        if (flags.Contains("FIN"))
+            return "Closing connection (FIN-ACK)";
+        if (flags.Contains("RST"))
+            return "Connection reset";
+        
+        return "TCP packet";
     }
     
     private void DetermineRoles(int srcPort, int dstPort, out string srcRole, out string dstRole)

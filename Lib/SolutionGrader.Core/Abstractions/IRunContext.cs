@@ -1,5 +1,29 @@
 ﻿namespace SolutionGrader.Core.Abstractions
 {
+    /// <summary>
+    /// Represents a captured network packet with TCP flow information.
+    /// Used for grading TCP handshake and connection lifecycle.
+    /// </summary>
+    public class CapturedNetworkPacket
+    {
+        /// <summary>Packet capture timestamp</summary>
+        public DateTime Timestamp { get; set; }
+        /// <summary>TCP flags (e.g., "SYN", "SYN, ACK", "ACK", "PSH, ACK", "FIN, ACK")</summary>
+        public string Flags { get; set; } = "";
+        /// <summary>Connection state description</summary>
+        public string State { get; set; } = "";
+        /// <summary>Source role (Client or Server)</summary>
+        public string SourceRole { get; set; } = "";
+        /// <summary>Destination role (Client or Server)</summary>
+        public string DestinationRole { get; set; } = "";
+        /// <summary>Payload data (for PSH packets)</summary>
+        public string? Data { get; set; }
+        /// <summary>Source port</summary>
+        public int SourcePort { get; set; }
+        /// <summary>Destination port</summary>
+        public int DestinationPort { get; set; }
+    }
+    
     public interface IRunContext
     {
         string ResultRoot { get; set; }
@@ -38,5 +62,17 @@
         /// Used to flush health check traffic before executing actual test steps.
         /// </summary>
         void ClearNetworkCaptures();
+        
+        /// <summary>
+        /// Adds a captured network packet to the list for the current stage.
+        /// Used for grading TCP handshake and connection lifecycle.
+        /// </summary>
+        void AddCapturedNetworkPacket(string questionCode, string stage, CapturedNetworkPacket packet);
+        
+        /// <summary>
+        /// Gets all captured network packets for a specific stage.
+        /// Returns an empty list if no packets were captured.
+        /// </summary>
+        IReadOnlyList<CapturedNetworkPacket> GetCapturedNetworkPackets(string questionCode, string stage);
     }
 }

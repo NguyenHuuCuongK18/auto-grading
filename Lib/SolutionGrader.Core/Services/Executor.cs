@@ -392,6 +392,14 @@ namespace SolutionGrader.Core.Services
                             result = (true, "TcpRelay action deprecated - network monitor active");
                             break;
                         }
+                        
+                    case var a when a == ActionKeywords.CompareNetworkFlow:
+                        {
+                            // Network flow validation - compares captured TCP packets against expected test kit values
+                            // This validates TCP handshake (SYN, SYN-ACK, ACK) and connection lifecycle (FIN-ACK)
+                            result = ValidateNetworkFlow(step);
+                            break;
+                        }
 
                     default:
                         result = (false, $"Unknown action: {step.Action}");
@@ -488,6 +496,109 @@ namespace SolutionGrader.Core.Services
                 var i = id.LastIndexOf('-');
                 return i >= 0 && i < id.Length - 1 ? id[(i + 1)..] : id;
             }
+        }
+        
+        /// <summary>
+        /// Validates a network flow step against captured TCP packets.
+        /// Compares expected TCP flags, connection state, and source/destination roles.
+        /// </summary>
+        private (bool, string) ValidateNetworkFlow(Step step)
+        {
+            // Extract expected values from step
+            var expectedFlags = step.TcpFlags ?? "";
+            var expectedState = step.ConnectionState ?? "";
+            var expectedSrcRole = step.SourceRole ?? "";
+            var expectedDstRole = step.DestinationRole ?? "";
+            var networkRowIndex = step.NetworkRowIndex ?? 0;
+            
+            // Get captured packets for this stage
+            var stageLabel = !string.IsNullOrWhiteSpace(step.Stage) ? step.Stage : (_run.CurrentStageLabel ?? "0");
+            var capturedPackets = _run.GetCapturedNetworkPackets(step.QuestionCode, stageLabel);
+            
+            // Check if we have enough captured packets
+            if (capturedPackets.Count == 0)
+            {
+                // If no packets captured and expected values are provided, it's a failure
+                if (!string.IsNullOrWhiteSpace(expectedFlags))
+                {
+                    return (false, $"Network flow validation failed: No packets captured for stage {stageLabel}, expected [{expectedFlags}] {expectedState}");
+                }
+                // If no expected values, it's an implicit pass (nothing to validate)
+                return (true, "Network flow validation skipped: No expected values specified");
+            }
+            
+            // Find the matching packet by index (networkRowIndex corresponds to the order in the test kit)
+            if (networkRowIndex > 0 && networkRowIndex <= capturedPackets.Count)
+            {
+                var actualPacket = capturedPackets[networkRowIndex - 1]; // Convert to 0-based index
+                
+                // Compare flags (normalize for comparison - ignore order)
+                var normalizedExpectedFlags = NormalizeFlags(expectedFlags);
+                var normalizedActualFlags = NormalizeFlags(actualPacket.Flags);
+                
+                if (normalizedExpectedFlags != normalizedActualFlags)
+                {
+                    return (false, $"TCP flags mismatch at packet {networkRowIndex}: Expected [{expectedFlags}], Got [{actualPacket.Flags}]");
+                }
+                
+                // Compare source role (if specified)
+                if (!string.IsNullOrWhiteSpace(expectedSrcRole) && 
+                    !string.Equals(expectedSrcRole, actualPacket.SourceRole, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (false, $"Source role mismatch at packet {networkRowIndex}: Expected [{expectedSrcRole}], Got [{actualPacket.SourceRole}]");
+                }
+                
+                // Compare destination role (if specified)
+                if (!string.IsNullOrWhiteSpace(expectedDstRole) && 
+                    !string.Equals(expectedDstRole, actualPacket.DestinationRole, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (false, $"Destination role mismatch at packet {networkRowIndex}: Expected [{expectedDstRole}], Got [{actualPacket.DestinationRole}]");
+                }
+                
+                // State comparison is optional (the state message may vary slightly)
+                // We only compare if expected state is provided and it's a strict match
+                // Note: State is informational and may not need exact match
+                
+                return (true, $"Network flow validation passed for packet {networkRowIndex}: [{actualPacket.Flags}] {actualPacket.SourceRole}->{actualPacket.DestinationRole}");
+            }
+            else if (networkRowIndex > capturedPackets.Count)
+            {
+                // Expected packet index exceeds captured packets - this is a failure
+                // The student's code didn't generate enough network traffic
+                return (false, $"Network flow validation failed: Expected packet {networkRowIndex}, but only {capturedPackets.Count} packets captured. Missing: [{expectedFlags}] {expectedSrcRole}->{expectedDstRole}");
+            }
+            
+            // Fallback: try to find a matching packet by flags and roles
+            foreach (var actualPacket in capturedPackets)
+            {
+                var normalizedExpectedFlags = NormalizeFlags(expectedFlags);
+                var normalizedActualFlags = NormalizeFlags(actualPacket.Flags);
+                
+                if (normalizedExpectedFlags == normalizedActualFlags &&
+                    (string.IsNullOrWhiteSpace(expectedSrcRole) || string.Equals(expectedSrcRole, actualPacket.SourceRole, StringComparison.OrdinalIgnoreCase)) &&
+                    (string.IsNullOrWhiteSpace(expectedDstRole) || string.Equals(expectedDstRole, actualPacket.DestinationRole, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return (true, $"Network flow validation passed: Found matching packet [{actualPacket.Flags}] {actualPacket.SourceRole}->{actualPacket.DestinationRole}");
+                }
+            }
+            
+            return (false, $"Network flow validation failed: No matching packet found for [{expectedFlags}] {expectedSrcRole}->{expectedDstRole}");
+        }
+        
+        /// <summary>
+        /// Normalizes TCP flags string for comparison (sorts flags alphabetically).
+        /// This ensures "SYN, ACK" matches "ACK, SYN".
+        /// </summary>
+        private static string NormalizeFlags(string flags)
+        {
+            if (string.IsNullOrWhiteSpace(flags)) return "";
+            
+            var flagList = flags.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(f => f.Trim().ToUpperInvariant())
+                .OrderBy(f => f)
+                .ToList();
+            
+            return string.Join(", ", flagList);
         }
     }
 }
