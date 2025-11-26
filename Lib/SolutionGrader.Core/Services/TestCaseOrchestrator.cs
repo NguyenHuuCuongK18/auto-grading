@@ -237,17 +237,9 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Initialize executable manager
+                // NOTE: Do NOT flush network captures here - some projects initialize connections 
+                // immediately when processes start, and we need to capture that traffic
                 _proc.Init(clientExePath, serverExePath);
-                
-                // Flush network captures before process start to clear any stale data
-                // Network monitor was already started in SetupEnvironmentAsync
-                // Flush even if not capturing - clear the RunContext data
-                if (_networkMonitor != null)
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing network captures before process initialization...");
-                    _networkMonitor.ClearCaptures();
-                }
-                _run.ClearNetworkCaptures();
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized");
                 return (true, "Processes initialized");
@@ -260,7 +252,9 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Flush network captures - used to clear health check traffic before actual test input.
+        /// Flush network captures - used to clear stale data BEFORE any processes start.
+        /// WARNING: Do NOT call this after client/server processes have started as it will 
+        /// lose important connection initialization traffic.
         /// </summary>
         public void FlushNetworkCaptures()
         {
@@ -342,27 +336,13 @@ namespace SolutionGrader.Core.Services
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     stepCts.CancelAfter(TimeSpan.FromSeconds(10));
                     
-                    // FLUSH network captures BEFORE key action steps to avoid capturing health check traffic
-                    // This ensures only the actual test communication is captured for grading
+                    // Identify action types for tracking
                     var isServerStart = string.Equals(step.Action, ActionKeywords.ServerStart, StringComparison.OrdinalIgnoreCase);
                     var isClientStart = string.Equals(step.Action, ActionKeywords.ClientStart, StringComparison.OrdinalIgnoreCase);
                     var isClientInput = string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase);
                     
-                    // Flush before server start (clears any stale captures)
-                    if (isServerStart && !serverStarted)
-                    {
-                        _networkMonitor?.ClearCaptures();
-                        _run.ClearNetworkCaptures();
-                    }
-                    
-                    // Flush before first client input after both processes are started
-                    // This is the main flush point - clears all health check traffic
-                    if (isClientInput && serverStarted && clientStarted && !hasSeenInputStep)
-                    {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing health check traffic before first input step...");
-                        _networkMonitor?.ClearCaptures();
-                        _run.ClearNetworkCaptures();
-                    }
+                    // NOTE: Do NOT flush network captures after processes start
+                    // Some projects initialize connections immediately and we need to capture that traffic
 
                     var currentStage = TryParseStage(step.Id);
                     
