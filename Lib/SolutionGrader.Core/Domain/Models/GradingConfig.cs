@@ -27,7 +27,7 @@ namespace SolutionGrader.Core.Domain.Models
         /// This is a fixed port to ensure consistent grading behavior.
         /// Default: 8888
         /// </summary>
-        public int GraderPort { get; set; } = 8888;
+        public int GraderPort { get; set; } = 8000;
         
         #endregion
         
