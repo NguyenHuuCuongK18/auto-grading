@@ -206,10 +206,11 @@ namespace SolutionGrader.Core.Services
                 ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 80);
             }
 
-            // NEW: Create separate TestRunData sheet with ONLY actual runtime data (no template duplication)
-            CreateTestRunDataSheet();
+            // Add STDOUT columns to result sheets for captured output during test execution
+            // This replaces the separate TestRunData sheet with inline STDOUT columns
+            AddStdoutColumnsToSheets();
 
-            // NEW: Create separate ErrorReport sheet with ALL errors (not just first one)
+            // Create separate ErrorReport sheet with ALL errors (not just first one)
             CreateErrorReportSheet();
 
             // Totals for this case → feed in-memory and incremental summary
@@ -229,7 +230,7 @@ namespace SolutionGrader.Core.Services
             using (var s = _files.OpenWrite(_outPath))
                 _wb.SaveAs(s);
 
-            // 🔁 NEW: make sure the overall summary exists/updates after **every** case
+            // 🔁 make sure the overall summary exists/updates after **every** case
             // Now includes error details directly in the summary
             if (!string.IsNullOrEmpty(_overallSummaryPath) && _questionCode != null)
             {
@@ -965,114 +966,131 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Creates a TestRunData sheet with ONLY actual runtime data (no template duplication).
-        /// This sheet shows what was actually captured during test execution.
+        /// Adds STDOUT columns (ClientStdout, ServerStdout, NetworkStdout) to the result sheets.
+        /// This replaces the separate TestRunData sheet, embedding the captured output directly
+        /// next to the expected values for easier comparison.
         /// </summary>
-        private void CreateTestRunDataSheet()
+        private void AddStdoutColumnsToSheets()
         {
             if (_wb == null || _records.Count == 0) return;
-
-            // Remove existing TestRunData sheet if it exists
-            if (_wb.Worksheets.TryGetWorksheet(GradingKeywords.Sheet_TestRunData, out var existingSheet))
+            
+            // Define the STDOUT columns to add
+            var stdoutColumns = new[]
             {
-                existingSheet.Delete();
+                GradingKeywords.Col_ClientStdout,
+                GradingKeywords.Col_ServerStdout,
+                GradingKeywords.Col_NetworkStdout
+            };
+
+            // Add STDOUT columns to Client sheet
+            if (TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, SheetOutClientsNew, out var clientWs) && clientWs != null)
+            {
+                EnsureColumns(clientWs, stdoutColumns);
+                var hdr = GetHeaderIndex(clientWs);
+                PopulateStdoutColumns(clientWs, hdr, isClientSheet: true, isServerSheet: false);
             }
 
-            var ws = _wb.AddWorksheet(GradingKeywords.Sheet_TestRunData);
-            
-            // Create header row
-            ws.Cell(1, 1).Value = GradingKeywords.Col_Stage;
-            ws.Cell(1, 2).Value = GradingKeywords.Col_StepId;
-            ws.Cell(1, 3).Value = GradingKeywords.Col_ValidationType;
-            ws.Cell(1, 4).Value = "Action";
-            ws.Cell(1, 5).Value = GradingKeywords.Col_Result;
-            ws.Cell(1, 6).Value = GradingKeywords.Col_Message;
-            ws.Cell(1, 7).Value = GradingKeywords.Col_DurationMs;
-            ws.Cell(1, 8).Value = GradingKeywords.Col_ActualOutput;
-            ws.Cell(1, 9).Value = GradingKeywords.Col_HttpMethod;
-            ws.Cell(1, 10).Value = GradingKeywords.Col_StatusCode;
-            ws.Cell(1, 11).Value = GradingKeywords.Col_ByteSize;
-            
-            ws.Row(1).Style.Font.Bold = true;
-            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
-            ws.Row(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-
-            int row = 2;
-            foreach (var record in _records)
+            // Add STDOUT columns to Server sheet
+            if (TryGetWorksheetFlexible(SheetOutServersAlt, SheetOutServers, SheetOutServersNew, out var serverWs) && serverWs != null)
             {
-                ws.Cell(row, 1).Value = record.Stage;
-                ws.Cell(row, 2).Value = record.StepId;
-                
-                // Extract validation type from metadata if available
-                var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
-                                   record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
-                                   record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
-                                   record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
-                ws.Cell(row, 3).Value = validationType;
-                
-                ws.Cell(row, 4).Value = record.Action ?? string.Empty;
-                ws.Cell(row, 5).Value = record.Passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
-                ws.Cell(row, 6).Value = record.Message;
-                ws.Cell(row, 7).Value = Math.Round(record.DurationMs, 2);
-                
-                // Get actual output from captured data if available
-                string? actualOutput = null;
-                if (!string.IsNullOrEmpty(record.ActualPath))
-                {
-                    _run.TryGetCapturedOutput(record.ActualPath, out actualOutput);
-                }
-                
-                // If ActualPath didn't work, try inferring from validation type and stage
-                if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(record.QuestionCode))
-                {
-                    // Reuse the validationType calculated above
-                    if (validationType == GradingKeywords.Validation_ClientOutput)
-                    {
-                        var key = _run.GetClientCaptureKey(record.QuestionCode, record.Stage.ToString());
-                        _run.TryGetCapturedOutput(key, out actualOutput);
-                    }
-                    else if (validationType == GradingKeywords.Validation_ServerOutput)
-                    {
-                        var key = _run.GetServerCaptureKey(record.QuestionCode, record.Stage.ToString());
-                        _run.TryGetCapturedOutput(key, out actualOutput);
-                    }
-                    else if (validationType == GradingKeywords.Validation_DataResponse)
-                    {
-                        var key = $"memory://{FileKeywords.Folder_ServersResponse}/{record.QuestionCode}/{record.Stage}";
-                        _run.TryGetCapturedOutput(key, out actualOutput);
-                    }
-                    else if (validationType == GradingKeywords.Validation_DataRequest)
-                    {
-                        var key = $"memory://{FileKeywords.Folder_ServersRequest}/{record.QuestionCode}/{record.Stage}";
-                        _run.TryGetCapturedOutput(key, out actualOutput);
-                    }
-                }
-                
-                if (!string.IsNullOrEmpty(actualOutput))
-                {
-                    var truncated = actualOutput.Length > 500 ? actualOutput.Substring(0, 500) + "..." : actualOutput;
-                    ws.Cell(row, 8).Value = truncated;
-                }
-                
-                // Get HTTP metadata if available
-                if (_run.TryGetHttpMetadata(record.QuestionCode, record.Stage, out var httpMethod, out var statusCode, out var byteSize))
-                {
-                    ws.Cell(row, 9).Value = httpMethod ?? string.Empty;
-                    ws.Cell(row, 10).Value = statusCode ?? 0;
-                    ws.Cell(row, 11).Value = byteSize ?? 0;
-                }
-                
-                // Color code the result row
-                if (!record.Passed)
-                {
-                    ws.Row(row).Style.Fill.BackgroundColor = XLColor.LightPink;
-                }
-                
-                row++;
+                EnsureColumns(serverWs, stdoutColumns);
+                var hdr = GetHeaderIndex(serverWs);
+                PopulateStdoutColumns(serverWs, hdr, isClientSheet: false, isServerSheet: true);
             }
-
+            
+            // Add STDOUT columns to Network sheet if it exists
+            if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out var networkWs))
+            {
+                EnsureColumns(networkWs, stdoutColumns);
+                var hdr = GetHeaderIndex(networkWs);
+                PopulateStdoutColumns(networkWs, hdr, isClientSheet: false, isServerSheet: false);
+            }
+        }
+        
+        /// <summary>
+        /// Populates STDOUT columns with captured output data for each stage in the worksheet.
+        /// </summary>
+        private void PopulateStdoutColumns(IXLWorksheet ws, Dictionary<string, int> hdr, bool isClientSheet, bool isServerSheet)
+        {
+            if (!hdr.TryGetValue(GradingKeywords.Col_Stage, out var stageCol)) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Get STDOUT column indices
+            hdr.TryGetValue(GradingKeywords.Col_ClientStdout, out var clientStdoutCol);
+            hdr.TryGetValue(GradingKeywords.Col_ServerStdout, out var serverStdoutCol);
+            hdr.TryGetValue(GradingKeywords.Col_NetworkStdout, out var networkStdoutCol);
+            
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                if (!int.TryParse(row.Cell(stageCol).GetString(), out var stage)) continue;
+                
+                var stageStr = stage.ToString();
+                var questionCode = _questionCode ?? "";
+                
+                // Populate ClientStdout column
+                if (clientStdoutCol > 0)
+                {
+                    var clientKey = _run.GetClientCaptureKey(questionCode, stageStr);
+                    if (_run.TryGetCapturedOutput(clientKey, out var clientOutput) && !string.IsNullOrEmpty(clientOutput))
+                    {
+                        var truncated = clientOutput.Length > PortKeywords.OUTPUT_PREVIEW_MAX_CHARS 
+                            ? clientOutput[..PortKeywords.OUTPUT_PREVIEW_MAX_CHARS] + "..." 
+                            : clientOutput;
+                        ws.Cell(row.RowNumber(), clientStdoutCol).Value = truncated;
+                    }
+                }
+                
+                // Populate ServerStdout column
+                if (serverStdoutCol > 0)
+                {
+                    var serverKey = _run.GetServerCaptureKey(questionCode, stageStr);
+                    if (_run.TryGetCapturedOutput(serverKey, out var serverOutput) && !string.IsNullOrEmpty(serverOutput))
+                    {
+                        var truncated = serverOutput.Length > PortKeywords.OUTPUT_PREVIEW_MAX_CHARS 
+                            ? serverOutput[..PortKeywords.OUTPUT_PREVIEW_MAX_CHARS] + "..." 
+                            : serverOutput;
+                        ws.Cell(row.RowNumber(), serverStdoutCol).Value = truncated;
+                    }
+                }
+                
+                // Populate NetworkStdout column (network request/response data)
+                if (networkStdoutCol > 0)
+                {
+                    // Try to get network response first (more common for grading)
+                    var responseKey = _run.GetServerResponseCaptureKey(questionCode, stageStr);
+                    var requestKey = _run.GetServerRequestCaptureKey(questionCode, stageStr);
+                    
+                    var networkData = new StringBuilder();
+                    
+                    if (_run.TryGetCapturedOutput(requestKey, out var requestData) && !string.IsNullOrEmpty(requestData))
+                    {
+                        var truncatedReq = requestData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                            ? requestData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                            : requestData;
+                        networkData.AppendLine("[REQUEST]");
+                        networkData.AppendLine(truncatedReq);
+                    }
+                    
+                    if (_run.TryGetCapturedOutput(responseKey, out var responseData) && !string.IsNullOrEmpty(responseData))
+                    {
+                        var truncatedRes = responseData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                            ? responseData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                            : responseData;
+                        if (networkData.Length > 0) networkData.AppendLine();
+                        networkData.AppendLine("[RESPONSE]");
+                        networkData.AppendLine(truncatedRes);
+                    }
+                    
+                    if (networkData.Length > 0)
+                    {
+                        ws.Cell(row.RowNumber(), networkStdoutCol).Value = networkData.ToString().Trim();
+                    }
+                }
+            }
+            
+            // Adjust column widths and wrap text
             ws.Style.Alignment.WrapText = true;
             ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
         }

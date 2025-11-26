@@ -231,8 +231,18 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // Extract payload data
             var payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
             
-            // Debug: log captured packet summary
-            var payloadPreview = payload.Length > 100 ? payload.Substring(0, 100) + "..." : payload;
+            // Skip health check packets to reduce log noise
+            // Health check packets contain "/healthz" in the payload
+            if (payload.Contains("/healthz", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            
+            // Log captured packet summary (reduced verbosity)
+            // Use constant for payload preview length
+            var payloadPreview = payload.Length > PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS 
+                ? payload.Substring(0, PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS) + "..." 
+                : payload;
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} ({srcPort}->{dstPort}): {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}");
             
             // Store in RunContext for comparison
@@ -310,14 +320,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                         Encoding.UTF8.GetByteCount(payload));
                     
                     // Store HTTP body separately for response payload comparison
+                    // Logging removed to reduce verbosity - body storage is silent now
                     if (!string.IsNullOrEmpty(httpData.Body))
                     {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} Storing response body ({httpData.Body.Length} chars) to network.{_currentStage}.res.body");
                         _run.SetCapturedOutput($"network.{_currentStage}.res.body", httpData.Body);
-                    }
-                    else
-                    {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} Response body is empty or null");
                     }
                 }
             }
