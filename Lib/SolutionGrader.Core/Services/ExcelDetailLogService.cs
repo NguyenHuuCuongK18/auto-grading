@@ -771,18 +771,8 @@ namespace SolutionGrader.Core.Services
                 notes.AppendLine($"  Stage {stageGroup.Key}:");
                 foreach (var record in stageGroup)
                 {
-                    // Extract validation type for clarity
-                    // NETWORK-FLOW-* steps are TCP handshake validation (SYN, SYN-ACK, ACK, FIN-ACK)
-                    var validationType = record.StepId.Contains("-FLOW-") ? "Network Flow (TCP)" :
-                                       record.StepId.Contains("-METHOD-") ? "HTTP Method" :
-                                       record.StepId.Contains("-STATUS-") ? "Status Code" :
-                                       record.StepId.Contains("-SIZE-") ? "Byte Size" :
-                                       record.StepId.Contains("-DATA-") ? "Data" :
-                                       record.StepId.Contains("-OUT-") ? "Output" :
-                                       record.StepId.Contains("-CONSOLE-") ? "Console Output" :
-                                       record.StepId.Contains("-REQ-") ? "Request" :
-                                       record.StepId.Contains("-REQPAYLOAD-") ? "Request Payload" :
-                                       record.StepId.Contains("-RESPAYLOAD-") ? "Response Payload" : "Unknown";
+                    // Use shared method to get human-readable validation type label
+                    var validationType = GetValidationTypeLabel(record.StepId);
                     
                     // Create concise error message
                     var message = record.Message ?? "Unknown error";
@@ -1393,18 +1383,8 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 1).Value = record.Stage;
                 ws.Cell(row, 2).Value = record.StepId;
                 
-                // Extract validation type
-                // NETWORK-FLOW-* steps are TCP handshake validation (SYN, SYN-ACK, ACK, FIN-ACK)
-                var validationType = record.StepId.Contains("-FLOW-") ? GradingKeywords.Validation_NetworkFlow :
-                                   record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
-                                   record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
-                                   record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
-                                   record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
-                                   record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
-                                   record.StepId.Contains("-CONSOLE-") ? GradingKeywords.Validation_Console :
-                                   record.StepId.Contains("-REQPAYLOAD-") ? GradingKeywords.Validation_ReqPayload :
-                                   record.StepId.Contains("-RESPAYLOAD-") ? GradingKeywords.Validation_ResPayload :
-                                   record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
+                // Use shared method to get validation type constant (non-obsolete)
+                var validationType = GetValidationTypeConstant(record.StepId);
                 ws.Cell(row, 3).Value = validationType;
                 
                 ws.Cell(row, 4).Value = record.ErrorCode;
@@ -1696,6 +1676,77 @@ namespace SolutionGrader.Core.Services
         {
             var cacheKey = $"{sheetName}_{stage}_{columnName}";
             return _expectedValuesCache.TryGetValue(cacheKey, out var value) ? value : null;
+        }
+        
+        /// <summary>
+        /// Gets a human-readable validation type label from a step ID for display purposes.
+        /// This is used in error reports and summaries to describe what type of validation failed.
+        /// </summary>
+        /// <param name="stepId">The step ID (e.g., "NETWORK-FLOW-3-1", "CLIENT-CONSOLE-2")</param>
+        /// <returns>Human-readable validation type label</returns>
+        private static string GetValidationTypeLabel(string? stepId)
+        {
+            if (string.IsNullOrWhiteSpace(stepId))
+                return "Unknown";
+            
+            // Check for specific validation types in the step ID
+            // Order matters - more specific patterns should be checked first
+            if (stepId.Contains("-FLOW-", StringComparison.OrdinalIgnoreCase))
+                return "Network Flow (TCP)";
+            if (stepId.Contains("-REQPAYLOAD-", StringComparison.OrdinalIgnoreCase))
+                return "Request Payload";
+            if (stepId.Contains("-RESPAYLOAD-", StringComparison.OrdinalIgnoreCase))
+                return "Response Payload";
+            if (stepId.Contains("-CONSOLE-", StringComparison.OrdinalIgnoreCase))
+                return "Console Output";
+            if (stepId.Contains("-METHOD-", StringComparison.OrdinalIgnoreCase))
+                return "HTTP Method";
+            if (stepId.Contains("-STATUS-", StringComparison.OrdinalIgnoreCase))
+                return "Status Code";
+            if (stepId.Contains("-SIZE-", StringComparison.OrdinalIgnoreCase))
+                return "Byte Size";
+            if (stepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                return "Data";
+            if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
+                return "Output";
+            if (stepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                return "Request";
+            
+            return "Unknown";
+        }
+        
+        /// <summary>
+        /// Gets the validation type constant from a step ID for use in grading reports.
+        /// Uses the new format validation type constants (non-obsolete).
+        /// </summary>
+        /// <param name="stepId">The step ID</param>
+        /// <returns>Validation type constant value</returns>
+        private static string GetValidationTypeConstant(string? stepId)
+        {
+            if (string.IsNullOrWhiteSpace(stepId))
+                return "OTHER";
+            
+            // Check for specific validation types in the step ID
+            if (stepId.Contains("-FLOW-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_NetworkFlow;
+            if (stepId.Contains("-REQPAYLOAD-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_ReqPayload;
+            if (stepId.Contains("-RESPAYLOAD-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_ResPayload;
+            if (stepId.Contains("-CONSOLE-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_Console;
+            if (stepId.Contains("-METHOD-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_Method;
+            if (stepId.Contains("-STATUS-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_Status;
+            if (stepId.Contains("-DATA-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_Data;
+            if (stepId.Contains("-OUT-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_Console; // OUT is also console output
+            if (stepId.Contains("-REQ-", StringComparison.OrdinalIgnoreCase))
+                return GradingKeywords.Validation_ReqPayload;
+            
+            return "OTHER";
         }
         
         /// <summary>
