@@ -239,8 +239,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             }
             
             // Log captured packet summary (reduced verbosity)
-            // Only show brief info for first 60 chars of payload
-            var payloadPreview = payload.Length > 60 ? payload.Substring(0, 60) + "..." : payload;
+            // Use constant for payload preview length
+            var payloadPreview = payload.Length > PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS 
+                ? payload.Substring(0, PortKeywords.PACKET_PAYLOAD_PREVIEW_MAX_CHARS) + "..." 
+                : payload;
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} ({srcPort}->{dstPort}): {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}");
             
             // Store in RunContext for comparison

@@ -241,12 +241,13 @@ namespace SolutionGrader.Core.Services
                 
                 // Flush network captures before process start to clear any stale data
                 // Network monitor was already started in SetupEnvironmentAsync
-                if (_networkMonitor != null && _networkMonitor.IsCapturing)
+                // Flush even if not capturing - clear the RunContext data
+                if (_networkMonitor != null)
                 {
                     Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing network captures before process initialization...");
                     _networkMonitor.ClearCaptures();
-                    _run.ClearNetworkCaptures();
                 }
+                _run.ClearNetworkCaptures();
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized");
                 return (true, "Processes initialized");

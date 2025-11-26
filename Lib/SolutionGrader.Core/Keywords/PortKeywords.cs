@@ -66,4 +66,19 @@ public static class PortKeywords
     /// Connection output wait time in seconds (for server output after connection-triggering actions).
     /// </summary>
     public const int CONNECTION_OUTPUT_WAIT_SECONDS = 2;
+    
+    /// <summary>
+    /// Maximum characters to show in console/log output preview.
+    /// </summary>
+    public const int OUTPUT_PREVIEW_MAX_CHARS = 500;
+    
+    /// <summary>
+    /// Maximum characters to show in network data preview.
+    /// </summary>
+    public const int NETWORK_PREVIEW_MAX_CHARS = 250;
+    
+    /// <summary>
+    /// Maximum characters to show in packet payload preview for logging.
+    /// </summary>
+    public const int PACKET_PAYLOAD_PREVIEW_MAX_CHARS = 60;
 }

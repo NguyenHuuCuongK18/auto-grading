@@ -1035,7 +1035,9 @@ namespace SolutionGrader.Core.Services
                     var clientKey = _run.GetClientCaptureKey(questionCode, stageStr);
                     if (_run.TryGetCapturedOutput(clientKey, out var clientOutput) && !string.IsNullOrEmpty(clientOutput))
                     {
-                        var truncated = clientOutput.Length > 500 ? clientOutput[..500] + "..." : clientOutput;
+                        var truncated = clientOutput.Length > PortKeywords.OUTPUT_PREVIEW_MAX_CHARS 
+                            ? clientOutput[..PortKeywords.OUTPUT_PREVIEW_MAX_CHARS] + "..." 
+                            : clientOutput;
                         ws.Cell(row.RowNumber(), clientStdoutCol).Value = truncated;
                     }
                 }
@@ -1046,7 +1048,9 @@ namespace SolutionGrader.Core.Services
                     var serverKey = _run.GetServerCaptureKey(questionCode, stageStr);
                     if (_run.TryGetCapturedOutput(serverKey, out var serverOutput) && !string.IsNullOrEmpty(serverOutput))
                     {
-                        var truncated = serverOutput.Length > 500 ? serverOutput[..500] + "..." : serverOutput;
+                        var truncated = serverOutput.Length > PortKeywords.OUTPUT_PREVIEW_MAX_CHARS 
+                            ? serverOutput[..PortKeywords.OUTPUT_PREVIEW_MAX_CHARS] + "..." 
+                            : serverOutput;
                         ws.Cell(row.RowNumber(), serverStdoutCol).Value = truncated;
                     }
                 }
@@ -1062,14 +1066,18 @@ namespace SolutionGrader.Core.Services
                     
                     if (_run.TryGetCapturedOutput(requestKey, out var requestData) && !string.IsNullOrEmpty(requestData))
                     {
-                        var truncatedReq = requestData.Length > 250 ? requestData[..250] + "..." : requestData;
+                        var truncatedReq = requestData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                            ? requestData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                            : requestData;
                         networkData.AppendLine("[REQUEST]");
                         networkData.AppendLine(truncatedReq);
                     }
                     
                     if (_run.TryGetCapturedOutput(responseKey, out var responseData) && !string.IsNullOrEmpty(responseData))
                     {
-                        var truncatedRes = responseData.Length > 250 ? responseData[..250] + "..." : responseData;
+                        var truncatedRes = responseData.Length > PortKeywords.NETWORK_PREVIEW_MAX_CHARS 
+                            ? responseData[..PortKeywords.NETWORK_PREVIEW_MAX_CHARS] + "..." 
+                            : responseData;
                         if (networkData.Length > 0) networkData.AppendLine();
                         networkData.AppendLine("[RESPONSE]");
                         networkData.AppendLine(truncatedRes);
