@@ -271,6 +271,32 @@ namespace SolutionGrader.Core.Services
 
             var sheetHint = ResolveSheet(step, actualPath);
             
+            // Network flow validation steps (NETWORK-FLOW-*) return null from ResolveSheet
+            // These should NOT be written to Client/Server sheets - they are handled by 
+            // PopulateNetworkActualColumns for the Network sheet
+            // We still add them to _records for tracking but skip writing to sheets
+            if (sheetHint == null)
+            {
+                // Still record the step for internal tracking (ErrorReport, etc.)
+                _records.Add(new StepGradeRecord
+                {
+                    QuestionCode = step.QuestionCode,
+                    StepId = step.Id,
+                    Stage = step.Stage,
+                    Action = step.Action,
+                    Passed = passed,
+                    PointsAwarded = 0,
+                    PointsPossible = 0, // Network flow steps don't contribute to Client/Server sheet points
+                    DurationMs = durationMs,
+                    ErrorCode = errorCode,
+                    ErrorCategory = ErrorCodes.CategoryOf(errorCode),
+                    Message = message ?? string.Empty,
+                    DetailPath = detailPath,
+                    ActualPath = actualPath
+                });
+                return;
+            }
+            
             // Try to get worksheet - support OLD (plural/singular) and NEW formats
             IXLWorksheet? ws = null;
             if (string.Equals(sheetHint, SheetOutClients, StringComparison.OrdinalIgnoreCase))
@@ -724,6 +750,7 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Collects error notes from all failed test steps to include in the OverallSummary.
         /// This replaces the need for a separate FailedTestDetail.xlsx file.
+        /// Network flow validation steps (NETWORK-FLOW-*) are included but labeled as "Network Flow".
         /// </summary>
         /// <returns>A summary string of all errors, or empty string if all tests passed</returns>
         private string CollectErrorNotes()
@@ -745,12 +772,17 @@ namespace SolutionGrader.Core.Services
                 foreach (var record in stageGroup)
                 {
                     // Extract validation type for clarity
-                    var validationType = record.StepId.Contains("-METHOD-") ? "HTTP Method" :
+                    // NETWORK-FLOW-* steps are TCP handshake validation (SYN, SYN-ACK, ACK, FIN-ACK)
+                    var validationType = record.StepId.Contains("-FLOW-") ? "Network Flow (TCP)" :
+                                       record.StepId.Contains("-METHOD-") ? "HTTP Method" :
                                        record.StepId.Contains("-STATUS-") ? "Status Code" :
                                        record.StepId.Contains("-SIZE-") ? "Byte Size" :
                                        record.StepId.Contains("-DATA-") ? "Data" :
                                        record.StepId.Contains("-OUT-") ? "Output" :
-                                       record.StepId.Contains("-REQ-") ? "Request" : "Unknown";
+                                       record.StepId.Contains("-CONSOLE-") ? "Console Output" :
+                                       record.StepId.Contains("-REQ-") ? "Request" :
+                                       record.StepId.Contains("-REQPAYLOAD-") ? "Request Payload" :
+                                       record.StepId.Contains("-RESPAYLOAD-") ? "Response Payload" : "Unknown";
                     
                     // Create concise error message
                     var message = record.Message ?? "Unknown error";
@@ -845,7 +877,20 @@ namespace SolutionGrader.Core.Services
             return wb;
         }
 
-        private static string ResolveSheet(Step step, string? actualPath)
+        /// <summary>
+        /// Determines which sheet to log step results to based on step ID prefix.
+        /// Returns null for steps that should not be logged to Client/Server sheets.
+        /// 
+        /// Network flow validation steps (NETWORK-FLOW-*) return null because:
+        /// - They validate TCP handshake (SYN, SYN-ACK, ACK, FIN-ACK) and connection lifecycle
+        /// - Their results are recorded in the Network sheet via PopulateNetworkActualColumns
+        /// - They should NOT appear in Client/Server sheets as they don't represent
+        ///   client/server console output or application data
+        /// </summary>
+        /// <param name="step">The step being processed</param>
+        /// <param name="actualPath">Optional path hint for sheet resolution</param>
+        /// <returns>Sheet name to log to, or null if step should not be logged to Client/Server sheets</returns>
+        private static string? ResolveSheet(Step step, string? actualPath)
         {
             // PRIMARY: Use Step ID prefix to determine sheet (most reliable)
             // OLD format: OC- = OutputClient, OS- = OutputServer, IC- = InputClient
@@ -869,8 +914,14 @@ namespace SolutionGrader.Core.Services
             if (stepId.StartsWith("CLIENT-"))
                 return SheetOutClients;
             
-            // NETWORK- steps (HTTP method, status code) should go to Client sheet by default
-            // as they represent client-side validation of network behavior
+            // NETWORK-FLOW-* steps (TCP handshake validation) should NOT be logged to Client/Server sheets
+            // They are handled separately in PopulateNetworkActualColumns for the Network sheet
+            // Format: NETWORK-FLOW-{stage}-{rowIndex} e.g., "NETWORK-FLOW-3-1"
+            if (stepId.StartsWith("NETWORK-FLOW-"))
+                return null;
+            
+            // Other NETWORK- steps (HTTP method, status code, payload) go to Client sheet
+            // These represent HTTP-level validation which is client-facing
             if (stepId.StartsWith("NETWORK-"))
                 return SheetOutClients;
             
@@ -1343,11 +1394,16 @@ namespace SolutionGrader.Core.Services
                 ws.Cell(row, 2).Value = record.StepId;
                 
                 // Extract validation type
-                var validationType = record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
+                // NETWORK-FLOW-* steps are TCP handshake validation (SYN, SYN-ACK, ACK, FIN-ACK)
+                var validationType = record.StepId.Contains("-FLOW-") ? GradingKeywords.Validation_NetworkFlow :
+                                   record.StepId.Contains("-METHOD-") ? GradingKeywords.Validation_HttpMethod :
                                    record.StepId.Contains("-STATUS-") ? GradingKeywords.Validation_StatusCode :
                                    record.StepId.Contains("-SIZE-") ? GradingKeywords.Validation_ByteSize :
                                    record.StepId.Contains("-DATA-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_DataResponse : GradingKeywords.Validation_DataRequest) :
                                    record.StepId.Contains("-OUT-") ? (record.StepId.StartsWith(GradingKeywords.StepPrefix_OutputClient) ? GradingKeywords.Validation_ClientOutput : GradingKeywords.Validation_ServerOutput) :
+                                   record.StepId.Contains("-CONSOLE-") ? GradingKeywords.Validation_Console :
+                                   record.StepId.Contains("-REQPAYLOAD-") ? GradingKeywords.Validation_ReqPayload :
+                                   record.StepId.Contains("-RESPAYLOAD-") ? GradingKeywords.Validation_ResPayload :
                                    record.StepId.Contains("-REQ-") ? GradingKeywords.Validation_DataRequest : GradingKeywords.Validation_Other;
                 ws.Cell(row, 3).Value = validationType;
                 
