@@ -303,16 +303,22 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private static string DetermineConnectionState(string flags, string srcRole)
     {
         // Standard TCP handshake states
+        // SYN only (no ACK) from client = connection initiation
         if (flags == "SYN" && srcRole == NetworkKeywords.Role_Client)
             return "Client connecting to server (SYN)";
-        if (flags == "SYN, ACK" && srcRole == NetworkKeywords.Role_Server)
+        // SYN, ACK from server = server acknowledging connection
+        if ((flags == "SYN, ACK" || flags == "ACK, SYN") && srcRole == NetworkKeywords.Role_Server)
             return "Server responding (SYN-ACK)";
-        if (flags == "ACK" && !flags.Contains("PSH") && !flags.Contains("FIN"))
+        // ACK only (no SYN, no PSH, no FIN) = connection established acknowledgment
+        if (flags == "ACK")
             return "Connection established";
+        // PSH, ACK = data transfer
         if (flags.Contains("PSH"))
             return "Data transfer in progress";
+        // FIN = connection closing
         if (flags.Contains("FIN"))
             return "Closing connection (FIN-ACK)";
+        // RST = connection reset
         if (flags.Contains("RST"))
             return "Connection reset";
         

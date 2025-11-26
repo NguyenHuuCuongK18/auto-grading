@@ -179,15 +179,21 @@ namespace SolutionGrader.Core.Services
                     return packets.ToList().AsReadOnly();
                 }
             }
-            return Array.Empty<CapturedNetworkPacket>();
+            return EmptyCapturedPackets;
         }
+        
+        /// <summary>
+        /// Static empty array for returning when no packets are captured.
+        /// Avoids creating new empty arrays on each call.
+        /// </summary>
+        private static readonly IReadOnlyList<CapturedNetworkPacket> EmptyCapturedPackets = Array.Empty<CapturedNetworkPacket>();
         
         /// <summary>
         /// Updates the network flow display string for the NetworkStdout column in output sheets.
         /// </summary>
         private void UpdateNetworkFlowDisplay(string questionCode, string stage, List<CapturedNetworkPacket> packets)
         {
-            var flowKey = $"network.{stage}.flow";
+            var flowKey = string.Format(PortKeywords.NETWORK_FLOW_KEY_PATTERN, stage);
             var sb = new StringBuilder();
             
             lock (packets)
@@ -199,7 +205,9 @@ namespace SolutionGrader.Core.Services
                     sb.AppendLine($"[{index}] {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
                     if (!string.IsNullOrEmpty(pkt.Data))
                     {
-                        var dataPreview = pkt.Data.Length > 50 ? pkt.Data.Substring(0, 50) + "..." : pkt.Data;
+                        var dataPreview = pkt.Data.Length > PortKeywords.NETWORK_FLOW_DATA_PREVIEW_MAX_CHARS 
+                            ? pkt.Data.Substring(0, PortKeywords.NETWORK_FLOW_DATA_PREVIEW_MAX_CHARS) + "..." 
+                            : pkt.Data;
                         sb.AppendLine($"    Data: {dataPreview.Replace("\n", "\\n").Replace("\r", "")}");
                     }
                 }

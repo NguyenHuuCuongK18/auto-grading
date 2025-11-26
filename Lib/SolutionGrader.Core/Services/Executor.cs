@@ -528,9 +528,11 @@ namespace SolutionGrader.Core.Services
             }
             
             // Find the matching packet by index (networkRowIndex corresponds to the order in the test kit)
-            if (networkRowIndex > 0 && networkRowIndex <= capturedPackets.Count)
+            // Using 1-based index from test kit, convert to 0-based for array access
+            var arrayIndex = networkRowIndex - 1;
+            if (networkRowIndex > 0 && arrayIndex >= 0 && arrayIndex < capturedPackets.Count)
             {
-                var actualPacket = capturedPackets[networkRowIndex - 1]; // Convert to 0-based index
+                var actualPacket = capturedPackets[arrayIndex];
                 
                 // Compare flags (normalize for comparison - ignore order)
                 var normalizedExpectedFlags = NormalizeFlags(expectedFlags);

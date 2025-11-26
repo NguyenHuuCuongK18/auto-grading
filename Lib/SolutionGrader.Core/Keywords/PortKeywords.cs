@@ -81,4 +81,15 @@ public static class PortKeywords
     /// Maximum characters to show in packet payload preview for logging.
     /// </summary>
     public const int PACKET_PAYLOAD_PREVIEW_MAX_CHARS = 60;
+    
+    /// <summary>
+    /// Maximum characters to show in network flow data preview (per packet).
+    /// </summary>
+    public const int NETWORK_FLOW_DATA_PREVIEW_MAX_CHARS = 50;
+    
+    /// <summary>
+    /// Key pattern for network flow capture storage.
+    /// Format: network.{stage}.flow
+    /// </summary>
+    public const string NETWORK_FLOW_KEY_PATTERN = "network.{0}.flow";
 }

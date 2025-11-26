@@ -1062,8 +1062,8 @@ namespace SolutionGrader.Core.Services
                 // Populate NetworkStdout column (only on Network sheet) with full TCP flow data
                 if (!isClientSheet && !isServerSheet && networkStdoutCol > 0)
                 {
-                    // Get the full captured network flow for this stage
-                    var networkFlowKey = $"network.{stageStr}.flow";
+                    // Get the full captured network flow for this stage using the constant key pattern
+                    var networkFlowKey = string.Format(PortKeywords.NETWORK_FLOW_KEY_PATTERN, stageStr);
                     if (_run.TryGetCapturedOutput(networkFlowKey, out var networkFlow) && !string.IsNullOrEmpty(networkFlow))
                     {
                         ws.Cell(row.RowNumber(), networkStdoutCol).Value = networkFlow;
