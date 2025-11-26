@@ -188,6 +188,20 @@ public static class GradingKeywords
     /// <summary>Column for network data captured during test execution</summary>
     public const string Col_NetworkStdout   = "NetworkStdout";
     
+    // Actual captured network data columns (for Network sheet comparison)
+    /// <summary>Column for actual captured TCP flags</summary>
+    public const string Col_ActualFlags     = "ActualFlags";
+    /// <summary>Column for actual captured connection state</summary>
+    public const string Col_ActualState     = "ActualState";
+    /// <summary>Column for actual captured source role</summary>
+    public const string Col_ActualSourceRole = "ActualSourceRole";
+    /// <summary>Column for actual captured destination role</summary>
+    public const string Col_ActualDestRole  = "ActualDestRole";
+    /// <summary>Column for actual captured data payload</summary>
+    public const string Col_ActualData      = "ActualData";
+    /// <summary>Column for network validation result (PASS/FAIL)</summary>
+    public const string Col_NetworkResult   = "NetworkResult";
+    
     #endregion
     
     #region Comparison Settings

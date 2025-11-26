@@ -8,7 +8,19 @@ using System.Collections.Generic;
 using System.Linq;
 
 /// <summary>
-/// Parser for the new detail.xlsx format with User/Client/Server/Network sheets
+/// Parser for the new detail.xlsx format with User/Client/Server/Network sheets.
+/// 
+/// Key Features:
+/// - Parses User sheet for actions (StartClient, StartServer, Input, CloseClient, CloseServer)
+/// - Parses Client/Server sheets for expected console output validation
+/// - Parses Network sheet for expected TCP/HTTP network flow validation
+/// 
+/// Network Sheet Parsing:
+/// - Each row in the Network sheet represents one expected network packet
+/// - Network row indices are tracked PER STAGE, not globally
+/// - This ensures that when validating, packet index 1 of stage 3 maps to the first
+///   captured packet for stage 3, not the first packet globally
+/// - Supports TCP (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK, RST) and HTTP validation
 /// </summary>
 public sealed class NewFormatDetailParser
 {
@@ -263,7 +275,10 @@ public sealed class NewFormatDetailParser
         if (networkSheet != null && networkSheet.RangeUsed() != null)
         {
             var map = Header(networkSheet);
-            int networkRowIndex = 0;
+            
+            // Track network row index PER STAGE, not globally
+            // This ensures that when validating, the index correctly maps to captured packets for each stage
+            var stageRowIndexMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             
             foreach (var row in networkSheet.RangeUsed()!.Rows().Skip(1))
             {
@@ -272,7 +287,16 @@ public sealed class NewFormatDetailParser
                 // Skip rows without stage
                 if (string.IsNullOrWhiteSpace(stage)) continue;
                 
-                networkRowIndex++;
+                // Get or initialize the per-stage row index counter
+                if (!stageRowIndexMap.TryGetValue(stage, out var currentIndex))
+                {
+                    currentIndex = 0;
+                }
+                currentIndex++;
+                stageRowIndexMap[stage] = currentIndex;
+                
+                // Use per-stage index for network row matching
+                var networkRowIndex = currentIndex;
                 
                 var info = Get(row, map, NetworkKeywords.Col_Info);
                 var flags = Get(row, map, NetworkKeywords.Col_Flags);

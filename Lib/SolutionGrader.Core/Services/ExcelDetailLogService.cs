@@ -203,7 +203,7 @@ namespace SolutionGrader.Core.Services
 
                 // Wrap and adjust for readability
                 ws.Style.Alignment.WrapText = true;
-                ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 80);
+                ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
             }
 
             // Add STDOUT columns to result sheets for captured output during test execution
@@ -993,13 +993,206 @@ namespace SolutionGrader.Core.Services
                 PopulateStdoutColumns(serverWs, hdr, isClientSheet: false, isServerSheet: true);
             }
             
-            // Add NetworkStdout column to Network sheet ONLY (if it exists)
+            // Add actual captured data columns to Network sheet (if it exists)
+            // This provides side-by-side comparison between expected and actual network traffic
             if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out var networkWs))
             {
-                EnsureColumns(networkWs, new[] { GradingKeywords.Col_NetworkStdout });
+                // Add columns for actual captured data
+                EnsureColumns(networkWs, new[] 
+                { 
+                    GradingKeywords.Col_ActualFlags,
+                    GradingKeywords.Col_ActualState,
+                    GradingKeywords.Col_ActualSourceRole,
+                    GradingKeywords.Col_ActualDestRole,
+                    GradingKeywords.Col_ActualData,
+                    GradingKeywords.Col_NetworkResult
+                });
                 var hdr = GetHeaderIndex(networkWs);
-                PopulateStdoutColumns(networkWs, hdr, isClientSheet: false, isServerSheet: false);
+                PopulateNetworkActualColumns(networkWs, hdr);
             }
+        }
+        
+        /// <summary>
+        /// Populates the Network sheet with actual captured data for side-by-side comparison.
+        /// Each row in the Network sheet represents an expected packet from the test kit.
+        /// This method adds actual captured data columns to enable easy verification of:
+        /// - TCP flags (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK, RST)
+        /// - Connection state descriptions
+        /// - Source/Destination roles (Client/Server)
+        /// - Payload data (for PSH packets)
+        /// </summary>
+        private void PopulateNetworkActualColumns(IXLWorksheet ws, Dictionary<string, int> hdr)
+        {
+            if (!hdr.TryGetValue(NetworkKeywords.Col_Stage, out var stageCol)) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Get actual data column indices
+            hdr.TryGetValue(GradingKeywords.Col_ActualFlags, out int actualFlagsCol);
+            hdr.TryGetValue(GradingKeywords.Col_ActualState, out int actualStateCol);
+            hdr.TryGetValue(GradingKeywords.Col_ActualSourceRole, out int actualSrcRoleCol);
+            hdr.TryGetValue(GradingKeywords.Col_ActualDestRole, out int actualDstRoleCol);
+            hdr.TryGetValue(GradingKeywords.Col_ActualData, out int actualDataCol);
+            hdr.TryGetValue(GradingKeywords.Col_NetworkResult, out int resultCol);
+            
+            // Get expected data column indices for comparison
+            hdr.TryGetValue(NetworkKeywords.Col_Flags, out int expFlagsCol);
+            hdr.TryGetValue(NetworkKeywords.Col_SourceRole, out int expSrcRoleCol);
+            hdr.TryGetValue(NetworkKeywords.Col_DestinationRole, out int expDstRoleCol);
+            
+            // Track per-stage packet indices for matching with captured data
+            var stagePacketIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var questionCode = _questionCode ?? "";
+            
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                var stageStr = row.Cell(stageCol).GetString()?.Trim();
+                if (string.IsNullOrWhiteSpace(stageStr)) continue;
+                
+                // Get or initialize the per-stage packet index
+                if (!stagePacketIndices.TryGetValue(stageStr, out var packetIndex))
+                {
+                    packetIndex = 0;
+                }
+                
+                // Get captured packets for this stage
+                var capturedPackets = _run.GetCapturedNetworkPackets(questionCode, stageStr);
+                
+                // Check if we have a packet at this index
+                if (capturedPackets != null && packetIndex < capturedPackets.Count)
+                {
+                    var actualPacket = capturedPackets[packetIndex];
+                    
+                    // Populate actual data columns
+                    if (actualFlagsCol > 0)
+                        ws.Cell(row.RowNumber(), actualFlagsCol).Value = actualPacket.Flags ?? "";
+                    if (actualStateCol > 0)
+                        ws.Cell(row.RowNumber(), actualStateCol).Value = actualPacket.State ?? "";
+                    if (actualSrcRoleCol > 0)
+                        ws.Cell(row.RowNumber(), actualSrcRoleCol).Value = actualPacket.SourceRole ?? "";
+                    if (actualDstRoleCol > 0)
+                        ws.Cell(row.RowNumber(), actualDstRoleCol).Value = actualPacket.DestinationRole ?? "";
+                    if (actualDataCol > 0 && !string.IsNullOrEmpty(actualPacket.Data))
+                    {
+                        var dataPreview = actualPacket.Data.Length > PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS 
+                            ? actualPacket.Data.Substring(0, PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS) + "..." 
+                            : actualPacket.Data;
+                        ws.Cell(row.RowNumber(), actualDataCol).Value = dataPreview;
+                    }
+                    
+                    // Determine if this packet matches expected values
+                    bool matched = true;
+                    
+                    // Compare flags (normalize for comparison)
+                    if (expFlagsCol > 0)
+                    {
+                        var expectedFlags = row.Cell(expFlagsCol).GetString()?.Trim() ?? "";
+                        var actualFlags = actualPacket.Flags ?? "";
+                        if (!FlagsMatch(expectedFlags, actualFlags))
+                        {
+                            matched = false;
+                        }
+                    }
+                    
+                    // Compare source role
+                    if (matched && expSrcRoleCol > 0)
+                    {
+                        var expectedSrcRole = row.Cell(expSrcRoleCol).GetString()?.Trim() ?? "";
+                        var actualSrcRole = actualPacket.SourceRole ?? "";
+                        if (!string.IsNullOrEmpty(expectedSrcRole) && 
+                            !string.Equals(expectedSrcRole, actualSrcRole, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matched = false;
+                        }
+                    }
+                    
+                    // Compare destination role
+                    if (matched && expDstRoleCol > 0)
+                    {
+                        var expectedDstRole = row.Cell(expDstRoleCol).GetString()?.Trim() ?? "";
+                        var actualDstRole = actualPacket.DestinationRole ?? "";
+                        if (!string.IsNullOrEmpty(expectedDstRole) && 
+                            !string.Equals(expectedDstRole, actualDstRole, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matched = false;
+                        }
+                    }
+                    
+                    // Set result
+                    if (resultCol > 0)
+                    {
+                        ws.Cell(row.RowNumber(), resultCol).Value = matched ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail;
+                        if (matched)
+                        {
+                            ws.Cell(row.RowNumber(), resultCol).Style.Font.FontColor = XLColor.DarkGreen;
+                            ws.Cell(row.RowNumber(), resultCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                        }
+                        else
+                        {
+                            ws.Cell(row.RowNumber(), resultCol).Style.Font.FontColor = XLColor.DarkRed;
+                            ws.Cell(row.RowNumber(), resultCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        }
+                    }
+                }
+                else
+                {
+                    // No packet captured at this index - this is a failure (missing network traffic)
+                    if (resultCol > 0)
+                    {
+                        ws.Cell(row.RowNumber(), resultCol).Value = GradingKeywords.Result_Fail;
+                        ws.Cell(row.RowNumber(), resultCol).Style.Font.FontColor = XLColor.DarkRed;
+                        ws.Cell(row.RowNumber(), resultCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                    }
+                    
+                    // Add note about missing packet
+                    if (actualFlagsCol > 0)
+                    {
+                        ws.Cell(row.RowNumber(), actualFlagsCol).Value = "(Missing)";
+                        ws.Cell(row.RowNumber(), actualFlagsCol).Style.Font.FontColor = XLColor.DarkRed;
+                    }
+                }
+                
+                // Increment per-stage packet index for next row
+                stagePacketIndices[stageStr] = packetIndex + 1;
+            }
+            
+            // Adjust column widths
+            ws.Style.Alignment.WrapText = true;
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
+        }
+        
+        /// <summary>
+        /// Compares TCP flags for equality, ignoring order.
+        /// e.g., "SYN, ACK" should match "ACK, SYN"
+        /// </summary>
+        private static bool FlagsMatch(string expected, string actual)
+        {
+            if (string.IsNullOrWhiteSpace(expected) && string.IsNullOrWhiteSpace(actual))
+                return true;
+            if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
+                return false;
+            
+            var expectedFlags = expected.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(f => f.Trim().ToUpperInvariant())
+                .OrderBy(f => f)
+                .ToList();
+            
+            var actualFlags = actual.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(f => f.Trim().ToUpperInvariant())
+                .OrderBy(f => f)
+                .ToList();
+            
+            if (expectedFlags.Count != actualFlags.Count)
+                return false;
+            
+            for (int i = 0; i < expectedFlags.Count; i++)
+            {
+                if (expectedFlags[i] != actualFlags[i])
+                    return false;
+            }
+            
+            return true;
         }
         
         /// <summary>
@@ -1105,7 +1298,7 @@ namespace SolutionGrader.Core.Services
             
             // Adjust column widths and wrap text
             ws.Style.Alignment.WrapText = true;
-            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }
 
         /// <summary>
@@ -1216,7 +1409,7 @@ namespace SolutionGrader.Core.Services
             ws.Cell(row, 2).Value = Math.Round(failedRecords.Sum(r => r.PointsPossible), 2);
 
             ws.Style.Alignment.WrapText = true;
-            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }
 
         /// <summary>
