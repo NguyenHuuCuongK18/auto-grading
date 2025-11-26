@@ -299,6 +299,8 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     
     /// <summary>
     /// Determines the connection state description based on TCP flags and source role.
+    /// State descriptions are informational and NOT used for grading validation.
+    /// Only TCP flags and roles are compared for grading purposes.
     /// </summary>
     private static string DetermineConnectionState(string flags, string srcRole)
     {
@@ -318,9 +320,9 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         // FIN = connection closing
         if (flags.Contains("FIN"))
             return "Closing connection (FIN-ACK)";
-        // RST = connection reset
+        // RST = connection reset - indicates error condition (crash, abnormal termination)
         if (flags.Contains("RST"))
-            return "Connection reset";
+            return "Connection reset (RST) - Error occurred";
         
         return "TCP packet";
     }

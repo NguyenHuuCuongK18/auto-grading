@@ -263,7 +263,10 @@ public sealed class NewFormatDetailParser
         if (networkSheet != null && networkSheet.RangeUsed() != null)
         {
             var map = Header(networkSheet);
-            int networkRowIndex = 0;
+            
+            // Track network row index PER STAGE, not globally
+            // This ensures that when validating, the index correctly maps to captured packets for each stage
+            var stageRowIndexMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             
             foreach (var row in networkSheet.RangeUsed()!.Rows().Skip(1))
             {
@@ -272,7 +275,16 @@ public sealed class NewFormatDetailParser
                 // Skip rows without stage
                 if (string.IsNullOrWhiteSpace(stage)) continue;
                 
-                networkRowIndex++;
+                // Get or initialize the per-stage row index counter
+                if (!stageRowIndexMap.TryGetValue(stage, out var currentIndex))
+                {
+                    currentIndex = 0;
+                }
+                currentIndex++;
+                stageRowIndexMap[stage] = currentIndex;
+                
+                // Use per-stage index for network row matching
+                var networkRowIndex = currentIndex;
                 
                 var info = Get(row, map, NetworkKeywords.Col_Info);
                 var flags = Get(row, map, NetworkKeywords.Col_Flags);
