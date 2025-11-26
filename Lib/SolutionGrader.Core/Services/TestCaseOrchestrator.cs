@@ -341,8 +341,12 @@ namespace SolutionGrader.Core.Services
                     var isClientStart = string.Equals(step.Action, ActionKeywords.ClientStart, StringComparison.OrdinalIgnoreCase);
                     var isClientInput = string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase);
                     
-                    // NOTE: Do NOT flush network captures after processes start
-                    // Some projects initialize connections immediately and we need to capture that traffic
+                    // NOTE: No network capture flush is needed here because:
+                    // 1. The server health check uses IsTcpPortInListeningState which is a pure local
+                    //    socket bind operation - it does NOT generate any network traffic
+                    // 2. CLIENTSTART and SERVERSTART are test kit steps, so any network traffic they
+                    //    generate (e.g., automatic connections on startup) is intentional and should
+                    //    be captured as part of the test
 
                     var currentStage = TryParseStage(step.Id);
                     

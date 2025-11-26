@@ -130,62 +130,14 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Wait for server to be ready
-                            var t0 = Environment.TickCount;
-                            bool serverReady = false;
-                            
-                            // Use TCP port binding check for ALL server types (HTTP and TCP) to avoid:
-                            // 1. RST (Reset) packets that pollute network captures during health checks
-                            // 2. Connection attempts before server is ready causing "bad request" errors
-                            // 3. Health check requests appearing in network flow captures
+                            // Wait briefly for server output to stabilize after startup
+                            // No health check is performed because:
+                            // 1. Student code may fail to start properly - that's their bug to fix
+                            // 2. Health checks could generate network traffic that pollutes captures
+                            // 3. The test kit steps will naturally fail if server isn't working
                             //
-                            // The IsTcpPortInListeningState method checks if the port is in use WITHOUT
-                            // establishing a connection - it tries to bind to the port and if binding fails
-                            // with AddressAlreadyInUse, the server is listening.
-                            //
-                            // Previous approach used HTTP GET /healthz for HTTP servers which caused:
-                            // - SYN packets being sent before server ready
-                            // - RST packets being captured by network monitor  
-                            // - These polluted the network flow comparison in test results
-                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
-                            {
-                                // First check if the process has crashed
-                                if (!_proc.IsServerRunning)
-                                {
-                                    // Process exited early - wait a bit for output then fail
-                                    await Task.Delay(200, ct);
-                                    break;
-                                }
-                                
-                                // Use non-connecting port check for all server types to avoid
-                                // triggering network traffic that pollutes the capture
-                                if (IsTcpPortInListeningState(_configuredServerPort))
-                                {
-                                    serverReady = true;
-                                    break;
-                                }
-                                
-                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
-                            }
-                            
-                            if (!_proc.IsServerRunning)
-                            {
-                                errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetServerOutput() ?? "";
-                                var errorPreview = output.Length > 500 ? output.Substring(0, 500) + "..." : output;
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_FULL_LOG_AVAILABLE}");
-                                result = (false, $"Server process failed to start or crashed immediately. Output: {errorPreview}");
-                                break;
-                            }
-                            
-                            if (!serverReady)
-                            {
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_NOT_INITIALIZED}");
-                            }
-                            
-                            // Wait for server output to stabilize after startup
-                            // Use shorter wait time to capture only initial startup messages
-                            // Connection-related messages will be captured when actual connections occur
+                            // We just wait for initial output to be captured, then let the test continue.
+                            // If the server crashes or doesn't listen, subsequent steps will fail appropriately.
                             await _proc.WaitForServerOutputAsync(1, ct);
                             
                             var serverOutput = _proc.GetServerOutput();
@@ -194,7 +146,7 @@ namespace SolutionGrader.Core.Services
                                 : serverOutput;
                             
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_SERVER_OUTPUT, outputPreview)}");
-                            result = (true, $"Server started successfully. Process running: {_proc.IsServerRunning}");
+                            result = (true, $"Server process started. Running: {_proc.IsServerRunning}");
                             break;
                         }
 
@@ -213,18 +165,13 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Wait for client output to stabilize after startup
+                            // Wait briefly for client output to stabilize after startup
+                            // No health check is performed because:
+                            // 1. Student code may fail to start properly - that's their bug to fix  
+                            // 2. The test kit steps will naturally fail if client isn't working
+                            //
+                            // We just wait for initial output to be captured, then let the test continue.
                             await _proc.WaitForClientOutputAsync(3, ct);
-                            
-                            if (!_proc.IsClientRunning)
-                            {
-                                errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetClientOutput() ?? "";
-                                var errorPreview = output.Length > 500 ? output.Substring(0, 500) + "..." : output;
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_CLIENT_FULL_LOG_AVAILABLE}");
-                                result = (false, $"Client process failed to start or crashed immediately. Output: {errorPreview}");
-                                break;
-                            }
                             
                             var clientOutput = _proc.GetClientOutput();
                             var outputPreview = clientOutput.Length > 100 
@@ -237,7 +184,7 @@ namespace SolutionGrader.Core.Services
                             // This allows "client connected" messages to be captured in the correct stage
                             await _proc.WaitForServerOutputAsync(PortKeywords.CONNECTION_OUTPUT_WAIT_SECONDS, ct);
                             
-                            result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
+                            result = (true, $"Client process started. Running: {_proc.IsClientRunning}");
                             break;
                         }
 
@@ -280,17 +227,8 @@ namespace SolutionGrader.Core.Services
 
                             var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{_configuredServerPort}", ct);
                             
-                            // Use TCP port binding check to avoid RST packet pollution
-                            // Same approach as ServerStart action - see detailed comment there
-                            var t0 = Environment.TickCount;
-                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
-                            {
-                                if (IsTcpPortInListeningState(_configuredServerPort))
-                                {
-                                    break;
-                                }
-                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
-                            }
+                            // No health check - just start the process and let the test continue
+                            // If the server doesn't start properly, subsequent steps will fail naturally
                             result = (true, "RunServer OK");
                             break;
                         }
