@@ -223,7 +223,7 @@ namespace SolutionGrader.Core.Domain.Models
         public static GradingConfig Default => new GradingConfig
         {
             // Port configuration
-            GraderPort = 8888,
+            GraderPort = 8000,
             
             // Sheet grading
             GradeClientSheet = true,
