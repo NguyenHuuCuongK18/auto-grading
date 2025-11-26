@@ -2,6 +2,7 @@
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Services;
 using SolutionGrader.Core.Keywords;
+using SolutionGrader.Services;
 
 public class Program
 {
@@ -15,6 +16,7 @@ public class Program
             return verb switch
             {
                 "executesuite" => ExecuteSuite(map).GetAwaiter().GetResult(),
+                "executepaper" => ExecutePaper(map).GetAwaiter().GetResult(),
                 _ => PrintUsage()
             };
         }
@@ -23,6 +25,25 @@ public class Program
             Console.Error.WriteLine(ex.Message);
             return -1;
         }
+    }
+
+    private static async System.Threading.Tasks.Task<int> ExecutePaper(Dictionary<string, string> map)
+    {
+        if (!Need(map, "suite", "out", "submission-root")) return PrintUsage();
+
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestampedResultRoot = System.IO.Path.Combine(map["out"], string.Format(FileKeywords.Pattern_GradeResult, timestamp));
+
+        var run = new ExecuteSuiteArgs
+        {
+            SuitePath = map["suite"],
+            ResultRoot = timestampedResultRoot,
+            SubmissionRoot = map["submission-root"],
+            UseInnerTestCaseEnvironment = true
+        };
+
+        var runner = new SuiteRunner();
+        return await runner.ExecutePaper(run);
     }
 
     private static async System.Threading.Tasks.Task<int> ExecuteSuite(Dictionary<string, string> a)
@@ -39,8 +60,8 @@ public class Program
             ResultRoot = timestampedResultRoot,
             ClientExePath = a.GetValueOrDefault("client"),
             ServerExePath = a.GetValueOrDefault("server"),
-            UseInnerTestCaseEnvironment = a.ContainsKey("use-inner-env") && 
-                                         (a["use-inner-env"].Equals("true", StringComparison.OrdinalIgnoreCase) || 
+            UseInnerTestCaseEnvironment = a.ContainsKey("use-inner-env") &&
+                                         (a["use-inner-env"].Equals("true", StringComparison.OrdinalIgnoreCase) ||
                                           a["use-inner-env"].Equals("1"))
         };
 
@@ -64,9 +85,9 @@ public class Program
         IReportService rep = new ReportService(files);
 
         var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx, appsettings);
-        
+
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
-        
+
         return await flow.ExecuteSuiteAsync(run);
     }
 
