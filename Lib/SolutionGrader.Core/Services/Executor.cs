@@ -130,70 +130,14 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Wait for server to be ready
-                            var t0 = Environment.TickCount;
-                            bool serverReady = false;
-                            bool isHttpProtocol = args.Protocol?.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) == true;
-                            
-                            // For TCP servers, we use a non-connecting health check to avoid triggering
-                            // "Client connected/disconnected" messages that should appear in later stages
-                            // For HTTP servers, we use HTTP health checks that don't trigger TCP connection events
-                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
-                            {
-                                // First check if the process has crashed
-                                if (!_proc.IsServerRunning)
-                                {
-                                    // Process exited early - wait a bit for output then fail
-                                    await Task.Delay(200, ct);
-                                    break;
-                                }
-                                
-                                // For HTTP servers, try HTTP health check
-                                if (isHttpProtocol)
-                                {
-                                    try
-                                    {
-                                        var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
-                                        if (res.IsSuccessStatusCode)
-                                        {
-                                            serverReady = true;
-                                            break;
-                                        }
-                                    }
-                                    catch { /* HTTP health check failed, will retry */ }
-                                }
-                                else
-                                {
-                                    // For TCP servers, use non-connecting port check to avoid triggering connection messages
-                                    // We check if the port is in listening state without establishing a connection
-                                    if (IsTcpPortInListeningState(_configuredServerPort))
-                                    {
-                                        serverReady = true;
-                                        break;
-                                    }
-                                }
-                                
-                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
-                            }
-                            
-                            if (!_proc.IsServerRunning)
-                            {
-                                errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetServerOutput() ?? "";
-                                var errorPreview = output.Length > 500 ? output.Substring(0, 500) + "..." : output;
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_FULL_LOG_AVAILABLE}");
-                                result = (false, $"Server process failed to start or crashed immediately. Output: {errorPreview}");
-                                break;
-                            }
-                            
-                            if (!serverReady)
-                            {
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_SERVER_NOT_INITIALIZED}");
-                            }
-                            
-                            // Wait for server output to stabilize after startup
-                            // Use shorter wait time to capture only initial startup messages
-                            // Connection-related messages will be captured when actual connections occur
+                            // Wait briefly for server output to stabilize after startup
+                            // No health check is performed because:
+                            // 1. Student code may fail to start properly - that's their bug to fix
+                            // 2. Health checks could generate network traffic that pollutes captures
+                            // 3. The test kit steps will naturally fail if server isn't working
+                            //
+                            // We just wait for initial output to be captured, then let the test continue.
+                            // If the server crashes or doesn't listen, subsequent steps will fail appropriately.
                             await _proc.WaitForServerOutputAsync(1, ct);
                             
                             var serverOutput = _proc.GetServerOutput();
@@ -202,7 +146,7 @@ namespace SolutionGrader.Core.Services
                                 : serverOutput;
                             
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {string.Format(LoggingKeywords.MSG_ACTION_SERVER_OUTPUT, outputPreview)}");
-                            result = (true, $"Server started successfully. Process running: {_proc.IsServerRunning}");
+                            result = (true, $"Server process started. Running: {_proc.IsServerRunning}");
                             break;
                         }
 
@@ -221,18 +165,13 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Wait for client output to stabilize after startup
+                            // Wait briefly for client output to stabilize after startup
+                            // No health check is performed because:
+                            // 1. Student code may fail to start properly - that's their bug to fix  
+                            // 2. The test kit steps will naturally fail if client isn't working
+                            //
+                            // We just wait for initial output to be captured, then let the test continue.
                             await _proc.WaitForClientOutputAsync(3, ct);
-                            
-                            if (!_proc.IsClientRunning)
-                            {
-                                errCode = ErrorCodes.PROCESS_CRASHED;
-                                var output = _proc.GetClientOutput() ?? "";
-                                var errorPreview = output.Length > 500 ? output.Substring(0, 500) + "..." : output;
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} {LoggingKeywords.MSG_ACTION_CLIENT_FULL_LOG_AVAILABLE}");
-                                result = (false, $"Client process failed to start or crashed immediately. Output: {errorPreview}");
-                                break;
-                            }
                             
                             var clientOutput = _proc.GetClientOutput();
                             var outputPreview = clientOutput.Length > 100 
@@ -245,7 +184,7 @@ namespace SolutionGrader.Core.Services
                             // This allows "client connected" messages to be captured in the correct stage
                             await _proc.WaitForServerOutputAsync(PortKeywords.CONNECTION_OUTPUT_WAIT_SECONDS, ct);
                             
-                            result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
+                            result = (true, $"Client process started. Running: {_proc.IsClientRunning}");
                             break;
                         }
 
@@ -287,17 +226,9 @@ namespace SolutionGrader.Core.Services
                             { errCode = ErrorCodes.FILE_NOT_FOUND; return (false, "Server executable not found"); }
 
                             var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{_configuredServerPort}", ct);
-                            var t0 = Environment.TickCount;
-                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
-                            {
-                                try
-                                {
-                                    var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
-                                    if (res.IsSuccessStatusCode) break;
-                                }
-                                catch { /* wait */ }
-                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
-                            }
+                            
+                            // No health check - just start the process and let the test continue
+                            // If the server doesn't start properly, subsequent steps will fail naturally
                             result = (true, "RunServer OK");
                             break;
                         }
