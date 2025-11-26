@@ -88,6 +88,21 @@ public static class PortKeywords
     public const int NETWORK_FLOW_DATA_PREVIEW_MAX_CHARS = 50;
     
     /// <summary>
+    /// Maximum characters to show in actual data column for Network sheet.
+    /// </summary>
+    public const int ACTUAL_DATA_COLUMN_MAX_CHARS = 100;
+    
+    /// <summary>
+    /// Minimum column width for Excel column auto-adjustment.
+    /// </summary>
+    public const int EXCEL_COLUMN_MIN_WIDTH = 5;
+    
+    /// <summary>
+    /// Maximum column width for Excel column auto-adjustment.
+    /// </summary>
+    public const int EXCEL_COLUMN_MAX_WIDTH = 80;
+    
+    /// <summary>
     /// Key pattern for network flow capture storage.
     /// Format: network.{stage}.flow
     /// </summary>

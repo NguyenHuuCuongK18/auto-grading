@@ -8,7 +8,19 @@ using System.Collections.Generic;
 using System.Linq;
 
 /// <summary>
-/// Parser for the new detail.xlsx format with User/Client/Server/Network sheets
+/// Parser for the new detail.xlsx format with User/Client/Server/Network sheets.
+/// 
+/// Key Features:
+/// - Parses User sheet for actions (StartClient, StartServer, Input, CloseClient, CloseServer)
+/// - Parses Client/Server sheets for expected console output validation
+/// - Parses Network sheet for expected TCP/HTTP network flow validation
+/// 
+/// Network Sheet Parsing:
+/// - Each row in the Network sheet represents one expected network packet
+/// - Network row indices are tracked PER STAGE, not globally
+/// - This ensures that when validating, packet index 1 of stage 3 maps to the first
+///   captured packet for stage 3, not the first packet globally
+/// - Supports TCP (SYN, SYN-ACK, ACK, PSH-ACK, FIN-ACK, RST) and HTTP validation
 /// </summary>
 public sealed class NewFormatDetailParser
 {

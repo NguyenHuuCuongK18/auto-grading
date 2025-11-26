@@ -203,7 +203,7 @@ namespace SolutionGrader.Core.Services
 
                 // Wrap and adjust for readability
                 ws.Style.Alignment.WrapText = true;
-                ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), 5, 80);
+                ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
             }
 
             // Add STDOUT columns to result sheets for captured output during test execution
@@ -1075,8 +1075,8 @@ namespace SolutionGrader.Core.Services
                         ws.Cell(row.RowNumber(), actualDstRoleCol).Value = actualPacket.DestinationRole ?? "";
                     if (actualDataCol > 0 && !string.IsNullOrEmpty(actualPacket.Data))
                     {
-                        var dataPreview = actualPacket.Data.Length > 100 
-                            ? actualPacket.Data.Substring(0, 100) + "..." 
+                        var dataPreview = actualPacket.Data.Length > PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS 
+                            ? actualPacket.Data.Substring(0, PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS) + "..." 
                             : actualPacket.Data;
                         ws.Cell(row.RowNumber(), actualDataCol).Value = dataPreview;
                     }
@@ -1159,7 +1159,7 @@ namespace SolutionGrader.Core.Services
             
             // Adjust column widths
             ws.Style.Alignment.WrapText = true;
-            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }
         
         /// <summary>
@@ -1298,7 +1298,7 @@ namespace SolutionGrader.Core.Services
             
             // Adjust column widths and wrap text
             ws.Style.Alignment.WrapText = true;
-            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }
 
         /// <summary>
@@ -1409,7 +1409,7 @@ namespace SolutionGrader.Core.Services
             ws.Cell(row, 2).Value = Math.Round(failedRecords.Sum(r => r.PointsPossible), 2);
 
             ws.Style.Alignment.WrapText = true;
-            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, 5, 80);
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }
 
         /// <summary>
