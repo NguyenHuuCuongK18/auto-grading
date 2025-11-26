@@ -133,11 +133,20 @@ namespace SolutionGrader.Core.Services
                             // Wait for server to be ready
                             var t0 = Environment.TickCount;
                             bool serverReady = false;
-                            bool isHttpProtocol = args.Protocol?.Equals(AppsettingKeywords.PROTOCOL_HTTP, StringComparison.OrdinalIgnoreCase) == true;
                             
-                            // For TCP servers, we use a non-connecting health check to avoid triggering
-                            // "Client connected/disconnected" messages that should appear in later stages
-                            // For HTTP servers, we use HTTP health checks that don't trigger TCP connection events
+                            // Use TCP port binding check for ALL server types (HTTP and TCP) to avoid:
+                            // 1. RST (Reset) packets that pollute network captures during health checks
+                            // 2. Connection attempts before server is ready causing "bad request" errors
+                            // 3. Health check requests appearing in network flow captures
+                            //
+                            // The IsTcpPortInListeningState method checks if the port is in use WITHOUT
+                            // establishing a connection - it tries to bind to the port and if binding fails
+                            // with AddressAlreadyInUse, the server is listening.
+                            //
+                            // Previous approach used HTTP GET /healthz for HTTP servers which caused:
+                            // - SYN packets being sent before server ready
+                            // - RST packets being captured by network monitor  
+                            // - These polluted the network flow comparison in test results
                             while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
                             {
                                 // First check if the process has crashed
@@ -148,29 +157,12 @@ namespace SolutionGrader.Core.Services
                                     break;
                                 }
                                 
-                                // For HTTP servers, try HTTP health check
-                                if (isHttpProtocol)
+                                // Use non-connecting port check for all server types to avoid
+                                // triggering network traffic that pollutes the capture
+                                if (IsTcpPortInListeningState(_configuredServerPort))
                                 {
-                                    try
-                                    {
-                                        var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
-                                        if (res.IsSuccessStatusCode)
-                                        {
-                                            serverReady = true;
-                                            break;
-                                        }
-                                    }
-                                    catch { /* HTTP health check failed, will retry */ }
-                                }
-                                else
-                                {
-                                    // For TCP servers, use non-connecting port check to avoid triggering connection messages
-                                    // We check if the port is in listening state without establishing a connection
-                                    if (IsTcpPortInListeningState(_configuredServerPort))
-                                    {
-                                        serverReady = true;
-                                        break;
-                                    }
+                                    serverReady = true;
+                                    break;
                                 }
                                 
                                 await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
