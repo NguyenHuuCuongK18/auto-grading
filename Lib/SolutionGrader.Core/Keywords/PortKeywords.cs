@@ -10,7 +10,7 @@ public static class PortKeywords
     /// Default port for grading communication.
     /// Server listens on this port, client connects to this port, network monitor captures on this port.
     /// </summary>
-    public const int DEFAULT_GRADER_PORT = 8888;
+    public const int DEFAULT_GRADER_PORT = 8000;
     
     /// <summary>
     /// Default SQL Server port for TCP connections.

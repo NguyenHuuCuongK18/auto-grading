@@ -84,7 +84,7 @@ public static class AppsettingKeywords
     
     // Messages
     public const string MSG_GENERATING_FROM_HEADER = "Generating appsettings.json from Header.xlsx configuration...";
-    public const string MSG_CONFIGURED_MIDDLEWARE = "Configured middleware - Proxy: {0}, Server: {1}";
+    public const string MSG_CONFIGURED_MIDDLEWARE = "Configured port {0}";
     public const string MSG_RESETTING_DATABASE = "Resetting database from script...";
     public const string MSG_DATABASE_RESET_SUCCESS = "Database reset completed successfully";
     public const string MSG_DATABASE_RESET_FAILED = "Warning: Could not execute database reset script";
@@ -95,7 +95,7 @@ public static class AppsettingKeywords
     public const string MSG_SQL_WARNINGS_NONFATAL = "SQL execution had warnings (non-fatal)";
     public const string MSG_GENERATED_SERVER_APPSETTINGS = "Generated server appsettings.json at: {0}";
     public const string MSG_GENERATED_CLIENT_APPSETTINGS = "Generated client appsettings.json at: {0}";
-    public const string MSG_ALLOCATED_PORTS = "Allocated ports - Proxy: {0}, Server: {1}";
+    public const string MSG_ALLOCATED_PORTS = "Allocated port {0}";
     public const string MSG_SCRIPT_SELF_MANAGING = "Script contains database management commands, executing from master context...";
     public const string MSG_MANUAL_DB_MANAGEMENT = "Using manual database drop/create/apply...";
     public const string MSG_APPSETTINGS_REPLACE_FAILED = "Failed to replace appsettings.";
