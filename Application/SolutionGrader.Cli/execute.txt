@@ -10,3 +10,11 @@ dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\NpCap\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\NoDisconnected\Project12\bin\Debug\net8.0\Project12.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\NoDisconnected\Project11\bin\Debug\net8.0\Project11.exe"
 #no response
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\NewQ\Testkit\NpCap\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\NoRes\Project12\bin\Debug\net8.0\Project12.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\NoRes\Project11\bin\Debug\net8.0\Project11.exe"
+
+
+#HTTP Hoang
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\TestKit\HTTP_Hoang\Q1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\PRN222-Project-sample-pe-sp25\PE_PRN222_GivenSolution1\ConsoleApp1\[QuestionNumber_NameStudentCode]\ConsoleApp1.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleProj\PRN222-Project-sample-pe-sp25\PE_PRN222_GivenSolution1\ConsoleApp2\[QuestionNumber_NameStudentCode]\ConsoleApp2.exe"
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite  --out "C:\Users\PC\Downloads" --client --server 
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite  --out "C:\Users\PC\Downloads" --client --server 
+
+
