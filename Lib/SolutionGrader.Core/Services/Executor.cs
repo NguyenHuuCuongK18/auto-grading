@@ -279,15 +279,16 @@ namespace SolutionGrader.Core.Services
                             { errCode = ErrorCodes.FILE_NOT_FOUND; return (false, "Server executable not found"); }
 
                             var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{_configuredServerPort}", ct);
+                            
+                            // Use TCP port binding check to avoid RST packet pollution
+                            // Same approach as ServerStart action - see detailed comment there
                             var t0 = Environment.TickCount;
                             while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
                             {
-                                try
+                                if (IsTcpPortInListeningState(_configuredServerPort))
                                 {
-                                    var res = await _http.GetAsync($"http://127.0.0.1:{_configuredServerPort}/healthz", ct);
-                                    if (res.IsSuccessStatusCode) break;
+                                    break;
                                 }
-                                catch { /* wait */ }
                                 await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
                             }
                             result = (true, "RunServer OK");
