@@ -1,3 +1,5 @@
+using SolutionGrader.Core.Keywords;
+
 namespace SolutionGrader.Core.Domain.Models
 {
     /// <summary>
@@ -25,9 +27,9 @@ namespace SolutionGrader.Core.Domain.Models
         /// - Network monitor captures traffic on this port
         /// 
         /// This is a fixed port to ensure consistent grading behavior.
-        /// Default: 8888
+        /// Default: Defined in PortKeywords.DEFAULT_GRADER_PORT
         /// </summary>
-        public int GraderPort { get; set; } = 8000;
+        public int GraderPort { get; set; } = PortKeywords.DEFAULT_GRADER_PORT;
         
         #endregion
         
@@ -218,12 +220,12 @@ namespace SolutionGrader.Core.Domain.Models
         /// <summary>
         /// Default configuration with all validations enabled.
         /// Time column and DateTime values are excluded from grading.
-        /// GraderPort is set to 8888 for consistent port usage.
+        /// GraderPort is set to the default port for consistent port usage.
         /// </summary>
         public static GradingConfig Default => new GradingConfig
         {
             // Port configuration
-            GraderPort = 8000,
+            GraderPort = PortKeywords.DEFAULT_GRADER_PORT,
             
             // Sheet grading
             GradeClientSheet = true,
@@ -316,6 +318,129 @@ namespace SolutionGrader.Core.Domain.Models
             ValidateTimeColumn = false,
             ValidateDateTimeValues = false
         };
+        
+        /// <summary>
+        /// Configuration optimized for HTTP protocol grading.
+        /// Enables validation of: Info, Flags, State, URI, Host, Method, Status, HttpVersion, HttpBody, SourceRole, DestinationRole
+        /// Disables TCP-specific validation.
+        /// </summary>
+        public static GradingConfig HttpProtocol => new GradingConfig
+        {
+            GraderPort = PortKeywords.DEFAULT_GRADER_PORT,
+            GradeClientSheet = true,
+            GradeServerSheet = true,
+            GradeNetworkSheet = true,
+            ValidateClientConsole = true,
+            ValidateServerConsole = true,
+            ValidateHttpMethod = true,
+            ValidateStatusCode = true,
+            ValidateHttpBody = true,
+            ValidateHttpHeaders = false,  // Headers often contain dynamic data
+            ValidateHttpUri = true,
+            ValidateTcpData = false,      // TCP data not relevant for HTTP
+            ValidateNetworkRequest = true,
+            ValidateNetworkResponse = true,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
+        };
+        
+        /// <summary>
+        /// Configuration optimized for TCP protocol grading.
+        /// Enables validation of: Info, Flags, State, Data, SourceRole, DestinationRole
+        /// Disables HTTP-specific validation.
+        /// </summary>
+        public static GradingConfig TcpProtocol => new GradingConfig
+        {
+            GraderPort = PortKeywords.DEFAULT_GRADER_PORT,
+            GradeClientSheet = true,
+            GradeServerSheet = true,
+            GradeNetworkSheet = true,
+            ValidateClientConsole = true,
+            ValidateServerConsole = true,
+            ValidateHttpMethod = false,   // HTTP method not relevant for TCP
+            ValidateStatusCode = false,   // Status code not relevant for TCP
+            ValidateHttpBody = false,     // HTTP body not relevant for TCP
+            ValidateHttpHeaders = false,  // HTTP headers not relevant for TCP
+            ValidateHttpUri = false,      // HTTP URI not relevant for TCP
+            ValidateTcpData = true,       // TCP data is the main validation target
+            ValidateNetworkRequest = true,
+            ValidateNetworkResponse = true,
+            ValidateTimeColumn = false,
+            ValidateDateTimeValues = false
+        };
+        
+        #endregion
+        
+        #region Protocol-Based Factory Methods
+        
+        /// <summary>
+        /// Gets the appropriate grading config based on the protocol type.
+        /// </summary>
+        /// <param name="protocol">Protocol type (HTTP or TCP)</param>
+        /// <returns>GradingConfig optimized for the specified protocol</returns>
+        public static GradingConfig ForProtocol(string? protocol)
+        {
+            if (string.IsNullOrWhiteSpace(protocol))
+                return Default;
+            
+            return protocol.ToUpperInvariant() switch
+            {
+                "HTTP" => HttpProtocol,
+                "TCP" => TcpProtocol,
+                _ => Default
+            };
+        }
+        
+        /// <summary>
+        /// Gets the list of columns to grade for HTTP protocol.
+        /// Excludes Time column as it varies with each run.
+        /// </summary>
+        public static readonly string[] HttpGradingColumns = new[]
+        {
+            NetworkKeywords.Col_Info,
+            NetworkKeywords.Col_Flags,
+            NetworkKeywords.Col_State,
+            NetworkKeywords.Col_URI,
+            NetworkKeywords.Col_Host,
+            NetworkKeywords.Col_Method,
+            NetworkKeywords.Col_Status,
+            NetworkKeywords.Col_HttpVersion,
+            NetworkKeywords.Col_HttpBody,
+            NetworkKeywords.Col_SourceRole,
+            NetworkKeywords.Col_DestinationRole
+        };
+        
+        /// <summary>
+        /// Gets the list of columns to grade for TCP protocol.
+        /// Excludes Time column as it varies with each run.
+        /// </summary>
+        public static readonly string[] TcpGradingColumns = new[]
+        {
+            NetworkKeywords.Col_Info,
+            NetworkKeywords.Col_Flags,
+            NetworkKeywords.Col_State,
+            NetworkKeywords.Col_Data,
+            NetworkKeywords.Col_SourceRole,
+            NetworkKeywords.Col_DestinationRole
+        };
+        
+        /// <summary>
+        /// Gets the appropriate grading columns based on the protocol type.
+        /// </summary>
+        /// <param name="protocol">Protocol type (HTTP or TCP)</param>
+        /// <returns>Array of column names to grade</returns>
+        public static string[] GetGradingColumnsForProtocol(string? protocol)
+        {
+            if (string.IsNullOrWhiteSpace(protocol))
+                return HttpGradingColumns; // Default to HTTP
+            
+            return protocol.ToUpperInvariant() switch
+            {
+                "HTTP" => HttpGradingColumns,
+                "TCP" => TcpGradingColumns,
+                _ => HttpGradingColumns
+            };
+        }
         
         #endregion
         

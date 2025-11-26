@@ -64,7 +64,7 @@ namespace SolutionGrader.Core.Services
         /// Step 1: Setup environment for test case
         /// - Reset database with appropriate script
         /// - Generate appsettings.json files with single port for client and server
-        /// - Configure network monitor port for packet capture
+        /// - Configure and START network monitor for packet capture (must start before any processes)
         /// </summary>
         public async Task<(bool Success, string Message)> SetupEnvironmentAsync(
             TestCaseDefinition testCase,
@@ -85,7 +85,7 @@ namespace SolutionGrader.Core.Services
                 var envConfig = testCase.Environment ?? suite.Environment;
                 
                 // Always generate appsettings from header
-                // NEW: This now generates a single port for both client and server
+                // This now generates a single port for both client and server
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
                 var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(
                     suite.DatabaseConfig, 
@@ -97,12 +97,19 @@ namespace SolutionGrader.Core.Services
                 // Store the monitor port (same as server port in new architecture)
                 _monitorPort = serverPort;
                 
-                // Configure network monitor (replaces middleware proxy)
+                // Configure and START network monitor IMMEDIATELY
+                // This ensures we capture ALL network traffic from the very beginning
+                // The monitor will be flushed before each user action step to clear health check noise
                 if (_networkMonitor != null)
                 {
                     _networkMonitor.MonitorPort = _monitorPort;
                     _networkMonitor.ProtocolType = _protocol;
                     Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Configured for port {_monitorPort} ({_protocol} mode)");
+                    
+                    // Start network monitor NOW - before any processes
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Starting network monitor early (before processes)...");
+                    _networkMonitor.ClearCaptures();
+                    await _networkMonitor.StartAsync(ct);
                 }
                 
                 // Configure executor with the server port for health checks
@@ -205,10 +212,10 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Step 3: Initialize processes and start network monitor.
-        /// Network monitor MUST start before client/server to capture full network flow.
+        /// Step 3: Initialize processes for execution.
+        /// Network monitor is already started in SetupEnvironmentAsync to capture full traffic.
         /// - Initialize executable manager with client/server paths
-        /// - Start network monitor on configured port
+        /// - Flush any stale network captures
         /// </summary>
         public async Task<(bool Success, string Message)> InitializeProcessesAsync(
             string? clientExePath,
@@ -217,7 +224,7 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Initializing processes and network monitor...");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Initializing processes...");
                 
                 if (string.IsNullOrWhiteSpace(clientExePath))
                 {
@@ -232,16 +239,16 @@ namespace SolutionGrader.Core.Services
                 // Initialize executable manager
                 _proc.Init(clientExePath, serverExePath);
                 
-                // Start network monitor FIRST - before any processes
-                // This ensures we capture the complete network flow from the start
-                if (_networkMonitor != null)
+                // Flush network captures before process start to clear any stale data
+                // Network monitor was already started in SetupEnvironmentAsync
+                if (_networkMonitor != null && _networkMonitor.IsCapturing)
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Starting network monitor before processes...");
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing network captures before process initialization...");
                     _networkMonitor.ClearCaptures();
-                    await _networkMonitor.StartAsync(ct);
+                    _run.ClearNetworkCaptures();
                 }
                 
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized, network monitor started");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Processes initialized");
                 return (true, "Processes initialized");
             }
             catch (Exception ex)
@@ -249,6 +256,18 @@ namespace SolutionGrader.Core.Services
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 3] Failed to initialize processes: {ex.Message}");
                 return (false, $"Failed to initialize processes: {ex.Message}");
             }
+        }
+        
+        /// <summary>
+        /// Flush network captures - used to clear health check traffic before actual test input.
+        /// </summary>
+        public void FlushNetworkCaptures()
+        {
+            if (_networkMonitor != null)
+            {
+                _networkMonitor.ClearCaptures();
+            }
+            _run.ClearNetworkCaptures();
         }
         
         /// <summary>
@@ -267,6 +286,7 @@ namespace SolutionGrader.Core.Services
         /// Step 4: Execute and grade test steps
         /// - Run through each test step
         /// - Update network monitor context for packet association
+        /// - Flush network captures before action steps to clear health check noise
         /// - Perform comparisons and validations
         /// - Log results for grading
         /// </summary>
@@ -283,7 +303,8 @@ namespace SolutionGrader.Core.Services
                 int? previousStage = null;
                 bool hasSeenInputStep = false;
                 bool hasAddedComparisonDelay = false;
-                bool hasFlushedNetworkCaptures = false; // Track if we've flushed health check garbage
+                bool serverStarted = false;  // Track if server has started
+                bool clientStarted = false;  // Track if client has started
                 
                 // Start a background task to monitor process status
                 var monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -320,16 +341,26 @@ namespace SolutionGrader.Core.Services
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     stepCts.CancelAfter(TimeSpan.FromSeconds(10));
                     
-                    // FLUSH network captures before the first CLIENT_INPUT step
-                    // This clears any health check traffic captured during server/client startup
-                    // so only the actual test communication is graded
-                    if (!hasFlushedNetworkCaptures && 
-                        string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase))
+                    // FLUSH network captures BEFORE key action steps to avoid capturing health check traffic
+                    // This ensures only the actual test communication is captured for grading
+                    var isServerStart = string.Equals(step.Action, ActionKeywords.ServerStart, StringComparison.OrdinalIgnoreCase);
+                    var isClientStart = string.Equals(step.Action, ActionKeywords.ClientStart, StringComparison.OrdinalIgnoreCase);
+                    var isClientInput = string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase);
+                    
+                    // Flush before server start (clears any stale captures)
+                    if (isServerStart && !serverStarted)
                     {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing network captures before first input step...");
                         _networkMonitor?.ClearCaptures();
                         _run.ClearNetworkCaptures();
-                        hasFlushedNetworkCaptures = true;
+                    }
+                    
+                    // Flush before first client input after both processes are started
+                    // This is the main flush point - clears all health check traffic
+                    if (isClientInput && serverStarted && clientStarted && !hasSeenInputStep)
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Flushing health check traffic before first input step...");
+                        _networkMonitor?.ClearCaptures();
+                        _run.ClearNetworkCaptures();
                     }
 
                     var currentStage = TryParseStage(step.Id);
@@ -346,8 +377,8 @@ namespace SolutionGrader.Core.Services
                         await Task.Delay(500, ct);
                     }
                     
-                    // Track input steps
-                    if (string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase))
+                    // Track input steps and process start states
+                    if (isClientInput)
                     {
                         hasSeenInputStep = true;
                     }
@@ -378,6 +409,10 @@ namespace SolutionGrader.Core.Services
                     var sw = Stopwatch.StartNew();
                     var (ok, msg) = await _exec.ExecuteAsync(step, args, stepCts.Token);
                     sw.Stop();
+                    
+                    // Track process start states after execution
+                    if (isServerStart && ok) serverStarted = true;
+                    if (isClientStart && ok) clientStarted = true;
                     
                     var result = new StepResult { Step = step, Passed = ok, Message = msg, DurationMs = sw.Elapsed.TotalMilliseconds };
                     results.Add(result);

@@ -26,10 +26,7 @@ namespace SolutionGrader.Core.Services
         private readonly IRunContext _run;
         private readonly GradingConfig _gradingConfig;
 
-        private const int ServerReadyTimeoutSeconds = 5;
-        private const int ServerReadyPollIntervalMs = 100;
-        private const int ConnectionOutputWaitSeconds = 2; // Wait time for server output after connection-triggering actions
-        private int _configuredServerPort = 5001; // Default fallback port
+        private int _configuredServerPort = PortKeywords.DEFAULT_SERVER_FALLBACK_PORT;
 
         public Executor(IExecutableManager proc, IDataComparisonService cmp, IDetailLogService log, IRunContext run, GradingConfig? gradingConfig = null)
         {
@@ -141,7 +138,7 @@ namespace SolutionGrader.Core.Services
                             // For TCP servers, we use a non-connecting health check to avoid triggering
                             // "Client connected/disconnected" messages that should appear in later stages
                             // For HTTP servers, we use HTTP health checks that don't trigger TCP connection events
-                            while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
+                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
                             {
                                 // First check if the process has crashed
                                 if (!_proc.IsServerRunning)
@@ -176,7 +173,7 @@ namespace SolutionGrader.Core.Services
                                     }
                                 }
                                 
-                                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
                             }
                             
                             if (!_proc.IsServerRunning)
@@ -246,7 +243,7 @@ namespace SolutionGrader.Core.Services
                             
                             // Wait for server output after client starts (in case connection triggers server messages)
                             // This allows "client connected" messages to be captured in the correct stage
-                            await _proc.WaitForServerOutputAsync(ConnectionOutputWaitSeconds, ct);
+                            await _proc.WaitForServerOutputAsync(PortKeywords.CONNECTION_OUTPUT_WAIT_SECONDS, ct);
                             
                             result = (true, $"Client started successfully. Process running: {_proc.IsClientRunning}");
                             break;
@@ -291,7 +288,7 @@ namespace SolutionGrader.Core.Services
 
                             var p = await _proc.StartAsync(serverPath, $"--urls http://127.0.0.1:{_configuredServerPort}", ct);
                             var t0 = Environment.TickCount;
-                            while (Environment.TickCount - t0 < ServerReadyTimeoutSeconds * 1000)
+                            while (Environment.TickCount - t0 < PortKeywords.SERVER_READY_TIMEOUT_SECONDS * 1000)
                             {
                                 try
                                 {
@@ -299,7 +296,7 @@ namespace SolutionGrader.Core.Services
                                     if (res.IsSuccessStatusCode) break;
                                 }
                                 catch { /* wait */ }
-                                await Task.Delay(ServerReadyPollIntervalMs, ct);
+                                await Task.Delay(PortKeywords.HEALTH_CHECK_POLL_INTERVAL_MS, ct);
                             }
                             result = (true, "RunServer OK");
                             break;

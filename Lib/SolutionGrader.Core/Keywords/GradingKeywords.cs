@@ -170,6 +170,15 @@ public static class GradingKeywords
     public const string Col_ErrorNotes      = "ErrorNotes";
     public const string Col_FailedStages    = "FailedStages";
     
+    /// <summary>Column for client STDOUT output captured during test execution</summary>
+    public const string Col_ClientStdout    = "ClientStdout";
+    
+    /// <summary>Column for server STDOUT output captured during test execution</summary>
+    public const string Col_ServerStdout    = "ServerStdout";
+    
+    /// <summary>Column for network data captured during test execution</summary>
+    public const string Col_NetworkStdout   = "NetworkStdout";
+    
     #endregion
     
     #region Comparison Settings
