@@ -1,7 +1,4 @@
 #HTTP
-dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project12\Project12.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_HTTP_1\Meta\Given\Project11\Project11.exe"
-#TCP
-dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Client\Client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\SampleTestKitsWithData\Testkit_TCP_3\Meta\Given\Server\Server.exe"
-
-#HTTP
 dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\HTTP_1" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\PE_Construct\Answer\1\Q12_HoangBSTHE186345\Project12.exe" --server "C:\Users\PC\Documents\School\NET\PE_Construct\Answer\1\Q11_HoangBSTHE186345\Project11.exe"
+#TCP
+dotnet run --project Application/SolutionGrader.Cli -- ExecuteSuite --suite "C:\Users\PC\Documents\School\NET\auto-grading\TCP_3" --out "C:\Users\PC\Downloads" --client "C:\Users\PC\Documents\School\NET\auto-grading\3\Client\Q11_dongnvhe172649\Client.exe" --server "C:\Users\PC\Documents\School\NET\auto-grading\3\Server\Q12_dongnvhe172649\Server.exe"
