@@ -82,12 +82,12 @@ namespace SolutionGrader.Core.Services
                 // Handle Grade_Content field to determine which executable to use
                 // This allows grading only the client or server component independently.
                 // When Grade_Content is set, the system will:
-                // 1. "Client" -> Use the student's client but plug in a reference server from Meta/Given
-                // 2. "Server" -> Use the student's server but plug in a reference client from Meta/Given
+                // 1. "Client" -> Use the student's client but plug in a reference server
+                // 2. "Server" -> Use the student's server but plug in a reference client
                 // 
                 // Resolution priority for reference executables:
                 // 1. Test case environment (q.Environment.GivenServerPath/GivenClientPath)
-                // 2. Suite environment (def.Environment.GivenServerPath/GivenClientPath)
+                // 2. Suite environment (def.Environment.GivenServerPath/GivenClientPath) - typically from Meta/Given folder
                 if (!string.IsNullOrWhiteSpace(q.GradeContent))
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Grade_Content: {q.GradeContent}");
@@ -102,11 +102,14 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrWhiteSpace(referenceServerPath))
                         {
                             serverExePath = referenceServerPath;
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server from Meta/Given: {serverExePath}");
+                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenServerPath) 
+                                ? "test case environment" 
+                                : "suite environment (Meta/Given)";
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server from {source}: {serverExePath}");
                         }
                         else
                         {
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Client' but no reference server found in Meta/Given");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Client' but no reference server found in test case or suite environment");
                         }
                     }
                     else if (q.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
@@ -119,11 +122,14 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrWhiteSpace(referenceClientPath))
                         {
                             clientExePath = referenceClientPath;
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client from Meta/Given: {clientExePath}");
+                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenClientPath) 
+                                ? "test case environment" 
+                                : "suite environment (Meta/Given)";
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client from {source}: {clientExePath}");
                         }
                         else
                         {
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Server' but no reference client found in Meta/Given");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Server' but no reference client found in test case or suite environment");
                         }
                     }
                 }
