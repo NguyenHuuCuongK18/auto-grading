@@ -80,6 +80,14 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Handle Grade_Content field to determine which executable to use
+                // This allows grading only the client or server component independently.
+                // When Grade_Content is set, the system will:
+                // 1. "Client" -> Use the student's client but plug in a reference server from Meta/Given
+                // 2. "Server" -> Use the student's server but plug in a reference client from Meta/Given
+                // 
+                // Resolution priority for reference executables:
+                // 1. Test case environment (q.Environment.GivenServerPath/GivenClientPath)
+                // 2. Suite environment (def.Environment.GivenServerPath/GivenClientPath)
                 if (!string.IsNullOrWhiteSpace(q.GradeContent))
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Grade_Content: {q.GradeContent}");
@@ -87,23 +95,43 @@ namespace SolutionGrader.Core.Services
                     if (q.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
                     {
                         // Grading client only - use given/reference server if available
-                        if (!string.IsNullOrWhiteSpace(q.Environment?.GivenServerPath))
+                        // First try test case environment, then fall back to suite environment
+                        var referenceServerPath = q.Environment?.GivenServerPath 
+                                                  ?? def.Environment?.GivenServerPath;
+                        
+                        if (!string.IsNullOrWhiteSpace(referenceServerPath))
                         {
-                            serverExePath = q.Environment.GivenServerPath;
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server: {serverExePath}");
+                            serverExePath = referenceServerPath;
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server from Meta/Given: {serverExePath}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Client' but no reference server found in Meta/Given");
                         }
                     }
                     else if (q.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
                     {
                         // Grading server only - use given/reference client if available
-                        if (!string.IsNullOrWhiteSpace(q.Environment?.GivenClientPath))
+                        // First try test case environment, then fall back to suite environment
+                        var referenceClientPath = q.Environment?.GivenClientPath 
+                                                  ?? def.Environment?.GivenClientPath;
+                        
+                        if (!string.IsNullOrWhiteSpace(referenceClientPath))
                         {
-                            clientExePath = q.Environment.GivenClientPath;
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client: {clientExePath}");
+                            clientExePath = referenceClientPath;
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client from Meta/Given: {clientExePath}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Grade_Content is 'Server' but no reference client found in Meta/Given");
                         }
                     }
                 }
 
+                // Log final executable paths for debugging
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Final client executable: {clientExePath ?? "(none)"}");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Final server executable: {serverExePath ?? "(none)"}");
+                
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
 
                 // ***** STEP-BASED ORCHESTRATION *****
