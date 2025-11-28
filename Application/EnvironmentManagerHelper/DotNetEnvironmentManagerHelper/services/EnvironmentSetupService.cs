@@ -355,14 +355,14 @@ namespace DotNetEnvironmentManagerHelper.Services
                         break;
 
                     //case EnvironmentQAction.ModifyGivenApiUrl:
-                    //    ModifyGivenApiUrl();
-                    //    logger.LogInfo("Try modifying api url");
+                    //    ModifyGivenIpAndPort();
+                    //    //logger.LogInfo("Try modifying api url");
                     //    break;
 
-                    case EnvironmentQAction.CopyGivenConsolePublish:
-                        CopyGivenConsolePublishFolder();
-                        //logger.LogInfo("Try copying given console publish file");
-                        break;
+                    //case EnvironmentQAction.CopyGivenConsolePublish:
+                    //    CopyGivenConsolePublishFolder();
+                    //    //logger.LogInfo("Try copying given console publish file");
+                    //    break;
 
                     default:
                         //logger.LogErr($"Action named '{step}' is not defined!");
@@ -403,9 +403,13 @@ namespace DotNetEnvironmentManagerHelper.Services
         public override void CopyEssentialFilesAndFolders()
         {
             // must copy runtimes folder to student question first
-            CopyRuntimesToStudentQuestion();
-            // then copy publish file into container
+            CopyRuntimesToClient();
+            CopyRuntimesToServer();
+
+            // deployt server
             CopyPublishFolder();
+            // deploy client
+            CopyGivenConsolePublishFolder();
         }
 
         public override void GenerateDbScript()
@@ -414,8 +418,10 @@ namespace DotNetEnvironmentManagerHelper.Services
             {
                 string sqlFilePath = questionConfigs[EnvironmentConfiguration.DefaultDatabaseFilePath];
                 string oldDatabaseName = questionConfigs[EnvironmentConfiguration.DefaultDatabaseName];
-                string studentQuestionPath = questionConfigs[EnvironmentConfiguration.StudentQuestionPath];
-                string newDatabaseName = questionConfigs[EnvironmentConfiguration.StudentQuestionName];
+
+                // Change to code file path since currently the server and only server need DB
+                string studentQuestionPath = questionConfigs[EnvironmentConfiguration.CodeFilePath];
+                string newDatabaseName = questionConfigs[EnvironmentConfiguration.DatabaseName];
                 string containerName = questionConfigs[EnvironmentConfiguration.DatabaseContainerName];
 
                 // read sql script and change db name
@@ -441,62 +447,67 @@ namespace DotNetEnvironmentManagerHelper.Services
 
         public override void GenerateConnectionFile()
         {
-            string newConnectionString =
-                $"Server={questionConfigs[EnvironmentConfiguration.DatabaseContainerName]}," +
-                $"{questionConfigs[EnvironmentConfiguration.DatabaseContainerInternalPort]};" +
-                $"database={questionConfigs[EnvironmentConfiguration.DatabaseName]};" +
-                $"uid={questionConfigs[EnvironmentConfiguration.DatabaseUsername]};" +
-                $"Password={questionConfigs[EnvironmentConfiguration.DatabasePassword]};" +
-                $"Encrypt=false;TrustServerCertificate=true";
+            string dbConn = $"Server={questionConfigs[EnvironmentConfiguration.DatabaseContainerName]},{questionConfigs[EnvironmentConfiguration.DatabaseContainerInternalPort]};database={questionConfigs[EnvironmentConfiguration.DatabaseName]};uid={questionConfigs[EnvironmentConfiguration.DatabaseUsername]};Password={questionConfigs[EnvironmentConfiguration.DatabasePassword]};Encrypt=false;TrustServerCertificate=true";
 
-            string appsettingsPath = Path.Combine(questionConfigs[EnvironmentConfiguration.StudentQuestionPath], "appsettings.json");
-            if (!File.Exists(appsettingsPath))
-                //throw new Exception("appsettings.json not found!");
-                return;
+            string port = questionConfigs[EnvironmentConfiguration.CodeContainerInternalPort];
+            string serverName = questionConfigs[EnvironmentConfiguration.CodeContainerName];
 
-            string appsettingsContent = File.ReadAllText(appsettingsPath);
+            void UpdateFile(string pathKey, string ipOverride)
+            {
+                if (!questionConfigs.TryGetValue(pathKey, out var rootPath)) return;
 
-            var appsettingsJson = JObject.Parse(appsettingsContent);
+                string filePath = Path.Combine(rootPath, "appsettings.json");
+                if (!File.Exists(filePath)) return;
 
-            var connectionStringsSection = appsettingsJson["ConnectionStrings"];
+                var json = JObject.Parse(File.ReadAllText(filePath));
 
-            if (connectionStringsSection != null)
-                connectionStringsSection["MyCnn"] = newConnectionString;
+                // Update DB
+                if (json["ConnectionStrings"] != null) json["ConnectionStrings"]["MyCnn"] = dbConn;
 
-            string updatedContent = appsettingsJson.ToString();
-            File.WriteAllText(appsettingsPath, updatedContent);
+                // Update Networking
+                json["IpAddress"] = ipOverride;
+                json["Port"] = port;
+
+                File.WriteAllText(filePath, json.ToString());
+            }
+
+            UpdateFile(EnvironmentConfiguration.CodeFilePath, "0.0.0.0");
+
+            UpdateFile(EnvironmentConfiguration.GivenConsolePath, "host.docker.internal");
         }
 
-        //public void ModifyGivenApiUrl()
-        //{
-        //    try
-        //    {
-        //        //thay đổi api url trước khi copy file given vào
-        //        string appsettingsPath = Path.Combine(questionConfigs[EnvironmentConfiguration.StudentQuestionPath], "appsettings.json");
-        //        if (!File.Exists(appsettingsPath))
-        //        {
-        //            logger.LogErr("appsettings.json not found!");
-        //            return;
-        //        }
-        //        string appsettingsContent = File.ReadAllText(appsettingsPath);
 
-        //        var appsettingsJson = JObject.Parse(appsettingsContent);
+        // TODO: Configure port
+        public void ModifyGivenIpAndPort()
+        {
+            try
+            {
+                //thay đổi api url trước khi copy file given vào
+                string appsettingsPath = Path.Combine(questionConfigs[EnvironmentConfiguration.StudentQuestionPath], "appsettings.json");
+                if (!File.Exists(appsettingsPath))
+                {
+                    //logger.LogErr("appsettings.json not found!");
+                    return;
+                }
+                string appsettingsContent = File.ReadAllText(appsettingsPath);
 
-        //        var givenApiUrlSection = appsettingsJson["GivenAPIBaseUrl"];
-        //        if (givenApiUrlSection == null)
-        //            return;
-        //        appsettingsJson["GivenAPIBaseUrl"] = questionConfigs[EnvironmentConfiguration.GivenApiUrl];
-        //        string updatedContent = appsettingsJson.ToString();
-        //        File.WriteAllText(appsettingsPath, updatedContent);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        // log
-        //        logger.LogErr("Error in appsettings.json: " + ex.Message);
-        //        return;
-        //    }
+                var appsettingsJson = JObject.Parse(appsettingsContent);
 
-        //}
+                var givenApiUrlSection = appsettingsJson["GivenAPIBaseUrl"];
+                if (givenApiUrlSection == null)
+                    return;
+                appsettingsJson["GivenAPIBaseUrl"] = questionConfigs[EnvironmentConfiguration.GivenApiUrl];
+                string updatedContent = appsettingsJson.ToString();
+                File.WriteAllText(appsettingsPath, updatedContent);
+            }
+            catch (Exception ex)
+            {
+                // log
+                //logger.LogErr("Error in appsettings.json: " + ex.Message);
+                return;
+            }
+
+        }
         #endregion
         #endregion
 
@@ -630,7 +641,7 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
         }
 
-        private void CopyRuntimesToStudentQuestion()
+        private void CopyRuntimesToClient()
         {
             try
             {
@@ -639,12 +650,12 @@ namespace DotNetEnvironmentManagerHelper.Services
                     EnvironmentConfiguration.RuntimesFolder
                 );
 
-                string studentQuestionPath = TryGetValueOrDefault(
+                string clientQuestionPath = TryGetValueOrDefault(
                     questionEnvironment.Configs,
-                    EnvironmentConfiguration.StudentQuestionPath
+                    EnvironmentConfiguration.GivenConsolePath
                 );
 
-                string destinationPath = Path.Combine(studentQuestionPath, "runtimes");
+                string destinationPath = Path.Combine(clientQuestionPath, "runtimes");
                 //check if exist runtimes folder, if not copy
                 if (!Directory.Exists(destinationPath))
                 {
@@ -659,6 +670,36 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
         }
 
+        private void CopyRuntimesToServer()
+        {
+            try
+            {
+                string runtimesFolder = TryGetValueOrDefault(
+                    questionEnvironment.Configs,
+                    EnvironmentConfiguration.RuntimesFolder
+                );
+
+                string serverQuestionPath = TryGetValueOrDefault(
+                    questionEnvironment.Configs,
+                    EnvironmentConfiguration.CodeFilePath
+                );
+
+                string destinationPath = Path.Combine(serverQuestionPath, "runtimes");
+                //check if exist runtimes folder, if not copy
+                if (!Directory.Exists(destinationPath))
+                {
+                    Directory.CreateDirectory(destinationPath);
+                    dockerCommandExecutor.CopyFolder(runtimesFolder, destinationPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                //logger.LogErr("Error adding runtimes folder: " + ex.Message);
+                throw;
+            }
+        }
+
+        // This is server
         private void CopyPublishFolder()
         {
             try
@@ -670,9 +711,11 @@ namespace DotNetEnvironmentManagerHelper.Services
                 );
 
                 // wait for .net deployment
-                dockerCommandExecutor.WaitForPublishFileDeployment(
+                dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.CodeContainerName],
-                    questionConfigs[EnvironmentConfiguration.StudentQuestionName]
+                    questionConfigs[EnvironmentConfiguration.StudentQuestionName],
+                    questionConfigs[EnvironmentConfiguration.DockerServerPath],
+                    questionConfigs[EnvironmentConfiguration.CodeContainerInternalPort]
                 );
             }
             catch (Exception ex)
@@ -685,21 +728,23 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
         }
 
+        // This is client
         private void CopyGivenConsolePublishFolder()
         {
             try
             {
                 // copy all publish files to container:/apps
                 dockerCommandExecutor.CopyFileToContainer(
-                    questionConfigs[EnvironmentConfiguration.GivenApiFilePath],
-                    questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName] + ":/apps",
-                    questionConfigs[EnvironmentConfiguration.GivenConsoleAppName]
+                    questionConfigs[EnvironmentConfiguration.GivenConsolePath],
+                    questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName] + ":/apps"
                 );
 
                 // wait for .net deployment
-                dockerCommandExecutor.WaitForPublishFileDeployment(
+                dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName],
-                    questionConfigs[EnvironmentConfiguration.GivenConsoleAppName]
+                    questionConfigs[EnvironmentConfiguration.GivenConsoleAppName],
+                    questionConfigs[EnvironmentConfiguration.DockerClientPath],
+                    "-1"
                 );
             }
             catch (Exception ex)

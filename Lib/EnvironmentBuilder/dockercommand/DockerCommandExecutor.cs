@@ -48,7 +48,7 @@ namespace EnvironmentBuilder.DockerCommand
             try
             {
                 string command = $"docker cp \"{sourcePath}\" \"{destinationPath}\"";
-                if(!string.IsNullOrEmpty(newName))
+                if (!string.IsNullOrEmpty(newName))
                 {
                     command += string.IsNullOrEmpty(newName) ? "" : $"/{newName}";
                 }
@@ -615,6 +615,98 @@ namespace EnvironmentBuilder.DockerCommand
             {
                 throw new Exception($"Error while checking deployment of {appName}. Details: {ex.Message}", ex);
             }
+        }
+
+        public bool WaitForPublishConsoleFileDeployment(string containerName, string appName, string appPath, string expectedPort, int maxWaitTimeMs = 70000, int checkIntervalMs = 1000)
+        {
+            try
+            {
+                int expPort = int.Parse(expectedPort);
+
+                StartApplicationInContainer(containerName, appName, appPath);
+
+                int elapsed = 0;
+                while (elapsed < maxWaitTimeMs)
+                {
+                    // Check if process is running inside the container
+                    bool running = IsProcessRunning(containerName, appName);
+
+                    // Check if expected port is open inside the container
+                    bool portOpen = IsPortOpen(containerName, expPort);
+
+                    if (running && portOpen)
+                    {
+                        Console.WriteLine($"[{appName}] Deployment successful. Process is running and port {expectedPort} is open.");
+                        return true;
+                    }
+
+                    Thread.Sleep(checkIntervalMs);
+                    elapsed += checkIntervalMs;
+                    Console.WriteLine($"[{appName}] Waiting for application to be ready... running={running}, port={portOpen} ({elapsed}/{maxWaitTimeMs}ms)");
+                }
+
+                Console.WriteLine($"[{appName}] Deployment timeout after {maxWaitTimeMs}ms");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error checking deployment of {appName}: {ex.Message}", ex);
+            }
+        }
+
+        private void StartApplicationInContainer(string containerName, string appName, string appPath)
+        {
+            string inputPipe = $"/tmp/{appName}_input_pipe";
+
+            string createInputFileCommand = $"{containerName} mkfifo \"{inputPipe}\"";
+            ExecDockerCommand(createInputFileCommand, 60000);
+
+            string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
+            ExecDockerCommand(startDoorstopCommand, 60000);
+
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            Console.WriteLine($"[{appName}] Starting application...");
+            ExecDockerCommand(command, 60000);
+
+            Console.WriteLine($"[{appName}] Application started. Monitor with: docker logs -f {containerName}");
+        }
+
+        private bool IsProcessRunning(string containerName, string processName)
+        {
+            string output = RunCommand($"docker top {containerName}");
+            return output.Contains(processName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsPortOpen(string containerName, int internalPort)
+        {
+            if (internalPort == -1) return true;
+            string output = RunCommand($"docker container port {containerName} {internalPort}/tcp");
+            return !string.IsNullOrWhiteSpace(output);
+        }
+
+        private string RunCommand(string cmd)
+        {
+            var psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using Process proc = Process.Start(psi);
+            string output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit();
+            return output;
+        }
+
+        public void SendInputToContainer(string containerName, string appName, string inputMessage)
+        {
+            string inputPipe = $"/tmp/{appName}_input_pipe";
+            string safeInput = inputMessage.Replace("'", "'\\''");
+            string command = $"{containerName} sh -c \"echo '{safeInput}' | tee /proc/1/fd/1 > {inputPipe}\"";
+            Console.WriteLine($"[{appName}] Sending input: {inputMessage}");
+            ExecDockerCommand(command, 5000);
         }
         #endregion
 

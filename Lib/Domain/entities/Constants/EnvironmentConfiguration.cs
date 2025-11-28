@@ -39,6 +39,10 @@ namespace Domain.Entities.Constants
         public const string GivenConsoleContainerInternalPort = "Given_Console_Internal_Port";
         public const string GivenConsoleContainerHostPort = "Given_Console_Host_Port";
 
+        // draft, will remove soon
+        public const string DockerClientPath = "Docker_Client_Path";
+        public const string DockerServerPath = "Docker_Server_Path";
+
         // database
         public const string DatabaseImageName = "Database_Image_Name"; // represent sql/mongodb image name
         public const string DatabaseContainerName = "Database_Container_Name"; // represent sql/mongodb container name
