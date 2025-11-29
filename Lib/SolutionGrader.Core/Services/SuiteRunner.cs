@@ -66,185 +66,7 @@ namespace SolutionGrader.Core.Services
             var fileService = new FileService();
             Dictionary<string, Dictionary<string, (string? Q11, string? Q12)>> studentSubmissions = fileService.GetStudentSubmission(args.SubmissionRoot);
 
-           
 
-            // Loop through each paper and grade submissions ONE BY ONE - no parallelism here
-            foreach (KeyValuePair<string, Dictionary<string, (string? Q11, string? Q12)>> paper in studentSubmissions)
-            {
-                if (paper.Value.Count == 0)
-                {
-                    Console.WriteLine($"[ENV] No submissions found for paper no {paper.Key}, skipping...");
-                    continue;
-                }
-
-                // Start env init for each student submission
-                foreach (KeyValuePair<string, (string? Q11, string? Q12)> submission in paper.Value)
-                {
-                    Console.WriteLine($"[ENV] Start creating enviroment config for {submission.Key}");
-                    // This only assume there's only 1 testsuite, current one has no multi suit handler
-                    string envPath = Path.Combine(args.SuitePath, FileKeywords.FileName_Environment);
-                    global::Domain.Entities.Main.Environment env = EnvironmentService.GetEnvironment(envPath);
-
-                    var (q11, q12) = submission.Value;
-
-                    string? givenPath = null;
-                    if (q11 == null || q12 == null)
-                    {
-                        givenPath = TryGetValueOrDefault(env.Configs, EnvConfig.GivenConsolePath, "");
-                        if (string.IsNullOrEmpty(givenPath))
-                            throw new ArgumentNullException("[ENV] Given console path missing");
-                    }
-
-                    // If Q11 null -> it's the given -> use given. Same for Q12.
-                    q11 ??= givenPath;
-                    q12 ??= givenPath;
-
-                    ModifyEnvironmentForContainerInit(env, q11, q12);
-
-                    // Setup other common configs, will extract onto other place later
-                    SetOrAddConfig(env.Configs, EnvConfig.RuntimesFolder, args.SuitePath + "\\" + TryGetValueOrDefault(env.Configs, EnvConfig.RuntimesFolder));
-                    SetOrAddConfig(env.Configs, EnvConfig.DefaultDatabaseFilePath, args.SuitePath + "\\" + TryGetValueOrDefault(env.Configs, EnvConfig.DefaultDatabaseFilePath));
-
-                    // 
-                    SetOrAddConfig(env.Configs, EnvConfig.DockerServerPath, TryGetDllPath(q11));
-                    SetOrAddConfig(env.Configs, EnvConfig.DockerClientPath, TryGetDllPath(q12));
-                    try
-                    {
-                        // Mute error, i know this is bad
-                        EnvironmentManagerInvoker.TrySetupContainer(env, out _);
-                        EnvironmentManagerInvoker.TrySetupQuestion(env, out _);
-
-                        // Grading logic goes here
-                        // Client and server will output in docker log, use MonitorLog to get the log line-by-line
-                        // Log located at tmp/<app-name>.log
-                        //
-                        // use SendInputToContainer() to send input to client
-                        // throw it in here so that i can test env first, remove when intergrate grading logic
-                        //
-                        if (false)
-                        {
-                            var executor = new DockerCommandExecutor();
-
-                            string containerName = TryGetValueOrDefault(env.Configs, EnvConfig.GivenConsoleContainerName); // get client, yes, given is client
-                            string appName = TryGetValueOrDefault(env.Configs, EnvConfig.GivenConsoleAppName);
-                            string input = "SAMPLE INPUT FOR TESTING PURPOSES";
-                            executor.SendInputToContainer(containerName, appName, input);
-                        }
-
-
-                        // Dispose all containers
-                        EnvironmentManagerInvoker.TryDisposeContainer(env, out _);
-                        Console.WriteLine($"[ENV] Disposed environment for {submission.Key}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ENV] Failed to create env for {submission.Key}, error: {ex.Message}");
-                    }
-                }
-            }
-            return 1;
-        }
-
-        // Method to get real-time logs from a Docker container
-        public async Task MonitorLogsAsync(string containerName, Action<string> onLogLine)
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "docker",
-                Arguments = $"logs -f --tail 0 {containerName}", // Only show newline at the time this method called -> no old log
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = System.Diagnostics.Process.Start(psi);
-
-            // Read the stream line by line
-            while (!process.StandardOutput.EndOfStream)
-            {
-                string line = await process.StandardOutput.ReadLineAsync();
-                if (line != null)
-                {
-                    onLogLine(line); // Trigger the callback with the new log line
-                }
-            }
-        }
-
-        private string TryGetDllPath(string path)
-        {
-            string dllPath = "";
-            string root = new DirectoryInfo(path).Name;
-
-            string[] fileName = { "Q11.dll", "Q12.dll", "Project11.dll", "Project12.dll" };
-
-            foreach (var name in fileName)
-            {
-                string potentialPath = Path.Combine(path, name);
-                if (File.Exists(potentialPath))
-                {
-                    dllPath = "/apps/" + root + "/" + name;
-                    break;
-                }
-            }
-            return dllPath;
-        }
-
-        // Will throw ts some where later, currently here because im too lazy to implement abstraction
-        // The Code Container will be Q11 and Given Container will be Q12 in the ENV config
-        // Why this way? Because i want to cut corners and reuse existing fields
-        private void ModifyEnvironmentForContainerInit(global::Domain.Entities.Main.Environment env, string q11, string q12)
-        {
-            string? givenConsoleImageName = TryGetValueOrDefault(env.Configs, EnvConfig.CodeImageName, null);
-
-            if (!string.IsNullOrEmpty(givenConsoleImageName))
-            {
-                SetOrAddConfig(env.Configs, EnvConfig.GivenConsoleImageName, givenConsoleImageName);
-            }
-            else
-            {
-                throw new ArgumentNullException("[ENV] Fym the image is null?");
-            }
-
-
-            SetOrAddConfig(env.Configs, EnvConfig.CodeFilePath, q11);
-            SetOrAddConfig(env.Configs, EnvConfig.CodeContainerName, "ag-server");
-            SetOrAddConfig(env.Configs, EnvConfig.StudentQuestionName, "ag-server");
-            SetOrAddConfig(env.Configs, EnvConfig.GivenConsolePath, q12);
-            SetOrAddConfig(env.Configs, EnvConfig.GivenConsoleContainerName, "ag-client");
-            SetOrAddConfig(env.Configs, EnvConfig.GivenConsoleAppName, "ag-client");
-            SetOrAddConfig(env.Configs, EnvConfig.DatabaseName, TryGetValueOrDefault(env.Configs, EnvConfig.DefaultDatabaseName));
-            //SetOrAddConfig(env.Configs, EnvConfig.DatabaseUsername, TryGetValueOrDefault(env.Configs, EnvConfig.DatabaseUsername));
-            //SetOrAddConfig(env.Configs, EnvConfig.DatabaseContainerName, TryGetValueOrDefault(env.Configs, EnvConfig.DatabaseContainerName));
-            //SetOrAddConfig(env.Configs, EnvConfig.DatabasePassword, TryGetValueOrDefault(env.Configs, EnvConfig.DatabasePassword));
-
-            string? givenConsoleInternalPort = TryGetValueOrDefault(env.Configs, EnvConfig.GivenConsoleContainerInternalPort, null);
-            if (string.IsNullOrEmpty(givenConsoleInternalPort))
-            {
-                givenConsoleInternalPort = TryGetValueOrDefault(env.Configs, EnvConfig.CodeContainerInternalPort, "");
-                SetOrAddConfig(env.Configs, EnvConfig.GivenConsoleContainerInternalPort, givenConsoleInternalPort);
-            }
-
-            string? givenConsoleHostPort = TryGetValueOrDefault(env.Configs, EnvConfig.GivenConsoleContainerHostPort, null);
-            if (string.IsNullOrEmpty(givenConsoleHostPort))
-            {
-                givenConsoleHostPort = TryGetValueOrDefault(env.Configs, EnvConfig.CodeContainerHostPort, "");
-                SetOrAddConfig(env.Configs, EnvConfig.GivenConsoleContainerHostPort, givenConsoleHostPort);
-            }
-        }
-
-        public async Task<int> ExecutePaper(ExecuteSuiteArgs args, CancellationToken ct = default)
-        {
-
-            if (args.SubmissionRoot == null)
-            {
-                throw new ArgumentNullException("No submission folder provided!");
-            }
-
-            var fileService = new FileService();
-            Dictionary<string, Dictionary<string, (string? Q11, string? Q12)>> studentSubmissions = fileService.GetStudentSubmission(args.SubmissionRoot);
-
-           
 
             // Loop through each paper and grade submissions ONE BY ONE - no parallelism here
             foreach (KeyValuePair<string, Dictionary<string, (string? Q11, string? Q12)>> paper in studentSubmissions)
@@ -467,14 +289,14 @@ namespace SolutionGrader.Core.Services
                     {
                         // Grading client only - use given/reference server if available
                         // First try test case environment, then fall back to suite environment
-                        var referenceServerPath = q.Environment?.GivenServerPath 
+                        var referenceServerPath = q.Environment?.GivenServerPath
                                                   ?? def.Environment?.GivenServerPath;
-                        
+
                         if (!string.IsNullOrWhiteSpace(referenceServerPath))
                         {
                             serverExePath = referenceServerPath;
-                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenServerPath) 
-                                ? "test case environment" 
+                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenServerPath)
+                                ? "test case environment"
                                 : "suite environment (Meta/Given)";
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference server from {source}: {serverExePath}");
                         }
@@ -487,14 +309,14 @@ namespace SolutionGrader.Core.Services
                     {
                         // Grading server only - use given/reference client if available
                         // First try test case environment, then fall back to suite environment
-                        var referenceClientPath = q.Environment?.GivenClientPath 
+                        var referenceClientPath = q.Environment?.GivenClientPath
                                                   ?? def.Environment?.GivenClientPath;
-                        
+
                         if (!string.IsNullOrWhiteSpace(referenceClientPath))
                         {
                             clientExePath = referenceClientPath;
-                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenClientPath) 
-                                ? "test case environment" 
+                            var source = !string.IsNullOrWhiteSpace(q.Environment?.GivenClientPath)
+                                ? "test case environment"
                                 : "suite environment (Meta/Given)";
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using reference client from {source}: {clientExePath}");
                         }
@@ -508,7 +330,7 @@ namespace SolutionGrader.Core.Services
                 // Log final executable paths for debugging
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Final client executable: {clientExePath ?? "(none)"}");
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Final server executable: {serverExePath ?? "(none)"}");
-                
+
                 var outDir = Path.Combine(args.ResultRoot, q.Name);
 
                 // ***** STEP-BASED ORCHESTRATION *****
