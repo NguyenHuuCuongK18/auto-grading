@@ -7,8 +7,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
-  <!-- COM Reference only works on Windows with .NET Framework MSBuild - disabled for cross-platform builds -->
-  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+  <!-- COM Reference should only be included for Windows target framework -->
+  <ItemGroup>
     <COMReference Include="Shell32">
       <WrapperTool>tlbimp</WrapperTool>
       <VersionMinor>0</VersionMinor>
