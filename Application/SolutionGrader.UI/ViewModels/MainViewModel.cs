@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using SolutionGrader.UI.Models;
@@ -18,6 +19,7 @@ namespace SolutionGrader.UI.ViewModels
     {
         private readonly ILoggingService _logger;
         private readonly GradingOrchestrationService _gradingService;
+        private readonly StringBuilder _logBuffer = new StringBuilder();
         
         private GradingConfiguration _configuration;
         private GradingSessionState _sessionState;
@@ -114,10 +116,8 @@ namespace SolutionGrader.UI.ViewModels
             _gradingService.StudentProgressUpdated += OnStudentProgressUpdated;
             _gradingService.SessionStateChanged += OnSessionStateChanged;
             
-            if (_logger is LoggingService loggingService)
-            {
-                loggingService.LogAdded += OnLogAdded;
-            }
+            // Subscribe to logging events (LogAdded is part of ILoggingService interface)
+            _logger.LogAdded += OnLogAdded;
 
             // Initialize commands
             BrowseSubmitFolderCommand = new RelayCommand(BrowseSubmitFolder);
@@ -328,8 +328,19 @@ namespace SolutionGrader.UI.ViewModels
         {
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
-                var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
-                LogOutput += logLine;
+                // Use StringBuilder for efficient log accumulation
+                var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}";
+                _logBuffer.AppendLine(logLine);
+                
+                // Keep only the last 10000 characters to prevent memory issues
+                if (_logBuffer.Length > 10000)
+                {
+                    var trimmedLog = _logBuffer.ToString().Substring(_logBuffer.Length - 8000);
+                    _logBuffer.Clear();
+                    _logBuffer.Append(trimmedLog);
+                }
+                
+                LogOutput = _logBuffer.ToString();
             });
         }
 
