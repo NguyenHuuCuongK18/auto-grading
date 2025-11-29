@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- Enable building Windows-targeting projects on non-Windows platforms -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Lib\SolutionGrader.Core\SolutionGrader.Core.csproj" />
+    <ProjectReference Include="..\..\Lib\Domain\Domain.csproj" />
+    <ProjectReference Include="..\..\Lib\EnvironmentBuilder\EnvironmentBuilder.csproj" />
+    <ProjectReference Include="..\..\Lib\FileMaster\FileMaster.csproj" />
+  </ItemGroup>
+
+</Project>
