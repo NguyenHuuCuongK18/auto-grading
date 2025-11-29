@@ -14,6 +14,9 @@
     <PackageReference Include="SharpPcap" Version="6.3.1" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Domain\Domain.csproj" />
+    <ProjectReference Include="..\EnvironmentBuilder\EnvironmentBuilder.csproj" />
+    <ProjectReference Include="..\FileMaster\FileMaster.csproj" />
     <ProjectReference Include="..\ProcessLauncher\ProcessLauncher.csproj" />
   </ItemGroup>
 </Project>
