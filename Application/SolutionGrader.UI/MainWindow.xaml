@@ -275,32 +275,32 @@
                 
                 <TextBlock Grid.Column="1" Foreground="White" Margin="20,0">
                     <Run Text="Progress: "/>
-                    <Run Text="{Binding SessionState.GradedStudents}"/>
+                    <Run Text="{Binding SessionState.GradedStudentsDisplay, FallbackValue='0'}"/>
                     <Run Text="/"/>
-                    <Run Text="{Binding SessionState.TotalStudents}"/>
+                    <Run Text="{Binding SessionState.TotalStudentsDisplay, FallbackValue='0'}"/>
                     <Run Text=" ("/>
-                    <Run Text="{Binding SessionState.OverallProgress}"/>
+                    <Run Text="{Binding SessionState.OverallProgressDisplay, FallbackValue='0'}"/>
                     <Run Text="%)"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="2" Foreground="#90EE90" Margin="20,0">
                     <Run Text="Success: "/>
-                    <Run Text="{Binding SessionState.SuccessCount}"/>
+                    <Run Text="{Binding SessionState.SuccessCountDisplay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="3" Foreground="#FFB6C1" Margin="20,0">
                     <Run Text="Failed: "/>
-                    <Run Text="{Binding SessionState.FailedCount}"/>
+                    <Run Text="{Binding SessionState.FailedCountDisplay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="4" Foreground="#FFFACD" Margin="20,0">
                     <Run Text="Not Run: "/>
-                    <Run Text="{Binding SessionState.NotRunCount}"/>
+                    <Run Text="{Binding SessionState.NotRunCountDisplay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="5" Foreground="White" Margin="20,0,0,0">
                     <Run Text="Elapsed: "/>
-                    <Run Text="{Binding SessionState.ElapsedTime}"/>
+                    <Run Text="{Binding SessionState.ElapsedTime, FallbackValue='-'}"/>
                 </TextBlock>
             </Grid>
         </Border>
