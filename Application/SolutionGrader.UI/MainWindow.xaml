@@ -268,39 +268,41 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 
+                <!-- Status bar text elements using TextBlock.Text binding instead of Run.Text -->
+                <!-- Run.Text binding in WPF requires Mode=OneWay explicitly as Run is not a FrameworkElement -->
                 <TextBlock Grid.Column="0" Foreground="White">
                     <Run Text="Current: "/>
-                    <Run Text="{Binding SessionState.CurrentStudentCode, FallbackValue='-'}"/>
+                    <Run Text="{Binding SessionState.CurrentStudentCode, Mode=OneWay, FallbackValue='-'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="1" Foreground="White" Margin="20,0">
                     <Run Text="Progress: "/>
-                    <Run Text="{Binding SessionState.GradedStudentsDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.GradedStudentsDisplay, Mode=OneWay, FallbackValue='0'}"/>
                     <Run Text="/"/>
-                    <Run Text="{Binding SessionState.TotalStudentsDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.TotalStudentsDisplay, Mode=OneWay, FallbackValue='0'}"/>
                     <Run Text=" ("/>
-                    <Run Text="{Binding SessionState.OverallProgressDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.OverallProgressDisplay, Mode=OneWay, FallbackValue='0'}"/>
                     <Run Text="%)"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="2" Foreground="#90EE90" Margin="20,0">
                     <Run Text="Success: "/>
-                    <Run Text="{Binding SessionState.SuccessCountDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.SuccessCountDisplay, Mode=OneWay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="3" Foreground="#FFB6C1" Margin="20,0">
                     <Run Text="Failed: "/>
-                    <Run Text="{Binding SessionState.FailedCountDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.FailedCountDisplay, Mode=OneWay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="4" Foreground="#FFFACD" Margin="20,0">
                     <Run Text="Not Run: "/>
-                    <Run Text="{Binding SessionState.NotRunCountDisplay, FallbackValue='0'}"/>
+                    <Run Text="{Binding SessionState.NotRunCountDisplay, Mode=OneWay, FallbackValue='0'}"/>
                 </TextBlock>
                 
                 <TextBlock Grid.Column="5" Foreground="White" Margin="20,0,0,0">
                     <Run Text="Elapsed: "/>
-                    <Run Text="{Binding SessionState.ElapsedTime, FallbackValue='-'}"/>
+                    <Run Text="{Binding SessionState.ElapsedTime, Mode=OneWay, FallbackValue='-'}"/>
                 </TextBlock>
             </Grid>
         </Border>
