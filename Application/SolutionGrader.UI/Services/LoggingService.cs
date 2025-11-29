@@ -1,0 +1,236 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Threading;
+
+namespace SolutionGrader.UI.Services
+{
+    /// <summary>
+    /// Interface for logging service used throughout the UI application.
+    /// </summary>
+    public interface ILoggingService
+    {
+        void LogInfo(string message);
+        void LogDebug(string message);
+        void LogWarning(string message);
+        void LogError(string message);
+        void LogError(string message, Exception ex);
+        
+        /// <summary>
+        /// Sets the current student context for logging.
+        /// Logs will be redirected to the student-specific log folder.
+        /// </summary>
+        void SetStudentContext(string? studentCode);
+        
+        /// <summary>
+        /// Gets all logs for display in the UI.
+        /// </summary>
+        string GetAllLogs();
+        
+        /// <summary>
+        /// Event raised when a new log entry is added.
+        /// </summary>
+        event EventHandler<LogEventArgs>? LogAdded;
+    }
+
+    /// <summary>
+    /// Event arguments for log entries.
+    /// </summary>
+    public class LogEventArgs : EventArgs
+    {
+        public LogLevel Level { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
+        public string? StudentCode { get; set; }
+    }
+
+    /// <summary>
+    /// Log severity levels.
+    /// </summary>
+    public enum LogLevel
+    {
+        Debug,
+        Info,
+        Warning,
+        Error
+    }
+
+    /// <summary>
+    /// Logging service implementation that writes to both console and file.
+    /// Supports per-student logging with the format: Log_{StudentCode}_{Date}
+    /// </summary>
+    public class LoggingService : ILoggingService, IDisposable
+    {
+        private readonly string _baseLogPath;
+        private readonly StringBuilder _allLogs = new StringBuilder();
+        private readonly object _lock = new object();
+        private string? _currentStudentCode;
+        private StreamWriter? _currentStudentLogWriter;
+        private StreamWriter? _systemLogWriter;
+        private bool _disposed;
+
+        public event EventHandler<LogEventArgs>? LogAdded;
+
+        /// <summary>
+        /// Creates a new logging service.
+        /// </summary>
+        /// <param name="baseLogPath">Base path for log files (e.g., application folder)</param>
+        public LoggingService(string baseLogPath)
+        {
+            _baseLogPath = baseLogPath;
+            
+            // Ensure log directory exists
+            var logDir = Path.Combine(_baseLogPath, "Logs");
+            if (!Directory.Exists(logDir))
+            {
+                Directory.CreateDirectory(logDir);
+            }
+
+            // Create system log file
+            var systemLogPath = Path.Combine(logDir, $"System_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+            _systemLogWriter = new StreamWriter(systemLogPath, true, Encoding.UTF8)
+            {
+                AutoFlush = true
+            };
+        }
+
+        /// <inheritdoc/>
+        public void SetStudentContext(string? studentCode)
+        {
+            lock (_lock)
+            {
+                // Close previous student log if exists
+                _currentStudentLogWriter?.Close();
+                _currentStudentLogWriter?.Dispose();
+                _currentStudentLogWriter = null;
+
+                _currentStudentCode = studentCode;
+
+                if (!string.IsNullOrEmpty(studentCode))
+                {
+                    // Create student-specific log folder and file
+                    // Format: Log_{StudentCode}_{Date}
+                    var studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    if (!Directory.Exists(studentLogDir))
+                    {
+                        Directory.CreateDirectory(studentLogDir);
+                    }
+
+                    var studentLogPath = Path.Combine(studentLogDir, $"grading_{DateTime.Now:HHmmss}.log");
+                    _currentStudentLogWriter = new StreamWriter(studentLogPath, true, Encoding.UTF8)
+                    {
+                        AutoFlush = true
+                    };
+
+                    LogInfo($"Started logging for student: {studentCode}");
+                }
+            }
+        }
+
+        /// <inheritdoc/>
+        public void LogInfo(string message) => Log(LogLevel.Info, message);
+
+        /// <inheritdoc/>
+        public void LogDebug(string message) => Log(LogLevel.Debug, message);
+
+        /// <inheritdoc/>
+        public void LogWarning(string message) => Log(LogLevel.Warning, message);
+
+        /// <inheritdoc/>
+        public void LogError(string message) => Log(LogLevel.Error, message);
+
+        /// <inheritdoc/>
+        public void LogError(string message, Exception ex)
+        {
+            Log(LogLevel.Error, $"{message}\nException: {ex.Message}\nStack Trace: {ex.StackTrace}");
+        }
+
+        /// <inheritdoc/>
+        public string GetAllLogs()
+        {
+            lock (_lock)
+            {
+                return _allLogs.ToString();
+            }
+        }
+
+        private void Log(LogLevel level, string message)
+        {
+            var timestamp = DateTime.Now;
+            var formattedMessage = $"[{timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{level}] {message}";
+
+            lock (_lock)
+            {
+                // Add to in-memory log
+                _allLogs.AppendLine(formattedMessage);
+
+                // Write to system log
+                try
+                {
+                    _systemLogWriter?.WriteLine(formattedMessage);
+                }
+                catch { /* Ignore write errors */ }
+
+                // Write to student log if context is set
+                if (_currentStudentLogWriter != null)
+                {
+                    try
+                    {
+                        _currentStudentLogWriter.WriteLine(formattedMessage);
+                    }
+                    catch { /* Ignore write errors */ }
+                }
+
+                // Write to console for debugging
+                var originalColor = Console.ForegroundColor;
+                Console.ForegroundColor = level switch
+                {
+                    LogLevel.Debug => ConsoleColor.Gray,
+                    LogLevel.Info => ConsoleColor.White,
+                    LogLevel.Warning => ConsoleColor.Yellow,
+                    LogLevel.Error => ConsoleColor.Red,
+                    _ => ConsoleColor.White
+                };
+                Console.WriteLine(formattedMessage);
+                Console.ForegroundColor = originalColor;
+            }
+
+            // Raise event for UI binding
+            LogAdded?.Invoke(this, new LogEventArgs
+            {
+                Level = level,
+                Message = message,
+                Timestamp = timestamp,
+                StudentCode = _currentStudentCode
+            });
+        }
+
+        /// <summary>
+        /// Creates a student-specific result folder and returns its path.
+        /// Format: {baseLogPath}/Results/{StudentCode}/{Date}
+        /// </summary>
+        public string GetStudentResultFolder(string studentCode)
+        {
+            var resultDir = Path.Combine(_baseLogPath, "Results", studentCode, DateTime.Now.ToString("yyyyMMdd"));
+            if (!Directory.Exists(resultDir))
+            {
+                Directory.CreateDirectory(resultDir);
+            }
+            return resultDir;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            
+            lock (_lock)
+            {
+                _currentStudentLogWriter?.Close();
+                _currentStudentLogWriter?.Dispose();
+                _systemLogWriter?.Close();
+                _systemLogWriter?.Dispose();
+                _disposed = true;
+            }
+        }
+    }
+}
