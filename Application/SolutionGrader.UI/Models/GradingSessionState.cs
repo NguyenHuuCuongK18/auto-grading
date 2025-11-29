@@ -63,7 +63,7 @@ namespace SolutionGrader.UI.Models
         public int TotalStudents
         {
             get => _totalStudents;
-            set { _totalStudents = value; OnPropertyChanged(); OnPropertyChanged(nameof(OverallProgress)); }
+            set { _totalStudents = value; OnPropertyChanged(); OnPropertyChanged(nameof(OverallProgress)); OnPropertyChanged(nameof(TotalStudentsDisplay)); OnPropertyChanged(nameof(OverallProgressDisplay)); }
         }
 
         /// <summary>
@@ -72,7 +72,7 @@ namespace SolutionGrader.UI.Models
         public int GradedStudents
         {
             get => _gradedStudents;
-            set { _gradedStudents = value; OnPropertyChanged(); OnPropertyChanged(nameof(OverallProgress)); }
+            set { _gradedStudents = value; OnPropertyChanged(); OnPropertyChanged(nameof(OverallProgress)); OnPropertyChanged(nameof(GradedStudentsDisplay)); OnPropertyChanged(nameof(OverallProgressDisplay)); }
         }
 
         /// <summary>
@@ -81,7 +81,7 @@ namespace SolutionGrader.UI.Models
         public int SuccessCount
         {
             get => _successCount;
-            set { _successCount = value; OnPropertyChanged(); }
+            set { _successCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(SuccessCountDisplay)); }
         }
 
         /// <summary>
@@ -90,7 +90,7 @@ namespace SolutionGrader.UI.Models
         public int FailedCount
         {
             get => _failedCount;
-            set { _failedCount = value; OnPropertyChanged(); }
+            set { _failedCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(FailedCountDisplay)); }
         }
 
         /// <summary>
@@ -99,7 +99,7 @@ namespace SolutionGrader.UI.Models
         public int NotRunCount
         {
             get => _notRunCount;
-            set { _notRunCount = value; OnPropertyChanged(); }
+            set { _notRunCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(NotRunCountDisplay)); }
         }
 
         /// <summary>
@@ -122,6 +122,37 @@ namespace SolutionGrader.UI.Models
                 return (int)((double)GradedStudents / TotalStudents * 100);
             }
         }
+
+        /// <summary>
+        /// Overall progress percentage as string for Run.Text binding.
+        /// WPF Run.Text requires string values - direct int binding causes XamlParseException.
+        /// </summary>
+        public string OverallProgressDisplay => OverallProgress.ToString();
+
+        /// <summary>
+        /// Graded students count as string for Run.Text binding.
+        /// </summary>
+        public string GradedStudentsDisplay => GradedStudents.ToString();
+
+        /// <summary>
+        /// Total students count as string for Run.Text binding.
+        /// </summary>
+        public string TotalStudentsDisplay => TotalStudents.ToString();
+
+        /// <summary>
+        /// Success count as string for Run.Text binding.
+        /// </summary>
+        public string SuccessCountDisplay => SuccessCount.ToString();
+
+        /// <summary>
+        /// Failed count as string for Run.Text binding.
+        /// </summary>
+        public string FailedCountDisplay => FailedCount.ToString();
+
+        /// <summary>
+        /// Not run count as string for Run.Text binding.
+        /// </summary>
+        public string NotRunCountDisplay => NotRunCount.ToString();
 
         /// <summary>
         /// Time when the grading session started
