@@ -1,48 +1,13 @@
-﻿using System;
+using System;
 using System.Globalization;
-using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 using SolutionGrader.UI.Models;
-using SolutionGrader.UI.ViewModels;
 
-namespace SolutionGrader.UI
+namespace SolutionGrader.UI.Converters
 {
     /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// Auto Grading System - Main application window
-    /// 
-    /// Features:
-    /// - Load student submissions from Submit folder (PaperNo/StudentCode/1/solution structure)
-    /// - Configure client/server project names for DLL lookup
-    /// - Filter by paper number for batch grading
-    /// - Start/Pause/Resume grading operations
-    /// - Real-time progress tracking and logging
-    /// - Per-student logging with Log_StudentCode_Date folder format
-    /// </summary>
-    public partial class MainWindow : Window
-    {
-        public MainWindow()
-        {
-            InitializeComponent();
-            
-            // Handle window closing to properly dispose resources
-            this.Closing += MainWindow_Closing;
-        }
-
-        private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
-        {
-            // Clean up resources
-            if (DataContext is MainViewModel viewModel)
-            {
-                // Cancel any running operations
-                // Dispose logging service if needed
-            }
-        }
-    }
-
-    /// <summary>
-    /// Converts GradingStatus to a background color for display in the DataGrid.
+    /// Converts GradingStatus to a background color for display.
     /// </summary>
     public class StatusToColorConverter : IValueConverter
     {
@@ -62,6 +27,47 @@ namespace SolutionGrader.UI
                 };
             }
             return System.Windows.Media.Brushes.Transparent;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    /// <summary>
+    /// Converts boolean to visibility.
+    /// </summary>
+    public class BoolToVisibilityConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is bool boolValue)
+            {
+                bool invert = parameter?.ToString()?.ToLower() == "invert";
+                return (boolValue ^ invert) ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            }
+            return System.Windows.Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    /// <summary>
+    /// Converts progress percent to progress bar width.
+    /// </summary>
+    public class ProgressToWidthConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is int progress && parameter is double maxWidth)
+            {
+                return (progress / 100.0) * maxWidth;
+            }
+            return 0;
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
