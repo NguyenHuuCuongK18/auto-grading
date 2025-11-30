@@ -484,7 +484,11 @@ namespace SolutionGrader.UI.Services
                     var headerRow = networkSheet.Row(1);
                     var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                     
-                    for (int col = 1; col <= headerRow.LastCellUsed()?.Address.ColumnNumber; col++)
+                    // Get the last used column number, defaulting to 0 if no cells are used
+                    var lastCell = headerRow.LastCellUsed();
+                    int lastColumnNumber = lastCell?.Address.ColumnNumber ?? 0;
+                    
+                    for (int col = 1; col <= lastColumnNumber; col++)
                     {
                         var headerName = headerRow.Cell(col).GetValue<string>()?.Trim();
                         if (!string.IsNullOrEmpty(headerName))

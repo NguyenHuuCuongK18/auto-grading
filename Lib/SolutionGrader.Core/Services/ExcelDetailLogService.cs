@@ -1062,7 +1062,7 @@ namespace SolutionGrader.Core.Services
                 bool hasNetworkData = false;
                 
                 // Check if any stage has captured network packets
-                for (int stage = 0; stage <= 20; stage++) // Check first 20 stages
+                for (int stage = 0; stage <= GradingKeywords.MaxStagesToCheck; stage++)
                 {
                     var packets = _run.GetCapturedNetworkPackets(questionCode, stage.ToString());
                     if (packets.Count > 0)
@@ -1113,7 +1113,7 @@ namespace SolutionGrader.Core.Services
             int row = 2;
             
             // Iterate through stages and add captured packets
-            for (int stage = 0; stage <= 20; stage++)
+            for (int stage = 0; stage <= GradingKeywords.MaxStagesToCheck; stage++)
             {
                 var packets = _run.GetCapturedNetworkPackets(questionCode, stage.ToString());
                 if (packets.Count == 0) continue;

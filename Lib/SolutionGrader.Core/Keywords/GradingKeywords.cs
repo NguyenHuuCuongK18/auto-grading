@@ -214,6 +214,12 @@ public static class GradingKeywords
     public const int ByteSizeTolerance = 10;
     public const double ByteSizeTolerancePercent = 0.05;
     
+    /// <summary>
+    /// Maximum number of stages to check when scanning for captured network data.
+    /// This is used when auto-generating Network sheets from captured packets.
+    /// </summary>
+    public const int MaxStagesToCheck = 20;
+    
     #endregion
     
     #region Helper Methods
