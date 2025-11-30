@@ -700,9 +700,19 @@ namespace SolutionGrader.UI.Services
                 var parse = new ExcelDetailParser();
 
                 // Use grading configuration with proper port
+                // Create a new instance based on Default to avoid modifying static config
                 // Exclude DateTime and Time from grading as they vary with each run
-                var gradingConfig = GradingConfig.Default;
-                gradingConfig.GraderPort = testKitConfig.CodeContainerHostPort;
+                var gradingConfig = new GradingConfig
+                {
+                    GraderPort = testKitConfig.CodeContainerHostPort,
+                    GradeClientSheet = true,
+                    GradeServerSheet = true,
+                    GradeNetworkSheet = true,
+                    ValidateClientConsole = true,
+                    ValidateServerConsole = true,
+                    ValidateTimeColumn = false,
+                    ValidateDateTimeValues = false
+                };
 
                 var appsettings = new AppsettingsCreationService(gradingConfig);
                 IRunContext runctx = new RunContext();
