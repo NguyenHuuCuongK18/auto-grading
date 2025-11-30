@@ -152,6 +152,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Executes all actions for a test case and captures outputs.
+        /// Actions are executed in stage order: StartServer, StartClient, Input, Close*
         /// </summary>
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
             Environment environment,
@@ -163,55 +164,128 @@ namespace SolutionGrader.UI.Services
             bool serverStarted = false;
             bool clientStarted = false;
 
+            _logger.LogInfo($"Executing {actions.Count} actions in Docker containers...");
+
             // Execute each action in order
             foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
             {
                 ct.ThrowIfCancellationRequested();
-                _logger.LogInfo($"[Stage {stage}] Executing: {action}" + (string.IsNullOrEmpty(input) ? "" : $" with input: '{input}'"));
+                var actionUpper = action.ToUpperInvariant();
+                
+                _logger.LogInfo($"[Stage {stage}] Action: {actionUpper}" + 
+                    (string.IsNullOrEmpty(input) ? "" : $", Input: '{input}'"));
 
-                switch (action.ToUpperInvariant())
+                switch (actionUpper)
                 {
                     case "STARTSERVER":
                         if (!serverStarted)
                         {
+                            _logger.LogInfo($"[Stage {stage}] Starting server application in container...");
                             serverStarted = await _dockerGrading.StartServerAsync(environment, ct);
-                            await Task.Delay(1000, ct); // Wait for server to start
-                            serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                            _logger.LogDebug($"Server output at stage {stage}: {serverOutputs[stage]}");
+                            if (serverStarted)
+                            {
+                                _logger.LogInfo($"[Stage {stage}] Server started successfully, waiting for initialization...");
+                                await Task.Delay(2000, ct); // Wait for server to fully start
+                                serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
+                                _logger.LogInfo($"[Stage {stage}] Server output captured ({serverOutputs[stage]?.Length ?? 0} chars)");
+                                if (!string.IsNullOrEmpty(serverOutputs[stage]))
+                                {
+                                    _logger.LogDebug($"Server output: {serverOutputs[stage]}");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogError($"[Stage {stage}] Server failed to start!");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Server already started, skipping StartServer action");
                         }
                         break;
 
                     case "STARTCLIENT":
                         if (!clientStarted)
                         {
+                            _logger.LogInfo($"[Stage {stage}] Starting client application in container...");
                             clientStarted = await _dockerGrading.StartClientAsync(environment, ct);
-                            await Task.Delay(1000, ct); // Wait for client to start
-                            clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                            _logger.LogDebug($"Client output at stage {stage}: {clientOutputs[stage]}");
+                            if (clientStarted)
+                            {
+                                _logger.LogInfo($"[Stage {stage}] Client started successfully, waiting for initialization...");
+                                await Task.Delay(2000, ct); // Wait for client to fully start
+                                clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
+                                _logger.LogInfo($"[Stage {stage}] Client output captured ({clientOutputs[stage]?.Length ?? 0} chars)");
+                                if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                                {
+                                    _logger.LogDebug($"Client output: {clientOutputs[stage]}");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogError($"[Stage {stage}] Client failed to start!");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Client already started, skipping StartClient action");
                         }
                         break;
 
                     case "INPUT":
-                        if (clientStarted)
+                        if (string.IsNullOrEmpty(input))
                         {
-                            var response = await _dockerGrading.SendInputToClientAsync(environment, input, ct);
-                            await Task.Delay(500, ct); // Wait for processing
-                            clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                            serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                            _logger.LogDebug($"After input '{input}' - Client: {clientOutputs[stage]}, Server: {serverOutputs[stage]}");
+                            _logger.LogDebug($"[Stage {stage}] Empty input, skipping");
+                            break;
+                        }
+                        
+                        if (!clientStarted)
+                        {
+                            _logger.LogWarning($"[Stage {stage}] Cannot send input - client not started yet!");
+                            break;
+                        }
+                        
+                        _logger.LogInfo($"[Stage {stage}] Sending input to client: '{input}'");
+                        var response = await _dockerGrading.SendInputToClientAsync(environment, input, ct);
+                        
+                        // Wait for input to be processed
+                        await Task.Delay(1000, ct);
+                        
+                        // Capture both client and server outputs after input
+                        clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
+                        serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
+                        
+                        _logger.LogInfo($"[Stage {stage}] After input - Client output: {clientOutputs[stage]?.Length ?? 0} chars, Server output: {serverOutputs[stage]?.Length ?? 0} chars");
+                        
+                        if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                        {
+                            _logger.LogDebug($"Client output after input: {clientOutputs[stage]}");
+                        }
+                        if (!string.IsNullOrEmpty(serverOutputs[stage]))
+                        {
+                            _logger.LogDebug($"Server output after input: {serverOutputs[stage]}");
                         }
                         break;
 
                     case "CLOSECLIENT":
-                        // Client cleanup handled at end
+                        _logger.LogInfo($"[Stage {stage}] CloseClient action - will be cleaned up at end");
+                        // Client cleanup handled at end of test case
                         break;
 
                     case "CLOSESERVER":
-                        // Server cleanup handled at end
+                        _logger.LogInfo($"[Stage {stage}] CloseServer action - will be cleaned up at end");
+                        // Server cleanup handled at end of test case
+                        break;
+
+                    default:
+                        _logger.LogWarning($"[Stage {stage}] Unknown action: {action} - skipping");
                         break;
                 }
+
+                // Brief delay between actions
+                await Task.Delay(200, ct);
             }
 
+            _logger.LogInfo($"Action execution complete. Captured {clientOutputs.Count} client outputs, {serverOutputs.Count} server outputs");
             return (clientOutputs, serverOutputs);
         }
 

@@ -58,9 +58,10 @@ namespace SolutionGrader.UI.Services
         private const int ClientPortOffset = 1;
         
         /// <summary>
-        /// Default timeout for database readiness check in milliseconds
+        /// Default timeout for database readiness check in milliseconds.
+        /// Reduced from 5000ms to 2000ms for faster startup.
         /// </summary>
-        private const int DatabaseReadinessTimeoutMs = 5000;
+        private const int DatabaseReadinessTimeoutMs = 2000;
         
         /// <summary>
         /// Interval for checking database readiness in milliseconds
@@ -297,6 +298,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Configures the environment settings for a specific student.
+        /// Handles fallback to Meta/Given folder when student only provides client or server.
         /// </summary>
         private void ConfigureEnvironmentForStudent(
             Environment environment, 
@@ -316,19 +318,63 @@ namespace SolutionGrader.UI.Services
             SetOrAddConfig(configs, EnvConfig.CodeContainerInternalPort, config.CodeContainerInternalPort.ToString());
             SetOrAddConfig(configs, EnvConfig.CodeContainerHostPort, config.CodeContainerHostPort.ToString());
 
-            // Set file paths
+            // Set file paths - with fallback to Meta/Given folder for missing components
+            var metaPath = Path.Combine(testKitPath, "Meta", "Given");
+            
+            // Handle Server path
             if (!string.IsNullOrEmpty(student.ServerDllPath))
             {
                 var serverDir = Path.GetDirectoryName(student.ServerDllPath)!;
                 SetOrAddConfig(configs, EnvConfig.CodeFilePath, serverDir);
                 SetOrAddConfig(configs, EnvConfig.DockerServerPath, GetDockerDllPath(serverDir, student.ServerDllPath));
+                _logger.LogInfo($"Using student's Server DLL: {student.ServerDllPath}");
+            }
+            else if (config.HasServer)
+            {
+                // Student should provide server but didn't - try Meta/Given/Server
+                var metaServerPath = Path.Combine(metaPath, "Server");
+                if (Directory.Exists(metaServerPath))
+                {
+                    var metaServerDll = FindDllInDirectory(metaServerPath, config.ServerProjectName);
+                    if (metaServerDll != null)
+                    {
+                        SetOrAddConfig(configs, EnvConfig.CodeFilePath, metaServerPath);
+                        SetOrAddConfig(configs, EnvConfig.DockerServerPath, GetDockerDllPath(metaServerPath, metaServerDll));
+                        _logger.LogInfo($"Using Meta/Given Server DLL: {metaServerDll}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"No Server DLL found in Meta/Given/Server for project '{config.ServerProjectName}'");
+                    }
+                }
             }
 
+            // Handle Client path
             if (!string.IsNullOrEmpty(student.ClientDllPath))
             {
                 var clientDir = Path.GetDirectoryName(student.ClientDllPath)!;
                 SetOrAddConfig(configs, EnvConfig.GivenConsolePath, clientDir);
                 SetOrAddConfig(configs, EnvConfig.DockerClientPath, GetDockerDllPath(clientDir, student.ClientDllPath));
+                _logger.LogInfo($"Using student's Client DLL: {student.ClientDllPath}");
+            }
+            else if (config.HasClient)
+            {
+                // Student should provide client but didn't - try Meta/Given/Client
+                var metaClientPath = Path.Combine(metaPath, "Client");
+                if (Directory.Exists(metaClientPath))
+                {
+                    var metaClientDll = FindDllInDirectory(metaClientPath, config.ClientProjectName);
+                    if (metaClientDll != null)
+                    {
+                        SetOrAddConfig(configs, EnvConfig.GivenConsolePath, metaClientPath);
+                        SetOrAddConfig(configs, EnvConfig.DockerClientPath, GetDockerDllPath(metaClientPath, metaClientDll));
+                        _logger.LogInfo($"Using Meta/Given Client DLL: {metaClientDll}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"No Client DLL found in Meta/Given/Client for project '{config.ClientProjectName}'");
+                    }
+                }
             }
 
             // Set runtime folder from test kit
@@ -344,6 +390,30 @@ namespace SolutionGrader.UI.Services
             {
                 SetOrAddConfig(configs, EnvConfig.DefaultDatabaseFilePath, Path.Combine(testKitPath, dbFilePath));
             }
+        }
+
+        /// <summary>
+        /// Finds a DLL file in a directory by project name.
+        /// </summary>
+        private string? FindDllInDirectory(string directory, string? projectName)
+        {
+            if (!Directory.Exists(directory)) return null;
+
+            // First try to find by project name if provided
+            if (!string.IsNullOrEmpty(projectName))
+            {
+                var exactMatch = Path.Combine(directory, $"{projectName}.dll");
+                if (File.Exists(exactMatch))
+                    return exactMatch;
+            }
+
+            // Otherwise find first .dll file (excluding common framework DLLs)
+            var dllFiles = Directory.GetFiles(directory, "*.dll")
+                .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") &&
+                           !Path.GetFileName(f).StartsWith("System."))
+                .ToArray();
+
+            return dllFiles.FirstOrDefault();
         }
 
         private string GetDockerDllPath(string baseDir, string dllPath)
@@ -514,16 +584,10 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
                 }
 
-                // Also try the EnvironmentManagerInvoker as a fallback/additional setup
-                // This handles any additional configuration that may be needed
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupContainer(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"EnvironmentManagerInvoker setup warning: {error}");
-                }
+                // NOTE: Removed duplicate EnvironmentManagerInvoker.TrySetupContainer call
+                // We already created all containers above - the invoker call was redundant and caused ~5s delay
 
-                await Task.Delay(1000, ct); // Wait for all containers to be ready
+                await Task.Delay(500, ct); // Brief wait for all containers to be ready
                 _logger.LogInfo("Docker containers setup complete (3 containers: server, client, database)");
             }
             catch (Exception ex)
@@ -598,15 +662,10 @@ namespace SolutionGrader.UI.Services
                     }
                 }
 
-                // Also try the EnvironmentManagerInvoker for any additional setup
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupQuestion(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"EnvironmentManagerInvoker setup warning: {error}");
-                }
+                // NOTE: Removed duplicate EnvironmentManagerInvoker.TrySetupQuestion call
+                // We already copied files above - the invoker call was redundant
 
-                await Task.Delay(500, ct);
+                await Task.Delay(200, ct); // Brief wait for filesystem sync
                 _logger.LogInfo("Files copied to containers");
             }
             catch (Exception ex)
@@ -646,7 +705,7 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                // Step 1: Check Docker availability
+                // Step 1: Check Docker availability (containers should already be set up by GradeStudentAsync)
                 if (!dockerGrading.IsDockerAvailable())
                 {
                     _logger.LogError("FATAL: Docker is not running. Cannot execute grading.");
@@ -678,37 +737,18 @@ namespace SolutionGrader.UI.Services
                 }
                 _logger.LogInfo($"Results will be saved to: {resultRoot}");
 
-                // Step 4: Setup Docker containers
-                _logger.LogInfo("=== Setting up Docker containers ===");
-                config.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
-                config.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
-                
-                if (!await dockerGrading.SetupContainersAsync(student, environment, config, ct))
-                {
-                    _logger.LogError("Failed to setup Docker containers");
-                    return (false, 0, "Failed to setup Docker containers");
-                }
+                // NOTE: Docker containers are already set up by GradeStudentAsync
+                // We skip duplicate SetupContainersAsync and CopyFilesToContainersAsync calls here
 
-                // Step 5: Copy student files to containers
-                _logger.LogInfo("=== Copying student files to containers ===");
-                if (!await dockerGrading.CopyFilesToContainersAsync(student, environment, ct))
-                {
-                    _logger.LogError("Failed to copy files to containers");
-                    await dockerGrading.DisposeContainersAsync(environment, ct);
-                    return (false, 0, "Failed to copy files to containers");
-                }
-
-                // Step 6: Execute test cases using DockerTestCaseExecutor
+                // Step 4: Execute test cases using DockerTestCaseExecutor
                 _logger.LogInfo("=== Executing test cases ===");
                 var testCaseExecutor = new DockerTestCaseExecutor(_logger, _testKitConfigService, dockerGrading);
                 var results = await testCaseExecutor.ExecuteAllTestCasesAsync(
                     environment, testKitPath, testKitConfig, resultRoot, ct);
 
-                // Step 7: Cleanup Docker containers
-                _logger.LogInfo("=== Cleaning up Docker containers ===");
-                await dockerGrading.DisposeContainersAsync(environment, ct);
+                // NOTE: Container cleanup is handled by GradeStudentAsync after this method returns
 
-                // Step 8: Write overall summary
+                // Step 5: Write overall summary
                 await WriteOverallSummaryAsync(resultRoot, results.TestCaseResults, results.TotalEarnedMark, testKitConfig.TotalMaxMark, ct);
 
                 // Final result
@@ -729,13 +769,13 @@ namespace SolutionGrader.UI.Services
             }
             catch (OperationCanceledException)
             {
-                await dockerGrading.DisposeContainersAsync(environment, ct);
+                // NOTE: Container cleanup handled by GradeStudentAsync
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError("Docker grading execution failed", ex);
-                await dockerGrading.DisposeContainersAsync(environment, ct);
+                // NOTE: Container cleanup handled by GradeStudentAsync
                 return (false, 0, ex.Message);
             }
         }
@@ -1796,7 +1836,7 @@ namespace SolutionGrader.UI.Services
         /// </summary>
         private async Task CleanupContainersAsync(Environment environment, CancellationToken ct)
         {
-            _logger.LogInfo("Cleaning up containers...");
+            _logger.LogInfo("Cleaning up containers (force removal)...");
 
             try
             {
@@ -1805,17 +1845,20 @@ namespace SolutionGrader.UI.Services
                 var clientContainer = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleContainerName);
                 var dbContainer = TryGetConfig(environment.Configs, EnvConfig.DatabaseContainerName);
 
-                // Remove Server container
+                _logger.LogInfo($"Containers to remove: server={serverContainer}, client={clientContainer}, db={dbContainer}");
+
+                // Remove Server container (docker rm -f will stop and remove)
                 if (!string.IsNullOrEmpty(serverContainer))
                 {
                     try
                     {
                         _logger.LogInfo($"Removing server container: {serverContainer}");
                         _dockerExecutor.RemoveContainer(serverContainer);
+                        _logger.LogInfo($"Server container '{serverContainer}' removed successfully");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Error removing server container: {ex.Message}");
+                        _logger.LogWarning($"Error removing server container '{serverContainer}': {ex.Message}");
                     }
                 }
 
@@ -1826,10 +1869,11 @@ namespace SolutionGrader.UI.Services
                     {
                         _logger.LogInfo($"Removing client container: {clientContainer}");
                         _dockerExecutor.RemoveContainer(clientContainer);
+                        _logger.LogInfo($"Client container '{clientContainer}' removed successfully");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Error removing client container: {ex.Message}");
+                        _logger.LogWarning($"Error removing client container '{clientContainer}': {ex.Message}");
                     }
                 }
 
@@ -1840,23 +1884,19 @@ namespace SolutionGrader.UI.Services
                     {
                         _logger.LogInfo($"Removing database container: {dbContainer}");
                         _dockerExecutor.RemoveContainer(dbContainer);
+                        _logger.LogInfo($"Database container '{dbContainer}' removed successfully");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Error removing database container: {ex.Message}");
+                        _logger.LogWarning($"Error removing database container '{dbContainer}': {ex.Message}");
                     }
                 }
 
-                // Also try the EnvironmentManagerInvoker for any additional cleanup
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TryDisposeContainer(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"EnvironmentManagerInvoker cleanup warning: {error}");
-                }
+                // NOTE: Removed EnvironmentManagerInvoker.TryDisposeContainer call
+                // We already removed all containers above - the invoker call was causing delays
 
-                await Task.Delay(500, ct);
-                _logger.LogInfo("Container cleanup complete (all 3 containers removed)");
+                await Task.Delay(200, ct); // Brief wait for Docker daemon to release resources
+                _logger.LogInfo("Container cleanup complete");
             }
             catch (Exception ex)
             {
