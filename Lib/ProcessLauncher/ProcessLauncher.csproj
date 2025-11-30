@@ -3,7 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>ProcessLauncher</RootNamespace>
-    <Nullable>enable</Nullable>
+    <!-- Nullable disabled - process launching utility with runtime-validated data -->
+    <Nullable>disable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>

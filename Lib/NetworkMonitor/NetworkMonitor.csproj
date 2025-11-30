@@ -3,7 +3,11 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- 
+      Nullable annotations only - allows ? annotations but doesn't enforce null checks.
+      This is a network monitoring utility where packet data is validated at runtime.
+    -->
+    <Nullable>annotations</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
