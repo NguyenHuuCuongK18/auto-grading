@@ -307,8 +307,15 @@ namespace SolutionGrader.UI
 
         private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
-            // Set logging context
-            _logger.SetStudentContext(student.StudentCode);
+            // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
+            if (_logger is LoggingService loggingService)
+            {
+                loggingService.SetStudentContext(student.StudentCode, student.PaperNo);
+            }
+            else
+            {
+                _logger.SetStudentContext(student.StudentCode);
+            }
             
             try
             {
@@ -454,17 +461,33 @@ namespace SolutionGrader.UI
             student.StatusMessage = null;
             student.ProgressPercent = 0;
             
-            // Delete associated result files if they exist
-            var studentResultFolder = Path.Combine(_configuration.SaveResultFolderPath, "student", student.StudentCode);
-            if (Directory.Exists(studentResultFolder))
+            // Delete associated result files if they exist - organized by paper
+            // Try paper-organized path first
+            var paperResultFolder = Path.Combine(_configuration.SaveResultFolderPath, student.PaperNo, "student", student.StudentCode);
+            if (Directory.Exists(paperResultFolder))
             {
                 try
                 {
-                    Directory.Delete(studentResultFolder, true);
+                    Directory.Delete(paperResultFolder, true);
+                    _logger.LogInfo($"Deleted result folder for {student.StudentCode} (Paper {student.PaperNo})");
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning($"Failed to delete result folder for {student.StudentCode}: {ex.Message}");
+                }
+            }
+
+            // Also try legacy non-paper-organized path
+            var legacyResultFolder = Path.Combine(_configuration.SaveResultFolderPath, "student", student.StudentCode);
+            if (Directory.Exists(legacyResultFolder))
+            {
+                try
+                {
+                    Directory.Delete(legacyResultFolder, true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to delete legacy result folder for {student.StudentCode}: {ex.Message}");
                 }
             }
         }

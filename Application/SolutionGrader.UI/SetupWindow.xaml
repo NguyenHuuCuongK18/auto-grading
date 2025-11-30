@@ -140,7 +140,8 @@
                         <CheckBox x:Name="chkHasClient" 
                                   Content="Has Client Component" 
                                   IsChecked="True"/>
-                        <StackPanel Orientation="Horizontal" Margin="20,8,0,0">
+                        <StackPanel Orientation="Horizontal" Margin="20,8,0,0" 
+                                    x:Name="pnlClientProjectName">
                             <TextBlock Text="Client Project Name:" 
                                        VerticalAlignment="Center" 
                                        Margin="0,0,10,0"/>
@@ -149,6 +150,7 @@
                                      Width="120" 
                                      Height="25"
                                      VerticalContentAlignment="Center"
+                                     IsEnabled="{Binding ElementName=chkHasClient, Path=IsChecked}"
                                      ToolTip="Enter the client project name (e.g., Project12). The DLL with this name will be searched for."/>
                         </StackPanel>
                     </StackPanel>
@@ -158,7 +160,8 @@
                         <CheckBox x:Name="chkHasServer" 
                                   Content="Has Server Component" 
                                   IsChecked="True"/>
-                        <StackPanel Orientation="Horizontal" Margin="20,8,0,0">
+                        <StackPanel Orientation="Horizontal" Margin="20,8,0,0"
+                                    x:Name="pnlServerProjectName">
                             <TextBlock Text="Server Project Name:" 
                                        VerticalAlignment="Center" 
                                        Margin="0,0,10,0"/>
@@ -167,6 +170,7 @@
                                      Width="120" 
                                      Height="25"
                                      VerticalContentAlignment="Center"
+                                     IsEnabled="{Binding ElementName=chkHasServer, Path=IsChecked}"
                                      ToolTip="Enter the server project name (e.g., Project11). The DLL with this name will be searched for."/>
                         </StackPanel>
                     </StackPanel>
