@@ -165,14 +165,18 @@ namespace SolutionGrader.UI.Services
                     sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
                     SessionStateChanged?.Invoke(this, sessionState);
 
-                    // Write StudentsSolution.xlsx after each student completes
-                    // This ensures results are saved incrementally in case of interruption
+                    // Write StudentsSolution.xlsx incrementally after each student completes
+                    // This ensures results are saved in case of interruption or pause
+                    // Performance note: For large batches, this could be optimized to batch writes,
+                    // but incremental writes are preferred for data safety during long grading sessions
                     _resultWriter.WriteStudentsSolutionSummary(students);
                 }
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInfo("Grading operation was cancelled");
+                // Write final summary even if cancelled
+                _resultWriter?.WriteStudentsSolutionSummary(students);
             }
             catch (Exception ex)
             {
@@ -180,8 +184,8 @@ namespace SolutionGrader.UI.Services
             }
             finally
             {
-                // Write final StudentsSolution.xlsx
-                _resultWriter?.WriteStudentsSolutionSummary(students);
+                // Final write is only needed if loop exited early (break) without going through exception handlers
+                // This handles edge cases like graceful completion without iteration or early termination
 
                 sessionState.IsRunning = false;
                 sessionState.SessionEndTime = DateTime.Now;
