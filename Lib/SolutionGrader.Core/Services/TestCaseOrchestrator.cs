@@ -334,7 +334,12 @@ namespace SolutionGrader.Core.Services
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+                    
+                    // Different timeout for different step types
+                    // CLIENT_INPUT needs more time because it waits for client to process input and respond
+                    var isClientInputStep = string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase);
+                    var stepTimeout = isClientInputStep ? TimeSpan.FromSeconds(20) : TimeSpan.FromSeconds(10);
+                    stepCts.CancelAfter(stepTimeout);
                     
                     // Identify action types for tracking
                     var isServerStart = string.Equals(step.Action, ActionKeywords.ServerStart, StringComparison.OrdinalIgnoreCase);

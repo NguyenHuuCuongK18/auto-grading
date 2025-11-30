@@ -134,10 +134,20 @@ namespace SolutionGrader.Core.Services
 
             try
             {
-                // Update the client stage label to current stage before sending input
-                // This ensures that the response output is attributed to the current stage (where input was sent)
-                // rather than the stage where the client was started
-                _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel);
+                // Update BOTH client and server stage labels to the current stage before sending input.
+                // This ensures that:
+                // 1. Client response output is attributed to the current stage (where input was sent)
+                // 2. Server output triggered by this input is also attributed to the current stage
+                // 
+                // Example: At stage 3, user sends "1 + 2". The client connects to server, which prints
+                // "Client connected", then processes and responds "3", then prints "Client disconnected".
+                // ALL of this server activity should be attributed to stage 3, not stage 2 where server started.
+                var currentStage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString());
+                if (currentStage != null)
+                {
+                    _clientStartStageLabel = currentStage;
+                    _serverStartStageLabel = currentStage;
+                }
                 
                 // Handle empty or null input by sending just a newline (blank Enter)
                 // This allows test cases to send empty input when the value cell is blank
