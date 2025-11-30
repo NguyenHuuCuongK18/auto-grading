@@ -43,6 +43,9 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private int _knownClientPort = 0;
     private readonly object _clientPortLock = new();
     
+    // Track when captures started - used to filter out pre-existing connections from Windows/Docker
+    private DateTime _captureStartTime = DateTime.UtcNow;
+    
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
     public bool IsCapturing => _isCapturing;
@@ -176,14 +179,19 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         _portRoleMap[_serverPort] = NetworkKeywords.Role_Server;
         
         // Reset known client port - will be set when we see the first SYN from actual client
+        // or when explicitly set via SetKnownClientPort() or DetectClientPortFromConnections()
         lock (_clientPortLock)
         {
             _knownClientPort = 0;
         }
+        
+        // Record the time when captures were cleared - used to filter out pre-existing connections
+        _captureStartTime = DateTime.UtcNow;
+        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, filtering connections from {_captureStartTime:HH:mm:ss.fff}");
     }
     
     /// <summary>
-    /// Sets the known client port. Call this after the client process starts and connects.
+    /// Sets the known client port explicitly. Call this if you know the client port in advance.
     /// This allows filtering out Windows/Docker health check traffic to the server port.
     /// </summary>
     public void SetKnownClientPort(int clientPort)
@@ -191,7 +199,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = clientPort;
-            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port set to {clientPort}");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port explicitly set to {clientPort}");
         }
     }
     
