@@ -229,6 +229,89 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
+        /// Stops all dotnet processes inside a container.
+        /// This is used between test cases to ensure the port is released.
+        /// </summary>
+        public async Task<bool> StopApplicationsInContainerAsync(string containerName, CancellationToken ct = default)
+        {
+            _logger.LogInfo($"Stopping all dotnet processes in container {containerName}...");
+
+            try
+            {
+                // Kill all dotnet processes in the container using pkill
+                // This releases the ports before starting a new test case
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = $"exec {containerName} pkill -9 dotnet",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process != null)
+                {
+                    await process.WaitForExitAsync(ct);
+                    // pkill returns 0 if at least one process matched, 1 if no process matched
+                    // Both are acceptable outcomes
+                }
+
+                // Also clean up named pipes to ensure clean restart
+                var cleanupPsi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = $"exec {containerName} sh -c \"rm -f /tmp/*_input_pipe 2>/dev/null || true\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var cleanupProcess = System.Diagnostics.Process.Start(cleanupPsi);
+                if (cleanupProcess != null)
+                {
+                    await cleanupProcess.WaitForExitAsync(ct);
+                }
+
+                _logger.LogInfo($"Stopped dotnet processes in container {containerName}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error stopping processes in {containerName}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Stops all applications in all containers (server and client).
+        /// Called between test cases to ensure clean state and release ports.
+        /// </summary>
+        public async Task StopAllApplicationsAsync(Environment environment, CancellationToken ct = default)
+        {
+            _logger.LogInfo("Stopping all applications in containers...");
+            
+            var serverContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName);
+            var clientContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName);
+
+            if (!string.IsNullOrEmpty(serverContainer))
+            {
+                await StopApplicationsInContainerAsync(serverContainer, ct);
+            }
+
+            if (!string.IsNullOrEmpty(clientContainer))
+            {
+                await StopApplicationsInContainerAsync(clientContainer, ct);
+            }
+
+            // Wait for ports to be fully released
+            await Task.Delay(1000, ct);
+            _logger.LogInfo("All applications stopped");
+        }
+
+        /// <summary>
         /// Disposes all containers for a student.
         /// Called after grading is complete or cancelled.
         /// Uses direct Docker commands for reliable container removal.

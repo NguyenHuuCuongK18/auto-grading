@@ -8,7 +8,6 @@ using SolutionGrader.UI.Models;
 using Domain.Entities.Constants;
 using Domain.Entities.Main;
 using EnvironmentBuilder.DockerCommand;
-using EnvironmentBuilder.helper;
 using Newtonsoft.Json;
 using SolutionGrader.Services;
 using SolutionGrader.Core.Services;
@@ -22,20 +21,15 @@ namespace SolutionGrader.UI.Services
 {
     /// <summary>
     /// Main service that orchestrates the grading process for student solutions.
+    /// Uses DOCKER containers for executing and grading student code.
     /// 
-    /// REFACTORED: This service now delegates to the Lib folder's services for:
-    /// - Docker container setup via EnvironmentManagerInvoker.TrySetupContainer()
-    /// - File copying via EnvironmentManagerInvoker.TrySetupQuestion()
-    /// - Container cleanup via EnvironmentManagerInvoker.TryDisposeContainer()
-    /// 
-    /// This ensures consistency between CLI and UI grading behavior.
-    /// 
-    /// UI-specific responsibilities retained:
+    /// Key responsibilities:
     /// 1. Discover student solutions from submit folder
     /// 2. Match students with test kits by paper number
-    /// 3. Manage grading session state (pause, resume, cancel)
-    /// 4. Update UI with progress events
-    /// 5. Write results in SampleLogging format
+    /// 3. Execute grading in Docker containers (server, client, database)
+    /// 4. Read test steps from Detail.xlsx and execute them (StartServer, StartClient, Input)
+    /// 5. Compare outputs against expected values from Client/Server/Network sheets
+    /// 6. Calculate points and write results in SampleLogging format
     /// 
     /// Port Configuration:
     /// - Code_Container_Internal_Port: The port the app listens on inside the container
@@ -261,7 +255,7 @@ namespace SolutionGrader.UI.Services
                 student.ProgressPercent = 50;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                await CopyFilesToContainersAsync(environment, ct);
+                await CopyFilesToContainersAsync(student, environment, ct);
 
                 // Step 6: Execute grading
                 student.ProgressPercent = 70;
@@ -519,56 +513,219 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Sets up Docker containers for grading using Lib folder's EnvironmentManagerInvoker.
+        /// Sets up Docker containers for grading.
         /// 
-        /// REFACTORED: Now delegates to EnvironmentManagerInvoker.TrySetupContainer() which handles:
+        /// This method sets up THREE containers per student:
         /// 1. Server container - runs the student's server code
         /// 2. Client container - runs the student's client code  
         /// 3. Database container - MSSQL server for database operations
         /// 
-        /// This ensures identical container setup behavior between CLI and UI.
+        /// The containers are created and started but the applications inside
+        /// are NOT started until grading steps call StartServer/StartClient.
+        /// This allows the network monitor to properly capture traffic.
+        /// 
+        /// IMPORTANT: This method first removes any existing containers with the same names
+        /// to avoid "port already in use" errors.
         /// </summary>
         private async Task SetupContainersAsync(Environment environment, CancellationToken ct)
         {
-            _logger.LogInfo("Setting up Docker containers via Lib folder's EnvironmentManagerInvoker...");
+            _logger.LogInfo("Setting up Docker containers (Server, Client, Database)...");
 
             try
             {
-                // Check if Docker is running first
+                // Check if Docker is running
                 if (!_dockerExecutor.IsDockerRunning())
                 {
                     throw new InvalidOperationException("Docker is not running. Please start Docker Desktop.");
                 }
 
-                // Log configuration for debugging
+                // Get container configuration
                 var serverContainer = TryGetConfig(environment.Configs, EnvConfig.CodeContainerName);
                 var clientContainer = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleContainerName);
                 var dbContainer = TryGetConfig(environment.Configs, EnvConfig.DatabaseContainerName);
+                var network = TryGetConfig(environment.Configs, EnvConfig.DockerNetwork);
                 
-                _logger.LogInfo($"Container configuration:");
+                // Get image names
+                var codeImageName = TryGetConfig(environment.Configs, EnvConfig.CodeImageName);
+                var dbImageName = TryGetConfig(environment.Configs, EnvConfig.DatabaseImageName);
+                
+                // Get port configuration
+                var internalPort = TryGetConfig(environment.Configs, EnvConfig.CodeContainerInternalPort);
+                var hostPort = TryGetConfig(environment.Configs, EnvConfig.CodeContainerHostPort);
+                var dbInternalPort = TryGetConfig(environment.Configs, EnvConfig.DatabaseContainerInternalPort);
+                var dbHostPort = TryGetConfig(environment.Configs, EnvConfig.DatabaseContainerHostPort);
+
+                _logger.LogInfo($"Container setup configuration:");
                 _logger.LogInfo($"  - Server container: {serverContainer}");
                 _logger.LogInfo($"  - Client container: {clientContainer}");
                 _logger.LogInfo($"  - Database container: {dbContainer}");
+                _logger.LogInfo($"  - Docker network: {network}");
+                _logger.LogInfo($"  - Code image: {codeImageName}");
+                _logger.LogInfo($"  - Database image: {dbImageName}");
+                _logger.LogInfo($"  - Code ports: {hostPort}:{internalPort}");
+                _logger.LogInfo($"  - Database ports: {dbHostPort}:{dbInternalPort}");
 
-                // Use Lib folder's EnvironmentManagerInvoker - SAME as SuiteRunner.ExecutePaper
-                // This ensures identical container setup behavior between CLI and UI
-                if (!EnvironmentManagerInvoker.TrySetupContainer(environment, out var setupError))
+                // IMPORTANT: Remove any existing containers first to avoid port conflicts
+                // This prevents "port already in use" errors from previous runs
+                _logger.LogInfo("Cleaning up any existing containers to avoid port conflicts...");
+                await CleanupExistingContainersAsync(serverContainer, clientContainer, dbContainer, ct);
+
+                // Create Docker network if not exists
+                if (!string.IsNullOrEmpty(network))
                 {
-                    _logger.LogWarning($"Container setup warning: {setupError}");
-                    // Note: EnvironmentManagerInvoker may report errors but still succeed
-                    // Continue unless Docker is not running
-                }
-                else
-                {
-                    _logger.LogInfo("Docker containers setup complete via EnvironmentManagerInvoker");
+                    try
+                    {
+                        _dockerExecutor.CreateNetwork(network);
+                        _logger.LogInfo($"Docker network '{network}' created/verified");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Network creation warning: {ex.Message}");
+                        // Network may already exist, continue
+                    }
                 }
 
-                await Task.Delay(500, ct); // Brief wait for containers to be ready
+                // Setup Database container (container 1 of 3)
+                if (!string.IsNullOrEmpty(dbContainer) && !string.IsNullOrEmpty(dbImageName))
+                {
+                    _logger.LogInfo($"Setting up Database container: {dbContainer}");
+                    
+                    // Pull image if needed
+                    if (!_dockerExecutor.IsImageExists(dbImageName))
+                    {
+                        _logger.LogInfo($"Pulling database image: {dbImageName}");
+                        _dockerExecutor.PullImage(dbImageName);
+                    }
+                    
+                    // Create and run database container
+                    var dbUsername = TryGetConfig(environment.Configs, EnvConfig.DatabaseUsername);
+                    var dbPassword = TryGetConfig(environment.Configs, EnvConfig.DatabasePassword);
+                    
+                    var dbDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = dbImageName,
+                        ContainerName = dbContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(dbInternalPort, out var dbip) ? dbip : 1433,
+                        HostPort = int.TryParse(dbHostPort, out var dbhp) ? dbhp : 1434,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "ACCEPT_EULA", "Y" },
+                            { "SA_PASSWORD", dbPassword }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(dbDockerBase);
+                    _logger.LogInfo($"Database container '{dbContainer}' started");
+                    
+                    // Wait for database to be ready
+                    _logger.LogInfo($"Waiting for database to be ready (timeout: {DatabaseReadinessTimeoutMs}ms)...");
+                    await Task.Delay(DatabaseReadinessTimeoutMs, ct);
+                }
+
+                // Setup Server container (container 2 of 3)
+                if (!string.IsNullOrEmpty(serverContainer) && !string.IsNullOrEmpty(codeImageName))
+                {
+                    _logger.LogInfo($"Setting up Server container: {serverContainer}");
+                    
+                    // Pull image if needed
+                    if (!_dockerExecutor.IsImageExists(codeImageName))
+                    {
+                        _logger.LogInfo($"Pulling code image: {codeImageName}");
+                        _dockerExecutor.PullImage(codeImageName);
+                    }
+                    
+                    var serverDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = codeImageName,
+                        ContainerName = serverContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(internalPort, out var sip) ? sip : 5000,
+                        HostPort = int.TryParse(hostPort, out var shp) ? shp : 5000,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "DOTNET_RUNNING_IN_CONTAINER", "true" },
+                            { "ASPNETCORE_URLS", $"http://+:{internalPort}" }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(serverDockerBase);
+                    _logger.LogInfo($"Server container '{serverContainer}' started");
+                }
+
+                // Setup Client container (container 3 of 3)
+                if (!string.IsNullOrEmpty(clientContainer) && !string.IsNullOrEmpty(codeImageName))
+                {
+                    _logger.LogInfo($"Setting up Client container: {clientContainer}");
+                    
+                    // Client container uses same code image but different port mapping
+                    // Client typically doesn't need to expose a port since it initiates connections
+                    // Using ClientPortOffset to avoid port conflicts with server container
+                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + ClientPortOffset : 5001;
+                    
+                    var clientDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = codeImageName,
+                        ContainerName = clientContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(internalPort, out var cip) ? cip : 5000,
+                        HostPort = clientPort,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "DOTNET_RUNNING_IN_CONTAINER", "true" }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(clientDockerBase);
+                    _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
+                }
+
+                await Task.Delay(500, ct); // Brief wait for all containers to be ready
+                _logger.LogInfo("Docker containers setup complete (3 containers: server, client, database)");
             }
             catch (Exception ex)
             {
                 _logger.LogError("Failed to setup Docker containers", ex);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Cleans up existing containers BEFORE setting up new ones.
+        /// This is called at the start of SetupContainersAsync to prevent port conflicts.
+        /// </summary>
+        private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
+        {
+            try
+            {
+                // Remove any existing containers with the same names to avoid port conflicts
+                // Using force removal (docker rm -f) which will stop and remove the container
+                
+                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
+                {
+                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
+                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
+                {
+                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
+                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
+                {
+                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
+                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
+                }
+
+                // Wait for Docker to release resources
+                await Task.Delay(500, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error cleaning up existing containers: {ex.Message}");
+                // Continue with setup even if cleanup fails
             }
         }
 
@@ -578,41 +735,71 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Copies student solution files to Docker containers using Lib folder's EnvironmentManagerInvoker.
-        /// 
-        /// REFACTORED: Now delegates to EnvironmentManagerInvoker.TrySetupQuestion() which handles
-        /// copying files to both Server and Client containers based on environment configuration.
-        /// This ensures identical file copying behavior between CLI and UI.
-        /// 
-        /// Note: The student parameter was removed as file paths come from environment configuration.
+        /// Copies student solution files to Docker containers.
+        /// Copies files to both Server and Client containers based on the configured paths.
+        /// Files are copied but containers are NOT started - they will be started
+        /// when grading steps call for StartServer/StartClient actions.
         /// </summary>
-        private async Task CopyFilesToContainersAsync(Environment environment, CancellationToken ct)
+        private async Task CopyFilesToContainersAsync(StudentSolution student, Environment environment, CancellationToken ct)
         {
-            _logger.LogInfo("Copying files to containers via Lib folder's EnvironmentManagerInvoker...");
+            _logger.LogInfo("Copying files to containers...");
 
             try
             {
-                // Log configuration for debugging
+                // Get container names
+                var serverContainer = TryGetConfig(environment.Configs, EnvConfig.CodeContainerName);
+                var clientContainer = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleContainerName);
+                
+                // Get source paths
                 var serverPath = TryGetConfig(environment.Configs, EnvConfig.CodeFilePath);
                 var clientPath = TryGetConfig(environment.Configs, EnvConfig.GivenConsolePath);
-                
-                _logger.LogInfo($"File copy configuration:");
-                _logger.LogInfo($"  - Server path: {serverPath}");
-                _logger.LogInfo($"  - Client path: {clientPath}");
 
-                // Use Lib folder's EnvironmentManagerInvoker - SAME as SuiteRunner.ExecutePaper
-                // This ensures identical file copying behavior between CLI and UI
-                if (!EnvironmentManagerInvoker.TrySetupQuestion(environment, out var setupError))
+                _logger.LogInfo($"File copy configuration:");
+                _logger.LogInfo($"  - Server path: {serverPath} -> container {serverContainer}");
+                _logger.LogInfo($"  - Client path: {clientPath} -> container {clientContainer}");
+
+                // Copy server files if configured
+                if (!string.IsNullOrEmpty(serverContainer) && !string.IsNullOrEmpty(serverPath) && Directory.Exists(serverPath))
                 {
-                    _logger.LogWarning($"File copy warning: {setupError}");
-                    // Note: EnvironmentManagerInvoker may report errors but still succeed
+                    _logger.LogInfo($"Copying server files from {serverPath} to container {serverContainer}");
+                    try
+                    {
+                        // Create /apps directory in container if it doesn't exist
+                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        
+                        // Copy the entire solution folder to the container
+                        var folderName = Path.GetFileName(serverPath);
+                        _dockerExecutor.CopyFileToContainer(serverPath, $"{serverContainer}:/apps/{folderName}");
+                        _logger.LogInfo($"Server files copied successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Failed to copy server files: {ex.Message}");
+                    }
                 }
-                else
+
+                // Copy client files if configured
+                if (!string.IsNullOrEmpty(clientContainer) && !string.IsNullOrEmpty(clientPath) && Directory.Exists(clientPath))
                 {
-                    _logger.LogInfo("Files copied to containers via EnvironmentManagerInvoker");
+                    _logger.LogInfo($"Copying client files from {clientPath} to container {clientContainer}");
+                    try
+                    {
+                        // Create /apps directory in container if it doesn't exist
+                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        
+                        // Copy the entire solution folder to the container
+                        var folderName = Path.GetFileName(clientPath);
+                        _dockerExecutor.CopyFileToContainer(clientPath, $"{clientContainer}:/apps/{folderName}");
+                        _logger.LogInfo($"Client files copied successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Failed to copy client files: {ex.Message}");
+                    }
                 }
 
                 await Task.Delay(200, ct); // Brief wait for filesystem sync
+                _logger.LogInfo("Files copied to containers");
             }
             catch (Exception ex)
             {
@@ -1778,77 +1965,69 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Cleans up existing containers BEFORE setting up new ones.
-        /// This is called at the start of SetupContainersAsync to prevent port conflicts.
-        /// </summary>
-        private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
-        {
-            try
-            {
-                // Remove any existing containers with the same names to avoid port conflicts
-                // Using force removal (docker rm -f) which will stop and remove the container
-                
-                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
-                {
-                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
-                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
-                }
-
-                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
-                {
-                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
-                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
-                }
-
-                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
-                {
-                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
-                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
-                }
-
-                // Wait for Docker to release resources
-                await Task.Delay(500, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"Error cleaning up existing containers: {ex.Message}");
-                // Continue with setup even if cleanup fails
-            }
-        }
-
-        /// <summary>
-        /// Cleans up Docker containers after grading using Lib folder's EnvironmentManagerInvoker.
-        /// 
-        /// REFACTORED: Now delegates to EnvironmentManagerInvoker.TryDisposeContainer() which handles
-        /// removing all containers (Server, Client, Database).
-        /// This ensures identical cleanup behavior between CLI and UI.
+        /// Cleans up Docker containers after grading.
+        /// Removes all three containers: Server, Client, and Database.
         /// </summary>
         private async Task CleanupContainersAsync(Environment environment, CancellationToken ct)
         {
-            _logger.LogInfo("Cleaning up containers via Lib folder's EnvironmentManagerInvoker...");
+            _logger.LogInfo("Cleaning up containers (force removal)...");
 
             try
             {
-                // Log configuration for debugging
+                // Get container names
                 var serverContainer = TryGetConfig(environment.Configs, EnvConfig.CodeContainerName);
                 var clientContainer = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleContainerName);
                 var dbContainer = TryGetConfig(environment.Configs, EnvConfig.DatabaseContainerName);
 
                 _logger.LogInfo($"Containers to remove: server={serverContainer}, client={clientContainer}, db={dbContainer}");
 
-                // Use Lib folder's EnvironmentManagerInvoker - SAME as SuiteRunner.ExecutePaper
-                // This ensures identical cleanup behavior between CLI and UI
-                if (!EnvironmentManagerInvoker.TryDisposeContainer(environment, out var disposeError))
+                // Remove Server container (docker rm -f will stop and remove)
+                if (!string.IsNullOrEmpty(serverContainer))
                 {
-                    _logger.LogWarning($"Container cleanup warning: {disposeError}");
-                    // Note: EnvironmentManagerInvoker may report errors but still succeed
+                    try
+                    {
+                        _logger.LogInfo($"Removing server container: {serverContainer}");
+                        _dockerExecutor.RemoveContainer(serverContainer);
+                        _logger.LogInfo($"Server container '{serverContainer}' removed successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing server container '{serverContainer}': {ex.Message}");
+                    }
                 }
-                else
+
+                // Remove Client container
+                if (!string.IsNullOrEmpty(clientContainer))
                 {
-                    _logger.LogInfo("Containers cleaned up via EnvironmentManagerInvoker");
+                    try
+                    {
+                        _logger.LogInfo($"Removing client container: {clientContainer}");
+                        _dockerExecutor.RemoveContainer(clientContainer);
+                        _logger.LogInfo($"Client container '{clientContainer}' removed successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing client container '{clientContainer}': {ex.Message}");
+                    }
+                }
+
+                // Remove Database container
+                if (!string.IsNullOrEmpty(dbContainer))
+                {
+                    try
+                    {
+                        _logger.LogInfo($"Removing database container: {dbContainer}");
+                        _dockerExecutor.RemoveContainer(dbContainer);
+                        _logger.LogInfo($"Database container '{dbContainer}' removed successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing database container '{dbContainer}': {ex.Message}");
+                    }
                 }
 
                 await Task.Delay(200, ct); // Brief wait for Docker daemon to release resources
+                _logger.LogInfo("Container cleanup complete");
             }
             catch (Exception ex)
             {

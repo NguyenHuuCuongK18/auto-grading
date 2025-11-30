@@ -102,6 +102,11 @@ namespace SolutionGrader.UI.Services
                     tcResultDir, testCaseName, tcResult.Passed, tcResult.EarnedMark, testCaseMaxMark,
                     tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, tcResult.Actions, ct);
                 
+                // IMPORTANT: Stop all dotnet processes in containers between test cases
+                // This kills the server/client processes to release ports before the next test case
+                _logger.LogInfo("Stopping applications in containers before next test case...");
+                await _dockerGrading.StopAllApplicationsAsync(environment, ct);
+                
                 // Wait for port to be released before next test case
                 // This prevents "Address already in use" errors when the socket is in TIME_WAIT state
                 await WaitForPortReleaseAsync(testKitConfig.CodeContainerHostPort, ct);
