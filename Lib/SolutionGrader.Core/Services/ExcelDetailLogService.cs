@@ -1013,6 +1013,9 @@ namespace SolutionGrader.Core.Services
         /// - Server sheet: ServerStdout only  
         /// - Network sheet: NetworkStdout only
         /// This prevents duplicate/irrelevant data from being shown on each sheet.
+        /// 
+        /// If there is captured network data but no Network sheet in the template,
+        /// this method will create one with the captured data for easy analysis.
         /// </summary>
         private void AddStdoutColumnsToSheets()
         {
@@ -1034,11 +1037,11 @@ namespace SolutionGrader.Core.Services
                 PopulateStdoutColumns(serverWs, hdr, isClientSheet: false, isServerSheet: true);
             }
             
-            // Add actual captured data columns to Network sheet (if it exists)
-            // This provides side-by-side comparison between expected and actual network traffic
-            if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out var networkWs))
+            // Handle Network sheet - create it if there's captured network data
+            IXLWorksheet? networkWs;
+            if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out networkWs))
             {
-                // Add columns for actual captured data
+                // Network sheet exists in template - add actual data columns
                 EnsureColumns(networkWs, new[] 
                 { 
                     GradingKeywords.Col_ActualFlags,
@@ -1051,6 +1054,118 @@ namespace SolutionGrader.Core.Services
                 var hdr = GetHeaderIndex(networkWs);
                 PopulateNetworkActualColumns(networkWs, hdr);
             }
+            else
+            {
+                // Network sheet doesn't exist - check if we have captured network data
+                // If so, create a new Network sheet with the captured data
+                var questionCode = _questionCode ?? "";
+                bool hasNetworkData = false;
+                
+                // Check if any stage has captured network packets
+                for (int stage = 0; stage <= GradingKeywords.MaxStagesToCheck; stage++)
+                {
+                    var packets = _run.GetCapturedNetworkPackets(questionCode, stage.ToString());
+                    if (packets.Count > 0)
+                    {
+                        hasNetworkData = true;
+                        break;
+                    }
+                }
+                
+                if (hasNetworkData)
+                {
+                    networkWs = CreateNetworkSheetFromCapturedData(questionCode);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Creates a Network sheet from captured network data when no template exists.
+        /// This ensures network traffic is always visible in the output even if the
+        /// test kit didn't define expected network flow.
+        /// 
+        /// The whole point of network monitoring is to boot up and capture the network
+        /// flow on the exposed port. This method ensures that captured data is shown
+        /// regardless of whether the test kit had a Network sheet.
+        /// </summary>
+        private IXLWorksheet CreateNetworkSheetFromCapturedData(string questionCode)
+        {
+            if (_wb == null)
+            {
+                throw new InvalidOperationException("Workbook is not initialized");
+            }
+            
+            var networkWs = _wb.AddWorksheet(SuiteKeywords.Sheet_Network);
+            
+            // Create header row with columns for captured network data
+            networkWs.Cell(1, 1).Value = NetworkKeywords.Col_Stage;
+            networkWs.Cell(1, 2).Value = NetworkKeywords.Col_Time;
+            networkWs.Cell(1, 3).Value = NetworkKeywords.Col_Flags;
+            networkWs.Cell(1, 4).Value = NetworkKeywords.Col_State;
+            networkWs.Cell(1, 5).Value = NetworkKeywords.Col_SourceRole;
+            networkWs.Cell(1, 6).Value = NetworkKeywords.Col_DestinationRole;
+            networkWs.Cell(1, 7).Value = NetworkKeywords.Col_Data;
+            networkWs.Cell(1, 8).Value = GradingKeywords.Col_Message;
+            
+            networkWs.Row(1).Style.Font.Bold = true;
+            networkWs.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            
+            int row = 2;
+            
+            // Iterate through stages and add captured packets
+            for (int stage = 0; stage <= GradingKeywords.MaxStagesToCheck; stage++)
+            {
+                var packets = _run.GetCapturedNetworkPackets(questionCode, stage.ToString());
+                if (packets.Count == 0) continue;
+                
+                foreach (var packet in packets)
+                {
+                    networkWs.Cell(row, 1).Value = stage;
+                    networkWs.Cell(row, 2).Value = packet.Timestamp.ToString("HH:mm:ss.fff");
+                    networkWs.Cell(row, 3).Value = packet.Flags ?? "";
+                    networkWs.Cell(row, 4).Value = packet.State ?? "";
+                    networkWs.Cell(row, 5).Value = packet.SourceRole ?? "";
+                    networkWs.Cell(row, 6).Value = packet.DestinationRole ?? "";
+                    
+                    // Truncate data if too long
+                    if (!string.IsNullOrEmpty(packet.Data))
+                    {
+                        var dataPreview = packet.Data.Length > PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS 
+                            ? packet.Data.Substring(0, PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS) + "..." 
+                            : packet.Data;
+                        networkWs.Cell(row, 7).Value = dataPreview;
+                    }
+                    
+                    networkWs.Cell(row, 8).Value = "Captured network traffic";
+                    
+                    row++;
+                }
+            }
+            
+            // Add summary at the bottom
+            if (row > 2)
+            {
+                row++;
+                networkWs.Cell(row, 1).Value = "Summary";
+                networkWs.Cell(row, 1).Style.Font.Bold = true;
+                row++;
+                networkWs.Cell(row, 1).Value = $"Total packets captured: {row - 3}";
+                networkWs.Cell(row, 8).Value = "This sheet was auto-generated from captured network traffic";
+                networkWs.Cell(row, 8).Style.Font.Italic = true;
+            }
+            else
+            {
+                // No packets captured - add a note
+                networkWs.Cell(2, 1).Value = "-";
+                networkWs.Cell(2, 8).Value = "No network traffic was captured. Ensure NPcap/libpcap is installed and the server is running on the monitored port.";
+                networkWs.Cell(2, 8).Style.Font.FontColor = XLColor.DarkRed;
+            }
+            
+            // Adjust column widths
+            networkWs.Style.Alignment.WrapText = true;
+            networkWs.Columns().AdjustToContents(1, networkWs.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
+            
+            return networkWs;
         }
         
         /// <summary>

@@ -45,6 +45,23 @@ public interface INetworkMonitorService
     void ClearCaptures();
     
     /// <summary>
+    /// Sets the known client port to filter out Windows/Docker health check traffic.
+    /// Once set, only traffic involving this port will be captured.
+    /// </summary>
+    /// <param name="clientPort">The ephemeral port used by the client process</param>
+    void SetKnownClientPort(int clientPort);
+    
+    /// <summary>
+    /// Detects the client's ephemeral port by querying the OS TCP connections table.
+    /// This is more reliable than detecting from SYN packets because it queries
+    /// the OS directly for established connections to the server port.
+    /// 
+    /// Call this after the client process has started and connected to the server.
+    /// </summary>
+    /// <returns>The client's ephemeral port, or 0 if not found</returns>
+    int DetectClientPortFromConnections();
+    
+    /// <summary>
     /// Gets whether the monitor is currently capturing.
     /// </summary>
     bool IsCapturing { get; }

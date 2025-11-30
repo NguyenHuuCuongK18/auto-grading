@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
 using Domain.Entities.Main;
+using Domain.Entities.Constants;
 using Environment = Domain.Entities.Main.Environment;
 
 namespace SolutionGrader.UI.Services
@@ -100,7 +101,8 @@ namespace SolutionGrader.UI.Services
                 }
                 await WriteTestCaseResultAsync(
                     tcResultDir, testCaseName, tcResult.Passed, tcResult.EarnedMark, testCaseMaxMark,
-                    tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, tcResult.Actions, ct);
+                    tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, 
+                    tcResult.ExpectedNetworkFlows, tcResult.Actions, ct);
                 
                 // IMPORTANT: Stop all dotnet processes in containers between test cases
                 // This kills the server/client processes to release ports before the next test case
@@ -179,6 +181,7 @@ namespace SolutionGrader.UI.Services
             public Dictionary<int, string> ClientOutputs { get; set; } = new Dictionary<int, string>();
             public Dictionary<int, string> ServerOutputs { get; set; } = new Dictionary<int, string>();
             public Dictionary<int, TestKitConfigService.ExpectedOutput> ExpectedOutputs { get; set; } = new Dictionary<int, TestKitConfigService.ExpectedOutput>();
+            public List<TestKitConfigService.ExpectedNetworkFlow> ExpectedNetworkFlows { get; set; } = new List<TestKitConfigService.ExpectedNetworkFlow>();
             public List<(int Stage, string Input, string Action)> Actions { get; set; } = new List<(int, string, string)>();
         }
 
@@ -214,6 +217,14 @@ namespace SolutionGrader.UI.Services
                 var expectedOutputs = _testKitConfigService.GetExpectedOutputs(testCasePath);
                 result.ExpectedOutputs = expectedOutputs;
                 _logger.LogInfo($"Loaded expected outputs for {expectedOutputs.Count} stages");
+                
+                // Read expected network flow from Network sheet
+                var expectedNetworkFlows = _testKitConfigService.GetExpectedNetworkFlow(testCasePath);
+                result.ExpectedNetworkFlows = expectedNetworkFlows;
+                if (expectedNetworkFlows.Count > 0)
+                {
+                    _logger.LogInfo($"Loaded {expectedNetworkFlows.Count} expected network flow entries from Detail.xlsx");
+                }
 
                 // Execute actions and capture outputs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(environment, actions, ct);
@@ -292,6 +303,11 @@ namespace SolutionGrader.UI.Services
             var serverOutputs = new Dictionary<int, string>();
             bool serverStarted = false;
             bool clientStarted = false;
+            
+            // Track cumulative output to detect new output for each stage
+            // docker logs returns ALL output from container start, so we need to track what's already been seen
+            string previousClientOutput = "";
+            string previousServerOutput = "";
 
             _logger.LogInfo($"Executing {actions.Count} actions in Docker containers...");
 
@@ -314,12 +330,39 @@ namespace SolutionGrader.UI.Services
                             if (serverStarted)
                             {
                                 _logger.LogInfo($"[Stage {stage}] Server started successfully, waiting for initialization...");
-                                await Task.Delay(2000, ct); // Wait for server to fully start
-                                serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                                _logger.LogInfo($"[Stage {stage}] Server output captured ({serverOutputs[stage]?.Length ?? 0} chars)");
-                                if (!string.IsNullOrEmpty(serverOutputs[stage]))
+                                
+                                // Wait for server output using cumulative approach
+                                // Keep checking until we see new output or timeout
+                                string currentServerOutput = "";
+                                int retries = 0;
+                                const int maxRetries = 10; // 10 retries * 500ms = 5 seconds max
+                                
+                                while (retries < maxRetries && !ct.IsCancellationRequested)
                                 {
-                                    _logger.LogDebug($"Server output: {serverOutputs[stage]}");
+                                    await Task.Delay(500, ct);
+                                    currentServerOutput = await _dockerGrading.GetServerOutputAsync(environment, ct) ?? "";
+                                    
+                                    // If we have more output than before, we've captured something
+                                    if (currentServerOutput.Length > previousServerOutput.Length)
+                                    {
+                                        _logger.LogDebug($"[Stage {stage}] Server output grew: {previousServerOutput.Length} -> {currentServerOutput.Length}");
+                                        break;
+                                    }
+                                    retries++;
+                                }
+                                
+                                // Store the NEW output for this stage (output that wasn't there before)
+                                string newServerOutput = currentServerOutput.Length > previousServerOutput.Length
+                                    ? currentServerOutput.Substring(previousServerOutput.Length)
+                                    : currentServerOutput;
+                                
+                                serverOutputs[stage] = newServerOutput;
+                                previousServerOutput = currentServerOutput;
+                                
+                                _logger.LogInfo($"[Stage {stage}] Server output captured ({newServerOutput.Length} chars new, {currentServerOutput.Length} chars total)");
+                                if (!string.IsNullOrEmpty(newServerOutput))
+                                {
+                                    _logger.LogDebug($"Server output: {newServerOutput}");
                                 }
                             }
                             else
@@ -341,12 +384,39 @@ namespace SolutionGrader.UI.Services
                             if (clientStarted)
                             {
                                 _logger.LogInfo($"[Stage {stage}] Client started successfully, waiting for initialization...");
-                                await Task.Delay(2000, ct); // Wait for client to fully start
-                                clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                                _logger.LogInfo($"[Stage {stage}] Client output captured ({clientOutputs[stage]?.Length ?? 0} chars)");
-                                if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                                
+                                // Wait for client output using cumulative approach
+                                // Keep checking until we see new output or timeout
+                                string currentClientOutput = "";
+                                int retries = 0;
+                                const int maxRetries = 10; // 10 retries * 500ms = 5 seconds max
+                                
+                                while (retries < maxRetries && !ct.IsCancellationRequested)
                                 {
-                                    _logger.LogDebug($"Client output: {clientOutputs[stage]}");
+                                    await Task.Delay(500, ct);
+                                    currentClientOutput = await _dockerGrading.GetClientOutputAsync(environment, ct) ?? "";
+                                    
+                                    // If we have more output than before, we've captured something
+                                    if (currentClientOutput.Length > previousClientOutput.Length)
+                                    {
+                                        _logger.LogDebug($"[Stage {stage}] Client output grew: {previousClientOutput.Length} -> {currentClientOutput.Length}");
+                                        break;
+                                    }
+                                    retries++;
+                                }
+                                
+                                // Store the NEW output for this stage (output that wasn't there before)
+                                string newClientOutput = currentClientOutput.Length > previousClientOutput.Length
+                                    ? currentClientOutput.Substring(previousClientOutput.Length)
+                                    : currentClientOutput;
+                                
+                                clientOutputs[stage] = newClientOutput;
+                                previousClientOutput = currentClientOutput;
+                                
+                                _logger.LogInfo($"[Stage {stage}] Client output captured ({newClientOutput.Length} chars new, {currentClientOutput.Length} chars total)");
+                                if (!string.IsNullOrEmpty(newClientOutput))
+                                {
+                                    _logger.LogDebug($"Client output: {newClientOutput}");
                                 }
                             }
                             else
@@ -376,33 +446,87 @@ namespace SolutionGrader.UI.Services
                         _logger.LogInfo($"[Stage {stage}] Sending input to client: '{input}'");
                         var response = await _dockerGrading.SendInputToClientAsync(environment, input, ct);
                         
-                        // Wait for input to be processed
-                        await Task.Delay(1000, ct);
-                        
-                        // Capture both client and server outputs after input
-                        clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                        serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                        
-                        _logger.LogInfo($"[Stage {stage}] After input - Client output: {clientOutputs[stage]?.Length ?? 0} chars, Server output: {serverOutputs[stage]?.Length ?? 0} chars");
-                        
-                        if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                        // Wait for input to be processed and capture new outputs using cumulative approach
                         {
-                            _logger.LogDebug($"Client output after input: {clientOutputs[stage]}");
-                        }
-                        if (!string.IsNullOrEmpty(serverOutputs[stage]))
-                        {
-                            _logger.LogDebug($"Server output after input: {serverOutputs[stage]}");
+                            string currentClientOutput = "";
+                            string currentServerOutput = "";
+                            int retries = 0;
+                            const int maxRetries = 10; // 10 retries * 300ms = 3 seconds max
+                            
+                            while (retries < maxRetries && !ct.IsCancellationRequested)
+                            {
+                                await Task.Delay(300, ct);
+                                currentClientOutput = await _dockerGrading.GetClientOutputAsync(environment, ct) ?? "";
+                                currentServerOutput = await _dockerGrading.GetServerOutputAsync(environment, ct) ?? "";
+                                
+                                // If either output grew, we've captured something
+                                if (currentClientOutput.Length > previousClientOutput.Length || 
+                                    currentServerOutput.Length > previousServerOutput.Length)
+                                {
+                                    _logger.LogDebug($"[Stage {stage}] Output after input - Client: {previousClientOutput.Length} -> {currentClientOutput.Length}, Server: {previousServerOutput.Length} -> {currentServerOutput.Length}");
+                                    break;
+                                }
+                                retries++;
+                            }
+                            
+                            // Store NEW outputs for this stage
+                            string newClientOutput = currentClientOutput.Length > previousClientOutput.Length
+                                ? currentClientOutput.Substring(previousClientOutput.Length)
+                                : "";
+                            string newServerOutput = currentServerOutput.Length > previousServerOutput.Length
+                                ? currentServerOutput.Substring(previousServerOutput.Length)
+                                : "";
+                            
+                            clientOutputs[stage] = newClientOutput;
+                            serverOutputs[stage] = newServerOutput;
+                            previousClientOutput = currentClientOutput;
+                            previousServerOutput = currentServerOutput;
+                            
+                            _logger.LogInfo($"[Stage {stage}] After input - Client: {newClientOutput.Length} chars new, Server: {newServerOutput.Length} chars new");
+                            
+                            if (!string.IsNullOrEmpty(newClientOutput))
+                            {
+                                _logger.LogDebug($"Client output after input: {newClientOutput}");
+                            }
+                            if (!string.IsNullOrEmpty(newServerOutput))
+                            {
+                                _logger.LogDebug($"Server output after input: {newServerOutput}");
+                            }
                         }
                         break;
 
                     case "CLOSECLIENT":
-                        _logger.LogInfo($"[Stage {stage}] CloseClient action - will be cleaned up at end");
-                        // Client cleanup handled at end of test case
+                        _logger.LogInfo($"[Stage {stage}] CloseClient action - stopping client process...");
+                        if (clientStarted)
+                        {
+                            await _dockerGrading.StopApplicationsInContainerAsync(
+                                environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client"), ct);
+                            clientStarted = false; // Reset so it can be started again
+                            // Reset cumulative client output since process was stopped
+                            previousClientOutput = "";
+                            _logger.LogInfo($"[Stage {stage}] Client stopped - can be restarted by a subsequent StartClient action");
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Client was not running, skipping CloseClient");
+                        }
                         break;
 
                     case "CLOSESERVER":
-                        _logger.LogInfo($"[Stage {stage}] CloseServer action - will be cleaned up at end");
-                        // Server cleanup handled at end of test case
+                        _logger.LogInfo($"[Stage {stage}] CloseServer action - stopping server process...");
+                        if (serverStarted)
+                        {
+                            await _dockerGrading.StopApplicationsInContainerAsync(
+                                environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server"), ct);
+                            serverStarted = false; // Reset so it can be started again
+                            // Reset cumulative server output since process was stopped
+                            previousServerOutput = "";
+                            _logger.LogInfo($"[Stage {stage}] Server stopped - can be restarted by a subsequent StartServer action");
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Server was not running, skipping CloseServer");
+                        }
                         break;
 
                     default:
@@ -491,13 +615,17 @@ namespace SolutionGrader.UI.Services
         /// - Client sheet: Client console comparisons
         /// - Server sheet: Server console comparisons
         /// - Database sheet: Database comparisons (placeholder)
-        /// - Network sheet: Network traffic comparisons (placeholder)
+        /// - Network sheet: Network traffic comparisons with expected flow from Detail.xlsx
+        /// 
+        /// The Network sheet is populated with expected network flow from the test kit,
+        /// which defines the TCP handshake and data patterns that should occur.
         /// </summary>
         private async Task WriteTestCaseResultAsync(
             string tcResultDir, string testCaseName, bool passed, 
             double earnedMark, double maxMark, 
             Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs,
             Dictionary<int, TestKitConfigService.ExpectedOutput> expectedOutputs,
+            List<TestKitConfigService.ExpectedNetworkFlow> expectedNetworkFlows,
             List<(int Stage, string Input, string Action)> actions,
             CancellationToken ct)
         {
@@ -705,7 +833,9 @@ namespace SolutionGrader.UI.Services
                     dbWs.Cell(1, 1).Value = "Stage";
                     dbWs.Row(1).Style.Font.Bold = true;
 
-                    // Network sheet (placeholder for future network traffic comparison)
+                    // Network sheet - populated with expected network flow from Detail.xlsx
+                    // This is the whole point of network monitoring - to show the expected TCP handshake
+                    // and data flow patterns that should occur during the test case.
                     var netWs = workbook.Worksheets.Add("Network");
                     netWs.Cell(1, 1).Value = "Stage";
                     netWs.Cell(1, 2).Value = "Time";
@@ -724,6 +854,39 @@ namespace SolutionGrader.UI.Services
                     netWs.Cell(1, 15).Value = "ActualData";
                     netWs.Cell(1, 16).Value = "NetworkResult";
                     netWs.Row(1).Style.Font.Bold = true;
+                    
+                    // Populate Network sheet with expected network flow from Detail.xlsx
+                    // The expected flows define the TCP handshake and data patterns to verify
+                    int netRow = 2;
+                    if (expectedNetworkFlows != null && expectedNetworkFlows.Count > 0)
+                    {
+                        foreach (var flow in expectedNetworkFlows)
+                        {
+                            netWs.Cell(netRow, 1).Value = flow.Stage;
+                            netWs.Cell(netRow, 2).Value = flow.Time ?? "";
+                            netWs.Cell(netRow, 3).Value = flow.Info ?? "TCP";
+                            netWs.Cell(netRow, 4).Value = flow.Source ?? "";
+                            netWs.Cell(netRow, 5).Value = flow.Destination ?? "";
+                            netWs.Cell(netRow, 6).Value = flow.Flags ?? "";
+                            netWs.Cell(netRow, 7).Value = flow.State ?? "";
+                            netWs.Cell(netRow, 8).Value = flow.Data ?? "";
+                            netWs.Cell(netRow, 9).Value = flow.SourceRole ?? "";
+                            netWs.Cell(netRow, 10).Value = flow.DestinationRole ?? "";
+                            // Actual columns left empty - would be populated by network monitor capture
+                            // ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData
+                            // NetworkResult would be set after comparison
+                            netWs.Cell(netRow, 16).Value = "NOT_CAPTURED"; // Default to not captured
+                            netRow++;
+                        }
+                        _logger.LogInfo($"Populated Network sheet with {expectedNetworkFlows.Count} expected flow entries");
+                    }
+                    else
+                    {
+                        // No expected network flow defined - add informational row
+                        netWs.Cell(2, 1).Value = "-";
+                        netWs.Cell(2, 16).Value = "No expected network flow defined in Detail.xlsx";
+                    }
+                    netWs.Columns().AdjustToContents();
 
                     workbook.SaveAs(detailPath);
                 }

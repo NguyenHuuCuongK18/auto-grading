@@ -38,6 +38,18 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private int _serverPort;
     private readonly ConcurrentDictionary<int, string> _portRoleMap = new();
     
+    // Track the known client ephemeral port - once we see the first SYN from client,
+    // we lock onto that port and filter out any other connections (Windows/Docker health checks)
+    private int _knownClientPort = 0;
+    private readonly object _clientPortLock = new();
+    
+    // Track when captures started - used to filter out pre-existing connections from Windows/Docker
+    private DateTime _captureStartTime = DateTime.UtcNow;
+    
+    // Flag to indicate if we've seen the first SYN packet (the real client-server connection)
+    // This is the most reliable indicator that our client has started connecting
+    private bool _firstSynSeen = false;
+    
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
     public bool IsCapturing => _isCapturing;
@@ -169,6 +181,78 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     {
         _portRoleMap.Clear();
         _portRoleMap[_serverPort] = NetworkKeywords.Role_Server;
+        
+        // Reset known client port - will be set when we see the first SYN from actual client
+        // or when explicitly set via SetKnownClientPort() or DetectClientPortFromConnections()
+        lock (_clientPortLock)
+        {
+            _knownClientPort = 0;
+            _firstSynSeen = false;
+        }
+        
+        // Record the time when captures were cleared - used to filter out pre-existing connections
+        _captureStartTime = DateTime.UtcNow;
+        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, waiting for first SYN to identify client-server connection");
+    }
+    
+    /// <summary>
+    /// Sets the known client port explicitly. Call this if you know the client port in advance.
+    /// This allows filtering out Windows/Docker health check traffic to the server port.
+    /// </summary>
+    public void SetKnownClientPort(int clientPort)
+    {
+        lock (_clientPortLock)
+        {
+            _knownClientPort = clientPort;
+            _firstSynSeen = true; // Consider connection identified if port is set explicitly
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port explicitly set to {clientPort}");
+        }
+    }
+    
+    /// <summary>
+    /// Detects the client's ephemeral port by querying the OS TCP connections table.
+    /// This is more reliable than detecting from SYN packets because it directly queries
+    /// the OS for established connections to the server port.
+    /// 
+    /// Call this after the client process has started and connected to the server.
+    /// Returns the client's ephemeral port, or 0 if not found.
+    /// </summary>
+    public int DetectClientPortFromConnections()
+    {
+        try
+        {
+            var ipGlobalProperties = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties();
+            var tcpConnections = ipGlobalProperties.GetActiveTcpConnections();
+            
+            // Find connections where the remote port is our server port (client connecting to server)
+            // or where the local port is our server port (connection from server's perspective)
+            foreach (var connection in tcpConnections)
+            {
+                // Client -> Server: local port is ephemeral, remote port is server port
+                if (connection.RemoteEndPoint.Port == _serverPort && 
+                    connection.LocalEndPoint.Address.ToString() == "127.0.0.1" &&
+                    connection.State == System.Net.NetworkInformation.TcpState.Established)
+                {
+                    var clientPort = connection.LocalEndPoint.Port;
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Detected client port from TCP table: {clientPort}");
+                    
+                    lock (_clientPortLock)
+                    {
+                        _knownClientPort = clientPort;
+                    }
+                    _portRoleMap.TryAdd(clientPort, NetworkKeywords.Role_Client);
+                    return clientPort;
+                }
+            }
+            
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} No established connection to server port {_serverPort} found in TCP table");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error detecting client port from TCP table: {ex.Message}");
+            return 0;
+        }
     }
     
     private void CaptureLoop(CancellationToken ct)
@@ -219,6 +303,71 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
+            // ===================================================================================
+            // HEALTH CHECK FILTERING LOGIC
+            // ===================================================================================
+            // After ClearCaptures(), we wait for the FIRST SYN packet. This first SYN establishes
+            // which ephemeral port is our real client. From that point on:
+            // - We only accept traffic between the known client port and server port
+            // - Any traffic from/to other ports = Windows/Docker health checks → filtered out
+            //
+            // This is deterministic because:
+            // 1. Containers are fresh after disposal, so no pre-existing connections
+            // 2. The client MUST send a SYN to connect to the server
+            // 3. That first SYN identifies our client's ephemeral port
+            // ===================================================================================
+            
+            int knownClientPort;
+            bool firstSynSeen;
+            lock (_clientPortLock)
+            {
+                knownClientPort = _knownClientPort;
+                firstSynSeen = _firstSynSeen;
+            }
+            
+            // Check if this is a SYN packet (start of a new TCP connection)
+            bool isSynPacket = tcpPacket.Synchronize && !tcpPacket.Acknowledgment;
+            
+            // If this is the FIRST SYN we see after ClearCaptures(), it's our real client connecting
+            if (isSynPacket && !firstSynSeen)
+            {
+                // The port that ISN'T the server port is the client's ephemeral port
+                int detectedClientPort = (dstPort == _serverPort) ? srcPort : dstPort;
+                
+                lock (_clientPortLock)
+                {
+                    if (!_firstSynSeen)
+                    {
+                        _knownClientPort = detectedClientPort;
+                        _firstSynSeen = true;
+                        knownClientPort = detectedClientPort;
+                        firstSynSeen = true;
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} First SYN detected! Client port: {detectedClientPort}, Server port: {_serverPort}");
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Traffic between {detectedClientPort} <-> {_serverPort} will be logged for grading");
+                    }
+                }
+            }
+            
+            // Once we know the client port, exclude traffic that doesn't involve our client-server pair from grading/logging
+            // We still receive all traffic, but only log traffic between our known client and server
+            if (knownClientPort > 0)
+            {
+                bool involvesKnownClient = (srcPort == knownClientPort || dstPort == knownClientPort);
+                bool involvesServer = (srcPort == _serverPort || dstPort == _serverPort);
+                
+                // Skip logging/grading for traffic that doesn't involve our client-server pair
+                // This filters out Windows/Docker health check traffic from the grading results
+                if (!involvesKnownClient || !involvesServer)
+                {
+                    // This traffic doesn't involve our client-server pair - skip logging for grading
+                    if (!tcpPacket.Reset) // Don't spam logs with RST packets
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Skipped non-graded traffic: {srcPort}->{dstPort} (grading only: {knownClientPort} <-> {_serverPort})");
+                    }
+                    return;
+                }
+            }
+            
             // Determine roles based on ports
             DetermineRoles(srcPort, dstPort, out var srcRole, out var dstRole);
             
@@ -233,12 +382,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             if (tcpPacket.Push && tcpPacket.PayloadData != null && tcpPacket.PayloadData.Length > 0)
             {
                 payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
-                
-                // Skip health check packets to reduce log noise
-                if (payload.Contains("/healthz", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
             }
             
             // Create captured packet record
