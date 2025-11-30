@@ -54,7 +54,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Starts the server application inside its container.
-        /// Returns immediately - server runs in background.
+        /// Uses WaitForPublishConsoleFileDeployment which properly sets up named pipes for stdin/stdout.
         /// </summary>
         public async Task<bool> StartServerAsync(Environment environment, CancellationToken ct = default)
         {
@@ -64,9 +64,13 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerServerPath, "");
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.StudentQuestionName, "ag-server") + "-server";
+                var port = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerInternalPort, "8000");
 
                 _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"App name (for pipe): {appName}");
                 _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
+                _logger.LogDebug($"Internal port: {port}");
 
                 if (string.IsNullOrEmpty(dllPath))
                 {
@@ -80,9 +84,9 @@ namespace SolutionGrader.UI.Services
                     return false;
                 }
 
-                // Start the dotnet application in the container
-                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName}...");
-                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
+                // Start the dotnet application in the container using proper pipe setup
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName} (app: {appName}, port: {port})...");
+                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, appName, dllPath, port, ct);
                 
                 if (result)
                 {
@@ -104,7 +108,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Starts the client application inside its container.
-        /// Returns immediately - client runs in background.
+        /// Uses WaitForPublishConsoleFileDeployment which properly sets up named pipes for stdin/stdout.
         /// </summary>
         public async Task<bool> StartClientAsync(Environment environment, CancellationToken ct = default)
         {
@@ -114,8 +118,12 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerClientPath, "");
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleAppName, "ag-client");
+                // Client doesn't listen on a port - it connects to server
+                var port = "-1";
 
                 _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"App name (for pipe): {appName}");
                 _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
 
                 if (string.IsNullOrEmpty(dllPath))
@@ -130,9 +138,9 @@ namespace SolutionGrader.UI.Services
                     return false;
                 }
 
-                // Start the dotnet application in the container
-                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName}...");
-                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
+                // Start the dotnet application in the container using proper pipe setup
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName} (app: {appName})...");
+                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, appName, dllPath, port, ct);
                 
                 if (result)
                 {
@@ -277,37 +285,52 @@ namespace SolutionGrader.UI.Services
 
     /// <summary>
     /// Extension methods for DockerCommandExecutor to provide async operations.
+    /// 
+    /// IMPORTANT: For starting console applications properly with input/output pipes,
+    /// use WaitForPublishConsoleFileDeployment() instead of StartApplicationInContainerAsync().
+    /// The former sets up named pipes for stdin/stdout redirection.
     /// </summary>
     internal static class DockerCommandExecutorExtensions
     {
+        /// <summary>
+        /// Starts a .NET application in a container with proper stdin/stdout setup via named pipes.
+        /// This method creates a named pipe for input, then starts the dotnet application
+        /// with stdin redirected from the pipe and stdout redirected to container logs.
+        /// 
+        /// The application name is used to create the named pipe at /tmp/{appName}_input_pipe.
+        /// Input can later be sent using SendInputToContainer().
+        /// </summary>
+        /// <param name="executor">Docker command executor</param>
+        /// <param name="containerName">Name of the container</param>
+        /// <param name="appName">Application name for pipe naming</param>
+        /// <param name="dllPath">Path to DLL inside container</param>
+        /// <param name="expectedPort">Port to check for readiness (-1 to skip port check)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if application started successfully</returns>
         public static async Task<bool> StartApplicationInContainerAsync(
             this DockerCommandExecutor executor, 
             string containerName, 
+            string appName,
             string dllPath, 
+            string expectedPort = "-1",
             CancellationToken ct = default)
         {
-            // Run dotnet command in container to start the application
-            var command = $"docker exec -d {containerName} dotnet {dllPath}";
-            
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "docker",
-                    Arguments = $"exec -d {containerName} dotnet {dllPath}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var process = System.Diagnostics.Process.Start(psi);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync(ct);
-                    return process.ExitCode == 0;
-                }
-                return false;
+                // Use the proper method that sets up pipes for stdin/stdout
+                // This calls WaitForPublishConsoleFileDeployment internally which:
+                // 1. Creates named pipe /tmp/{appName}_input_pipe
+                // 2. Starts sleep process to keep pipe open
+                // 3. Starts dotnet with stdin from pipe and stdout to container logs
+                // 4. Waits for process to be running and port to be listening
+                bool success = executor.WaitForPublishConsoleFileDeployment(
+                    containerName,
+                    appName,
+                    dllPath,
+                    expectedPort,
+                    maxWaitTimeMs: 30000);
+                
+                return success;
             }
             catch
             {
@@ -315,6 +338,9 @@ namespace SolutionGrader.UI.Services
             }
         }
 
+        /// <summary>
+        /// Gets the logs from a container.
+        /// </summary>
         public static async Task<string> GetContainerLogsAsync(
             this DockerCommandExecutor executor, 
             string containerName, 

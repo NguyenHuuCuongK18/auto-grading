@@ -319,6 +319,7 @@ namespace SolutionGrader.UI.Services
             SetOrAddConfig(configs, EnvConfig.CodeContainerName, $"ag-server-{student.StudentCode}");
             SetOrAddConfig(configs, EnvConfig.GivenConsoleContainerName, $"ag-client-{student.StudentCode}");
             SetOrAddConfig(configs, EnvConfig.StudentQuestionName, $"ag-{student.StudentCode}");
+            SetOrAddConfig(configs, EnvConfig.GivenConsoleAppName, $"ag-{student.StudentCode}-client");
             SetOrAddConfig(configs, EnvConfig.DatabaseName, $"DB_{student.StudentCode}");
 
             // Set port configurations
