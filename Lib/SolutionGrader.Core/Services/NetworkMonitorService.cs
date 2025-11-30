@@ -219,12 +219,12 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // Filter out Windows/Docker health check and keepalive packets
-            // These can occur when Windows or Docker engine pings to check port status
-            if (IsHealthCheckOrKeepalive(tcpPacket))
-            {
-                return;
-            }
+            // NOTE: We capture ALL TCP packets without filtering.
+            // Previous attempts to filter "health check" packets were problematic because:
+            // 1. ACK-only packets are a normal part of TCP flow (handshake, acknowledgments)
+            // 2. TCP doesn't have HTTP-style health check endpoints
+            // 3. Docker/Windows pings to the exposed port are indistinguishable from normal traffic
+            // The grading comparison logic will handle matching against expected network flow.
             
             // Determine roles based on ports
             DetermineRoles(srcPort, dstPort, out var srcRole, out var dstRole);
@@ -240,12 +240,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             if (tcpPacket.Push && tcpPacket.PayloadData != null && tcpPacket.PayloadData.Length > 0)
             {
                 payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
-                
-                // Skip health check packets in payload content
-                if (IsHealthCheckPayload(payload))
-                {
-                    return;
-                }
             }
             
             // Create captured packet record
@@ -545,87 +539,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             return code;
         }
         return 0;
-    }
-    
-    /// <summary>
-    /// Checks if a TCP packet is a keepalive probe that should be filtered out.
-    /// 
-    /// TCP keepalive probes are used by Windows/Docker to check if a connection is still alive.
-    /// They typically have:
-    /// - ACK flag only (no SYN, PSH, FIN, RST)
-    /// - 1 byte of payload (garbage data)
-    /// 
-    /// Note: We do NOT filter out:
-    /// - ACK packets with no payload (these are part of normal TCP flow)
-    /// - Any packets with SYN, PSH, FIN flags (these are connection events)
-    /// - RST packets (these indicate errors that should be captured)
-    /// 
-    /// The problem with filtering too aggressively is that TCP connections
-    /// don't have HTTP-style health check endpoints, so we can only filter
-    /// based on TCP-level characteristics.
-    /// </summary>
-    private static bool IsHealthCheckOrKeepalive(TcpPacket tcpPacket)
-    {
-        // Only filter TCP keepalive probes - these are ACK-only with exactly 1 byte payload
-        // This is a very specific pattern used by TCP keepalive mechanism
-        bool isAckOnly = tcpPacket.Acknowledgment && 
-                         !tcpPacket.Synchronize && 
-                         !tcpPacket.Push && 
-                         !tcpPacket.Finished && 
-                         !tcpPacket.Reset;
-        
-        if (isAckOnly)
-        {
-            var payloadLength = tcpPacket.PayloadData?.Length ?? 0;
-            
-            // TCP keepalive probes have exactly 1 byte of garbage data
-            // This is a standard TCP keepalive probe pattern
-            if (payloadLength == 1)
-            {
-                return true; // Filter out keepalive probes
-            }
-        }
-        
-        // Don't filter anything else - we want to capture all normal TCP traffic
-        // including handshakes (SYN, SYN-ACK, ACK), data (PSH), and closures (FIN, RST)
-        return false;
-    }
-    
-    /// <summary>
-    /// For HTTP protocol only: Checks if a payload contains HTTP health check patterns.
-    /// This should ONLY be called when ProtocolType is HTTP.
-    /// 
-    /// For TCP protocol, this method always returns false because TCP doesn't have
-    /// HTTP-style health check endpoints.
-    /// </summary>
-    private bool IsHealthCheckPayload(string? payload)
-    {
-        if (string.IsNullOrEmpty(payload))
-            return false;
-        
-        // Only apply HTTP health check filtering for HTTP protocol
-        if (!ProtocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
-        {
-            return false; // Don't filter TCP payloads based on content
-        }
-        
-        // HTTP health check URL patterns (only for HTTP protocol)
-        var healthCheckPatterns = new[]
-        {
-            "/healthz",           // Kubernetes-style health check
-            "/health",            // Generic health endpoint
-            "/_ping",             // Docker internal ping
-        };
-        
-        foreach (var pattern in healthCheckPatterns)
-        {
-            if (payload.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        
-        return false;
     }
     
     /// <summary>
