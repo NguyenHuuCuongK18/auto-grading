@@ -19,6 +19,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Sets the current student context for logging.
         /// Logs will be redirected to the student-specific log folder.
+        /// Format: Log_{StudentCode}_{Date}
         /// </summary>
         void SetStudentContext(string? studentCode);
         
@@ -57,7 +58,14 @@ namespace SolutionGrader.UI.Services
 
     /// <summary>
     /// Logging service implementation that writes to both console and file.
+    /// 
     /// Supports per-student logging with the format: Log_{StudentCode}_{Date}
+    /// This matches the SampleLogging folder structure where debug content
+    /// is redirected to student-specific log folders.
+    /// 
+    /// Log structure:
+    /// - {SaveFolder}/Logs/System_{DateTime}.log - System-wide logs
+    /// - {SaveFolder}/Logs/Log_{StudentCode}_{yyyyMMdd}/grading_{HHmmss}.log - Per-student logs
     /// </summary>
     public class LoggingService : ILoggingService, IDisposable
     {
@@ -74,7 +82,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Creates a new logging service.
         /// </summary>
-        /// <param name="baseLogPath">Base path for log files (e.g., application folder)</param>
+        /// <param name="baseLogPath">Base path for log files (e.g., save results folder)</param>
         public LoggingService(string baseLogPath)
         {
             _baseLogPath = baseLogPath;
@@ -109,7 +117,7 @@ namespace SolutionGrader.UI.Services
                 if (!string.IsNullOrEmpty(studentCode))
                 {
                     // Create student-specific log folder and file
-                    // Format: Log_{StudentCode}_{Date}
+                    // Format: Log_{StudentCode}_{Date} - matching the requirements
                     var studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
                     if (!Directory.Exists(studentLogDir))
                     {
@@ -207,11 +215,12 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Creates a student-specific result folder and returns its path.
-        /// Format: {baseLogPath}/Results/{StudentCode}/{Date}
+        /// Format: {baseLogPath}/student/{StudentCode}
+        /// This matches the SampleLogging folder structure.
         /// </summary>
         public string GetStudentResultFolder(string studentCode)
         {
-            var resultDir = Path.Combine(_baseLogPath, "Results", studentCode, DateTime.Now.ToString("yyyyMMdd"));
+            var resultDir = Path.Combine(_baseLogPath, "student", studentCode);
             if (!Directory.Exists(resultDir))
             {
                 Directory.CreateDirectory(resultDir);

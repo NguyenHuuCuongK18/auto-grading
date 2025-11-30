@@ -37,6 +37,7 @@ namespace SolutionGrader.UI.Models
         private string? _serverDllPath;
         private GradingStatus _status = GradingStatus.Not_Run;
         private double _mark;
+        private double _maxMark;
         private DateTime? _startTime;
         private DateTime? _endTime;
         private string? _statusMessage;
@@ -111,6 +112,15 @@ namespace SolutionGrader.UI.Models
         {
             get => _mark;
             set { _mark = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Maximum possible mark for this solution (read from Header.xlsx)
+        /// </summary>
+        public double MaxMark
+        {
+            get => _maxMark;
+            set { _maxMark = value; OnPropertyChanged(); }
         }
 
         /// <summary>
