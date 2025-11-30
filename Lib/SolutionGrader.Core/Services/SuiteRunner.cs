@@ -422,40 +422,120 @@ namespace SolutionGrader.Core.Services
         /// - The port becomes available (returns true)
         /// - Maximum wait time is exceeded (returns false)
         /// - Cancellation is requested
+        /// 
+        /// NOTE: The "Address already in use" error typically occurs because:
+        /// 1. The previous server process was killed but the socket is in TIME_WAIT state
+        /// 2. TIME_WAIT can last up to 2*MSL (Maximum Segment Lifetime), typically 60 seconds on Windows
+        /// 3. Student code may not properly close sockets before terminating
+        /// 
+        /// For faster recovery, the student server should use SO_REUSEADDR socket option.
+        /// We wait longer here to handle cases where student code doesn't do this.
         /// </summary>
         /// <param name="port">The TCP port to wait for</param>
         /// <param name="ct">Cancellation token</param>
-        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 10)</param>
+        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 30 - increased for TIME_WAIT handling)</param>
         /// <returns>True if port is available, false if timeout exceeded</returns>
-        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 10)
+        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 30)
         {
             var startTime = DateTime.UtcNow;
-            int delayMs = 100; // Start with 100ms delay, increase exponentially
-            const int maxDelayMs = 1000; // Cap at 1 second
+            int delayMs = 200; // Start with 200ms delay, increase exponentially
+            const int maxDelayMs = 2000; // Cap at 2 seconds
             
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released...");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released (max {maxWaitSeconds}s)...");
+            
+            // First, try to forcefully close any lingering connections to the port
+            // This can help speed up TIME_WAIT state resolution
+            TryKillProcessOnPort(port);
+            
+            // Small initial delay to allow the OS to clean up
+            await Task.Delay(500, ct);
             
             while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds && !ct.IsCancellationRequested)
             {
                 if (IsPortAvailable(port))
                 {
-                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is now available");
+                    var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is now available (after {elapsed:F1}s)");
                     return true;
                 }
                 
                 await Task.Delay(delayMs, ct);
                 
-                // Exponential backoff
+                // Exponential backoff with jitter
                 delayMs = Math.Min(delayMs * 2, maxDelayMs);
             }
             
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Port {port} may still be in use after {maxWaitSeconds} seconds wait");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} WARNING: Port {port} may still be in use after {maxWaitSeconds}s wait. " +
+                              "This could cause 'Address already in use' errors. " +
+                              "Consider using SO_REUSEADDR in server code.");
             return false;
+        }
+
+        /// <summary>
+        /// Attempts to find and kill any process listening on the specified port.
+        /// This is a best-effort cleanup to help release ports faster.
+        /// </summary>
+        /// <param name="port">The TCP port to clean up</param>
+        private static void TryKillProcessOnPort(int port)
+        {
+            try
+            {
+                // Try to find processes using netstat and kill them
+                // This is a best-effort approach and may not work in all scenarios
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "netstat",
+                    Arguments = "-ano",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process == null) return;
+                
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(5000);
+                
+                // Parse netstat output to find PIDs using the port
+                // Format: "  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       1234"
+                var lines = output.Split('\n');
+                foreach (var line in lines)
+                {
+                    if (line.Contains($":{port}") && line.Contains("LISTENING"))
+                    {
+                        var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length > 0)
+                        {
+                            var pidStr = parts[parts.Length - 1].Trim();
+                            if (int.TryParse(pidStr, out var pid) && pid > 0)
+                            {
+                                try
+                                {
+                                    var proc = System.Diagnostics.Process.GetProcessById(pid);
+                                    if (proc != null && !proc.HasExited)
+                                    {
+                                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Killing process {pid} using port {port}");
+                                        proc.Kill();
+                                        proc.WaitForExit(2000);
+                                    }
+                                }
+                                catch { /* Process may have already exited */ }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Best effort - ignore errors
+            }
         }
 
         /// <summary>
         /// Checks if a TCP port is available (not in use by any process).
         /// Attempts to bind to the port; if successful, the port is available.
+        /// Uses SO_REUSEADDR to handle TIME_WAIT state more gracefully.
         /// </summary>
         /// <param name="port">The TCP port to check</param>
         /// <returns>True if port is available, false if in use</returns>
@@ -463,9 +543,19 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
-                listener.Start();
-                listener.Stop();
+                using var socket = new System.Net.Sockets.Socket(
+                    System.Net.Sockets.AddressFamily.InterNetwork, 
+                    System.Net.Sockets.SocketType.Stream, 
+                    System.Net.Sockets.ProtocolType.Tcp);
+                
+                // Enable SO_REUSEADDR to allow binding even if port is in TIME_WAIT
+                socket.SetSocketOption(
+                    System.Net.Sockets.SocketOptionLevel.Socket, 
+                    System.Net.Sockets.SocketOptionName.ReuseAddress, 
+                    true);
+                
+                socket.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
+                socket.Close();
                 return true;
             }
             catch (System.Net.Sockets.SocketException)

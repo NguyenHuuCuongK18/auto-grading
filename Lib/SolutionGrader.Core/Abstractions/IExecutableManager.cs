@@ -19,4 +19,24 @@ public interface IExecutableManager
     System.Threading.Tasks.Task<bool> WaitForServerOutputAsync(int timeoutSeconds = 5, System.Threading.CancellationToken ct = default);
     string GetClientOutput();
     string GetServerOutput();
+    
+    /// <summary>
+    /// Gets only the NEW output since the last call to this method (or since process started).
+    /// This is useful for stage-by-stage output tracking where we only want output generated
+    /// after a specific action, not cumulative output from the entire session.
+    /// </summary>
+    /// <returns>New client output since last check, or empty string if no new output</returns>
+    string GetClientOutputSinceLastCheck();
+    
+    /// <summary>
+    /// Gets only the NEW server output since the last call to this method (or since process started).
+    /// </summary>
+    /// <returns>New server output since last check, or empty string if no new output</returns>
+    string GetServerOutputSinceLastCheck();
+    
+    /// <summary>
+    /// Resets the "last check" tracking point to the current output length.
+    /// Call this when transitioning to a new stage to ensure only output from the new stage is captured.
+    /// </summary>
+    void ResetOutputCheckpoints();
 }
