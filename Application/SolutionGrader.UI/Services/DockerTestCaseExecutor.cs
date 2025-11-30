@@ -744,7 +744,9 @@ namespace SolutionGrader.UI.Services
                     dbWs.Cell(1, 1).Value = "Stage";
                     dbWs.Row(1).Style.Font.Bold = true;
 
-                    // Network sheet (placeholder for future network traffic comparison)
+                    // Network sheet - populated with expected network flow from Detail.xlsx
+                    // This is the whole point of network monitoring - to show the expected TCP handshake
+                    // and data flow patterns that should occur during the test case.
                     var netWs = workbook.Worksheets.Add("Network");
                     netWs.Cell(1, 1).Value = "Stage";
                     netWs.Cell(1, 2).Value = "Time";
@@ -763,6 +765,39 @@ namespace SolutionGrader.UI.Services
                     netWs.Cell(1, 15).Value = "ActualData";
                     netWs.Cell(1, 16).Value = "NetworkResult";
                     netWs.Row(1).Style.Font.Bold = true;
+                    
+                    // Populate Network sheet with expected network flow from Detail.xlsx
+                    // The expected flows define the TCP handshake and data patterns to verify
+                    int netRow = 2;
+                    if (expectedNetworkFlows != null && expectedNetworkFlows.Count > 0)
+                    {
+                        foreach (var flow in expectedNetworkFlows)
+                        {
+                            netWs.Cell(netRow, 1).Value = flow.Stage;
+                            netWs.Cell(netRow, 2).Value = flow.Time ?? "";
+                            netWs.Cell(netRow, 3).Value = flow.Info ?? "TCP";
+                            netWs.Cell(netRow, 4).Value = flow.Source ?? "";
+                            netWs.Cell(netRow, 5).Value = flow.Destination ?? "";
+                            netWs.Cell(netRow, 6).Value = flow.Flags ?? "";
+                            netWs.Cell(netRow, 7).Value = flow.State ?? "";
+                            netWs.Cell(netRow, 8).Value = flow.Data ?? "";
+                            netWs.Cell(netRow, 9).Value = flow.SourceRole ?? "";
+                            netWs.Cell(netRow, 10).Value = flow.DestinationRole ?? "";
+                            // Actual columns left empty - would be populated by network monitor capture
+                            // ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData
+                            // NetworkResult would be set after comparison
+                            netWs.Cell(netRow, 16).Value = "NOT_CAPTURED"; // Default to not captured
+                            netRow++;
+                        }
+                        _logger.LogInfo($"Populated Network sheet with {expectedNetworkFlows.Count} expected flow entries");
+                    }
+                    else
+                    {
+                        // No expected network flow defined - add informational row
+                        netWs.Cell(2, 1).Value = "-";
+                        netWs.Cell(2, 16).Value = "No expected network flow defined in Detail.xlsx";
+                    }
+                    netWs.Columns().AdjustToContents();
 
                     workbook.SaveAs(detailPath);
                 }
