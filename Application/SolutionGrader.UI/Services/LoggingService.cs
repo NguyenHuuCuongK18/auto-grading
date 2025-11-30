@@ -38,6 +38,14 @@ namespace SolutionGrader.UI.Services
         string GetAllLogs();
         
         /// <summary>
+        /// Gets the result folder path for a student.
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing (optional)</param>
+        /// <returns>Path to the student's result folder</returns>
+        string GetStudentResultFolder(string studentCode, string? paperNo = null);
+        
+        /// <summary>
         /// Event raised when a new log entry is added.
         /// </summary>
         event EventHandler<LogEventArgs>? LogAdded;
