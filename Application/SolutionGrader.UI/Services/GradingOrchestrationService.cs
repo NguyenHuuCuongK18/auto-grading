@@ -661,6 +661,7 @@ namespace SolutionGrader.UI.Services
                 double totalEarnedMark = 0;
                 int passedTestCases = 0;
                 var testCaseResults = new List<string>();
+                var allTestCaseResults = new List<(string testCaseName, TestCaseExecutionResult result)>();
 
                 // Process each test case
                 foreach (var testCaseName in testCaseNames)
@@ -689,26 +690,42 @@ namespace SolutionGrader.UI.Services
                         _logger.LogInfo($"  Stage {stage}: Action='{action}', Input='{input}'");
                     }
 
+                    // Read expected outputs from Detail.xlsx Client and Server sheets
+                    var expectedOutputs = _testKitConfigService.GetExpectedOutputs(testCasePath);
+                    _logger.LogInfo($"Loaded expected outputs for {expectedOutputs.Count} stages");
+
                     // Get max mark for this test case from Header.xlsx
                     var testCaseMaxMark = testKitConfig.TestCaseMarks.TryGetValue(testCaseName, out var mark) ? mark : 0;
                     _logger.LogInfo($"Test case {testCaseName}: Max mark = {testCaseMaxMark}");
 
-                    // Execute test case actions by reading from Detail.xlsx
-                    bool testCasePassed = await ExecuteTestCaseAsync(student, testCasePath, actions, environment, config, ct);
+                    // Execute test case actions and perform comparison
+                    var testCaseResult = await ExecuteAndCompareTestCaseAsync(
+                        student, testCaseName, testCasePath, actions, expectedOutputs, 
+                        testCaseMaxMark, environment, config, ct);
 
-                    if (testCasePassed)
+                    if (testCaseResult.passed)
                     {
-                        totalEarnedMark += testCaseMaxMark;
+                        totalEarnedMark += testCaseResult.earnedPoints;
                         passedTestCases++;
-                        _logger.LogInfo($">>> Test case {testCaseName}: PASSED (+{testCaseMaxMark} points)");
-                        testCaseResults.Add($"{testCaseName}: PASSED (+{testCaseMaxMark})");
+                        _logger.LogInfo($">>> Test case {testCaseName}: PASSED (+{testCaseResult.earnedPoints:F2} points)");
+                        testCaseResults.Add($"{testCaseName}: PASSED (+{testCaseResult.earnedPoints:F2})");
                     }
                     else
                     {
-                        _logger.LogInfo($">>> Test case {testCaseName}: FAILED (0 points)");
-                        testCaseResults.Add($"{testCaseName}: FAILED (0)");
+                        totalEarnedMark += testCaseResult.earnedPoints; // May have partial points
+                        _logger.LogInfo($">>> Test case {testCaseName}: FAILED ({testCaseResult.earnedPoints:F2} points)");
+                        testCaseResults.Add($"{testCaseName}: FAILED ({testCaseResult.earnedPoints:F2})");
                     }
+
+                    // Write test case result files
+                    await WriteTestCaseResultFilesAsync(student, testCaseName, testCaseResult, ct);
+                    
+                    // Store for overall summary
+                    allTestCaseResults.Add((testCaseName, testCaseResult));
                 }
+
+                // Write OverallSummary.xlsx in SampleLogging format
+                await WriteOverallSummaryAsync(student, allTestCaseResults, ct);
 
                 // Calculate final result
                 bool overallSuccess = passedTestCases > 0;
@@ -1144,6 +1161,477 @@ namespace SolutionGrader.UI.Services
                     _logger.LogWarning($"Could not retrieve client logs: {ex.Message}");
                 }
             }
+        }
+
+        #region Test Case Result Structures
+        /// <summary>
+        /// Represents the result of executing and comparing a test case.
+        /// </summary>
+        public class TestCaseExecutionResult
+        {
+            public bool passed { get; set; }
+            public double earnedPoints { get; set; }
+            public double maxPoints { get; set; }
+            public string? errorMessage { get; set; }
+            public List<StepComparisonResult> stepResults { get; set; } = new List<StepComparisonResult>();
+        }
+
+        /// <summary>
+        /// Represents the result of a single step comparison.
+        /// </summary>
+        public class StepComparisonResult
+        {
+            public string stepId { get; set; } = "";
+            public int stage { get; set; }
+            public string action { get; set; } = "";
+            public bool passed { get; set; }
+            public string result { get; set; } = "PASS";
+            public string? errorCode { get; set; }
+            public double pointsAwarded { get; set; }
+            public double pointsPossible { get; set; }
+            public double durationMs { get; set; }
+            public string? message { get; set; }
+            public string? expectedOutput { get; set; }
+            public string? actualOutput { get; set; }
+        }
+        #endregion
+
+        /// <summary>
+        /// Executes a test case and compares the outputs with expected values.
+        /// This is the main grading method that:
+        /// 1. Executes actions (StartClient, StartServer, Input)
+        /// 2. Captures actual console outputs
+        /// 3. Compares against expected outputs from Detail.xlsx
+        /// 4. Calculates points based on comparison
+        /// </summary>
+        private async Task<TestCaseExecutionResult> ExecuteAndCompareTestCaseAsync(
+            StudentSolution student,
+            string testCaseName,
+            string testCasePath,
+            List<(int Stage, string Input, string Action)> actions,
+            Dictionary<int, TestKitConfigService.ExpectedOutput> expectedOutputs,
+            double maxPoints,
+            Environment environment,
+            GradingConfiguration config,
+            CancellationToken ct)
+        {
+            var result = new TestCaseExecutionResult
+            {
+                maxPoints = maxPoints
+            };
+
+            _logger.LogInfo($"=== Executing and Comparing Test Case: {testCaseName} ===");
+            _logger.LogInfo($"Max points available: {maxPoints}");
+
+            // Get container names from environment configuration
+            var serverContainerName = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName);
+            var clientContainerName = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName);
+
+            // Calculate points per comparison (divide among all expected outputs)
+            int totalComparisons = expectedOutputs.Sum(eo => 
+                (string.IsNullOrEmpty(eo.Value.ClientConsole) ? 0 : 1) + 
+                (string.IsNullOrEmpty(eo.Value.ServerConsole) ? 0 : 1));
+            double pointsPerComparison = totalComparisons > 0 ? maxPoints / totalComparisons : 0;
+
+            _logger.LogInfo($"Total comparisons to perform: {totalComparisons}");
+            _logger.LogInfo($"Points per comparison: {pointsPerComparison:F2}");
+
+            var startTime = DateTime.Now;
+            var actualClientOutputs = new Dictionary<int, string>();
+            var actualServerOutputs = new Dictionary<int, string>();
+
+            try
+            {
+                // Check if Docker is available
+                if (!_dockerExecutor.IsDockerRunning())
+                {
+                    _logger.LogError("FATAL: Docker is not running. Cannot execute test case.");
+                    result.passed = false;
+                    result.errorMessage = "Docker is not running";
+                    result.stepResults.Add(new StepComparisonResult
+                    {
+                        stepId = "DOCKER-CHECK",
+                        stage = 0,
+                        action = "DOCKER_CHECK",
+                        passed = false,
+                        result = "FAIL",
+                        message = "Docker is not running. Please start Docker Desktop."
+                    });
+                    return result;
+                }
+
+                // Execute each action and capture outputs
+                foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var stepStart = DateTime.Now;
+
+                    _logger.LogInfo($"[Stage {stage}] Executing action: '{action}'" + 
+                        (string.IsNullOrEmpty(input) ? "" : $" with input: '{input}'"));
+
+                    var stepResult = new StepComparisonResult
+                    {
+                        stepId = $"USER-{action.ToUpper()}-{stage}",
+                        stage = stage,
+                        action = action.ToUpper()
+                    };
+
+                    bool actionSuccess = true;
+
+                    switch (action.ToUpperInvariant())
+                    {
+                        case "STARTSERVER":
+                            actionSuccess = await ExecuteStartServerAsync(
+                                serverContainerName,
+                                TryGetConfig(environment.Configs, EnvironmentConfiguration.StudentQuestionName) + "-server",
+                                TryGetConfig(environment.Configs, EnvironmentConfiguration.DockerServerPath) ?? 
+                                    (student.ServerDllPath != null ? $"/apps/{Path.GetFileName(Path.GetDirectoryName(student.ServerDllPath))}/{Path.GetFileName(student.ServerDllPath)}" : null),
+                                config.CodeContainerInternalPort.ToString(),
+                                ct);
+                            
+                            // Wait for server to start and capture output
+                            await Task.Delay(1000, ct);
+                            if (!string.IsNullOrEmpty(serverContainerName))
+                            {
+                                actualServerOutputs[stage] = _dockerExecutor.GetContainerLogs(serverContainerName) ?? "";
+                            }
+                            break;
+
+                        case "STARTCLIENT":
+                            actionSuccess = await ExecuteStartClientAsync(
+                                clientContainerName,
+                                TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleAppName) ?? $"ag-{student.StudentCode}-client",
+                                TryGetConfig(environment.Configs, EnvironmentConfiguration.DockerClientPath) ?? 
+                                    (student.ClientDllPath != null ? $"/apps/{Path.GetFileName(Path.GetDirectoryName(student.ClientDllPath))}/{Path.GetFileName(student.ClientDllPath)}" : null),
+                                ct);
+                            
+                            // Wait for client to start and capture output
+                            await Task.Delay(1000, ct);
+                            if (!string.IsNullOrEmpty(clientContainerName))
+                            {
+                                actualClientOutputs[stage] = _dockerExecutor.GetContainerLogs(clientContainerName) ?? "";
+                            }
+                            break;
+
+                        case "INPUT":
+                            actionSuccess = await ExecuteInputAsync(
+                                clientContainerName,
+                                TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleAppName) ?? $"ag-{student.StudentCode}-client",
+                                input,
+                                ct);
+                            
+                            // Wait for input to be processed and capture output
+                            await Task.Delay(500, ct);
+                            if (!string.IsNullOrEmpty(clientContainerName))
+                            {
+                                actualClientOutputs[stage] = _dockerExecutor.GetContainerLogs(clientContainerName) ?? "";
+                            }
+                            if (!string.IsNullOrEmpty(serverContainerName))
+                            {
+                                actualServerOutputs[stage] = _dockerExecutor.GetContainerLogs(serverContainerName) ?? "";
+                            }
+                            break;
+
+                        case "CLOSECLIENT":
+                            actionSuccess = await ExecuteCloseClientAsync(clientContainerName, ct);
+                            break;
+
+                        case "CLOSESERVER":
+                            actionSuccess = await ExecuteCloseServerAsync(serverContainerName, ct);
+                            break;
+                    }
+
+                    stepResult.durationMs = (DateTime.Now - stepStart).TotalMilliseconds;
+                    stepResult.passed = actionSuccess;
+                    stepResult.result = actionSuccess ? "PASS" : "FAIL";
+                    stepResult.message = actionSuccess ? $"Action {action} completed" : $"Action {action} failed";
+
+                    result.stepResults.Add(stepResult);
+
+                    // Allow time for Docker operations to complete
+                    await Task.Delay(200, ct);
+                }
+
+                // Now perform comparisons for each expected output
+                _logger.LogInfo("=== Performing Output Comparisons ===");
+
+                foreach (var (stage, expected) in expectedOutputs.OrderBy(e => e.Key))
+                {
+                    // Compare Client output
+                    if (!string.IsNullOrEmpty(expected.ClientConsole))
+                    {
+                        var clientStep = new StepComparisonResult
+                        {
+                            stepId = $"CLIENT-CONSOLE-{stage}",
+                            stage = stage,
+                            action = "COMPARE_TEXT",
+                            expectedOutput = expected.ClientConsole,
+                            actualOutput = actualClientOutputs.TryGetValue(stage, out var clientOut) ? clientOut : null,
+                            pointsPossible = pointsPerComparison
+                        };
+
+                        bool clientMatch = CompareOutput(expected.ClientConsole, clientStep.actualOutput ?? "");
+                        clientStep.passed = clientMatch;
+                        clientStep.result = clientMatch ? "PASS" : "FAIL";
+                        clientStep.pointsAwarded = clientMatch ? pointsPerComparison : 0;
+                        clientStep.message = clientMatch ? 
+                            "Text comparison passed: client output matches" : 
+                            "Text comparison failed: client output does not match expected";
+
+                        result.stepResults.Add(clientStep);
+                        result.earnedPoints += clientStep.pointsAwarded;
+
+                        _logger.LogInfo($"[Stage {stage}] Client comparison: {clientStep.result} ({clientStep.pointsAwarded:F2} points)");
+                        if (!clientMatch)
+                        {
+                            _logger.LogDebug($"  Expected: '{expected.ClientConsole}'");
+                            _logger.LogDebug($"  Actual: '{clientStep.actualOutput}'");
+                        }
+                    }
+
+                    // Compare Server output
+                    if (!string.IsNullOrEmpty(expected.ServerConsole))
+                    {
+                        var serverStep = new StepComparisonResult
+                        {
+                            stepId = $"SERVER-CONSOLE-{stage}",
+                            stage = stage,
+                            action = "COMPARE_TEXT",
+                            expectedOutput = expected.ServerConsole,
+                            actualOutput = actualServerOutputs.TryGetValue(stage, out var serverOut) ? serverOut : null,
+                            pointsPossible = pointsPerComparison
+                        };
+
+                        bool serverMatch = CompareOutput(expected.ServerConsole, serverStep.actualOutput ?? "");
+                        serverStep.passed = serverMatch;
+                        serverStep.result = serverMatch ? "PASS" : "FAIL";
+                        serverStep.pointsAwarded = serverMatch ? pointsPerComparison : 0;
+                        serverStep.message = serverMatch ? 
+                            "Text comparison passed: server output matches" : 
+                            "Text comparison failed: server output does not match expected";
+
+                        result.stepResults.Add(serverStep);
+                        result.earnedPoints += serverStep.pointsAwarded;
+
+                        _logger.LogInfo($"[Stage {stage}] Server comparison: {serverStep.result} ({serverStep.pointsAwarded:F2} points)");
+                        if (!serverMatch)
+                        {
+                            _logger.LogDebug($"  Expected: '{expected.ServerConsole}'");
+                            _logger.LogDebug($"  Actual: '{serverStep.actualOutput}'");
+                        }
+                    }
+                }
+
+                // Determine if test case passed (earned more than 50% of max points, or all comparisons passed)
+                result.passed = result.earnedPoints >= (maxPoints * 0.5) || 
+                    result.stepResults.Where(s => s.action == "COMPARE_TEXT").All(s => s.passed);
+
+                _logger.LogInfo($"=== Test Case {testCaseName} Result ===");
+                _logger.LogInfo($"  Passed: {result.passed}");
+                _logger.LogInfo($"  Points: {result.earnedPoints:F2} / {result.maxPoints:F2}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Test case execution failed: {ex.Message}");
+                result.passed = false;
+                result.errorMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Compares expected output with actual output.
+        /// Uses flexible matching that ignores whitespace differences.
+        /// </summary>
+        private bool CompareOutput(string expected, string actual)
+        {
+            if (string.IsNullOrEmpty(expected)) return true;
+            if (string.IsNullOrEmpty(actual)) return false;
+
+            // Normalize whitespace for comparison
+            string normalizedExpected = NormalizeText(expected);
+            string normalizedActual = NormalizeText(actual);
+
+            // Check if actual contains expected (more lenient)
+            return normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Normalizes text by trimming and reducing multiple whitespaces.
+        /// </summary>
+        private string NormalizeText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
+        }
+
+        /// <summary>
+        /// Writes test case result files in SampleLogging format.
+        /// Creates {testCaseName}_Result.xlsx and updates GradeDetail.xlsx
+        /// </summary>
+        private async Task WriteTestCaseResultFilesAsync(
+            StudentSolution student,
+            string testCaseName,
+            TestCaseExecutionResult testCaseResult,
+            CancellationToken ct)
+        {
+            try
+            {
+                var resultFolder = (_logger as LoggingService)?.GetStudentResultFolder(student.StudentCode, student.PaperNo) 
+                    ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Results", student.StudentCode);
+
+                var testCaseFolder = Path.Combine(resultFolder, testCaseName);
+                if (!Directory.Exists(testCaseFolder))
+                {
+                    Directory.CreateDirectory(testCaseFolder);
+                }
+
+                // Write TC_Result.xlsx (matches SampleLogging format)
+                var resultPath = Path.Combine(testCaseFolder, $"{testCaseName}_Result.xlsx");
+                using (var workbook = new ClosedXML.Excel.XLWorkbook())
+                {
+                    var worksheet = workbook.Worksheets.Add("Result");
+                    
+                    // Header row
+                    worksheet.Cell(1, 1).Value = "StepId";
+                    worksheet.Cell(1, 2).Value = "Stage";
+                    worksheet.Cell(1, 3).Value = "Action";
+                    worksheet.Cell(1, 4).Value = "Passed";
+                    worksheet.Cell(1, 5).Value = "Message";
+                    worksheet.Cell(1, 6).Value = "DurationMs";
+                    
+                    var headerRow = worksheet.Row(1);
+                    headerRow.Style.Font.Bold = true;
+
+                    int row = 2;
+                    foreach (var step in testCaseResult.stepResults)
+                    {
+                        worksheet.Cell(row, 1).Value = step.stepId;
+                        worksheet.Cell(row, 2).Value = step.stage;
+                        worksheet.Cell(row, 3).Value = step.action;
+                        worksheet.Cell(row, 4).Value = step.passed;
+                        worksheet.Cell(row, 5).Value = step.message ?? "";
+                        worksheet.Cell(row, 6).Value = step.durationMs;
+                        row++;
+                    }
+
+                    worksheet.Columns().AdjustToContents();
+                    workbook.SaveAs(resultPath);
+                }
+
+                // Write GradeDetail.xlsx (matches SampleLogging format)
+                var detailPath = Path.Combine(testCaseFolder, "GradeDetail.xlsx");
+                using (var workbook = new ClosedXML.Excel.XLWorkbook())
+                {
+                    var worksheet = workbook.Worksheets.Add("User");
+                    
+                    // Header row matching SampleLogging format
+                    worksheet.Cell(1, 1).Value = "Stage";
+                    worksheet.Cell(1, 2).Value = "Input";
+                    worksheet.Cell(1, 3).Value = "Action";
+                    worksheet.Cell(1, 4).Value = "DataType";
+                    worksheet.Cell(1, 5).Value = "Result";
+                    worksheet.Cell(1, 6).Value = "ErrorCode";
+                    worksheet.Cell(1, 7).Value = "ErrorCategory";
+                    worksheet.Cell(1, 8).Value = "PointsAwarded";
+                    worksheet.Cell(1, 9).Value = "PointsPossible";
+                    worksheet.Cell(1, 10).Value = "DurationMs";
+                    worksheet.Cell(1, 11).Value = "DetailPath";
+                    worksheet.Cell(1, 12).Value = "Message";
+                    
+                    var headerRow = worksheet.Row(1);
+                    headerRow.Style.Font.Bold = true;
+
+                    int row = 2;
+                    foreach (var step in testCaseResult.stepResults)
+                    {
+                        worksheet.Cell(row, 1).Value = step.stage;
+                        worksheet.Cell(row, 2).Value = "";
+                        worksheet.Cell(row, 3).Value = step.action;
+                        worksheet.Cell(row, 4).Value = "";
+                        worksheet.Cell(row, 5).Value = step.result;
+                        worksheet.Cell(row, 6).Value = step.errorCode ?? "NONE";
+                        worksheet.Cell(row, 7).Value = step.passed ? "None" : "Comparison";
+                        worksheet.Cell(row, 8).Value = step.pointsAwarded;
+                        worksheet.Cell(row, 9).Value = step.pointsPossible;
+                        worksheet.Cell(row, 10).Value = step.durationMs;
+                        worksheet.Cell(row, 11).Value = "";
+                        worksheet.Cell(row, 12).Value = step.message ?? "";
+                        row++;
+                    }
+
+                    worksheet.Columns().AdjustToContents();
+                    workbook.SaveAs(detailPath);
+                }
+
+                _logger.LogInfo($"Test case result files written to {testCaseFolder}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to write test case result files: {ex.Message}");
+            }
+
+            await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Writes OverallSummary.xlsx in SampleLogging format.
+        /// Format: TestCase, Passed, PointsAwarded, PointsPossible, ErrorNotes
+        /// </summary>
+        private async Task WriteOverallSummaryAsync(
+            StudentSolution student,
+            List<(string testCaseName, TestCaseExecutionResult result)> testCaseResults,
+            CancellationToken ct)
+        {
+            try
+            {
+                var resultFolder = (_logger as LoggingService)?.GetStudentResultFolder(student.StudentCode, student.PaperNo) 
+                    ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Results", student.StudentCode);
+
+                if (!Directory.Exists(resultFolder))
+                {
+                    Directory.CreateDirectory(resultFolder);
+                }
+
+                var summaryPath = Path.Combine(resultFolder, "OverallSummary.xlsx");
+                using (var workbook = new ClosedXML.Excel.XLWorkbook())
+                {
+                    var worksheet = workbook.Worksheets.Add("Summary");
+                    
+                    // Header row matching SampleLogging format
+                    worksheet.Cell(1, 1).Value = "TestCase";
+                    worksheet.Cell(1, 2).Value = "Passed";
+                    worksheet.Cell(1, 3).Value = "PointsAwarded";
+                    worksheet.Cell(1, 4).Value = "PointsPossible";
+                    worksheet.Cell(1, 5).Value = "ErrorNotes";
+                    
+                    var headerRow = worksheet.Row(1);
+                    headerRow.Style.Font.Bold = true;
+
+                    int row = 2;
+                    foreach (var (testCaseName, result) in testCaseResults)
+                    {
+                        worksheet.Cell(row, 1).Value = testCaseName;
+                        worksheet.Cell(row, 2).Value = result.passed ? "PASS" : "FAIL";
+                        worksheet.Cell(row, 3).Value = result.earnedPoints;
+                        worksheet.Cell(row, 4).Value = result.maxPoints;
+                        worksheet.Cell(row, 5).Value = result.errorMessage ?? "";
+                        row++;
+                    }
+
+                    worksheet.Columns().AdjustToContents();
+                    workbook.SaveAs(summaryPath);
+                }
+
+                _logger.LogInfo($"OverallSummary.xlsx written to {resultFolder}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to write OverallSummary.xlsx: {ex.Message}");
+            }
+
+            await Task.CompletedTask;
         }
 
         /// <summary>

@@ -348,5 +348,88 @@ namespace SolutionGrader.UI.Services
 
             return actions;
         }
+
+        /// <summary>
+        /// Represents expected outputs for a specific stage from Detail.xlsx
+        /// </summary>
+        public class ExpectedOutput
+        {
+            public int Stage { get; set; }
+            public string? ClientConsole { get; set; }
+            public string? ServerConsole { get; set; }
+        }
+
+        /// <summary>
+        /// Reads the expected outputs from Detail.xlsx Client and Server sheets.
+        /// These are the expected console outputs that need to be compared against actual outputs.
+        /// </summary>
+        /// <param name="testCasePath">Path to the test case folder</param>
+        /// <returns>Dictionary mapping stage number to expected outputs</returns>
+        public Dictionary<int, ExpectedOutput> GetExpectedOutputs(string testCasePath)
+        {
+            var expectedOutputs = new Dictionary<int, ExpectedOutput>();
+            
+            var detailPath = Path.Combine(testCasePath, "Detail.xlsx");
+            if (!File.Exists(detailPath))
+            {
+                _logger.LogWarning($"Detail.xlsx not found in {testCasePath}");
+                return expectedOutputs;
+            }
+
+            try
+            {
+                using var workbook = new XLWorkbook(detailPath);
+                
+                // Read Client sheet for expected client console output
+                if (workbook.TryGetWorksheet("Client", out var clientSheet))
+                {
+                    var rows = clientSheet.RowsUsed().Skip(1); // Skip header
+                    foreach (var row in rows)
+                    {
+                        var stageValue = row.Cell(1).GetValue<string>();
+                        var consoleOutput = row.Cell(2).GetValue<string>();
+
+                        if (int.TryParse(stageValue, out var stage))
+                        {
+                            if (!expectedOutputs.ContainsKey(stage))
+                            {
+                                expectedOutputs[stage] = new ExpectedOutput { Stage = stage };
+                            }
+                            expectedOutputs[stage].ClientConsole = consoleOutput;
+                            _logger.LogDebug($"Expected Client output at Stage {stage}: '{consoleOutput}'");
+                        }
+                    }
+                }
+
+                // Read Server sheet for expected server console output
+                if (workbook.TryGetWorksheet("Server", out var serverSheet))
+                {
+                    var rows = serverSheet.RowsUsed().Skip(1); // Skip header
+                    foreach (var row in rows)
+                    {
+                        var stageValue = row.Cell(1).GetValue<string>();
+                        var consoleOutput = row.Cell(2).GetValue<string>();
+
+                        if (int.TryParse(stageValue, out var stage))
+                        {
+                            if (!expectedOutputs.ContainsKey(stage))
+                            {
+                                expectedOutputs[stage] = new ExpectedOutput { Stage = stage };
+                            }
+                            expectedOutputs[stage].ServerConsole = consoleOutput;
+                            _logger.LogDebug($"Expected Server output at Stage {stage}: '{consoleOutput}'");
+                        }
+                    }
+                }
+
+                _logger.LogInfo($"Loaded expected outputs for {expectedOutputs.Count} stages");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error reading Detail.xlsx for expected outputs: {ex.Message}");
+            }
+
+            return expectedOutputs;
+        }
     }
 }
