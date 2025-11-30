@@ -45,6 +45,13 @@ public interface INetworkMonitorService
     void ClearCaptures();
     
     /// <summary>
+    /// Sets the known client port to filter out Windows/Docker health check traffic.
+    /// Once set, only traffic involving this port will be captured.
+    /// </summary>
+    /// <param name="clientPort">The ephemeral port used by the client process</param>
+    void SetKnownClientPort(int clientPort);
+    
+    /// <summary>
     /// Gets whether the monitor is currently capturing.
     /// </summary>
     bool IsCapturing { get; }

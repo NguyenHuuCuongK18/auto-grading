@@ -38,6 +38,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private int _serverPort;
     private readonly ConcurrentDictionary<int, string> _portRoleMap = new();
     
+    // Track the known client ephemeral port - once we see the first SYN from client,
+    // we lock onto that port and filter out any other connections (Windows/Docker health checks)
+    private int _knownClientPort = 0;
+    private readonly object _clientPortLock = new();
+    
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
     public bool IsCapturing => _isCapturing;
@@ -169,6 +174,25 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     {
         _portRoleMap.Clear();
         _portRoleMap[_serverPort] = NetworkKeywords.Role_Server;
+        
+        // Reset known client port - will be set when we see the first SYN from actual client
+        lock (_clientPortLock)
+        {
+            _knownClientPort = 0;
+        }
+    }
+    
+    /// <summary>
+    /// Sets the known client port. Call this after the client process starts and connects.
+    /// This allows filtering out Windows/Docker health check traffic to the server port.
+    /// </summary>
+    public void SetKnownClientPort(int clientPort)
+    {
+        lock (_clientPortLock)
+        {
+            _knownClientPort = clientPort;
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port set to {clientPort}");
+        }
     }
     
     private void CaptureLoop(CancellationToken ct)
@@ -219,12 +243,64 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // NOTE: We capture ALL TCP packets without filtering.
-            // Previous attempts to filter "health check" packets were problematic because:
-            // 1. ACK-only packets are a normal part of TCP flow (handshake, acknowledgments)
-            // 2. TCP doesn't have HTTP-style health check endpoints
-            // 3. Docker/Windows pings to the exposed port are indistinguishable from normal traffic
-            // The grading comparison logic will handle matching against expected network flow.
+            // Filter out Windows/Docker health check traffic by checking if traffic involves the known client port.
+            // The client uses an ephemeral port to connect to the server. Once we know that port,
+            // any traffic to/from the server that doesn't involve the client port is a health check.
+            //
+            // The first SYN packet from the client will establish the known client port.
+            // After that, we filter out any connections from other ports (Windows/Docker health checks).
+            int knownClientPort;
+            lock (_clientPortLock)
+            {
+                knownClientPort = _knownClientPort;
+            }
+            
+            // Identify the client port in this packet (the port that isn't the server port)
+            int clientPortInPacket = (srcPort == _serverPort) ? dstPort : srcPort;
+            
+            // If this is a SYN packet (new connection) from a client to the server
+            if (tcpPacket.Synchronize && !tcpPacket.Acknowledgment && dstPort == _serverPort)
+            {
+                // If we haven't seen a client yet, this is our client - lock onto this port
+                if (knownClientPort == 0)
+                {
+                    lock (_clientPortLock)
+                    {
+                        if (_knownClientPort == 0)
+                        {
+                            _knownClientPort = srcPort;
+                            knownClientPort = srcPort;
+                            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Auto-detected client port: {srcPort}");
+                        }
+                    }
+                }
+                // If we already have a known client and this SYN is from a different port,
+                // it's a health check probe - filter it out
+                else if (srcPort != knownClientPort)
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered health check SYN from port {srcPort} (expected client port: {knownClientPort})");
+                    return;
+                }
+            }
+            
+            // For all other packets, check if they involve the known client port
+            // Only filter if we have a known client port set
+            if (knownClientPort > 0)
+            {
+                bool involvesKnownClient = (srcPort == knownClientPort || dstPort == knownClientPort);
+                bool involvesServer = (srcPort == _serverPort || dstPort == _serverPort);
+                
+                // If this packet involves the server but NOT the known client, it's a health check
+                if (involvesServer && !involvesKnownClient)
+                {
+                    // Only log and filter non-RST packets (RST could be from health check probe being rejected)
+                    if (!tcpPacket.Reset)
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered health check traffic: {srcPort}->{dstPort} (expected client port: {knownClientPort})");
+                    }
+                    return;
+                }
+            }
             
             // Determine roles based on ports
             DetermineRoles(srcPort, dstPort, out var srcRole, out var dstRole);
