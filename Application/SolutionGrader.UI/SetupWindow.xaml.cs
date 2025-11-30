@@ -29,6 +29,18 @@ namespace SolutionGrader.UI
         {
             InitializeComponent();
             _configuration = new GradingConfiguration();
+
+            // Hook up events AFTER components are created to avoid early invocation
+            chkHasClient.Checked += ChkHasClient_CheckedChanged;
+            chkHasClient.Unchecked += ChkHasClient_CheckedChanged;
+            chkHasServer.Checked += ChkHasServer_CheckedChanged;
+            chkHasServer.Unchecked += ChkHasServer_CheckedChanged;
+
+            // Sync initial state
+            txtClientProjectName.IsEnabled = chkHasClient.IsChecked == true;
+            txtServerProjectName.IsEnabled = chkHasServer.IsChecked == true;
+            _configuration.HasClient = chkHasClient.IsChecked == true;
+            _configuration.HasServer = chkHasServer.IsChecked == true;
         }
 
         /// <summary>
@@ -91,6 +103,7 @@ namespace SolutionGrader.UI
 
         private void ChkHasClient_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (txtClientProjectName == null || chkHasClient == null) return; // safety
             txtClientProjectName.IsEnabled = chkHasClient.IsChecked == true;
             _configuration.HasClient = chkHasClient.IsChecked == true;
             ValidateConfiguration();
@@ -98,6 +111,7 @@ namespace SolutionGrader.UI
 
         private void ChkHasServer_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (txtServerProjectName == null || chkHasServer == null) return; // safety
             txtServerProjectName.IsEnabled = chkHasServer.IsChecked == true;
             _configuration.HasServer = chkHasServer.IsChecked == true;
             ValidateConfiguration();
