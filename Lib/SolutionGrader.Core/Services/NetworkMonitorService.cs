@@ -46,6 +46,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     // Track when captures started - used to filter out pre-existing connections from Windows/Docker
     private DateTime _captureStartTime = DateTime.UtcNow;
     
+    // Flag to indicate if we've seen the first SYN packet (the real client-server connection)
+    // This is the most reliable indicator that our client has started connecting
+    private bool _firstSynSeen = false;
+    
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
     public bool IsCapturing => _isCapturing;
@@ -183,11 +187,12 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = 0;
+            _firstSynSeen = false;
         }
         
         // Record the time when captures were cleared - used to filter out pre-existing connections
         _captureStartTime = DateTime.UtcNow;
-        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, filtering connections from {_captureStartTime:HH:mm:ss.fff}");
+        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, waiting for first SYN to identify client-server connection");
     }
     
     /// <summary>
@@ -199,6 +204,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = clientPort;
+            _firstSynSeen = true; // Consider connection identified if port is set explicitly
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port explicitly set to {clientPort}");
         }
     }
@@ -297,60 +303,65 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // Filter out Windows/Docker health check traffic by checking if traffic involves the known client port.
-            // The client uses an ephemeral port to connect to the server. Once we know that port,
-            // any traffic to/from the server that doesn't involve the client port is a health check.
+            // ===================================================================================
+            // HEALTH CHECK FILTERING LOGIC
+            // ===================================================================================
+            // After ClearCaptures(), we wait for the FIRST SYN packet. This first SYN establishes
+            // which ephemeral port is our real client. From that point on:
+            // - We only accept traffic between the known client port and server port
+            // - Any traffic from/to other ports = Windows/Docker health checks → filtered out
             //
-            // The first SYN packet from the client will establish the known client port.
-            // After that, we filter out any connections from other ports (Windows/Docker health checks).
+            // This is deterministic because:
+            // 1. Containers are fresh after disposal, so no pre-existing connections
+            // 2. The client MUST send a SYN to connect to the server
+            // 3. That first SYN identifies our client's ephemeral port
+            // ===================================================================================
+            
             int knownClientPort;
+            bool firstSynSeen;
             lock (_clientPortLock)
             {
                 knownClientPort = _knownClientPort;
+                firstSynSeen = _firstSynSeen;
             }
             
-            // Identify the client port in this packet (the port that isn't the server port)
-            int clientPortInPacket = (srcPort == _serverPort) ? dstPort : srcPort;
+            // Check if this is a SYN packet (start of a new TCP connection)
+            bool isSynPacket = tcpPacket.Synchronize && !tcpPacket.Acknowledgment;
             
-            // If this is a SYN packet (new connection) from a client to the server
-            if (tcpPacket.Synchronize && !tcpPacket.Acknowledgment && dstPort == _serverPort)
+            // If this is the FIRST SYN we see after ClearCaptures(), it's our real client connecting
+            if (isSynPacket && !firstSynSeen)
             {
-                // If we haven't seen a client yet, this is our client - lock onto this port
-                if (knownClientPort == 0)
+                // The port that ISN'T the server port is the client's ephemeral port
+                int detectedClientPort = (dstPort == _serverPort) ? srcPort : dstPort;
+                
+                lock (_clientPortLock)
                 {
-                    lock (_clientPortLock)
+                    if (!_firstSynSeen)
                     {
-                        if (_knownClientPort == 0)
-                        {
-                            _knownClientPort = srcPort;
-                            knownClientPort = srcPort;
-                            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Auto-detected client port: {srcPort}");
-                        }
+                        _knownClientPort = detectedClientPort;
+                        _firstSynSeen = true;
+                        knownClientPort = detectedClientPort;
+                        firstSynSeen = true;
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} First SYN detected! Client port: {detectedClientPort}, Server port: {_serverPort}");
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} From now on, only accepting traffic between ports {detectedClientPort} <-> {_serverPort}");
                     }
                 }
-                // If we already have a known client and this SYN is from a different port,
-                // it's a health check probe - filter it out
-                else if (srcPort != knownClientPort)
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered health check SYN from port {srcPort} (expected client port: {knownClientPort})");
-                    return;
-                }
             }
             
-            // For all other packets, check if they involve the known client port
-            // Only filter if we have a known client port set
+            // Once we know the client port, filter out anything that doesn't involve our client-server pair
             if (knownClientPort > 0)
             {
                 bool involvesKnownClient = (srcPort == knownClientPort || dstPort == knownClientPort);
                 bool involvesServer = (srcPort == _serverPort || dstPort == _serverPort);
                 
-                // If this packet involves the server but NOT the known client, it's a health check
-                if (involvesServer && !involvesKnownClient)
+                // Accept only traffic between our known client and server
+                // Filter out everything else (Windows/Docker health checks)
+                if (!involvesKnownClient || !involvesServer)
                 {
-                    // Only log and filter non-RST packets (RST could be from health check probe being rejected)
-                    if (!tcpPacket.Reset)
+                    // This traffic doesn't involve our client-server pair - it's a health check
+                    if (!tcpPacket.Reset) // Don't spam logs with RST packets
                     {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered health check traffic: {srcPort}->{dstPort} (expected client port: {knownClientPort})");
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered non-client traffic: {srcPort}->{dstPort} (our client: {knownClientPort}, our server: {_serverPort})");
                     }
                     return;
                 }
