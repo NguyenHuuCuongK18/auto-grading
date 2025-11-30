@@ -195,6 +195,52 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         }
     }
     
+    /// <summary>
+    /// Detects the client's ephemeral port by querying the OS TCP connections table.
+    /// This is more reliable than detecting from SYN packets because it directly queries
+    /// the OS for established connections to the server port.
+    /// 
+    /// Call this after the client process has started and connected to the server.
+    /// Returns the client's ephemeral port, or 0 if not found.
+    /// </summary>
+    public int DetectClientPortFromConnections()
+    {
+        try
+        {
+            var ipGlobalProperties = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties();
+            var tcpConnections = ipGlobalProperties.GetActiveTcpConnections();
+            
+            // Find connections where the remote port is our server port (client connecting to server)
+            // or where the local port is our server port (connection from server's perspective)
+            foreach (var connection in tcpConnections)
+            {
+                // Client -> Server: local port is ephemeral, remote port is server port
+                if (connection.RemoteEndPoint.Port == _serverPort && 
+                    connection.LocalEndPoint.Address.ToString() == "127.0.0.1" &&
+                    connection.State == System.Net.NetworkInformation.TcpState.Established)
+                {
+                    var clientPort = connection.LocalEndPoint.Port;
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Detected client port from TCP table: {clientPort}");
+                    
+                    lock (_clientPortLock)
+                    {
+                        _knownClientPort = clientPort;
+                    }
+                    _portRoleMap.TryAdd(clientPort, NetworkKeywords.Role_Client);
+                    return clientPort;
+                }
+            }
+            
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} No established connection to server port {_serverPort} found in TCP table");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error detecting client port from TCP table: {ex.Message}");
+            return 0;
+        }
+    }
+    
     private void CaptureLoop(CancellationToken ct)
     {
         try
