@@ -7,11 +7,17 @@ namespace SolutionGrader.UI.Models
     /// <summary>
     /// Configuration settings for a grading session.
     /// Contains paths, project names, and Docker container settings.
+    /// 
+    /// Note: Port configurations (CodeContainerInternalPort, CodeContainerHostPort) are now
+    /// read from each test kit's environment.xlsx file rather than user input. This ensures
+    /// consistency with the test kit's expected network configuration and allows the 
+    /// network monitor on Windows to sniff the correct exposed port.
     /// </summary>
     public class GradingConfiguration : INotifyPropertyChanged
     {
         private string _submitFolderPath = string.Empty;
         private string _testKitFolderPath = string.Empty;
+        private string _saveResultFolderPath = string.Empty;
         private bool _hasClient = true;
         private bool _hasServer = true;
         private string _clientProjectName = "Project12";
@@ -20,6 +26,12 @@ namespace SolutionGrader.UI.Models
         private int _codeContainerHostPort = 5000;
         private string _dockerNetwork = "auto-grading-network";
         private int _gradingTimeoutSeconds = 60;
+        private string _databaseImageName = "mcr.microsoft.com/mssql/server:2019-latest";
+        private string _databaseContainerName = "auto-grading-sqlserver";
+        private int _databaseContainerInternalPort = 1433;
+        private int _databaseContainerHostPort = 1434;
+        private string _databaseUsername = "sa";
+        private string _databasePassword = "Khanh@2721";
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -41,6 +53,16 @@ namespace SolutionGrader.UI.Models
         {
             get => _testKitFolderPath;
             set { _testKitFolderPath = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Path to the folder where grading results will be saved.
+        /// Results include StudentsSolution.xlsx and student-specific folders.
+        /// </summary>
+        public string SaveResultFolderPath
+        {
+            get => _saveResultFolderPath;
+            set { _saveResultFolderPath = value; OnPropertyChanged(); }
         }
 
         /// <summary>
@@ -92,6 +114,7 @@ namespace SolutionGrader.UI.Models
 
         /// <summary>
         /// Host port mapped to the container port (for network monitoring)
+        /// Note: This is now read from environment.xlsx but kept for runtime state
         /// </summary>
         public int CodeContainerHostPort
         {
@@ -117,6 +140,60 @@ namespace SolutionGrader.UI.Models
             set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// Database Docker image name (e.g., mcr.microsoft.com/mssql/server:2019-latest)
+        /// </summary>
+        public string DatabaseImageName
+        {
+            get => _databaseImageName;
+            set { _databaseImageName = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database container name
+        /// </summary>
+        public string DatabaseContainerName
+        {
+            get => _databaseContainerName;
+            set { _databaseContainerName = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database container internal port
+        /// </summary>
+        public int DatabaseContainerInternalPort
+        {
+            get => _databaseContainerInternalPort;
+            set { _databaseContainerInternalPort = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database container host port
+        /// </summary>
+        public int DatabaseContainerHostPort
+        {
+            get => _databaseContainerHostPort;
+            set { _databaseContainerHostPort = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database username (e.g., sa for MSSQL)
+        /// </summary>
+        public string DatabaseUsername
+        {
+            get => _databaseUsername;
+            set { _databaseUsername = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database password
+        /// </summary>
+        public string DatabasePassword
+        {
+            get => _databasePassword;
+            set { _databasePassword = value; OnPropertyChanged(); }
+        }
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -131,6 +208,7 @@ namespace SolutionGrader.UI.Models
             {
                 SubmitFolderPath = this.SubmitFolderPath,
                 TestKitFolderPath = this.TestKitFolderPath,
+                SaveResultFolderPath = this.SaveResultFolderPath,
                 HasClient = this.HasClient,
                 HasServer = this.HasServer,
                 ClientProjectName = this.ClientProjectName,
@@ -138,7 +216,13 @@ namespace SolutionGrader.UI.Models
                 CodeContainerInternalPort = this.CodeContainerInternalPort,
                 CodeContainerHostPort = this.CodeContainerHostPort,
                 DockerNetwork = this.DockerNetwork,
-                GradingTimeoutSeconds = this.GradingTimeoutSeconds
+                GradingTimeoutSeconds = this.GradingTimeoutSeconds,
+                DatabaseImageName = this.DatabaseImageName,
+                DatabaseContainerName = this.DatabaseContainerName,
+                DatabaseContainerInternalPort = this.DatabaseContainerInternalPort,
+                DatabaseContainerHostPort = this.DatabaseContainerHostPort,
+                DatabaseUsername = this.DatabaseUsername,
+                DatabasePassword = this.DatabasePassword
             };
         }
     }
