@@ -499,6 +499,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Copies student solution files to Docker containers.
+        /// Copies files to both Server and Client containers based on the configured paths.
         /// Files are copied but containers are NOT started - they will be started
         /// when grading steps call for StartServer/StartClient actions.
         /// </summary>
@@ -508,11 +509,60 @@ namespace SolutionGrader.UI.Services
 
             try
             {
+                // Get container names
+                var serverContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName);
+                var clientContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName);
+                
+                // Get source paths
+                var serverPath = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeFilePath);
+                var clientPath = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsolePath);
+
+                // Copy server files if configured
+                if (!string.IsNullOrEmpty(serverContainer) && !string.IsNullOrEmpty(serverPath) && Directory.Exists(serverPath))
+                {
+                    _logger.LogInfo($"Copying server files from {serverPath} to container {serverContainer}");
+                    try
+                    {
+                        // Create /apps directory in container if it doesn't exist
+                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        
+                        // Copy the entire solution folder to the container
+                        var folderName = Path.GetFileName(serverPath);
+                        _dockerExecutor.CopyFileToContainer(serverPath, $"{serverContainer}:/apps/{folderName}");
+                        _logger.LogInfo($"Server files copied successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Failed to copy server files: {ex.Message}");
+                    }
+                }
+
+                // Copy client files if configured
+                if (!string.IsNullOrEmpty(clientContainer) && !string.IsNullOrEmpty(clientPath) && Directory.Exists(clientPath))
+                {
+                    _logger.LogInfo($"Copying client files from {clientPath} to container {clientContainer}");
+                    try
+                    {
+                        // Create /apps directory in container if it doesn't exist
+                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        
+                        // Copy the entire solution folder to the container
+                        var folderName = Path.GetFileName(clientPath);
+                        _dockerExecutor.CopyFileToContainer(clientPath, $"{clientContainer}:/apps/{folderName}");
+                        _logger.LogInfo($"Client files copied successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Failed to copy client files: {ex.Message}");
+                    }
+                }
+
+                // Also try the EnvironmentManagerInvoker for any additional setup
                 EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupQuestion(environment, out var error);
                 
                 if (!string.IsNullOrEmpty(error))
                 {
-                    _logger.LogWarning($"File copy warning: {error}");
+                    _logger.LogWarning($"EnvironmentManagerInvoker setup warning: {error}");
                 }
 
                 await Task.Delay(500, ct);
@@ -894,6 +944,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Cleans up Docker containers after grading.
+        /// Removes all three containers: Server, Client, and Database.
         /// </summary>
         private async Task CleanupContainersAsync(Environment environment, CancellationToken ct)
         {
@@ -901,15 +952,63 @@ namespace SolutionGrader.UI.Services
 
             try
             {
+                // Get container names
+                var serverContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName);
+                var clientContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName);
+                var dbContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseContainerName);
+
+                // Remove Server container
+                if (!string.IsNullOrEmpty(serverContainer))
+                {
+                    try
+                    {
+                        _logger.LogInfo($"Removing server container: {serverContainer}");
+                        _dockerExecutor.RemoveContainer(serverContainer);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing server container: {ex.Message}");
+                    }
+                }
+
+                // Remove Client container
+                if (!string.IsNullOrEmpty(clientContainer))
+                {
+                    try
+                    {
+                        _logger.LogInfo($"Removing client container: {clientContainer}");
+                        _dockerExecutor.RemoveContainer(clientContainer);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing client container: {ex.Message}");
+                    }
+                }
+
+                // Remove Database container
+                if (!string.IsNullOrEmpty(dbContainer))
+                {
+                    try
+                    {
+                        _logger.LogInfo($"Removing database container: {dbContainer}");
+                        _dockerExecutor.RemoveContainer(dbContainer);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Error removing database container: {ex.Message}");
+                    }
+                }
+
+                // Also try the EnvironmentManagerInvoker for any additional cleanup
                 EnvironmentBuilder.helper.EnvironmentManagerInvoker.TryDisposeContainer(environment, out var error);
                 
                 if (!string.IsNullOrEmpty(error))
                 {
-                    _logger.LogWarning($"Container cleanup warning: {error}");
+                    _logger.LogWarning($"EnvironmentManagerInvoker cleanup warning: {error}");
                 }
 
                 await Task.Delay(500, ct);
-                _logger.LogInfo("Container cleanup complete");
+                _logger.LogInfo("Container cleanup complete (all 3 containers removed)");
             }
             catch (Exception ex)
             {
