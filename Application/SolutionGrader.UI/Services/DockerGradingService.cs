@@ -334,8 +334,10 @@ namespace SolutionGrader.UI.Services
                 
                 return success;
             }
-            catch
+            catch (Exception ex)
             {
+                // Log the exception for debugging - helps identify Docker setup failures
+                Console.WriteLine($"[ERROR] StartApplicationInContainerAsync failed for {containerName}/{appName}: {ex.Message}");
                 return false;
             }
         }

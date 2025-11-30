@@ -1023,7 +1023,8 @@ namespace SolutionGrader.UI.Services
             // Get container names from environment configuration
             var serverContainerName = TryGetConfig(environment.Configs, EnvConfig.CodeContainerName);
             var clientContainerName = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleContainerName);
-            var serverAppName = TryGetConfig(environment.Configs, EnvConfig.StudentQuestionName) + "-server";
+            // App names should match container names for pipe consistency (/tmp/{appName}_input_pipe)
+            var serverAppName = TryGetConfig(environment.Configs, EnvConfig.StudentQuestionName);
             var clientAppName = TryGetConfig(environment.Configs, EnvConfig.GivenConsoleAppName);
             var serverDllPath = TryGetConfig(environment.Configs, EnvConfig.DockerServerPath);
             var clientDllPath = TryGetConfig(environment.Configs, EnvConfig.DockerClientPath);
@@ -1525,7 +1526,7 @@ namespace SolutionGrader.UI.Services
                         case "STARTSERVER":
                             actionSuccess = await ExecuteStartServerAsync(
                                 serverContainerName,
-                                TryGetConfig(environment.Configs, EnvConfig.StudentQuestionName) + "-server",
+                                TryGetConfig(environment.Configs, EnvConfig.StudentQuestionName),
                                 TryGetConfig(environment.Configs, EnvConfig.DockerServerPath) ?? 
                                     (student.ServerDllPath != null ? $"/apps/{Path.GetFileName(Path.GetDirectoryName(student.ServerDllPath))}/{Path.GetFileName(student.ServerDllPath)}" : null),
                                 config.CodeContainerInternalPort.ToString(),
@@ -1542,7 +1543,7 @@ namespace SolutionGrader.UI.Services
                         case "STARTCLIENT":
                             actionSuccess = await ExecuteStartClientAsync(
                                 clientContainerName,
-                                TryGetConfig(environment.Configs, EnvConfig.GivenConsoleAppName) ?? $"ag-{student.StudentCode}-client",
+                                TryGetConfig(environment.Configs, EnvConfig.GivenConsoleAppName),
                                 TryGetConfig(environment.Configs, EnvConfig.DockerClientPath) ?? 
                                     (student.ClientDllPath != null ? $"/apps/{Path.GetFileName(Path.GetDirectoryName(student.ClientDllPath))}/{Path.GetFileName(student.ClientDllPath)}" : null),
                                 ct);
