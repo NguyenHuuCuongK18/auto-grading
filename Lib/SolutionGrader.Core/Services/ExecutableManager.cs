@@ -23,22 +23,6 @@ namespace SolutionGrader.Core.Services
         private string? _clientStartStageLabel;
         private string? _serverStartQuestionCode;
         private string? _serverStartStageLabel;
-        
-        // Synchronization for ensuring PumpAsync has started reading before returning from StartClient/StartServer
-        // This prevents the race condition where the caller waits for output but the pump hasn't started yet
-        private readonly ManualResetEventSlim _clientPumpStarted = new(false);
-        private readonly ManualResetEventSlim _serverPumpStarted = new(false);
-        
-        // Track cumulative console output for change detection
-        // This approach checks console output length changes rather than relying solely on stdout capture timing
-        private int _lastClientOutputLength = 0;
-        private int _lastServerOutputLength = 0;
-        
-        /// <summary>
-        /// Timeout for waiting for the stdout pump to start reading after process starts.
-        /// This ensures we don't miss early output from the process.
-        /// </summary>
-        private static readonly TimeSpan PumpStartTimeout = TimeSpan.FromSeconds(2);
 
         public ExecutableManager(IRunContext run) { _run = run; }
 
@@ -50,43 +34,12 @@ namespace SolutionGrader.Core.Services
             _clientPath = clientPath;
             _serverPath = serverPath;
             _client = null; _server = null;
-            
-            // Clear all console output buffers for fresh start
-            ClearConsoleBuffers();
-            
+            _clientOutputBuffer.Clear();
+            _serverOutputBuffer.Clear();
             _clientStartQuestionCode = null;
             _clientStartStageLabel = null;
             _serverStartQuestionCode = null;
             _serverStartStageLabel = null;
-            
-            // Reset synchronization events for new session
-            _clientPumpStarted.Reset();
-            _serverPumpStarted.Reset();
-            
-            // Reset cumulative output tracking
-            _lastClientOutputLength = 0;
-            _lastServerOutputLength = 0;
-        }
-        
-        /// <summary>
-        /// Clears all console output buffers.
-        /// This should be called between test cases to ensure each test case starts fresh
-        /// and doesn't inherit output from previous test cases.
-        /// </summary>
-        public void ClearConsoleBuffers()
-        {
-            lock (_clientOutputBuffer)
-            {
-                _clientOutputBuffer.Clear();
-            }
-            lock (_serverOutputBuffer)
-            {
-                _serverOutputBuffer.Clear();
-            }
-            _lastClientOutputLength = 0;
-            _lastServerOutputLength = 0;
-            
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Console buffers cleared for new test case");
         }
 
         public void StartServer()
@@ -99,21 +52,9 @@ namespace SolutionGrader.Core.Services
             _serverStartQuestionCode = _run.CurrentQuestionCode;
             _serverStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
             
-            // Reset pump started event before starting new process
-            _serverPumpStarted.Reset();
-            
-            // Record the output length before starting to detect any new output
-            _lastServerOutputLength = GetServerOutput().Length;
-            
             _server = Create(_serverPath);
             _server.Start();
             _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
-            
-            // Wait for pump to start reading (ensures we don't miss early output)
-            if (!_serverPumpStarted.Wait(PumpStartTimeout))
-            {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Server pump did not signal start within {PumpStartTimeout.TotalSeconds}s timeout");
-            }
         }
 
         public void StartClient()
@@ -126,21 +67,9 @@ namespace SolutionGrader.Core.Services
             _clientStartQuestionCode = _run.CurrentQuestionCode;
             _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
             
-            // Reset pump started event before starting new process
-            _clientPumpStarted.Reset();
-            
-            // Record the output length before starting to detect any new output
-            _lastClientOutputLength = GetClientOutput().Length;
-            
             _client = Create(_clientPath);
             _client.Start();
             _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
-            
-            // Wait for pump to start reading (ensures we don't miss early output)
-            if (!_clientPumpStarted.Wait(PumpStartTimeout))
-            {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Client pump did not signal start within {PumpStartTimeout.TotalSeconds}s timeout");
-            }
         }
 
         public async Task<Process?> StartAsync(string executablePath, string arguments, CancellationToken ct)
@@ -314,60 +243,6 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Gets only the NEW output since the last call to this method (or since process started).
-        /// This is useful for stage-by-stage output tracking where we only want output generated
-        /// after a specific action, not cumulative output from the entire session.
-        /// 
-        /// This approach fixes the "first test case always failing" issue by allowing the grading
-        /// system to detect new console output even if the initial stdout capture was missed.
-        /// </summary>
-        /// <returns>New client output since last check, or empty string if no new output</returns>
-        public string GetClientOutputSinceLastCheck()
-        {
-            var currentOutput = GetClientOutput();
-            var currentLength = currentOutput.Length;
-            
-            if (currentLength > _lastClientOutputLength)
-            {
-                var newOutput = currentOutput.Substring(_lastClientOutputLength);
-                _lastClientOutputLength = currentLength;
-                return newOutput;
-            }
-            
-            return string.Empty;
-        }
-        
-        /// <summary>
-        /// Gets only the NEW server output since the last call to this method (or since process started).
-        /// Same principle as GetClientOutputSinceLastCheck but for server process.
-        /// </summary>
-        /// <returns>New server output since last check, or empty string if no new output</returns>
-        public string GetServerOutputSinceLastCheck()
-        {
-            var currentOutput = GetServerOutput();
-            var currentLength = currentOutput.Length;
-            
-            if (currentLength > _lastServerOutputLength)
-            {
-                var newOutput = currentOutput.Substring(_lastServerOutputLength);
-                _lastServerOutputLength = currentLength;
-                return newOutput;
-            }
-            
-            return string.Empty;
-        }
-        
-        /// <summary>
-        /// Resets the "last check" tracking point to the current output length.
-        /// Call this when transitioning to a new stage to ensure only output from the new stage is captured.
-        /// </summary>
-        public void ResetOutputCheckpoints()
-        {
-            _lastClientOutputLength = GetClientOutput().Length;
-            _lastServerOutputLength = GetServerOutput().Length;
-        }
-        
-        /// <summary>
         /// Waits for the server process to produce output or exit, with stabilization detection.
         /// Similar to WaitForClientOutputAsync but for server process.
         /// </summary>
@@ -482,20 +357,8 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Determine log file path - use run context result root if available, otherwise AppContext.BaseDirectory
-                // This ensures logs are written to the grading session folder for better organization
-                var logDir = !string.IsNullOrEmpty(_run.ResultRoot) && Directory.Exists(_run.ResultRoot)
-                    ? _run.ResultRoot
-                    : AppContext.BaseDirectory;
-                var logPath = Path.Combine(logDir, logName);
-                
-                using var sw = new StreamWriter(logPath, append: true, Encoding.UTF8);
+                using var sw = new StreamWriter(Path.Combine(AppContext.BaseDirectory, logName), append: true, Encoding.UTF8);
                 sw.AutoFlush = true;
-                
-                // Signal that pump has started reading - this prevents race conditions
-                // where the caller is waiting for output but the pump hasn't started yet
-                var pumpStartedEvent = appendServer ? _serverPumpStarted : _clientPumpStarted;
-                pumpStartedEvent.Set();
 
                 async Task readAsync(StreamReader reader)
                 {
