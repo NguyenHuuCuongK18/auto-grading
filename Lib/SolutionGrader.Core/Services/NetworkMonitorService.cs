@@ -43,12 +43,8 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private int _knownClientPort = 0;
     private readonly object _clientPortLock = new();
     
-    // Track when captures started - used to filter out pre-existing connections from Windows/Docker
+    // Track when captures started - used for logging/debugging
     private DateTime _captureStartTime = DateTime.UtcNow;
-    
-    // Flag to indicate if we've seen the first SYN packet (the real client-server connection)
-    // This is the most reliable indicator that our client has started connecting
-    private bool _firstSynSeen = false;
     
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
@@ -186,7 +182,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = 0;
-            _firstSynSeen = false;
         }
         
         // Record the time when captures were cleared (for logging/debugging)
@@ -196,14 +191,13 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     
     /// <summary>
     /// Sets the known client port explicitly. Call this if you know the client port in advance.
-    /// This allows filtering out Windows/Docker health check traffic to the server port.
+    /// This is used for reference/debugging only - traffic is not filtered based on this.
     /// </summary>
     public void SetKnownClientPort(int clientPort)
     {
         lock (_clientPortLock)
         {
             _knownClientPort = clientPort;
-            _firstSynSeen = true; // Consider connection identified if port is set explicitly
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port explicitly set to {clientPort}");
         }
     }
@@ -341,7 +335,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     if (_knownClientPort == 0)
                     {
                         _knownClientPort = clientPort;
-                        _firstSynSeen = true;
                     }
                 }
             }
