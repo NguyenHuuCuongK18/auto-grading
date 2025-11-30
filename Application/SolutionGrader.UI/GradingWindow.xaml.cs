@@ -312,7 +312,8 @@ namespace SolutionGrader.UI
             
             try
             {
-                student.Status = GradingStatus.InProgress;
+                // NOTE: Do NOT change status to InProgress here - let the orchestration service handle it
+                // This was causing the filter in StartGradingAsync to skip students
                 student.StartTime = DateTime.Now;
                 student.ProgressPercent = 0;
                 UpdateStudentInUI(student);
@@ -361,7 +362,7 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Using ports - Internal: {testKitConfig.CodeContainerInternalPort}, Host: {testKitConfig.CodeContainerHostPort}");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 
-                // Execute grading using the orchestration service
+                // Execute grading using the orchestration service - it handles status changes internally
                 var sessionState = new GradingSessionState();
                 await _gradingService.StartGradingAsync(
                     new System.Collections.Generic.List<StudentSolution> { student },
