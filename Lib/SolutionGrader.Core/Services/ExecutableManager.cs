@@ -475,30 +475,34 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // For stage attribution, we use the current global stage at the time output is captured.
-                // Stages are global and sequential (1, 2, 3, 4, ...). Any output captured during a stage
-                // is attributed to that stage, regardless of whether it's from client, server, or network.
+                // IMPORTANT: For stage attribution, we use the CAPTURED stage at process start time,
+                // NOT the current global stage. This is because the pump runs asynchronously and may
+                // process output AFTER the main thread has moved to a different stage.
                 //
-                // To ensure accuracy, we capture the stage IMMEDIATELY when the output line is complete,
-                // before any async delays or stage transitions can occur.
+                // Example: Client starts at stage 1, prints "Enter operation...". By the time the pump
+                // processes this line, the main thread might be at stage 2 (StartServer). Using the
+                // current stage would incorrectly attribute the output to stage 2.
+                //
+                // The captured stage (_clientStartStageLabel / _serverStartStageLabel) is set at
+                // the moment StartClient() / StartServer() is called, which is the correct stage
+                // for initial output. For subsequent output after user input, SendClientInput()
+                // updates _clientStartStageLabel to the current stage before sending input.
                 string? question;
                 string? stage;
                 
-                // Capture current stage immediately to minimize timing issues
-                var currentStage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString());
-                var currentQuestion = _run.CurrentQuestionCode;
-                
                 if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Use current stage for server output, fallback to server start stage if current is not set
-                    question = currentQuestion ?? _serverStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = currentStage ?? _serverStartStageLabel ?? "0";
+                    // Use captured server start stage - this is the stage when server was started
+                    // or last updated via server-related action
+                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
                 }
                 else
                 {
-                    // Use current stage for client output, fallback to client start stage if current is not set
-                    question = currentQuestion ?? _clientStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = currentStage ?? _clientStartStageLabel ?? "0";
+                    // Use captured client start stage - this is the stage when client was started
+                    // or last updated via SendClientInput()
+                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
                 }
                 
                 var payload = line + Environment.NewLine;
