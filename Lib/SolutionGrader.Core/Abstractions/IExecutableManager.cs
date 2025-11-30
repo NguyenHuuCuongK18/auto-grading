@@ -39,4 +39,10 @@ public interface IExecutableManager
     /// Call this when transitioning to a new stage to ensure only output from the new stage is captured.
     /// </summary>
     void ResetOutputCheckpoints();
+    
+    /// <summary>
+    /// Clears all console output buffers.
+    /// This should be called between test cases to ensure each test case starts fresh.
+    /// </summary>
+    void ClearConsoleBuffers();
 }

@@ -44,8 +44,10 @@ namespace SolutionGrader.Core.Services
             _clientPath = clientPath;
             _serverPath = serverPath;
             _client = null; _server = null;
-            _clientOutputBuffer.Clear();
-            _serverOutputBuffer.Clear();
+            
+            // Clear all console output buffers for fresh start
+            ClearConsoleBuffers();
+            
             _clientStartQuestionCode = null;
             _clientStartStageLabel = null;
             _serverStartQuestionCode = null;
@@ -58,6 +60,27 @@ namespace SolutionGrader.Core.Services
             // Reset cumulative output tracking
             _lastClientOutputLength = 0;
             _lastServerOutputLength = 0;
+        }
+        
+        /// <summary>
+        /// Clears all console output buffers.
+        /// This should be called between test cases to ensure each test case starts fresh
+        /// and doesn't inherit output from previous test cases.
+        /// </summary>
+        public void ClearConsoleBuffers()
+        {
+            lock (_clientOutputBuffer)
+            {
+                _clientOutputBuffer.Clear();
+            }
+            lock (_serverOutputBuffer)
+            {
+                _serverOutputBuffer.Clear();
+            }
+            _lastClientOutputLength = 0;
+            _lastServerOutputLength = 0;
+            
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Console buffers cleared for new test case");
         }
 
         public void StartServer()

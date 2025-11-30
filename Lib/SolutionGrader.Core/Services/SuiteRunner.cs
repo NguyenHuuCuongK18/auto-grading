@@ -393,7 +393,7 @@ namespace SolutionGrader.Core.Services
             return 1;
         }
 
-        protected static string TryGetValueOrDefault(
+        private static string TryGetValueOrDefault(
             Dictionary<string, string> configs,
             string key,
             string defaultValue = "")
@@ -418,7 +418,8 @@ namespace SolutionGrader.Core.Services
         /// This is crucial between test cases to prevent "Address already in use" errors
         /// when the socket is still in TIME_WAIT state after the previous server terminates.
         /// 
-        /// The method polls the port availability with exponential backoff until either:
+        /// The method first checks if the port is already available (fast path).
+        /// If not, it polls with exponential backoff until:
         /// - The port becomes available (returns true)
         /// - Maximum wait time is exceeded (returns false)
         /// - Cancellation is requested
@@ -429,29 +430,33 @@ namespace SolutionGrader.Core.Services
         /// 3. Student code may not properly close sockets before terminating
         /// 
         /// For faster recovery, the student server should use SO_REUSEADDR socket option.
-        /// We wait longer here to handle cases where student code doesn't do this.
         /// </summary>
         /// <param name="port">The TCP port to wait for</param>
         /// <param name="ct">Cancellation token</param>
-        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 30 - increased for TIME_WAIT handling)</param>
+        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 5 - only waits if port is in use)</param>
         /// <returns>True if port is available, false if timeout exceeded</returns>
-        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 30)
+        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 5)
         {
+            // Fast path: Check if port is already available (most common case)
+            if (IsPortAvailable(port))
+            {
+                return true;
+            }
+            
+            // Port is in use - now we need to wait
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is in use, waiting for release (max {maxWaitSeconds}s)...");
+            
             var startTime = DateTime.UtcNow;
-            int delayMs = 200; // Start with 200ms delay, increase exponentially
-            const int maxDelayMs = 2000; // Cap at 2 seconds
+            int delayMs = 100; // Start with 100ms delay
+            const int maxDelayMs = 500; // Cap at 500ms for faster response
             
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released (max {maxWaitSeconds}s)...");
-            
-            // First, try to forcefully close any lingering connections to the port
-            // This can help speed up TIME_WAIT state resolution
+            // Try to forcefully close any lingering connections to the port
             TryKillProcessOnPort(port);
-            
-            // Small initial delay to allow the OS to clean up
-            await Task.Delay(500, ct);
             
             while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds && !ct.IsCancellationRequested)
             {
+                await Task.Delay(delayMs, ct);
+                
                 if (IsPortAvailable(port))
                 {
                     var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
@@ -459,14 +464,11 @@ namespace SolutionGrader.Core.Services
                     return true;
                 }
                 
-                await Task.Delay(delayMs, ct);
-                
-                // Exponential backoff with jitter
+                // Exponential backoff
                 delayMs = Math.Min(delayMs * 2, maxDelayMs);
             }
             
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} WARNING: Port {port} may still be in use after {maxWaitSeconds}s wait. " +
-                              "This could cause 'Address already in use' errors. " +
                               "Consider using SO_REUSEADDR in server code.");
             return false;
         }
@@ -474,6 +476,8 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Attempts to find and kill any process listening on the specified port.
         /// This is a best-effort cleanup to help release ports faster.
+        /// Uses netstat -ano on Windows to find listening processes.
+        /// NOTE: The netstat parsing assumes Windows format which may not work on Linux.
         /// </summary>
         /// <param name="port">The TCP port to clean up</param>
         private static void TryKillProcessOnPort(int port)
@@ -482,6 +486,7 @@ namespace SolutionGrader.Core.Services
             {
                 // Try to find processes using netstat and kill them
                 // This is a best-effort approach and may not work in all scenarios
+                // Windows netstat -ano format: "  TCP    0.0.0.0:5000    0.0.0.0:0    LISTENING    1234"
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "netstat",
@@ -498,31 +503,41 @@ namespace SolutionGrader.Core.Services
                 process.WaitForExit(5000);
                 
                 // Parse netstat output to find PIDs using the port
-                // Format: "  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       1234"
+                // Format on Windows: "  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       1234"
+                // The PID is the last numeric column when LISTENING
                 var lines = output.Split('\n');
                 foreach (var line in lines)
                 {
-                    if (line.Contains($":{port}") && line.Contains("LISTENING"))
+                    // Look for lines with our port in LISTENING state
+                    if (!line.Contains($":{port}") || !line.Contains("LISTENING"))
+                        continue;
+                    
+                    // Parse the line by splitting on whitespace
+                    var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    
+                    // Expect at least 5 parts: Protocol, Local Address, Foreign Address, State, PID
+                    if (parts.Length < 5)
+                        continue;
+                    
+                    // Validate the port is in the local address (second column)
+                    if (!parts[1].EndsWith($":{port}") && !parts[1].Contains($":{port} "))
+                        continue;
+                    
+                    // PID should be the last element and be a valid number
+                    var pidStr = parts[parts.Length - 1].Trim();
+                    if (int.TryParse(pidStr, out var pid) && pid > 0)
                     {
-                        var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length > 0)
+                        try
                         {
-                            var pidStr = parts[parts.Length - 1].Trim();
-                            if (int.TryParse(pidStr, out var pid) && pid > 0)
+                            var proc = System.Diagnostics.Process.GetProcessById(pid);
+                            if (proc != null && !proc.HasExited)
                             {
-                                try
-                                {
-                                    var proc = System.Diagnostics.Process.GetProcessById(pid);
-                                    if (proc != null && !proc.HasExited)
-                                    {
-                                        Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Killing process {pid} using port {port}");
-                                        proc.Kill();
-                                        proc.WaitForExit(2000);
-                                    }
-                                }
-                                catch { /* Process may have already exited */ }
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Killing process {pid} using port {port}");
+                                proc.Kill();
+                                proc.WaitForExit(2000);
                             }
                         }
+                        catch { /* Process may have already exited */ }
                     }
                 }
             }

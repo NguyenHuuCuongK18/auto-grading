@@ -43,12 +43,8 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private int _knownClientPort = 0;
     private readonly object _clientPortLock = new();
     
-    // Track when captures started - used to filter out pre-existing connections from Windows/Docker
+    // Track when captures started - used for logging/debugging
     private DateTime _captureStartTime = DateTime.UtcNow;
-    
-    // Flag to indicate if we've seen the first SYN packet (the real client-server connection)
-    // This is the most reliable indicator that our client has started connecting
-    private bool _firstSynSeen = false;
     
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
@@ -187,12 +183,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = 0;
-            _firstSynSeen = false;
         }
         
-        // Record the time when captures were cleared - used to filter out pre-existing connections
+        // Record the time when captures were cleared - used for logging/debugging
         _captureStartTime = DateTime.UtcNow;
-        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, waiting for first SYN to identify client-server connection");
+        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Captures cleared, ready to capture client-server traffic");
     }
     
     /// <summary>
@@ -204,7 +199,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         lock (_clientPortLock)
         {
             _knownClientPort = clientPort;
-            _firstSynSeen = true; // Consider connection identified if port is set explicitly
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Known client port explicitly set to {clientPort}");
         }
     }
@@ -344,7 +338,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     if (_knownClientPort == 0)
                     {
                         _knownClientPort = clientPort;
-                        _firstSynSeen = true;
                         Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Primary client port set to: {clientPort}");
                     }
                 }
@@ -358,8 +351,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             
             // Determine connection state based on flags
             var state = DetermineConnectionState(flags, srcRole);
-            
-            // Extract payload data if available (PSH packets)
             
             // Extract payload data if available (PSH packets)
             string? payload = null;
