@@ -101,10 +101,71 @@ namespace SolutionGrader.UI.Services
                 await WriteTestCaseResultAsync(
                     tcResultDir, testCaseName, tcResult.Passed, tcResult.EarnedMark, testCaseMaxMark,
                     tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, tcResult.Actions, ct);
+                
+                // IMPORTANT: Stop all dotnet processes in containers between test cases
+                // This kills the server/client processes to release ports before the next test case
+                _logger.LogInfo("Stopping applications in containers before next test case...");
+                await _dockerGrading.StopAllApplicationsAsync(environment, ct);
+                
+                // Wait for port to be released before next test case
+                // This prevents "Address already in use" errors when the socket is in TIME_WAIT state
+                await WaitForPortReleaseAsync(testKitConfig.CodeContainerHostPort, ct);
             }
 
             results.TotalTestCases = testCaseNames.Count;
             return results;
+        }
+
+        /// <summary>
+        /// Waits for a TCP port to be released (no longer in use).
+        /// This is crucial between test cases to prevent "Address already in use" errors.
+        /// </summary>
+        /// <param name="port">The TCP port to wait for</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 10)</param>
+        /// <returns>True if port is available, false if timeout exceeded</returns>
+        private async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 10)
+        {
+            var startTime = DateTime.UtcNow;
+            int delayMs = 100; // Start with 100ms delay, increase exponentially
+            const int maxDelayMs = 1000; // Cap at 1 second
+            
+            _logger.LogInfo($"Waiting for port {port} to be released...");
+            
+            while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds && !ct.IsCancellationRequested)
+            {
+                if (IsPortAvailable(port))
+                {
+                    _logger.LogInfo($"Port {port} is now available");
+                    return true;
+                }
+                
+                await Task.Delay(delayMs, ct);
+                
+                // Exponential backoff
+                delayMs = Math.Min(delayMs * 2, maxDelayMs);
+            }
+            
+            _logger.LogWarning($"Warning: Port {port} may still be in use after {maxWaitSeconds}s wait");
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a TCP port is available (not in use by any process).
+        /// </summary>
+        private static bool IsPortAvailable(int port)
+        {
+            try
+            {
+                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+                listener.Start();
+                listener.Stop();
+                return true;
+            }
+            catch (System.Net.Sockets.SocketException)
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -359,6 +420,8 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Compares actual outputs against expected outputs and calculates points.
+        /// Uses ALL-OR-NOTHING policy: If all comparisons pass, award full marks; otherwise 0.
+        /// This matches the behavior of the Lib folder's ExcelDetailLogService.ComputeCaseTotals.
         /// </summary>
         private (double earnedPoints, bool passed) CalculatePoints(
             Dictionary<int, TestKitConfigService.ExpectedOutput> expectedOutputs,
@@ -367,7 +430,6 @@ namespace SolutionGrader.UI.Services
             double maxMark,
             string testCaseName)
         {
-            double earnedPoints = 0;
             int totalComparisons = 0;
             int passedComparisons = 0;
 
@@ -410,14 +472,14 @@ namespace SolutionGrader.UI.Services
                 }
             }
 
-            // Calculate points
-            if (totalComparisons > 0)
-            {
-                earnedPoints = (passedComparisons / (double)totalComparisons) * maxMark;
-            }
-
+            // ALL-OR-NOTHING policy: If all comparisons pass, award full marks; otherwise 0
+            // This matches the Lib folder's SolutionGrader.Core.Services.ExcelDetailLogService.ComputeCaseTotals behavior
+            // See: Lib/SolutionGrader.Core/Services/ExcelDetailLogService.cs, method ComputeCaseTotals()
             bool passed = passedComparisons == totalComparisons && totalComparisons > 0;
-            _logger.LogInfo($"Test case {testCaseName}: {passedComparisons}/{totalComparisons} comparisons passed, earned {earnedPoints:F2}/{maxMark} points");
+            double earnedPoints = passed ? maxMark : 0;
+            
+            _logger.LogInfo($"Test case {testCaseName}: {passedComparisons}/{totalComparisons} comparisons passed");
+            _logger.LogInfo($"  ALL-OR-NOTHING policy: earned {earnedPoints:F2}/{maxMark} points ({(passed ? "PASS" : "FAIL")})");
 
             return (earnedPoints, passed);
         }

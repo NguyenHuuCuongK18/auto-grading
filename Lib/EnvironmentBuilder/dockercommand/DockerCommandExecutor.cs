@@ -658,6 +658,37 @@ namespace EnvironmentBuilder.DockerCommand
         {
             string inputPipe = $"/tmp/{appName}_input_pipe";
 
+            // IMPORTANT: Clean up any existing processes and pipes BEFORE starting
+            // This prevents "Address already in use" errors when restarting applications
+            Console.WriteLine($"[{appName}] Cleaning up any existing processes and pipes...");
+            
+            // Kill any existing dotnet processes in the container (ignore errors)
+            try
+            {
+                string killCommand = $"{containerName} pkill -9 dotnet";
+                ExecDockerCommand(killCommand, 5000);
+            }
+            catch { /* Ignore - no processes to kill */ }
+            
+            // Kill any existing sleep processes keeping pipes open (ignore errors)
+            try
+            {
+                string killSleepCommand = $"{containerName} pkill -9 sleep";
+                ExecDockerCommand(killSleepCommand, 5000);
+            }
+            catch { /* Ignore - no processes to kill */ }
+            
+            // Remove existing pipe if it exists (ignore errors)
+            try
+            {
+                string removePipeCommand = $"{containerName} rm -f {inputPipe}";
+                ExecDockerCommand(removePipeCommand, 5000);
+            }
+            catch { /* Ignore - pipe may not exist */ }
+            
+            // Wait for port to be released after killing processes
+            Thread.Sleep(1000);
+
             string createInputFileCommand = $"{containerName} mkfifo \"{inputPipe}\"";
             ExecDockerCommand(createInputFileCommand, 60000);
 

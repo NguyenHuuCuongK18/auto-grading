@@ -42,6 +42,7 @@ namespace SolutionGrader.UI.Services
         private readonly TestKitDiscoveryService _testKitDiscovery;
         private readonly TestKitConfigService _testKitConfigService;
         private readonly DockerCommandExecutor _dockerExecutor;
+        private ResultWriterService? _resultWriter;
         
         private CancellationTokenSource? _cancellationTokenSource;
         private readonly object _lockObject = new object();
@@ -111,6 +112,12 @@ namespace SolutionGrader.UI.Services
             _cancellationTokenSource = new CancellationTokenSource();
             var ct = _cancellationTokenSource.Token;
 
+            // Initialize result writer for saving StudentsSolution.xlsx
+            var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
+                ? config.SaveResultFolderPath 
+                : Path.Combine(config.SubmitFolderPath, "Results");
+            _resultWriter = new ResultWriterService(_logger, resultPath);
+
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
             sessionState.SessionStartTime = DateTime.Now;
@@ -118,6 +125,7 @@ namespace SolutionGrader.UI.Services
             sessionState.NotRunCount = students.Count(s => s.Status == GradingStatus.Not_Run);
 
             _logger.LogInfo($"Starting grading for {students.Count} students");
+            _logger.LogInfo($"Results will be saved to: {resultPath}");
             SessionStateChanged?.Invoke(this, sessionState);
 
             try
@@ -150,11 +158,19 @@ namespace SolutionGrader.UI.Services
                     sessionState.SuccessCount = students.Count(s => s.Status == GradingStatus.Success);
                     sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
                     SessionStateChanged?.Invoke(this, sessionState);
+
+                    // Write StudentsSolution.xlsx incrementally after each student completes
+                    // This ensures results are saved in case of interruption or pause
+                    // Performance note: For large batches, this could be optimized to batch writes,
+                    // but incremental writes are preferred for data safety during long grading sessions
+                    _resultWriter.WriteStudentsSolutionSummary(students);
                 }
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInfo("Grading operation was cancelled");
+                // Write final summary even if cancelled
+                _resultWriter?.WriteStudentsSolutionSummary(students);
             }
             catch (Exception ex)
             {
@@ -162,6 +178,9 @@ namespace SolutionGrader.UI.Services
             }
             finally
             {
+                // Final write is only needed if loop exited early (break) without going through exception handlers
+                // This handles edge cases like graceful completion without iteration or early termination
+
                 sessionState.IsRunning = false;
                 sessionState.SessionEndTime = DateTime.Now;
                 sessionState.CurrentStudentCode = null;
@@ -600,7 +619,6 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"Database container '{dbContainer}' started");
                     
                     // Wait for database to be ready
-                    // Using configurable timeout for database readiness
                     _logger.LogInfo($"Waiting for database to be ready (timeout: {DatabaseReadinessTimeoutMs}ms)...");
                     await Task.Delay(DatabaseReadinessTimeoutMs, ct);
                 }
@@ -662,9 +680,6 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
                 }
 
-                // NOTE: Removed duplicate EnvironmentManagerInvoker.TrySetupContainer call
-                // We already created all containers above - the invoker call was redundant and caused ~5s delay
-
                 await Task.Delay(500, ct); // Brief wait for all containers to be ready
                 _logger.LogInfo("Docker containers setup complete (3 containers: server, client, database)");
             }
@@ -672,6 +687,45 @@ namespace SolutionGrader.UI.Services
             {
                 _logger.LogError("Failed to setup Docker containers", ex);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Cleans up existing containers BEFORE setting up new ones.
+        /// This is called at the start of SetupContainersAsync to prevent port conflicts.
+        /// </summary>
+        private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
+        {
+            try
+            {
+                // Remove any existing containers with the same names to avoid port conflicts
+                // Using force removal (docker rm -f) which will stop and remove the container
+                
+                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
+                {
+                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
+                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
+                {
+                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
+                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
+                {
+                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
+                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
+                }
+
+                // Wait for Docker to release resources
+                await Task.Delay(500, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error cleaning up existing containers: {ex.Message}");
+                // Continue with setup even if cleanup fails
             }
         }
 
@@ -699,6 +753,10 @@ namespace SolutionGrader.UI.Services
                 // Get source paths
                 var serverPath = TryGetConfig(environment.Configs, EnvConfig.CodeFilePath);
                 var clientPath = TryGetConfig(environment.Configs, EnvConfig.GivenConsolePath);
+
+                _logger.LogInfo($"File copy configuration:");
+                _logger.LogInfo($"  - Server path: {serverPath} -> container {serverContainer}");
+                _logger.LogInfo($"  - Client path: {clientPath} -> container {clientContainer}");
 
                 // Copy server files if configured
                 if (!string.IsNullOrEmpty(serverContainer) && !string.IsNullOrEmpty(serverPath) && Directory.Exists(serverPath))
@@ -739,9 +797,6 @@ namespace SolutionGrader.UI.Services
                         _logger.LogError($"Failed to copy client files: {ex.Message}");
                     }
                 }
-
-                // NOTE: Removed duplicate EnvironmentManagerInvoker.TrySetupQuestion call
-                // We already copied files above - the invoker call was redundant
 
                 await Task.Delay(200, ct); // Brief wait for filesystem sync
                 _logger.LogInfo("Files copied to containers");
@@ -1910,45 +1965,6 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Cleans up existing containers BEFORE setting up new ones.
-        /// This is called at the start of SetupContainersAsync to prevent port conflicts.
-        /// </summary>
-        private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
-        {
-            try
-            {
-                // Remove any existing containers with the same names to avoid port conflicts
-                // Using force removal (docker rm -f) which will stop and remove the container
-                
-                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
-                {
-                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
-                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
-                }
-
-                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
-                {
-                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
-                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
-                }
-
-                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
-                {
-                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
-                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
-                }
-
-                // Wait for Docker to release resources
-                await Task.Delay(500, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"Error cleaning up existing containers: {ex.Message}");
-                // Continue with setup even if cleanup fails
-            }
-        }
-
-        /// <summary>
         /// Cleans up Docker containers after grading.
         /// Removes all three containers: Server, Client, and Database.
         /// </summary>
@@ -2009,9 +2025,6 @@ namespace SolutionGrader.UI.Services
                         _logger.LogWarning($"Error removing database container '{dbContainer}': {ex.Message}");
                     }
                 }
-
-                // NOTE: Removed EnvironmentManagerInvoker.TryDisposeContainer call
-                // We already removed all containers above - the invoker call was causing delays
 
                 await Task.Delay(200, ct); // Brief wait for Docker daemon to release resources
                 _logger.LogInfo("Container cleanup complete");
