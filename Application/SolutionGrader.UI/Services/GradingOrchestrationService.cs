@@ -619,16 +619,17 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Executes the actual grading process using DOCKER containers.
         /// 
-        /// This method:
-        /// 1. Sets up Docker containers (server, client, database) for the student
-        /// 2. Copies student solution files to containers
-        /// 3. Reads test case actions from Detail.xlsx (User sheet: Stage, Input, Action)
-        /// 4. Executes actions in Docker containers (StartServer, StartClient, Input, etc.)
-        /// 5. Captures outputs from containers and compares against expected values
-        /// 6. Calculates points based on comparison results
-        /// 7. Cleans up containers after grading
+        /// This method orchestrates the Docker-based grading process:
+        /// 1. Checks Docker availability
+        /// 2. Loads test kit configuration
+        /// 3. Sets up Docker containers (server, client, database)
+        /// 4. Copies student solution files to containers
+        /// 5. Delegates test case execution to DockerTestCaseExecutor
+        /// 6. Cleans up containers after grading
+        /// 7. Writes results
         /// 
-        /// Network traffic is captured via the exposed host port for NetworkMonitor grading.
+        /// Test case execution (reading Detail.xlsx, executing actions, comparing outputs)
+        /// is handled by DockerTestCaseExecutor for better separation of concerns.
         /// </summary>
         private async Task<(bool success, double mark, string message)> ExecuteGradingAsync(
             StudentSolution student,
@@ -642,9 +643,6 @@ namespace SolutionGrader.UI.Services
             _logger.LogInfo("=".PadRight(60, '='));
 
             var dockerGrading = new DockerGradingService(_logger);
-            double totalEarnedMark = 0;
-            int passedTestCases = 0;
-            var testCaseResults = new List<string>();
 
             try
             {
@@ -700,73 +698,34 @@ namespace SolutionGrader.UI.Services
                     return (false, 0, "Failed to copy files to containers");
                 }
 
-                // Step 6: Get test cases from test kit
-                var testCaseNames = _testKitConfigService.GetTestCaseNames(testKitPath);
-                if (testCaseNames.Count == 0)
-                {
-                    _logger.LogError("FATAL: No test cases found in test kit");
-                    await dockerGrading.DisposeContainersAsync(environment, ct);
-                    return (false, 0, "No test cases found in test kit");
-                }
-                _logger.LogInfo($"Found {testCaseNames.Count} test cases: {string.Join(", ", testCaseNames)}");
+                // Step 6: Execute test cases using DockerTestCaseExecutor
+                _logger.LogInfo("=== Executing test cases ===");
+                var testCaseExecutor = new DockerTestCaseExecutor(_logger, _testKitConfigService, dockerGrading);
+                var results = await testCaseExecutor.ExecuteAllTestCasesAsync(
+                    environment, testKitPath, testKitConfig, resultRoot, ct);
 
-                // Step 7: Execute each test case
-                foreach (var testCaseName in testCaseNames)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    _logger.LogInfo("-".PadRight(50, '-'));
-                    _logger.LogInfo($"Executing test case: {testCaseName}");
-                    _logger.LogInfo("-".PadRight(50, '-'));
-
-                    var testCasePath = Path.Combine(testKitPath, testCaseName);
-                    var testCaseMaxMark = testKitConfig.TestCaseMarks.TryGetValue(testCaseName, out var mark) ? mark : 0;
-
-                    // Execute test case in Docker containers
-                    var (tcPassed, tcMark) = await ExecuteDockerTestCaseAsync(
-                        dockerGrading, environment, testCasePath, testCaseName, 
-                        testCaseMaxMark, testKitConfig.Protocol, ct);
-
-                    totalEarnedMark += tcMark;
-                    if (tcPassed) passedTestCases++;
-
-                    var resultMsg = tcPassed 
-                        ? $"{testCaseName}: PASSED (+{tcMark:F2})" 
-                        : $"{testCaseName}: FAILED ({tcMark:F2})";
-                    testCaseResults.Add(resultMsg);
-                    _logger.LogInfo($">>> {resultMsg}");
-
-                    // Write test case result to file
-                    var tcResultDir = Path.Combine(resultRoot, testCaseName);
-                    if (!Directory.Exists(tcResultDir))
-                    {
-                        Directory.CreateDirectory(tcResultDir);
-                    }
-                    await WriteTestCaseResultAsync(tcResultDir, testCaseName, tcPassed, tcMark, testCaseMaxMark, ct);
-                }
-
-                // Step 8: Cleanup Docker containers
+                // Step 7: Cleanup Docker containers
                 _logger.LogInfo("=== Cleaning up Docker containers ===");
                 await dockerGrading.DisposeContainersAsync(environment, ct);
 
-                // Step 9: Write overall summary
-                await WriteOverallSummaryAsync(resultRoot, testCaseResults, totalEarnedMark, testKitConfig.TotalMaxMark, ct);
+                // Step 8: Write overall summary
+                await WriteOverallSummaryAsync(resultRoot, results.TestCaseResults, results.TotalEarnedMark, testKitConfig.TotalMaxMark, ct);
 
                 // Final result
-                bool success = passedTestCases > 0;
-                string message = $"Passed {passedTestCases}/{testCaseNames.Count} test cases";
+                bool success = results.PassedTestCases > 0;
+                string message = $"Passed {results.PassedTestCases}/{results.TotalTestCases} test cases";
                 
                 _logger.LogInfo("=".PadRight(60, '='));
                 _logger.LogInfo($"GRADING COMPLETE FOR {student.StudentCode}");
-                _logger.LogInfo($"  Total mark: {totalEarnedMark}/{testKitConfig.TotalMaxMark}");
-                _logger.LogInfo($"  Test cases passed: {passedTestCases}/{testCaseNames.Count}");
-                foreach (var result in testCaseResults)
+                _logger.LogInfo($"  Total mark: {results.TotalEarnedMark}/{testKitConfig.TotalMaxMark}");
+                _logger.LogInfo($"  Test cases passed: {results.PassedTestCases}/{results.TotalTestCases}");
+                foreach (var result in results.TestCaseResults)
                 {
                     _logger.LogInfo($"    - {result}");
                 }
                 _logger.LogInfo("=".PadRight(60, '='));
 
-                return (success, totalEarnedMark, message);
+                return (success, results.TotalEarnedMark, message);
             }
             catch (OperationCanceledException)
             {
@@ -779,216 +738,6 @@ namespace SolutionGrader.UI.Services
                 await dockerGrading.DisposeContainersAsync(environment, ct);
                 return (false, 0, ex.Message);
             }
-        }
-
-        /// <summary>
-        /// Executes a single test case in Docker containers.
-        /// Reads actions from Detail.xlsx and executes them in sequence.
-        /// Compares outputs against expected values from Client/Server/Network sheets.
-        /// </summary>
-        private async Task<(bool passed, double mark)> ExecuteDockerTestCaseAsync(
-            DockerGradingService dockerGrading,
-            Environment environment,
-            string testCasePath,
-            string testCaseName,
-            double maxMark,
-            string protocol,
-            CancellationToken ct)
-        {
-            _logger.LogInfo($"Executing Docker test case: {testCaseName} (max: {maxMark} points)");
-
-            try
-            {
-                // Read actions from Detail.xlsx User sheet
-                var actions = _testKitConfigService.GetTestCaseActions(testCasePath);
-                if (actions.Count == 0)
-                {
-                    _logger.LogWarning($"No actions found in Detail.xlsx for {testCaseName}");
-                    return (false, 0);
-                }
-                _logger.LogInfo($"Loaded {actions.Count} actions from Detail.xlsx");
-
-                // Read expected outputs from Client/Server sheets
-                var expectedOutputs = _testKitConfigService.GetExpectedOutputs(testCasePath);
-                _logger.LogInfo($"Loaded expected outputs for {expectedOutputs.Count} stages");
-
-                // Track captured outputs per stage
-                var clientOutputs = new Dictionary<int, string>();
-                var serverOutputs = new Dictionary<int, string>();
-                bool serverStarted = false;
-                bool clientStarted = false;
-
-                // Execute each action in order
-                foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
-                {
-                    ct.ThrowIfCancellationRequested();
-                    _logger.LogInfo($"[Stage {stage}] Executing: {action}" + (string.IsNullOrEmpty(input) ? "" : $" with input: '{input}'"));
-
-                    switch (action.ToUpperInvariant())
-                    {
-                        case "STARTSERVER":
-                            if (!serverStarted)
-                            {
-                                serverStarted = await dockerGrading.StartServerAsync(environment, ct);
-                                await Task.Delay(1000, ct); // Wait for server to start
-                                serverOutputs[stage] = await dockerGrading.GetServerOutputAsync(environment, ct);
-                                _logger.LogDebug($"Server output at stage {stage}: {serverOutputs[stage]}");
-                            }
-                            break;
-
-                        case "STARTCLIENT":
-                            if (!clientStarted)
-                            {
-                                clientStarted = await dockerGrading.StartClientAsync(environment, ct);
-                                await Task.Delay(1000, ct); // Wait for client to start
-                                clientOutputs[stage] = await dockerGrading.GetClientOutputAsync(environment, ct);
-                                _logger.LogDebug($"Client output at stage {stage}: {clientOutputs[stage]}");
-                            }
-                            break;
-
-                        case "INPUT":
-                            if (clientStarted)
-                            {
-                                var response = await dockerGrading.SendInputToClientAsync(environment, input, ct);
-                                await Task.Delay(500, ct); // Wait for processing
-                                clientOutputs[stage] = await dockerGrading.GetClientOutputAsync(environment, ct);
-                                serverOutputs[stage] = await dockerGrading.GetServerOutputAsync(environment, ct);
-                                _logger.LogDebug($"After input '{input}' - Client: {clientOutputs[stage]}, Server: {serverOutputs[stage]}");
-                            }
-                            break;
-
-                        case "CLOSECLIENT":
-                            // Client cleanup handled at end
-                            break;
-
-                        case "CLOSESERVER":
-                            // Server cleanup handled at end
-                            break;
-                    }
-                }
-
-                // Compare outputs and calculate points
-                double earnedPoints = 0;
-                int totalComparisons = 0;
-                int passedComparisons = 0;
-
-                foreach (var (stage, expected) in expectedOutputs)
-                {
-                    // Compare Client output
-                    if (!string.IsNullOrEmpty(expected.ClientConsole))
-                    {
-                        totalComparisons++;
-                        var actualClient = clientOutputs.TryGetValue(stage, out var co) ? co : "";
-                        if (CompareOutput(expected.ClientConsole, actualClient))
-                        {
-                            passedComparisons++;
-                            _logger.LogInfo($"[Stage {stage}] Client comparison: PASS");
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"[Stage {stage}] Client comparison: FAIL");
-                            _logger.LogDebug($"  Expected: '{expected.ClientConsole}'");
-                            _logger.LogDebug($"  Actual: '{actualClient}'");
-                        }
-                    }
-
-                    // Compare Server output
-                    if (!string.IsNullOrEmpty(expected.ServerConsole))
-                    {
-                        totalComparisons++;
-                        var actualServer = serverOutputs.TryGetValue(stage, out var so) ? so : "";
-                        if (CompareOutput(expected.ServerConsole, actualServer))
-                        {
-                            passedComparisons++;
-                            _logger.LogInfo($"[Stage {stage}] Server comparison: PASS");
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"[Stage {stage}] Server comparison: FAIL");
-                            _logger.LogDebug($"  Expected: '{expected.ServerConsole}'");
-                            _logger.LogDebug($"  Actual: '{actualServer}'");
-                        }
-                    }
-                }
-
-                // Calculate points
-                if (totalComparisons > 0)
-                {
-                    earnedPoints = (passedComparisons / (double)totalComparisons) * maxMark;
-                }
-
-                bool passed = passedComparisons == totalComparisons && totalComparisons > 0;
-                _logger.LogInfo($"Test case {testCaseName}: {passedComparisons}/{totalComparisons} comparisons passed, earned {earnedPoints:F2}/{maxMark} points");
-
-                return (passed, earnedPoints);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Test case execution failed: {ex.Message}");
-                return (false, 0);
-            }
-        }
-
-        /// <summary>
-        /// Compares expected output with actual output (flexible matching).
-        /// </summary>
-        private bool CompareOutput(string expected, string actual)
-        {
-            if (string.IsNullOrEmpty(expected)) return true;
-            if (string.IsNullOrEmpty(actual)) return false;
-
-            // Normalize for comparison
-            var normalizedExpected = NormalizeText(expected);
-            var normalizedActual = NormalizeText(actual);
-
-            // Check if actual contains expected
-            return normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Normalizes text for comparison.
-        /// </summary>
-        private string NormalizeText(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return "";
-            return System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
-        }
-
-        /// <summary>
-        /// Writes test case result to Excel file.
-        /// </summary>
-        private async Task WriteTestCaseResultAsync(
-            string tcResultDir, string testCaseName, bool passed, 
-            double earnedMark, double maxMark, CancellationToken ct)
-        {
-            try
-            {
-                var resultPath = Path.Combine(tcResultDir, $"{testCaseName}_Result.xlsx");
-                using (var workbook = new ClosedXML.Excel.XLWorkbook())
-                {
-                    var ws = workbook.Worksheets.Add("Result");
-                    ws.Cell(1, 1).Value = "TestCase";
-                    ws.Cell(1, 2).Value = "Passed";
-                    ws.Cell(1, 3).Value = "PointsAwarded";
-                    ws.Cell(1, 4).Value = "PointsPossible";
-                    ws.Row(1).Style.Font.Bold = true;
-
-                    ws.Cell(2, 1).Value = testCaseName;
-                    ws.Cell(2, 2).Value = passed ? "PASS" : "FAIL";
-                    ws.Cell(2, 3).Value = earnedMark;
-                    ws.Cell(2, 4).Value = maxMark;
-
-                    ws.Columns().AdjustToContents();
-                    workbook.SaveAs(resultPath);
-                }
-                _logger.LogDebug($"Test case result written to {resultPath}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to write test case result: {ex.Message}");
-            }
-
-            await Task.CompletedTask;
         }
 
         /// <summary>
@@ -1034,6 +783,31 @@ namespace SolutionGrader.UI.Services
             }
 
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Compares expected output with actual output (flexible matching).
+        /// </summary>
+        private bool CompareOutput(string? expected, string actual)
+        {
+            if (string.IsNullOrEmpty(expected)) return true;
+            if (string.IsNullOrEmpty(actual)) return false;
+
+            // Normalize for comparison
+            var normalizedExpected = NormalizeText(expected);
+            var normalizedActual = NormalizeText(actual);
+
+            // Check if actual contains expected
+            return normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Normalizes text for comparison.
+        /// </summary>
+        private string NormalizeText(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
         }
 
         /// <summary>
