@@ -316,10 +316,18 @@ namespace SolutionGrader.UI.Services
             _logger.LogDebug($"  Config ServerProjectName: {config.ServerProjectName ?? "(not set)"}, ClientProjectName: {config.ClientProjectName ?? "(not set)"}");
 
             // Set container names for this student
-            SetOrAddConfig(configs, EnvConfig.CodeContainerName, $"ag-server-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvConfig.GivenConsoleContainerName, $"ag-client-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvConfig.StudentQuestionName, $"ag-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvConfig.GivenConsoleAppName, $"ag-{student.StudentCode}-client");
+            // Container names and app names must match for pipe-based I/O to work
+            // The pipe is created at /tmp/{appName}_input_pipe
+            var serverContainerName = $"ag-server-{student.StudentCode}";
+            var clientContainerName = $"ag-client-{student.StudentCode}";
+            // App names should match container names for simplicity (pipe: /tmp/{appName}_input_pipe)
+            var serverAppName = serverContainerName;  // ag-server-{studentCode}
+            var clientAppName = clientContainerName;  // ag-client-{studentCode}
+            
+            SetOrAddConfig(configs, EnvConfig.CodeContainerName, serverContainerName);
+            SetOrAddConfig(configs, EnvConfig.GivenConsoleContainerName, clientContainerName);
+            SetOrAddConfig(configs, EnvConfig.StudentQuestionName, serverAppName);
+            SetOrAddConfig(configs, EnvConfig.GivenConsoleAppName, clientAppName);
             SetOrAddConfig(configs, EnvConfig.DatabaseName, $"DB_{student.StudentCode}");
 
             // Set port configurations
@@ -327,11 +335,14 @@ namespace SolutionGrader.UI.Services
             SetOrAddConfig(configs, EnvConfig.CodeContainerHostPort, config.CodeContainerHostPort.ToString());
 
             // Set file paths - with fallback to Meta/Given folder for missing components
+            // The Meta/Given folder in TestKit contains reference implementations:
+            // - Meta/Given/Server - reference server to use when student only provides client
+            // - Meta/Given/Client - reference client to use when student only provides server
             var metaPath = Path.Combine(testKitPath, "Meta", "Given");
             bool serverPathSet = false;
             bool clientPathSet = false;
             
-            // Handle Server path
+            // Handle Server path - first try student's, then fallback to Meta/Given/Server
             if (!string.IsNullOrEmpty(student.ServerDllPath))
             {
                 var serverDir = Path.GetDirectoryName(student.ServerDllPath)!;
@@ -342,9 +353,12 @@ namespace SolutionGrader.UI.Services
                 _logger.LogDebug($"  Docker server path: {dockerServerPath}");
                 serverPathSet = true;
             }
-            else if (config.HasServer)
+            else
             {
-                // Student should provide server but didn't - try Meta/Given/Server
+                // Student doesn't have server - try Meta/Given/Server as fallback
+                // This is used when:
+                // 1. config.HasServer is true but student didn't provide one
+                // 2. Student only provided client, need reference server from test kit
                 var metaServerPath = Path.Combine(metaPath, "Server");
                 _logger.LogDebug($"Server DLL not found for student, checking Meta/Given/Server: {metaServerPath}");
                 if (Directory.Exists(metaServerPath))
@@ -355,22 +369,22 @@ namespace SolutionGrader.UI.Services
                         var dockerServerPath = GetDockerDllPath(metaServerPath, metaServerDll);
                         SetOrAddConfig(configs, EnvConfig.CodeFilePath, metaServerPath);
                         SetOrAddConfig(configs, EnvConfig.DockerServerPath, dockerServerPath);
-                        _logger.LogInfo($"Using Meta/Given Server DLL: {metaServerDll}");
+                        _logger.LogInfo($"Using Meta/Given/Server DLL (reference): {metaServerDll}");
                         _logger.LogDebug($"  Docker server path: {dockerServerPath}");
                         serverPathSet = true;
                     }
                     else
                     {
-                        _logger.LogWarning($"No Server DLL found in Meta/Given/Server for project '{config.ServerProjectName}'");
+                        _logger.LogDebug($"No Server DLL found in Meta/Given/Server for project '{config.ServerProjectName}'");
                     }
                 }
                 else
                 {
-                    _logger.LogWarning($"Meta/Given/Server folder not found: {metaServerPath}");
+                    _logger.LogDebug($"Meta/Given/Server folder not found: {metaServerPath}");
                 }
             }
 
-            // Handle Client path
+            // Handle Client path - first try student's, then fallback to Meta/Given/Client
             if (!string.IsNullOrEmpty(student.ClientDllPath))
             {
                 var clientDir = Path.GetDirectoryName(student.ClientDllPath)!;
@@ -381,9 +395,12 @@ namespace SolutionGrader.UI.Services
                 _logger.LogDebug($"  Docker client path: {dockerClientPath}");
                 clientPathSet = true;
             }
-            else if (config.HasClient)
+            else
             {
-                // Student should provide client but didn't - try Meta/Given/Client
+                // Student doesn't have client - try Meta/Given/Client as fallback
+                // This is used when:
+                // 1. config.HasClient is true but student didn't provide one
+                // 2. Student only provided server, need reference client from test kit
                 var metaClientPath = Path.Combine(metaPath, "Client");
                 _logger.LogDebug($"Client DLL not found for student, checking Meta/Given/Client: {metaClientPath}");
                 if (Directory.Exists(metaClientPath))
@@ -394,34 +411,39 @@ namespace SolutionGrader.UI.Services
                         var dockerClientPath = GetDockerDllPath(metaClientPath, metaClientDll);
                         SetOrAddConfig(configs, EnvConfig.GivenConsolePath, metaClientPath);
                         SetOrAddConfig(configs, EnvConfig.DockerClientPath, dockerClientPath);
-                        _logger.LogInfo($"Using Meta/Given Client DLL: {metaClientDll}");
+                        _logger.LogInfo($"Using Meta/Given/Client DLL (reference): {metaClientDll}");
                         _logger.LogDebug($"  Docker client path: {dockerClientPath}");
                         clientPathSet = true;
                     }
                     else
                     {
-                        _logger.LogWarning($"No Client DLL found in Meta/Given/Client for project '{config.ClientProjectName}'");
+                        _logger.LogDebug($"No Client DLL found in Meta/Given/Client for project '{config.ClientProjectName}'");
                     }
                 }
                 else
                 {
-                    _logger.LogWarning($"Meta/Given/Client folder not found: {metaClientPath}");
+                    _logger.LogDebug($"Meta/Given/Client folder not found: {metaClientPath}");
                 }
             }
 
-            // Log warnings if required paths not set
+            // Log warnings if required paths not set - but only if config says they're needed
             if (config.HasServer && !serverPathSet)
             {
-                _logger.LogError($"CRITICAL: Server DLL path not set! Docker grading will fail.");
-                _logger.LogError($"  Expected project name: {config.ServerProjectName}");
-                _logger.LogError($"  Solution path searched: {student.SolutionPath}");
+                _logger.LogWarning($"Server DLL path not set. Grading may fail if server is required.");
+                _logger.LogWarning($"  Expected project name: {config.ServerProjectName}");
+                _logger.LogWarning($"  Checked: student solution and Meta/Given/Server");
             }
             if (config.HasClient && !clientPathSet)
             {
-                _logger.LogError($"CRITICAL: Client DLL path not set! Docker grading will fail.");
-                _logger.LogError($"  Expected project name: {config.ClientProjectName}");
-                _logger.LogError($"  Solution path searched: {student.SolutionPath}");
+                _logger.LogWarning($"Client DLL path not set. Grading may fail if client is required.");
+                _logger.LogWarning($"  Expected project name: {config.ClientProjectName}");
+                _logger.LogWarning($"  Checked: student solution and Meta/Given/Client");
             }
+            
+            // Log summary of what was configured
+            _logger.LogInfo($"Environment configuration summary:");
+            _logger.LogInfo($"  Server: {(serverPathSet ? "configured" : "NOT SET")}");
+            _logger.LogInfo($"  Client: {(clientPathSet ? "configured" : "NOT SET")}");
 
             // Set runtime folder from test kit
             var runtimesFolder = configs.GetValueOrDefault(EnvConfig.RuntimesFolder);

@@ -64,11 +64,12 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerServerPath, "");
-                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.StudentQuestionName, "ag-server") + "-server";
+                // App name should match container name for pipe to work: /tmp/{appName}_input_pipe
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.StudentQuestionName, containerName);
                 var port = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerInternalPort, "8000");
 
                 _logger.LogDebug($"Container: {containerName}");
-                _logger.LogDebug($"App name (for pipe): {appName}");
+                _logger.LogDebug($"App name (for pipe /tmp/{appName}_input_pipe): {appName}");
                 _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
                 _logger.LogDebug($"Internal port: {port}");
 
@@ -118,12 +119,13 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerClientPath, "");
-                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleAppName, "ag-client");
+                // App name should match container name for pipe to work: /tmp/{appName}_input_pipe
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleAppName, containerName);
                 // Client doesn't listen on a port - it connects to server
                 var port = "-1";
 
                 _logger.LogDebug($"Container: {containerName}");
-                _logger.LogDebug($"App name (for pipe): {appName}");
+                _logger.LogDebug($"App name (for pipe /tmp/{appName}_input_pipe): {appName}");
                 _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
 
                 if (string.IsNullOrEmpty(dllPath))
