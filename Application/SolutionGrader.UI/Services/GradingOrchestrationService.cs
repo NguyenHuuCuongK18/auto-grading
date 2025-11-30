@@ -323,8 +323,8 @@ namespace SolutionGrader.UI.Services
         /// 2. Client container - runs the student's client code  
         /// 3. Database container - MSSQL server for database operations
         /// 
-        /// Note: Containers are set up with files copied but NOT started.
-        /// They are started only when grading steps call StartServer/StartClient.
+        /// The containers are created and started but the applications inside
+        /// are NOT started until grading steps call StartServer/StartClient.
         /// This allows the network monitor to properly capture traffic.
         /// </summary>
         private async Task SetupContainersAsync(Environment environment, CancellationToken ct)
@@ -339,45 +339,150 @@ namespace SolutionGrader.UI.Services
                     throw new InvalidOperationException("Docker is not running. Please start Docker Desktop.");
                 }
 
-                // Log container configuration
+                // Get container configuration
                 var serverContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName);
                 var clientContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName);
                 var dbContainer = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseContainerName);
                 var network = TryGetConfig(environment.Configs, EnvironmentConfiguration.DockerNetwork);
+                
+                // Get image names
+                var codeImageName = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeImageName);
+                var dbImageName = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseImageName);
+                
+                // Get port configuration
+                var internalPort = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerInternalPort);
+                var hostPort = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerHostPort);
+                var dbInternalPort = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseContainerInternalPort);
+                var dbHostPort = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseContainerHostPort);
 
-                _logger.LogInfo($"Container setup:");
+                _logger.LogInfo($"Container setup configuration:");
                 _logger.LogInfo($"  - Server container: {serverContainer}");
                 _logger.LogInfo($"  - Client container: {clientContainer}");
                 _logger.LogInfo($"  - Database container: {dbContainer}");
                 _logger.LogInfo($"  - Docker network: {network}");
+                _logger.LogInfo($"  - Code image: {codeImageName}");
+                _logger.LogInfo($"  - Database image: {dbImageName}");
+                _logger.LogInfo($"  - Code ports: {hostPort}:{internalPort}");
+                _logger.LogInfo($"  - Database ports: {dbHostPort}:{dbInternalPort}");
 
-                // Verify all three containers are configured
-                if (string.IsNullOrEmpty(serverContainer))
-                    _logger.LogWarning("Server container name not configured");
-                if (string.IsNullOrEmpty(clientContainer))
-                    _logger.LogWarning("Client container name not configured");
-                if (string.IsNullOrEmpty(dbContainer))
-                    _logger.LogWarning("Database container name not configured");
+                // Create Docker network if not exists
+                if (!string.IsNullOrEmpty(network))
+                {
+                    try
+                    {
+                        _dockerExecutor.CreateNetwork(network);
+                        _logger.LogInfo($"Docker network '{network}' created/verified");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Network creation warning: {ex.Message}");
+                        // Network may already exist, continue
+                    }
+                }
 
-                // EnvironmentManagerInvoker is the bridge to the EnvironmentManager executable
-                // which handles Docker container lifecycle operations:
-                // - Creates Docker network for inter-container communication
-                // - Pulls required Docker images (code image for server/client, MSSQL image for database)
-                // - Creates and configures containers with proper port mappings and environment variables
-                // - Sets up database container with MSSQL server
-                // - Copies solution files to containers (but does NOT start executables)
-                // 
-                // The invoker serializes the environment configuration to JSON/Base64 and passes it
-                // to the EnvironmentManager executable which performs the actual Docker operations.
-                // This separation allows the UI to run on systems without direct Docker access.
+                // Setup Database container (container 1 of 3)
+                if (!string.IsNullOrEmpty(dbContainer) && !string.IsNullOrEmpty(dbImageName))
+                {
+                    _logger.LogInfo($"Setting up Database container: {dbContainer}");
+                    
+                    // Pull image if needed
+                    if (!_dockerExecutor.IsImageExists(dbImageName))
+                    {
+                        _logger.LogInfo($"Pulling database image: {dbImageName}");
+                        _dockerExecutor.PullImage(dbImageName);
+                    }
+                    
+                    // Create and run database container
+                    var dbUsername = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabaseUsername);
+                    var dbPassword = TryGetConfig(environment.Configs, EnvironmentConfiguration.DatabasePassword);
+                    
+                    var dbDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = dbImageName,
+                        ContainerName = dbContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(dbInternalPort, out var dbip) ? dbip : 1433,
+                        HostPort = int.TryParse(dbHostPort, out var dbhp) ? dbhp : 1434,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "ACCEPT_EULA", "Y" },
+                            { "SA_PASSWORD", dbPassword }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(dbDockerBase);
+                    _logger.LogInfo($"Database container '{dbContainer}' started");
+                    
+                    // Wait for database to be ready
+                    await Task.Delay(3000, ct);
+                }
+
+                // Setup Server container (container 2 of 3)
+                if (!string.IsNullOrEmpty(serverContainer) && !string.IsNullOrEmpty(codeImageName))
+                {
+                    _logger.LogInfo($"Setting up Server container: {serverContainer}");
+                    
+                    // Pull image if needed
+                    if (!_dockerExecutor.IsImageExists(codeImageName))
+                    {
+                        _logger.LogInfo($"Pulling code image: {codeImageName}");
+                        _dockerExecutor.PullImage(codeImageName);
+                    }
+                    
+                    var serverDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = codeImageName,
+                        ContainerName = serverContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(internalPort, out var sip) ? sip : 5000,
+                        HostPort = int.TryParse(hostPort, out var shp) ? shp : 5000,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "DOTNET_RUNNING_IN_CONTAINER", "true" },
+                            { "ASPNETCORE_URLS", $"http://+:{internalPort}" }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(serverDockerBase);
+                    _logger.LogInfo($"Server container '{serverContainer}' started");
+                }
+
+                // Setup Client container (container 3 of 3)
+                if (!string.IsNullOrEmpty(clientContainer) && !string.IsNullOrEmpty(codeImageName))
+                {
+                    _logger.LogInfo($"Setting up Client container: {clientContainer}");
+                    
+                    // Client container uses same code image but different port mapping
+                    // Client typically doesn't need to expose a port since it initiates connections
+                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + 1 : 5001;
+                    
+                    var clientDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
+                    {
+                        ImageName = codeImageName,
+                        ContainerName = clientContainer,
+                        DockerNetwork = network,
+                        ContainerPort = int.TryParse(internalPort, out var cip) ? cip : 5000,
+                        HostPort = clientPort,
+                        EnvironmentVariables = new Dictionary<string, string>
+                        {
+                            { "DOTNET_RUNNING_IN_CONTAINER", "true" }
+                        }
+                    };
+                    
+                    _dockerExecutor.RunContainer(clientDockerBase);
+                    _logger.LogInfo($"Client container '{clientContainer}' started");
+                }
+
+                // Also try the EnvironmentManagerInvoker as a fallback/additional setup
+                // This handles any additional configuration that may be needed
                 EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupContainer(environment, out var error);
                 
                 if (!string.IsNullOrEmpty(error))
                 {
-                    _logger.LogWarning($"Container setup warning: {error}");
+                    _logger.LogWarning($"EnvironmentManagerInvoker setup warning: {error}");
                 }
 
-                await Task.Delay(1000, ct); // Wait for containers to be ready
+                await Task.Delay(1000, ct); // Wait for all containers to be ready
                 _logger.LogInfo("Docker containers setup complete (3 containers: server, client, database)");
             }
             catch (Exception ex)
@@ -521,6 +626,14 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Executes a single test case by processing its actions from Detail.xlsx.
         /// Actions include: StartClient, StartServer, CloseClient, CloseServer, Input
+        /// 
+        /// This method actually deploys and runs the student's code in Docker containers:
+        /// 1. StartServer - Starts the server application inside the server container
+        /// 2. StartClient - Starts the client application inside the client container
+        /// 3. Input - Sends input to the appropriate container
+        /// 4. CloseClient/CloseServer - Stops the respective container
+        /// 
+        /// Network traffic is captured via the exposed host port for later validation.
         /// </summary>
         private async Task<bool> ExecuteTestCaseAsync(
             StudentSolution student,
@@ -532,42 +645,162 @@ namespace SolutionGrader.UI.Services
         {
             _logger.LogDebug($"Executing test case with {actions.Count} actions");
 
+            // Get container names from environment configuration
+            var serverContainerName = TryGetConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName);
+            var clientContainerName = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName);
+            var serverAppName = TryGetConfig(environment.Configs, EnvironmentConfiguration.StudentQuestionName) + "-server";
+            var clientAppName = TryGetConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleAppName);
+            var serverDllPath = TryGetConfig(environment.Configs, EnvironmentConfiguration.DockerServerPath);
+            var clientDllPath = TryGetConfig(environment.Configs, EnvironmentConfiguration.DockerClientPath);
+            var internalPort = config.CodeContainerInternalPort.ToString();
+
+            // Log configuration for debugging
+            _logger.LogInfo($"Test case execution configuration:");
+            _logger.LogInfo($"  - Server container: {serverContainerName}");
+            _logger.LogInfo($"  - Client container: {clientContainerName}");
+            _logger.LogInfo($"  - Server DLL path: {serverDllPath}");
+            _logger.LogInfo($"  - Client DLL path: {clientDllPath}");
+            _logger.LogInfo($"  - Internal port: {internalPort}");
+
             try
             {
                 foreach (var (stage, input, action) in actions)
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    _logger.LogDebug($"Stage {stage}: {action} (Input: '{input}')");
+                    _logger.LogInfo($"Stage {stage}: Executing action '{action}' with input '{input}'");
 
                     switch (action.ToUpperInvariant())
                     {
-                        case "STARTCLIENT":
-                            _logger.LogInfo($"Starting client container for {student.StudentCode}");
-                            // In production, this would start the client container
-                            // _dockerExecutor.StartExistedContainer(clientContainerName);
-                            break;
-
                         case "STARTSERVER":
-                            _logger.LogInfo($"Starting server container for {student.StudentCode}");
-                            // In production, this would start the server container
-                            // _dockerExecutor.StartExistedContainer(serverContainerName);
+                            // Start the server application inside the server container
+                            if (!string.IsNullOrEmpty(serverContainerName) && !string.IsNullOrEmpty(serverDllPath))
+                            {
+                                _logger.LogInfo($"Starting server in container {serverContainerName}");
+                                
+                                // First, ensure the container is running
+                                if (_dockerExecutor.IsContainerExist(serverContainerName))
+                                {
+                                    _dockerExecutor.StartExistedContainer(serverContainerName);
+                                    
+                                    // Wait for container to start
+                                    await Task.Delay(1000, ct);
+                                    
+                                    // Start the .NET application inside the container
+                                    // Using the WaitForPublishConsoleFileDeployment method which starts and waits
+                                    bool serverStarted = _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                        serverContainerName, 
+                                        serverAppName, 
+                                        serverDllPath, 
+                                        internalPort,
+                                        maxWaitTimeMs: 30000);
+                                    
+                                    if (serverStarted)
+                                    {
+                                        _logger.LogInfo($"Server started successfully in {serverContainerName}");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning($"Server may not have started properly in {serverContainerName}");
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogError($"Server container {serverContainerName} does not exist");
+                                    return false;
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Server container or DLL path not configured, skipping StartServer");
+                            }
                             break;
 
-                        case "CLOSECLIENT":
-                            _logger.LogInfo($"Closing client container for {student.StudentCode}");
-                            // In production, this would stop the client container
-                            break;
-
-                        case "CLOSESERVER":
-                            _logger.LogInfo($"Closing server container for {student.StudentCode}");
-                            // In production, this would stop the server container
+                        case "STARTCLIENT":
+                            // Start the client application inside the client container
+                            if (!string.IsNullOrEmpty(clientContainerName) && !string.IsNullOrEmpty(clientDllPath))
+                            {
+                                _logger.LogInfo($"Starting client in container {clientContainerName}");
+                                
+                                // First, ensure the container is running
+                                if (_dockerExecutor.IsContainerExist(clientContainerName))
+                                {
+                                    _dockerExecutor.StartExistedContainer(clientContainerName);
+                                    
+                                    // Wait for container to start
+                                    await Task.Delay(1000, ct);
+                                    
+                                    // Start the .NET application inside the container
+                                    bool clientStarted = _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                        clientContainerName, 
+                                        clientAppName ?? "ag-client", 
+                                        clientDllPath, 
+                                        "-1", // Client may not listen on a port
+                                        maxWaitTimeMs: 30000);
+                                    
+                                    if (clientStarted)
+                                    {
+                                        _logger.LogInfo($"Client started successfully in {clientContainerName}");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning($"Client may not have started properly in {clientContainerName}");
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogError($"Client container {clientContainerName} does not exist");
+                                    return false;
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Client container or DLL path not configured, skipping StartClient");
+                            }
                             break;
 
                         case "INPUT":
-                            _logger.LogInfo($"Sending input to container: '{input}'");
-                            // In production, this would send input via Docker exec
-                            // _dockerExecutor.SendInputToContainer(containerName, appName, input);
+                            // Send input to the client container
+                            if (!string.IsNullOrEmpty(clientContainerName) && !string.IsNullOrEmpty(input))
+                            {
+                                _logger.LogInfo($"Sending input to client container: '{input}'");
+                                _dockerExecutor.SendInputToContainer(clientContainerName, clientAppName ?? "ag-client", input);
+                                
+                                // Wait for the input to be processed
+                                await Task.Delay(500, ct);
+                            }
+                            break;
+
+                        case "CLOSECLIENT":
+                            // Stop the client container
+                            if (!string.IsNullOrEmpty(clientContainerName))
+                            {
+                                _logger.LogInfo($"Stopping client container {clientContainerName}");
+                                try
+                                {
+                                    _dockerExecutor.StopContainer(clientContainerName);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning($"Error stopping client container: {ex.Message}");
+                                }
+                            }
+                            break;
+
+                        case "CLOSESERVER":
+                            // Stop the server container
+                            if (!string.IsNullOrEmpty(serverContainerName))
+                            {
+                                _logger.LogInfo($"Stopping server container {serverContainerName}");
+                                try
+                                {
+                                    _dockerExecutor.StopContainer(serverContainerName);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning($"Error stopping server container: {ex.Message}");
+                                }
+                            }
                             break;
 
                         default:
@@ -575,11 +808,31 @@ namespace SolutionGrader.UI.Services
                             break;
                     }
 
-                    // Small delay between actions
-                    await Task.Delay(100, ct);
+                    // Allow time for Docker operations to complete
+                    await Task.Delay(200, ct);
                 }
 
-                // For now, simulate success - actual implementation would compare outputs
+                // Get container logs for debugging
+                if (!string.IsNullOrEmpty(serverContainerName))
+                {
+                    var serverLogs = _dockerExecutor.GetContainerLogs(serverContainerName);
+                    if (!string.IsNullOrEmpty(serverLogs))
+                    {
+                        _logger.LogDebug($"Server logs:\n{serverLogs}");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(clientContainerName))
+                {
+                    var clientLogs = _dockerExecutor.GetContainerLogs(clientContainerName);
+                    if (!string.IsNullOrEmpty(clientLogs))
+                    {
+                        _logger.LogDebug($"Client logs:\n{clientLogs}");
+                    }
+                }
+
+                // TODO: Compare outputs with expected values from test kit
+                // For now, consider the test case passed if all actions completed
                 return true;
             }
             catch (Exception ex)

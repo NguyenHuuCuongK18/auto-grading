@@ -139,9 +139,7 @@
                     <StackPanel Grid.Row="1" Grid.Column="0">
                         <CheckBox x:Name="chkHasClient" 
                                   Content="Has Client Component" 
-                                  IsChecked="True"
-                                  Checked="ChkHasClient_CheckedChanged"
-                                  Unchecked="ChkHasClient_CheckedChanged"/>
+                                  IsChecked="True"/>
                         <StackPanel Orientation="Horizontal" Margin="20,8,0,0">
                             <TextBlock Text="Client Project Name:" 
                                        VerticalAlignment="Center" 
@@ -150,7 +148,8 @@
                                      Text="Project12" 
                                      Width="120" 
                                      Height="25"
-                                     VerticalContentAlignment="Center"/>
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="Enter the client project name (e.g., Project12). The DLL with this name will be searched for."/>
                         </StackPanel>
                     </StackPanel>
                     
@@ -158,9 +157,7 @@
                     <StackPanel Grid.Row="1" Grid.Column="2">
                         <CheckBox x:Name="chkHasServer" 
                                   Content="Has Server Component" 
-                                  IsChecked="True"
-                                  Checked="ChkHasServer_CheckedChanged"
-                                  Unchecked="ChkHasServer_CheckedChanged"/>
+                                  IsChecked="True"/>
                         <StackPanel Orientation="Horizontal" Margin="20,8,0,0">
                             <TextBlock Text="Server Project Name:" 
                                        VerticalAlignment="Center" 
@@ -169,7 +166,8 @@
                                      Text="Project11" 
                                      Width="120" 
                                      Height="25"
-                                     VerticalContentAlignment="Center"/>
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="Enter the server project name (e.g., Project11). The DLL with this name will be searched for."/>
                         </StackPanel>
                     </StackPanel>
                     

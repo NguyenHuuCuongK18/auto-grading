@@ -123,15 +123,18 @@ namespace SolutionGrader.UI
                 var students = _studentDiscovery.DiscoverStudents(_configuration.SubmitFolderPath, _configuration);
                 
                 _students.Clear();
-                cmbPaperFilter.Items.Clear();
-                cmbPaperFilter.Items.Add("All");
-                cmbPaperFilter.SelectedIndex = 0;
+                _filteredStudents.Clear();
+                cmbPaperSelection.Items.Clear();
+                
+                // First item is instruction/placeholder
+                cmbPaperSelection.Items.Add("-- Select Paper --");
+                cmbPaperSelection.SelectedIndex = 0;
                 
                 // Get unique paper numbers
                 var paperNumbers = students.Select(s => s.PaperNo).Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : 0);
                 foreach (var paper in paperNumbers)
                 {
-                    cmbPaperFilter.Items.Add(paper);
+                    cmbPaperSelection.Items.Add($"Paper {paper}");
                 }
                 
                 // Load test kit configs for each paper to get max marks
@@ -158,9 +161,9 @@ namespace SolutionGrader.UI
                     }
                     
                     _students.Add(student);
+                    _filteredStudents.Add(student);  // Show all students initially
                 }
                 
-                ApplyFilter();
                 UpdateStatusBar();
                 
                 _logger.LogInfo($"Loaded {students.Count} students");
@@ -172,23 +175,56 @@ namespace SolutionGrader.UI
             }
         }
 
-        private void ApplyFilter()
+        /// <summary>
+        /// When a paper is selected from the dropdown, select all students with that paper number.
+        /// This allows multi-selection of different groups by selecting papers multiple times.
+        /// </summary>
+        private void PaperSelection_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
-            var selectedPaper = cmbPaperFilter.SelectedItem?.ToString() ?? "All";
+            if (cmbPaperSelection.SelectedIndex <= 0) return; // Skip placeholder
             
-            _filteredStudents.Clear();
-            foreach (var student in _students)
+            var selectedItem = cmbPaperSelection.SelectedItem?.ToString();
+            if (string.IsNullOrEmpty(selectedItem) || !selectedItem.StartsWith("Paper ")) return;
+            
+            var paperNo = selectedItem.Replace("Paper ", "");
+            
+            // Select all students with this paper number
+            foreach (var student in _students.Where(s => s.PaperNo == paperNo))
             {
-                if (selectedPaper == "All" || student.PaperNo == selectedPaper)
-                {
-                    _filteredStudents.Add(student);
-                }
+                student.IsSelected = true;
             }
+            
+            dgStudents.Items.Refresh();
+            _logger.LogInfo($"Selected all students with Paper {paperNo}");
+            
+            // Reset dropdown to placeholder to allow re-selection
+            cmbPaperSelection.SelectedIndex = 0;
         }
 
-        private void PaperFilter_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        /// <summary>
+        /// Select all visible students
+        /// </summary>
+        private void SelectAll_Click(object sender, RoutedEventArgs e)
         {
-            ApplyFilter();
+            foreach (var student in _filteredStudents)
+            {
+                student.IsSelected = true;
+            }
+            dgStudents.Items.Refresh();
+            _logger.LogInfo("Selected all students");
+        }
+
+        /// <summary>
+        /// Unselect all students
+        /// </summary>
+        private void UnselectAll_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var student in _students)
+            {
+                student.IsSelected = false;
+            }
+            dgStudents.Items.Refresh();
+            _logger.LogInfo("Unselected all students");
         }
 
         private async void StartAll_Click(object sender, RoutedEventArgs e)
@@ -386,7 +422,7 @@ namespace SolutionGrader.UI
                 ResetStudent(student);
             }
             
-            ApplyFilter();
+            dgStudents.Items.Refresh();
             UpdateStatusBar();
             _logger.LogInfo("All statuses reset");
         }
@@ -404,7 +440,7 @@ namespace SolutionGrader.UI
                 ResetStudent(student);
             }
             
-            ApplyFilter();
+            dgStudents.Items.Refresh();
             UpdateStatusBar();
             _logger.LogInfo("Selected statuses reset");
         }
