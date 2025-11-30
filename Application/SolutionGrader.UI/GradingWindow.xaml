@@ -65,49 +65,73 @@
         <!-- Control Section -->
         <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1" Padding="15">
             <StackPanel Orientation="Horizontal">
-                <TextBlock Text="Filter by Paper:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <ComboBox x:Name="cmbPaperFilter" 
-                          Width="80" 
+                <!-- Paper Selection - Selecting a paper will select all students with that paper number -->
+                <TextBlock Text="Select by Paper:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="SemiBold"/>
+                <ComboBox x:Name="cmbPaperSelection" 
+                          Width="100" 
                           VerticalAlignment="Center"
-                          SelectionChanged="PaperFilter_SelectionChanged"/>
+                          SelectionChanged="PaperSelection_SelectionChanged"
+                          ToolTip="Select a paper to select all students with that paper number"/>
+                
+                <!-- Select/Unselect All Buttons -->
+                <Button x:Name="btnSelectAll" 
+                        Content="☑ Select All" 
+                        Background="#6C757D" Foreground="White"
+                        Style="{StaticResource ActionButton}" 
+                        Margin="10,0,0,0"
+                        Click="SelectAll_Click"
+                        ToolTip="Select all visible students"/>
+                
+                <Button x:Name="btnUnselectAll" 
+                        Content="☐ Unselect All" 
+                        Background="#6C757D" Foreground="White"
+                        Style="{StaticResource ActionButton}"
+                        Click="UnselectAll_Click"
+                        ToolTip="Unselect all students"/>
                 
                 <Button x:Name="btnStartAll" 
                         Content="▶ Start All" 
                         Background="#28A745" Foreground="White"
                         Style="{StaticResource ActionButton}" 
                         Margin="30,0,0,0"
-                        Click="StartAll_Click"/>
+                        Click="StartAll_Click"
+                        ToolTip="Start grading all students"/>
                 
                 <Button x:Name="btnStartSelected" 
                         Content="▶ Start Selected" 
                         Background="#17A2B8" Foreground="White"
                         Style="{StaticResource ActionButton}"
-                        Click="StartSelected_Click"/>
+                        Click="StartSelected_Click"
+                        ToolTip="Start grading only selected students"/>
                 
                 <Button x:Name="btnPause" 
                         Content="⏸ Pause" 
                         Background="#FFC107" Foreground="Black"
                         Style="{StaticResource ActionButton}"
-                        Click="Pause_Click"/>
+                        Click="Pause_Click"
+                        ToolTip="Pause the grading process"/>
                 
                 <Button x:Name="btnResume" 
                         Content="▶ Resume" 
                         Background="#20C997" Foreground="White"
                         Style="{StaticResource ActionButton}"
-                        Click="Resume_Click"/>
+                        Click="Resume_Click"
+                        ToolTip="Resume paused grading"/>
                 
                 <Button x:Name="btnResetAll" 
                         Content="↻ Reset All" 
                         Background="#DC3545" Foreground="White"
                         Style="{StaticResource ActionButton}" 
                         Margin="30,0,0,0"
-                        Click="ResetAll_Click"/>
+                        Click="ResetAll_Click"
+                        ToolTip="Reset all student grading statuses"/>
                 
                 <Button x:Name="btnResetSelected" 
                         Content="↻ Reset Selected" 
                         Background="#FD7E14" Foreground="White"
                         Style="{StaticResource ActionButton}"
-                        Click="ResetSelected_Click"/>
+                        Click="ResetSelected_Click"
+                        ToolTip="Reset selected student grading statuses"/>
             </StackPanel>
         </Border>
         
