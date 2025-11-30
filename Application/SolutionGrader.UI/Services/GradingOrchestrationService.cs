@@ -36,6 +36,27 @@ namespace SolutionGrader.UI.Services
         private CancellationTokenSource? _cancellationTokenSource;
         private readonly object _lockObject = new object();
         
+        // Constants for configuration
+        /// <summary>
+        /// Indicates no port is required (e.g., for client applications that initiate connections)
+        /// </summary>
+        private const string NoPortRequired = "-1";
+        
+        /// <summary>
+        /// Port offset for client container to avoid conflicts with server container
+        /// </summary>
+        private const int ClientPortOffset = 1;
+        
+        /// <summary>
+        /// Default timeout for database readiness check in milliseconds
+        /// </summary>
+        private const int DatabaseReadinessTimeoutMs = 5000;
+        
+        /// <summary>
+        /// Interval for checking database readiness in milliseconds
+        /// </summary>
+        private const int DatabaseReadinessCheckIntervalMs = 500;
+        
         // Events for UI updates
         public event EventHandler<StudentSolution>? StudentGradingStarted;
         public event EventHandler<StudentSolution>? StudentGradingCompleted;
@@ -414,7 +435,9 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"Database container '{dbContainer}' started");
                     
                     // Wait for database to be ready
-                    await Task.Delay(3000, ct);
+                    // Using configurable timeout for database readiness
+                    _logger.LogInfo($"Waiting for database to be ready (timeout: {DatabaseReadinessTimeoutMs}ms)...");
+                    await Task.Delay(DatabaseReadinessTimeoutMs, ct);
                 }
 
                 // Setup Server container (container 2 of 3)
@@ -454,7 +477,8 @@ namespace SolutionGrader.UI.Services
                     
                     // Client container uses same code image but different port mapping
                     // Client typically doesn't need to expose a port since it initiates connections
-                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + 1 : 5001;
+                    // Using ClientPortOffset to avoid port conflicts with server container
+                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + ClientPortOffset : 5001;
                     
                     var clientDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
                     {
@@ -470,7 +494,7 @@ namespace SolutionGrader.UI.Services
                     };
                     
                     _dockerExecutor.RunContainer(clientDockerBase);
-                    _logger.LogInfo($"Client container '{clientContainer}' started");
+                    _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
                 }
 
                 // Also try the EnvironmentManagerInvoker as a fallback/additional setup
@@ -785,7 +809,7 @@ namespace SolutionGrader.UI.Services
                                         clientContainerName, 
                                         clientAppName ?? "ag-client", 
                                         clientDllPath, 
-                                        "-1", // Client may not listen on a port
+                                        NoPortRequired, // Client typically doesn't listen on a port - it initiates connections
                                         maxWaitTimeMs: 30000);
                                     
                                     if (clientStarted)
