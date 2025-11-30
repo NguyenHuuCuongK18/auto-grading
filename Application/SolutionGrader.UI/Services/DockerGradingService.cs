@@ -58,25 +58,39 @@ namespace SolutionGrader.UI.Services
         /// </summary>
         public async Task<bool> StartServerAsync(Environment environment, CancellationToken ct = default)
         {
-            _logger.LogInfo("Starting server application...");
+            _logger.LogInfo("Starting server application in container...");
 
             try
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerServerPath, "");
 
+                _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
+
                 if (string.IsNullOrEmpty(dllPath))
                 {
-                    _logger.LogError("Server DLL path not configured");
+                    // Log all available configs for debugging
+                    _logger.LogError("Server DLL path not configured in environment!");
+                    _logger.LogDebug("Available environment configs:");
+                    foreach (var kvp in environment.Configs.Take(20))
+                    {
+                        _logger.LogDebug($"  {kvp.Key}: {kvp.Value}");
+                    }
                     return false;
                 }
 
                 // Start the dotnet application in the container
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName}...");
                 var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
                 
                 if (result)
                 {
-                    _logger.LogInfo($"Server started in container {containerName}");
+                    _logger.LogInfo($"Server started successfully in container {containerName}");
+                }
+                else
+                {
+                    _logger.LogError($"Server failed to start in container {containerName}");
                 }
 
                 return result;
@@ -94,25 +108,39 @@ namespace SolutionGrader.UI.Services
         /// </summary>
         public async Task<bool> StartClientAsync(Environment environment, CancellationToken ct = default)
         {
-            _logger.LogInfo("Starting client application...");
+            _logger.LogInfo("Starting client application in container...");
 
             try
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerClientPath, "");
 
+                _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
+
                 if (string.IsNullOrEmpty(dllPath))
                 {
-                    _logger.LogError("Client DLL path not configured");
+                    // Log all available configs for debugging
+                    _logger.LogError("Client DLL path not configured in environment!");
+                    _logger.LogDebug("Available environment configs:");
+                    foreach (var kvp in environment.Configs.Take(20))
+                    {
+                        _logger.LogDebug($"  {kvp.Key}: {kvp.Value}");
+                    }
                     return false;
                 }
 
                 // Start the dotnet application in the container
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName}...");
                 var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
                 
                 if (result)
                 {
-                    _logger.LogInfo($"Client started in container {containerName}");
+                    _logger.LogInfo($"Client started successfully in container {containerName}");
+                }
+                else
+                {
+                    _logger.LogError($"Client failed to start in container {containerName}");
                 }
 
                 return result;
