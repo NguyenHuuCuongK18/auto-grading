@@ -343,25 +343,26 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                         knownClientPort = detectedClientPort;
                         firstSynSeen = true;
                         Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} First SYN detected! Client port: {detectedClientPort}, Server port: {_serverPort}");
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} From now on, only accepting traffic between ports {detectedClientPort} <-> {_serverPort}");
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Traffic between {detectedClientPort} <-> {_serverPort} will be logged for grading");
                     }
                 }
             }
             
-            // Once we know the client port, filter out anything that doesn't involve our client-server pair
+            // Once we know the client port, exclude traffic that doesn't involve our client-server pair from grading/logging
+            // We still receive all traffic, but only log traffic between our known client and server
             if (knownClientPort > 0)
             {
                 bool involvesKnownClient = (srcPort == knownClientPort || dstPort == knownClientPort);
                 bool involvesServer = (srcPort == _serverPort || dstPort == _serverPort);
                 
-                // Accept only traffic between our known client and server
-                // Filter out everything else (Windows/Docker health checks)
+                // Skip logging/grading for traffic that doesn't involve our client-server pair
+                // This filters out Windows/Docker health check traffic from the grading results
                 if (!involvesKnownClient || !involvesServer)
                 {
-                    // This traffic doesn't involve our client-server pair - it's a health check
+                    // This traffic doesn't involve our client-server pair - skip logging for grading
                     if (!tcpPacket.Reset) // Don't spam logs with RST packets
                     {
-                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Filtered non-client traffic: {srcPort}->{dstPort} (our client: {knownClientPort}, our server: {_serverPort})");
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Skipped non-graded traffic: {srcPort}->{dstPort} (grading only: {knownClientPort} <-> {_serverPort})");
                     }
                     return;
                 }
