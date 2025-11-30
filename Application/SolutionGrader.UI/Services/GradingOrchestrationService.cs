@@ -504,6 +504,9 @@ namespace SolutionGrader.UI.Services
         /// The containers are created and started but the applications inside
         /// are NOT started until grading steps call StartServer/StartClient.
         /// This allows the network monitor to properly capture traffic.
+        /// 
+        /// IMPORTANT: This method first removes any existing containers with the same names
+        /// to avoid "port already in use" errors.
         /// </summary>
         private async Task SetupContainersAsync(Environment environment, CancellationToken ct)
         {
@@ -542,6 +545,11 @@ namespace SolutionGrader.UI.Services
                 _logger.LogInfo($"  - Database image: {dbImageName}");
                 _logger.LogInfo($"  - Code ports: {hostPort}:{internalPort}");
                 _logger.LogInfo($"  - Database ports: {dbHostPort}:{dbInternalPort}");
+
+                // IMPORTANT: Remove any existing containers first to avoid port conflicts
+                // This prevents "port already in use" errors from previous runs
+                _logger.LogInfo("Cleaning up any existing containers to avoid port conflicts...");
+                await CleanupExistingContainersAsync(serverContainer, clientContainer, dbContainer, ct);
 
                 // Create Docker network if not exists
                 if (!string.IsNullOrEmpty(network))
@@ -1899,6 +1907,45 @@ namespace SolutionGrader.UI.Services
             }
 
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Cleans up existing containers BEFORE setting up new ones.
+        /// This is called at the start of SetupContainersAsync to prevent port conflicts.
+        /// </summary>
+        private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
+        {
+            try
+            {
+                // Remove any existing containers with the same names to avoid port conflicts
+                // Using force removal (docker rm -f) which will stop and remove the container
+                
+                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
+                {
+                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
+                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
+                {
+                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
+                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
+                {
+                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
+                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
+                }
+
+                // Wait for Docker to release resources
+                await Task.Delay(500, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error cleaning up existing containers: {ex.Message}");
+                // Continue with setup even if cleanup fails
+            }
         }
 
         /// <summary>
