@@ -449,7 +449,7 @@ namespace SolutionGrader.Core.Services
                 delayMs = Math.Min(delayMs * 2, maxDelayMs);
             }
             
-            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Port {port} may still be in use after {maxWaitSeconds}s wait");
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Port {port} may still be in use after {maxWaitSeconds} seconds wait");
             return false;
         }
 

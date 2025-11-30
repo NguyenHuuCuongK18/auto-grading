@@ -468,7 +468,8 @@ namespace SolutionGrader.UI.Services
             }
 
             // ALL-OR-NOTHING policy: If all comparisons pass, award full marks; otherwise 0
-            // This matches the Lib folder's ExcelDetailLogService.ComputeCaseTotals behavior
+            // This matches the Lib folder's SolutionGrader.Core.Services.ExcelDetailLogService.ComputeCaseTotals behavior
+            // See: Lib/SolutionGrader.Core/Services/ExcelDetailLogService.cs, method ComputeCaseTotals()
             bool passed = passedComparisons == totalComparisons && totalComparisons > 0;
             double earnedPoints = passed ? maxMark : 0;
             
