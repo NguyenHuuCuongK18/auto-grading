@@ -3,7 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- Nullable disabled - file handling utilities with runtime-validated data -->
+    <Nullable>disable</Nullable>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 

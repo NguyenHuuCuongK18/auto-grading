@@ -334,7 +334,12 @@ namespace SolutionGrader.Core.Services
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    stepCts.CancelAfter(TimeSpan.FromSeconds(10));
+                    
+                    // Different timeout for different step types
+                    // CLIENT_INPUT needs more time because it waits for client to process input and respond
+                    var isClientInputStep = string.Equals(step.Action, ActionKeywords.ClientInput, StringComparison.OrdinalIgnoreCase);
+                    var stepTimeout = isClientInputStep ? TimeSpan.FromSeconds(20) : TimeSpan.FromSeconds(10);
+                    stepCts.CancelAfter(stepTimeout);
                     
                     // Identify action types for tracking
                     var isServerStart = string.Equals(step.Action, ActionKeywords.ServerStart, StringComparison.OrdinalIgnoreCase);
@@ -479,8 +484,10 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Step 6: Cleanup processes and network monitor
-        /// - Stop all running processes
+        /// - Stop all running processes (but NOT Docker containers - those are reused)
+        /// - Clear console output buffers for next test case
         /// - Stop network monitor (finalizes captured data)
+        /// - Clear network captures for next test case
         /// </summary>
         public async Task<(bool Success, string Message)> CleanupAsync()
         {
@@ -489,13 +496,24 @@ namespace SolutionGrader.Core.Services
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 6] Cleaning up processes...");
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {LoggingKeywords.MSG_TESTCASE_CLEANING_PROCESSES}");
+                
+                // Stop all processes but keep Docker containers running for reuse
                 try { await _proc.StopAllAsync(); } catch { }
+                
+                // Clear console buffers for next test case - each test case should start fresh
+                try { _proc.ClearConsoleBuffers(); } catch { }
                 
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
                     try { await _networkMonitor.StopAsync(); } catch { }
+                    
+                    // Clear network captures for next test case
+                    try { _networkMonitor.ClearCaptures(); } catch { }
                 }
+                
+                // Clear RunContext network captures
+                try { _run.ClearNetworkCaptures(); } catch { }
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 6] Cleanup completed");
                 return (true, "Cleanup successful");

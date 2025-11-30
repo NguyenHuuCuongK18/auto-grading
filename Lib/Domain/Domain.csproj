@@ -3,7 +3,12 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <!-- 
+      Nullable disabled for Domain entities.
+      These are data transfer objects populated via deserialization (JSON, Excel).
+      Null safety is handled at the deserialization boundary, not in the type system.
+    -->
+    <Nullable>disable</Nullable>
   </PropertyGroup>
 
 </Project>
