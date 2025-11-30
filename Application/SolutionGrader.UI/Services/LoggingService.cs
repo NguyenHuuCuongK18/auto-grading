@@ -24,9 +24,26 @@ namespace SolutionGrader.UI.Services
         void SetStudentContext(string? studentCode);
         
         /// <summary>
+        /// Sets the current student context for logging with paper number organization.
+        /// Logs will be redirected to the paper-organized student-specific log folder.
+        /// Format: {PaperNo}/Log_{StudentCode}_{Date}
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing logs (e.g., "1", "2")</param>
+        void SetStudentContext(string? studentCode, string? paperNo);
+        
+        /// <summary>
         /// Gets all logs for display in the UI.
         /// </summary>
         string GetAllLogs();
+        
+        /// <summary>
+        /// Gets the result folder path for a student.
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing (optional)</param>
+        /// <returns>Path to the student's result folder</returns>
+        string GetStudentResultFolder(string studentCode, string? paperNo = null);
         
         /// <summary>
         /// Event raised when a new log entry is added.
@@ -65,7 +82,10 @@ namespace SolutionGrader.UI.Services
     /// 
     /// Log structure:
     /// - {SaveFolder}/Logs/System_{DateTime}.log - System-wide logs
-    /// - {SaveFolder}/Logs/Log_{StudentCode}_{yyyyMMdd}/grading_{HHmmss}.log - Per-student logs
+    /// - {SaveFolder}/Logs/{PaperNo}/Log_{StudentCode}_{yyyyMMdd}/grading_{HHmmss}.log - Per-student logs organized by paper
+    /// 
+    /// The paper number organization (1/, 2/, etc.) ensures logs are grouped by exam paper,
+    /// making it easier to review and debug grading for specific exam versions.
     /// </summary>
     public class LoggingService : ILoggingService, IDisposable
     {
@@ -73,6 +93,7 @@ namespace SolutionGrader.UI.Services
         private readonly StringBuilder _allLogs = new StringBuilder();
         private readonly object _lock = new object();
         private string? _currentStudentCode;
+        private string? _currentPaperNo;
         private StreamWriter? _currentStudentLogWriter;
         private StreamWriter? _systemLogWriter;
         private bool _disposed;
@@ -94,9 +115,11 @@ namespace SolutionGrader.UI.Services
                 Directory.CreateDirectory(logDir);
             }
 
-            // Create system log file
+            // Create system log file with FileShare.ReadWrite to allow deletion while app is running
             var systemLogPath = Path.Combine(logDir, $"System_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-            _systemLogWriter = new StreamWriter(systemLogPath, true, Encoding.UTF8)
+            _systemLogWriter = new StreamWriter(
+                new FileStream(systemLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                Encoding.UTF8)
             {
                 AutoFlush = true
             };
@@ -104,6 +127,18 @@ namespace SolutionGrader.UI.Services
 
         /// <inheritdoc/>
         public void SetStudentContext(string? studentCode)
+        {
+            SetStudentContext(studentCode, null);
+        }
+
+        /// <summary>
+        /// Sets the current student context for logging with paper number.
+        /// Logs will be redirected to the student-specific log folder organized by paper.
+        /// Format: {PaperNo}/Log_{StudentCode}_{Date}
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing logs (e.g., "1", "2")</param>
+        public void SetStudentContext(string? studentCode, string? paperNo)
         {
             lock (_lock)
             {
@@ -113,24 +148,44 @@ namespace SolutionGrader.UI.Services
                 _currentStudentLogWriter = null;
 
                 _currentStudentCode = studentCode;
+                _currentPaperNo = paperNo;
 
                 if (!string.IsNullOrEmpty(studentCode))
                 {
-                    // Create student-specific log folder and file
-                    // Format: Log_{StudentCode}_{Date} - matching the requirements
-                    var studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    // Create student-specific log folder and file organized by paper number
+                    // Format: {PaperNo}/Log_{StudentCode}_{Date} - matching the requirements
+                    string studentLogDir;
+                    if (!string.IsNullOrEmpty(paperNo))
+                    {
+                        // Organize by paper number: e.g., "1/Log_cuongnhhe186494_20251130"
+                        var paperDir = Path.Combine(_baseLogPath, "Logs", paperNo);
+                        if (!Directory.Exists(paperDir))
+                        {
+                            Directory.CreateDirectory(paperDir);
+                        }
+                        studentLogDir = Path.Combine(paperDir, $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    }
+                    else
+                    {
+                        // Fallback to non-paper-organized structure
+                        studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    }
+
                     if (!Directory.Exists(studentLogDir))
                     {
                         Directory.CreateDirectory(studentLogDir);
                     }
 
+                    // Create student log file with FileShare.ReadWrite to allow deletion while app is running
                     var studentLogPath = Path.Combine(studentLogDir, $"grading_{DateTime.Now:HHmmss}.log");
-                    _currentStudentLogWriter = new StreamWriter(studentLogPath, true, Encoding.UTF8)
+                    _currentStudentLogWriter = new StreamWriter(
+                        new FileStream(studentLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                        Encoding.UTF8)
                     {
                         AutoFlush = true
                     };
 
-                    LogInfo($"Started logging for student: {studentCode}");
+                    LogInfo($"Started logging for student: {studentCode}{(paperNo != null ? $" (Paper {paperNo})" : "")}");
                 }
             }
         }
@@ -215,18 +270,43 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Creates a student-specific result folder and returns its path.
-        /// Format: {baseLogPath}/student/{StudentCode}
-        /// This matches the SampleLogging folder structure.
+        /// Format: {baseLogPath}/{PaperNo}/student/{StudentCode}
+        /// This matches the SampleLogging folder structure organized by paper.
         /// </summary>
-        public string GetStudentResultFolder(string studentCode)
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing results (optional)</param>
+        public string GetStudentResultFolder(string studentCode, string? paperNo = null)
         {
-            var resultDir = Path.Combine(_baseLogPath, "student", studentCode);
+            string resultDir;
+            if (!string.IsNullOrEmpty(paperNo))
+            {
+                // Organize by paper number: e.g., "1/student/cuongnhhe186494"
+                resultDir = Path.Combine(_baseLogPath, paperNo, "student", studentCode);
+            }
+            else
+            {
+                // Fallback to current paper context or non-paper-organized structure
+                if (!string.IsNullOrEmpty(_currentPaperNo))
+                {
+                    resultDir = Path.Combine(_baseLogPath, _currentPaperNo, "student", studentCode);
+                }
+                else
+                {
+                    resultDir = Path.Combine(_baseLogPath, "student", studentCode);
+                }
+            }
+            
             if (!Directory.Exists(resultDir))
             {
                 Directory.CreateDirectory(resultDir);
             }
             return resultDir;
         }
+
+        /// <summary>
+        /// Gets the current paper number context.
+        /// </summary>
+        public string? GetCurrentPaperNo() => _currentPaperNo;
 
         public void Dispose()
         {

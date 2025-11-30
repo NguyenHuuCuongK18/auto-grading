@@ -7,32 +7,28 @@ using System.Threading.Tasks;
 using Domain.Entities.Constants;
 using Domain.Entities.Main;
 using EnvironmentBuilder.DockerCommand;
-using EnvironmentBuilder.helper;
 using SolutionGrader.UI.Models;
 using Environment = Domain.Entities.Main.Environment;
 
 namespace SolutionGrader.UI.Services
 {
     /// <summary>
-    /// Service responsible for Docker container management for student grading.
-    /// Creates 3 containers per student: Server, Client, and Database (if needed).
+    /// Service responsible for Docker container operations during grading.
+    /// Handles application execution inside containers (StartServer, StartClient, SendInput).
+    /// 
+    /// NOTE: Container lifecycle (setup, copy files, dispose) is handled by GradingOrchestrationService.
+    /// This service focuses on runtime operations during test case execution.
     /// 
     /// Key responsibilities:
-    /// - Setup containers with proper port mappings for network monitoring
-    /// - Copy student solution files to containers (separate from execution)
+    /// - Check Docker availability
     /// - Start/Stop applications inside containers via Docker commands
-    /// - Redirect stdin/stdout for grading
-    /// - Flush network monitor before each grading step
+    /// - Send input to containers via named pipes
+    /// - Capture container logs for comparison
     /// </summary>
     public class DockerGradingService
     {
         private readonly ILoggingService _logger;
         private readonly DockerCommandExecutor _dockerExecutor;
-
-        // Container name suffixes for student-specific containers
-        private const string ServerSuffix = "-server";
-        private const string ClientSuffix = "-client";
-        private const string DatabaseSuffix = "-db";
 
         public DockerGradingService(ILoggingService logger)
         {
@@ -57,118 +53,49 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Creates and configures containers for a student solution.
-        /// Uses environment configuration to determine container settings.
-        /// </summary>
-        /// <param name="student">Student solution to grade</param>
-        /// <param name="environment">Environment configuration</param>
-        /// <param name="config">Grading configuration</param>
-        /// <returns>True if setup successful</returns>
-        public async Task<bool> SetupContainersAsync(
-            StudentSolution student,
-            Environment environment,
-            GradingConfiguration config,
-            CancellationToken ct = default)
-        {
-            _logger.LogInfo($"Setting up Docker containers for {student.StudentCode}...");
-
-            try
-            {
-                // Configure environment for this student's containers
-                ConfigureContainerNames(environment, student.StudentCode);
-                ConfigurePorts(environment, config);
-
-                // Setup file paths for Docker
-                if (!string.IsNullOrEmpty(student.ServerDllPath))
-                {
-                    var serverDir = Path.GetDirectoryName(student.ServerDllPath)!;
-                    SetOrAddConfig(environment.Configs, EnvironmentConfiguration.CodeFilePath, serverDir);
-                    SetOrAddConfig(environment.Configs, EnvironmentConfiguration.DockerServerPath, 
-                        GetDockerInternalPath(serverDir, student.ServerDllPath));
-                }
-
-                if (!string.IsNullOrEmpty(student.ClientDllPath))
-                {
-                    var clientDir = Path.GetDirectoryName(student.ClientDllPath)!;
-                    SetOrAddConfig(environment.Configs, EnvironmentConfiguration.GivenConsolePath, clientDir);
-                    SetOrAddConfig(environment.Configs, EnvironmentConfiguration.DockerClientPath, 
-                        GetDockerInternalPath(clientDir, student.ClientDllPath));
-                }
-
-                // Use existing EnvironmentManagerInvoker to setup containers
-                if (!EnvironmentManagerInvoker.TrySetupContainer(environment, out var setupError))
-                {
-                    _logger.LogError($"Container setup failed: {setupError}");
-                    return false;
-                }
-
-                await Task.Delay(1000, ct); // Wait for containers to initialize
-                _logger.LogInfo("Docker containers created successfully");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to setup containers: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Copies student solution files to their respective containers.
-        /// This is separate from execution to allow proper staging before grading.
-        /// </summary>
-        public async Task<bool> CopyFilesToContainersAsync(
-            StudentSolution student,
-            Environment environment,
-            CancellationToken ct = default)
-        {
-            _logger.LogInfo($"Copying solution files for {student.StudentCode}...");
-
-            try
-            {
-                // Use existing EnvironmentManagerInvoker for file copying
-                if (!EnvironmentManagerInvoker.TrySetupQuestion(environment, out var copyError))
-                {
-                    _logger.LogError($"File copy failed: {copyError}");
-                    return false;
-                }
-
-                await Task.Delay(500, ct);
-                _logger.LogInfo("Files copied to containers");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to copy files: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
         /// Starts the server application inside its container.
-        /// Returns immediately - server runs in background.
+        /// Uses WaitForPublishConsoleFileDeployment which properly sets up named pipes for stdin/stdout.
         /// </summary>
         public async Task<bool> StartServerAsync(Environment environment, CancellationToken ct = default)
         {
-            _logger.LogInfo("Starting server application...");
+            _logger.LogInfo("Starting server application in container...");
 
             try
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerServerPath, "");
+                // App name should match container name for pipe to work: /tmp/{appName}_input_pipe
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.StudentQuestionName, containerName);
+                var port = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerInternalPort, "8000");
+
+                _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"App name (for pipe /tmp/{appName}_input_pipe): {appName}");
+                _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
+                _logger.LogDebug($"Internal port: {port}");
 
                 if (string.IsNullOrEmpty(dllPath))
                 {
-                    _logger.LogError("Server DLL path not configured");
+                    // Log all available configs for debugging
+                    _logger.LogError("Server DLL path not configured in environment!");
+                    _logger.LogDebug("Available environment configs:");
+                    foreach (var kvp in environment.Configs.Take(20))
+                    {
+                        _logger.LogDebug($"  {kvp.Key}: {kvp.Value}");
+                    }
                     return false;
                 }
 
-                // Start the dotnet application in the container
-                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
+                // Start the dotnet application in the container using proper pipe setup
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName} (app: {appName}, port: {port})...");
+                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, appName, dllPath, port, ct);
                 
                 if (result)
                 {
-                    _logger.LogInfo($"Server started in container {containerName}");
+                    _logger.LogInfo($"Server started successfully in container {containerName}");
+                }
+                else
+                {
+                    _logger.LogError($"Server failed to start in container {containerName}");
                 }
 
                 return result;
@@ -182,29 +109,48 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Starts the client application inside its container.
-        /// Returns immediately - client runs in background.
+        /// Uses WaitForPublishConsoleFileDeployment which properly sets up named pipes for stdin/stdout.
         /// </summary>
         public async Task<bool> StartClientAsync(Environment environment, CancellationToken ct = default)
         {
-            _logger.LogInfo("Starting client application...");
+            _logger.LogInfo("Starting client application in container...");
 
             try
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 var dllPath = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DockerClientPath, "");
+                // App name should match container name for pipe to work: /tmp/{appName}_input_pipe
+                var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleAppName, containerName);
+                // Client doesn't listen on a port - it connects to server
+                var port = "-1";
+
+                _logger.LogDebug($"Container: {containerName}");
+                _logger.LogDebug($"App name (for pipe /tmp/{appName}_input_pipe): {appName}");
+                _logger.LogDebug($"DLL path (from environment): {(string.IsNullOrEmpty(dllPath) ? "(not set)" : dllPath)}");
 
                 if (string.IsNullOrEmpty(dllPath))
                 {
-                    _logger.LogError("Client DLL path not configured");
+                    // Log all available configs for debugging
+                    _logger.LogError("Client DLL path not configured in environment!");
+                    _logger.LogDebug("Available environment configs:");
+                    foreach (var kvp in environment.Configs.Take(20))
+                    {
+                        _logger.LogDebug($"  {kvp.Key}: {kvp.Value}");
+                    }
                     return false;
                 }
 
-                // Start the dotnet application in the container
-                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, dllPath, ct);
+                // Start the dotnet application in the container using proper pipe setup
+                _logger.LogInfo($"Starting dotnet {dllPath} in container {containerName} (app: {appName})...");
+                var result = await _dockerExecutor.StartApplicationInContainerAsync(containerName, appName, dllPath, port, ct);
                 
                 if (result)
                 {
-                    _logger.LogInfo($"Client started in container {containerName}");
+                    _logger.LogInfo($"Client started successfully in container {containerName}");
+                }
+                else
+                {
+                    _logger.LogError($"Client failed to start in container {containerName}");
                 }
 
                 return result;
@@ -285,123 +231,120 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Disposes all containers for a student.
         /// Called after grading is complete or cancelled.
+        /// Uses direct Docker commands for reliable container removal.
         /// </summary>
         public async Task DisposeContainersAsync(Environment environment, CancellationToken ct = default)
         {
-            _logger.LogInfo("Disposing Docker containers...");
+            _logger.LogInfo("Disposing Docker containers (force removal)...");
 
             try
             {
-                EnvironmentManagerInvoker.TryDisposeContainer(environment, out var disposeError);
+                // Get container names from environment
+                var serverContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName);
+                var clientContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName);
                 
-                if (!string.IsNullOrEmpty(disposeError))
+                _logger.LogInfo($"Containers to remove: server={serverContainer}, client={clientContainer}");
+
+                // Remove server container
+                if (!string.IsNullOrEmpty(serverContainer))
                 {
-                    _logger.LogWarning($"Container disposal warning: {disposeError}");
+                    try
+                    {
+                        _logger.LogInfo($"Removing server container: {serverContainer}");
+                        _dockerExecutor.RemoveContainer(serverContainer);
+                        _logger.LogInfo($"Server container '{serverContainer}' removed");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to remove server container '{serverContainer}': {ex.Message}");
+                    }
                 }
 
-                await Task.Delay(500, ct);
-                _logger.LogInfo("Containers disposed");
+                // Remove client container
+                if (!string.IsNullOrEmpty(clientContainer))
+                {
+                    try
+                    {
+                        _logger.LogInfo($"Removing client container: {clientContainer}");
+                        _dockerExecutor.RemoveContainer(clientContainer);
+                        _logger.LogInfo($"Client container '{clientContainer}' removed");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to remove client container '{clientContainer}': {ex.Message}");
+                    }
+                }
+
+                await Task.Delay(200, ct);
+                _logger.LogInfo("Container disposal complete");
             }
             catch (Exception ex)
             {
                 _logger.LogError($"Failed to dispose containers: {ex.Message}");
             }
         }
-
-        /// <summary>
-        /// Configures container names for a specific student to avoid conflicts.
-        /// </summary>
-        private void ConfigureContainerNames(Environment environment, string studentCode)
-        {
-            var baseName = $"ag-{studentCode}";
-            
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.CodeContainerName, baseName + ServerSuffix);
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerName, baseName + ClientSuffix);
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.StudentQuestionName, baseName);
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleAppName, baseName + ClientSuffix);
-        }
-
-        /// <summary>
-        /// Configures port mappings for network monitoring.
-        /// The host port is exposed for the Windows NetworkMonitor to sniff traffic.
-        /// </summary>
-        private void ConfigurePorts(Environment environment, GradingConfiguration config)
-        {
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.CodeContainerInternalPort, 
-                config.CodeContainerInternalPort.ToString());
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.CodeContainerHostPort, 
-                config.CodeContainerHostPort.ToString());
-            
-            // Also set the Given Console ports to match
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerInternalPort, 
-                config.CodeContainerInternalPort.ToString());
-            SetOrAddConfig(environment.Configs, EnvironmentConfiguration.GivenConsoleContainerHostPort, 
-                config.CodeContainerHostPort.ToString());
-        }
-
-        /// <summary>
-        /// Gets the Docker-internal path for a DLL file.
-        /// </summary>
-        private string GetDockerInternalPath(string baseDir, string dllPath)
-        {
-            var folderName = Path.GetFileName(baseDir);
-            var fileName = Path.GetFileName(dllPath);
-            return $"/apps/{folderName}/{fileName}";
-        }
-
-        private static void SetOrAddConfig(Dictionary<string, string> configs, string key, string value)
-        {
-            if (configs.ContainsKey(key))
-            {
-                configs[key] = value;
-            }
-            else
-            {
-                configs.Add(key, value);
-            }
-        }
     }
 
     /// <summary>
     /// Extension methods for DockerCommandExecutor to provide async operations.
+    /// 
+    /// IMPORTANT: For starting console applications properly with input/output pipes,
+    /// use WaitForPublishConsoleFileDeployment() instead of StartApplicationInContainerAsync().
+    /// The former sets up named pipes for stdin/stdout redirection.
     /// </summary>
     internal static class DockerCommandExecutorExtensions
     {
+        /// <summary>
+        /// Starts a .NET application in a container with proper stdin/stdout setup via named pipes.
+        /// This method creates a named pipe for input, then starts the dotnet application
+        /// with stdin redirected from the pipe and stdout redirected to container logs.
+        /// 
+        /// The application name is used to create the named pipe at /tmp/{appName}_input_pipe.
+        /// Input can later be sent using SendInputToContainer().
+        /// </summary>
+        /// <param name="executor">Docker command executor</param>
+        /// <param name="containerName">Name of the container</param>
+        /// <param name="appName">Application name for pipe naming</param>
+        /// <param name="dllPath">Path to DLL inside container</param>
+        /// <param name="expectedPort">Port to check for readiness (-1 to skip port check)</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <returns>True if application started successfully</returns>
         public static async Task<bool> StartApplicationInContainerAsync(
             this DockerCommandExecutor executor, 
             string containerName, 
+            string appName,
             string dllPath, 
+            string expectedPort = "-1",
             CancellationToken ct = default)
         {
-            // Run dotnet command in container to start the application
-            var command = $"docker exec -d {containerName} dotnet {dllPath}";
-            
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "docker",
-                    Arguments = $"exec -d {containerName} dotnet {dllPath}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var process = System.Diagnostics.Process.Start(psi);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync(ct);
-                    return process.ExitCode == 0;
-                }
-                return false;
+                // Use the proper method that sets up pipes for stdin/stdout
+                // This calls WaitForPublishConsoleFileDeployment internally which:
+                // 1. Creates named pipe /tmp/{appName}_input_pipe
+                // 2. Starts sleep process to keep pipe open
+                // 3. Starts dotnet with stdin from pipe and stdout to container logs
+                // 4. Waits for process to be running and port to be listening
+                bool success = executor.WaitForPublishConsoleFileDeployment(
+                    containerName,
+                    appName,
+                    dllPath,
+                    expectedPort,
+                    maxWaitTimeMs: 30000);
+                
+                return success;
             }
-            catch
+            catch (Exception ex)
             {
+                // Log the exception for debugging - helps identify Docker setup failures
+                Console.WriteLine($"[ERROR] StartApplicationInContainerAsync failed for {containerName}/{appName}: {ex.Message}");
                 return false;
             }
         }
 
+        /// <summary>
+        /// Gets the logs from a container.
+        /// </summary>
         public static async Task<string> GetContainerLogsAsync(
             this DockerCommandExecutor executor, 
             string containerName, 

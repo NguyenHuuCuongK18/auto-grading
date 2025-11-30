@@ -11,15 +11,16 @@ namespace SolutionGrader.UI.Services
     /// Service for writing grading results to Excel files.
     /// Creates student-specific result files and overall summary spreadsheets.
     /// 
-    /// Output structure follows the SampleLogging format exactly:
+    /// Output structure follows the SampleLogging format with paper-based organization:
     /// - StudentsSolution.xlsx: Overall summary of all students
-    /// - student/{StudentCode}/
-    ///   - OverallSummary.xlsx: Student-level summary (like SampleLogging/student/student-code-here/OverallSummary.xlsx)
+    /// - {PaperNo}/StudentsSolution.xlsx: Per-paper summary
+    /// - {PaperNo}/student/{StudentCode}/
+    ///   - OverallSummary.xlsx: Student-level summary 
     ///   - {TestCase}/
     ///     - GradeDetail.xlsx: Detailed test case results
     ///     - {TestCase}_Result.xlsx: Raw test data
     /// 
-    /// Note: The 'student' folder name matches SampleLogging structure and uses StudentCode as subfolder
+    /// Note: Results are organized by paper number (1/, 2/, etc.) for better navigation.
     /// </summary>
     public class ResultWriterService
     {
@@ -36,24 +37,40 @@ namespace SolutionGrader.UI.Services
             {
                 Directory.CreateDirectory(_baseResultPath);
             }
-            
-            // Ensure student folder exists
-            var studentFolder = Path.Combine(_baseResultPath, "student");
-            if (!Directory.Exists(studentFolder))
-            {
-                Directory.CreateDirectory(studentFolder);
-            }
         }
 
         /// <summary>
         /// Writes the overall student solution summary spreadsheet.
+        /// Creates both a global summary and per-paper summaries.
         /// Format matches SampleLogging/StudentsSolution.xlsx exactly:
         /// No, StudentCode, ExamPaper, Status, FinalResult, StartDate, EndDate
         /// </summary>
         public void WriteStudentsSolutionSummary(List<StudentSolution> students)
         {
+            // Write global summary
             var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-            
+            WriteStudentsSolutionSummaryToFile(filePath, students);
+
+            // Write per-paper summaries
+            var paperGroups = students.GroupBy(s => s.PaperNo);
+            foreach (var group in paperGroups)
+            {
+                var paperDir = Path.Combine(_baseResultPath, group.Key);
+                if (!Directory.Exists(paperDir))
+                {
+                    Directory.CreateDirectory(paperDir);
+                }
+
+                var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
+                WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
+            }
+        }
+
+        /// <summary>
+        /// Writes the students solution summary to a specific file path.
+        /// </summary>
+        private void WriteStudentsSolutionSummaryToFile(string filePath, List<StudentSolution> students)
+        {
             _logger.LogInfo($"Writing students summary to {filePath}");
 
             try
@@ -121,16 +138,16 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes a student-specific result summary.
-        /// Creates student/{StudentCode}/OverallSummary.xlsx
+        /// Creates {PaperNo}/student/{StudentCode}/OverallSummary.xlsx
         /// Format matches SampleLogging/student/student-code-here/OverallSummary.xlsx
         /// </summary>
         public void WriteStudentSummary(StudentSolution student, List<TestCaseResult> testCases)
         {
-            var studentDir = GetStudentResultFolder(student.StudentCode);
+            var studentDir = GetStudentResultFolder(student.StudentCode, student.PaperNo);
 
             var filePath = Path.Combine(studentDir, "OverallSummary.xlsx");
             
-            _logger.LogInfo($"Writing student summary for {student.StudentCode}");
+            _logger.LogInfo($"Writing student summary for {student.StudentCode} (Paper {student.PaperNo})");
 
             try
             {
@@ -176,11 +193,11 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes detailed test case results for a student.
-        /// Creates student/{StudentCode}/{TestCase}/GradeDetail.xlsx
+        /// Creates {PaperNo}/student/{StudentCode}/{TestCase}/GradeDetail.xlsx
         /// </summary>
         public void WriteTestCaseDetail(StudentSolution student, string testCaseName, List<StepResult> steps)
         {
-            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode), testCaseName);
+            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode, student.PaperNo), testCaseName);
             if (!Directory.Exists(testCaseDir))
             {
                 Directory.CreateDirectory(testCaseDir);
@@ -234,11 +251,11 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes raw test result data for a test case.
-        /// Creates student/{StudentCode}/{TestCase}/{TestCase}_Result.xlsx
+        /// Creates {PaperNo}/student/{StudentCode}/{TestCase}/{TestCase}_Result.xlsx
         /// </summary>
         public void WriteTestCaseResult(StudentSolution student, string testCaseName, List<StepResult> steps)
         {
-            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode), testCaseName);
+            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode, student.PaperNo), testCaseName);
             if (!Directory.Exists(testCaseDir))
             {
                 Directory.CreateDirectory(testCaseDir);
@@ -288,12 +305,26 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Gets the student result folder path (student/{StudentCode}).
+        /// Gets the student result folder path organized by paper number.
+        /// Format: {PaperNo}/student/{StudentCode}
         /// Creates the folder if it doesn't exist.
         /// </summary>
-        public string GetStudentResultFolder(string studentCode)
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organization (optional)</param>
+        public string GetStudentResultFolder(string studentCode, string? paperNo = null)
         {
-            var path = Path.Combine(_baseResultPath, "student", studentCode);
+            string path;
+            if (!string.IsNullOrEmpty(paperNo))
+            {
+                // Organize by paper number: e.g., "1/student/cuongnhhe186494"
+                path = Path.Combine(_baseResultPath, paperNo, "student", studentCode);
+            }
+            else
+            {
+                // Fallback to non-paper-organized structure
+                path = Path.Combine(_baseResultPath, "student", studentCode);
+            }
+
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);
@@ -303,20 +334,40 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Deletes all result files for a student (used when resetting).
+        /// Searches in all paper folders.
         /// </summary>
-        public void DeleteStudentResults(string studentCode)
+        public void DeleteStudentResults(string studentCode, string? paperNo = null)
         {
-            var path = Path.Combine(_baseResultPath, "student", studentCode);
-            if (Directory.Exists(path))
+            // Try paper-organized path if paperNo provided
+            if (!string.IsNullOrEmpty(paperNo))
+            {
+                var paperPath = Path.Combine(_baseResultPath, paperNo, "student", studentCode);
+                if (Directory.Exists(paperPath))
+                {
+                    try
+                    {
+                        Directory.Delete(paperPath, true);
+                        _logger.LogInfo($"Deleted result folder for {studentCode} (Paper {paperNo})");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to delete result folder for {studentCode}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Also try legacy non-paper-organized path
+            var legacyPath = Path.Combine(_baseResultPath, "student", studentCode);
+            if (Directory.Exists(legacyPath))
             {
                 try
                 {
-                    Directory.Delete(path, true);
-                    _logger.LogInfo($"Deleted result folder for {studentCode}");
+                    Directory.Delete(legacyPath, true);
+                    _logger.LogInfo($"Deleted legacy result folder for {studentCode}");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to delete result folder for {studentCode}: {ex.Message}");
+                    _logger.LogWarning($"Failed to delete legacy result folder for {studentCode}: {ex.Message}");
                 }
             }
         }
