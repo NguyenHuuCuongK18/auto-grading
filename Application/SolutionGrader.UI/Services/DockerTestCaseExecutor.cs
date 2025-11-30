@@ -303,6 +303,11 @@ namespace SolutionGrader.UI.Services
             var serverOutputs = new Dictionary<int, string>();
             bool serverStarted = false;
             bool clientStarted = false;
+            
+            // Track cumulative output to detect new output for each stage
+            // docker logs returns ALL output from container start, so we need to track what's already been seen
+            string previousClientOutput = "";
+            string previousServerOutput = "";
 
             _logger.LogInfo($"Executing {actions.Count} actions in Docker containers...");
 
@@ -325,12 +330,39 @@ namespace SolutionGrader.UI.Services
                             if (serverStarted)
                             {
                                 _logger.LogInfo($"[Stage {stage}] Server started successfully, waiting for initialization...");
-                                await Task.Delay(2000, ct); // Wait for server to fully start
-                                serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                                _logger.LogInfo($"[Stage {stage}] Server output captured ({serverOutputs[stage]?.Length ?? 0} chars)");
-                                if (!string.IsNullOrEmpty(serverOutputs[stage]))
+                                
+                                // Wait for server output using cumulative approach
+                                // Keep checking until we see new output or timeout
+                                string currentServerOutput = "";
+                                int retries = 0;
+                                const int maxRetries = 10; // 10 retries * 500ms = 5 seconds max
+                                
+                                while (retries < maxRetries && !ct.IsCancellationRequested)
                                 {
-                                    _logger.LogDebug($"Server output: {serverOutputs[stage]}");
+                                    await Task.Delay(500, ct);
+                                    currentServerOutput = await _dockerGrading.GetServerOutputAsync(environment, ct) ?? "";
+                                    
+                                    // If we have more output than before, we've captured something
+                                    if (currentServerOutput.Length > previousServerOutput.Length)
+                                    {
+                                        _logger.LogDebug($"[Stage {stage}] Server output grew: {previousServerOutput.Length} -> {currentServerOutput.Length}");
+                                        break;
+                                    }
+                                    retries++;
+                                }
+                                
+                                // Store the NEW output for this stage (output that wasn't there before)
+                                string newServerOutput = currentServerOutput.Length > previousServerOutput.Length
+                                    ? currentServerOutput.Substring(previousServerOutput.Length)
+                                    : currentServerOutput;
+                                
+                                serverOutputs[stage] = newServerOutput;
+                                previousServerOutput = currentServerOutput;
+                                
+                                _logger.LogInfo($"[Stage {stage}] Server output captured ({newServerOutput.Length} chars new, {currentServerOutput.Length} chars total)");
+                                if (!string.IsNullOrEmpty(newServerOutput))
+                                {
+                                    _logger.LogDebug($"Server output: {newServerOutput}");
                                 }
                             }
                             else
@@ -352,16 +384,39 @@ namespace SolutionGrader.UI.Services
                             if (clientStarted)
                             {
                                 _logger.LogInfo($"[Stage {stage}] Client started successfully, waiting for initialization...");
-                                // Wait for client to fully start and capture initial output
-                                // Increased to 3000ms because some test kits expect console output
-                                // that appears immediately when the client starts, and 2000ms may not
-                                // be enough to capture all initial output on slower systems.
-                                await Task.Delay(3000, ct);
-                                clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                                _logger.LogInfo($"[Stage {stage}] Client output captured ({clientOutputs[stage]?.Length ?? 0} chars)");
-                                if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                                
+                                // Wait for client output using cumulative approach
+                                // Keep checking until we see new output or timeout
+                                string currentClientOutput = "";
+                                int retries = 0;
+                                const int maxRetries = 10; // 10 retries * 500ms = 5 seconds max
+                                
+                                while (retries < maxRetries && !ct.IsCancellationRequested)
                                 {
-                                    _logger.LogDebug($"Client output: {clientOutputs[stage]}");
+                                    await Task.Delay(500, ct);
+                                    currentClientOutput = await _dockerGrading.GetClientOutputAsync(environment, ct) ?? "";
+                                    
+                                    // If we have more output than before, we've captured something
+                                    if (currentClientOutput.Length > previousClientOutput.Length)
+                                    {
+                                        _logger.LogDebug($"[Stage {stage}] Client output grew: {previousClientOutput.Length} -> {currentClientOutput.Length}");
+                                        break;
+                                    }
+                                    retries++;
+                                }
+                                
+                                // Store the NEW output for this stage (output that wasn't there before)
+                                string newClientOutput = currentClientOutput.Length > previousClientOutput.Length
+                                    ? currentClientOutput.Substring(previousClientOutput.Length)
+                                    : currentClientOutput;
+                                
+                                clientOutputs[stage] = newClientOutput;
+                                previousClientOutput = currentClientOutput;
+                                
+                                _logger.LogInfo($"[Stage {stage}] Client output captured ({newClientOutput.Length} chars new, {currentClientOutput.Length} chars total)");
+                                if (!string.IsNullOrEmpty(newClientOutput))
+                                {
+                                    _logger.LogDebug($"Client output: {newClientOutput}");
                                 }
                             }
                             else
@@ -391,22 +446,52 @@ namespace SolutionGrader.UI.Services
                         _logger.LogInfo($"[Stage {stage}] Sending input to client: '{input}'");
                         var response = await _dockerGrading.SendInputToClientAsync(environment, input, ct);
                         
-                        // Wait for input to be processed
-                        await Task.Delay(1000, ct);
-                        
-                        // Capture both client and server outputs after input
-                        clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
-                        serverOutputs[stage] = await _dockerGrading.GetServerOutputAsync(environment, ct);
-                        
-                        _logger.LogInfo($"[Stage {stage}] After input - Client output: {clientOutputs[stage]?.Length ?? 0} chars, Server output: {serverOutputs[stage]?.Length ?? 0} chars");
-                        
-                        if (!string.IsNullOrEmpty(clientOutputs[stage]))
+                        // Wait for input to be processed and capture new outputs using cumulative approach
                         {
-                            _logger.LogDebug($"Client output after input: {clientOutputs[stage]}");
-                        }
-                        if (!string.IsNullOrEmpty(serverOutputs[stage]))
-                        {
-                            _logger.LogDebug($"Server output after input: {serverOutputs[stage]}");
+                            string currentClientOutput = "";
+                            string currentServerOutput = "";
+                            int retries = 0;
+                            const int maxRetries = 10; // 10 retries * 300ms = 3 seconds max
+                            
+                            while (retries < maxRetries && !ct.IsCancellationRequested)
+                            {
+                                await Task.Delay(300, ct);
+                                currentClientOutput = await _dockerGrading.GetClientOutputAsync(environment, ct) ?? "";
+                                currentServerOutput = await _dockerGrading.GetServerOutputAsync(environment, ct) ?? "";
+                                
+                                // If either output grew, we've captured something
+                                if (currentClientOutput.Length > previousClientOutput.Length || 
+                                    currentServerOutput.Length > previousServerOutput.Length)
+                                {
+                                    _logger.LogDebug($"[Stage {stage}] Output after input - Client: {previousClientOutput.Length} -> {currentClientOutput.Length}, Server: {previousServerOutput.Length} -> {currentServerOutput.Length}");
+                                    break;
+                                }
+                                retries++;
+                            }
+                            
+                            // Store NEW outputs for this stage
+                            string newClientOutput = currentClientOutput.Length > previousClientOutput.Length
+                                ? currentClientOutput.Substring(previousClientOutput.Length)
+                                : "";
+                            string newServerOutput = currentServerOutput.Length > previousServerOutput.Length
+                                ? currentServerOutput.Substring(previousServerOutput.Length)
+                                : "";
+                            
+                            clientOutputs[stage] = newClientOutput;
+                            serverOutputs[stage] = newServerOutput;
+                            previousClientOutput = currentClientOutput;
+                            previousServerOutput = currentServerOutput;
+                            
+                            _logger.LogInfo($"[Stage {stage}] After input - Client: {newClientOutput.Length} chars new, Server: {newServerOutput.Length} chars new");
+                            
+                            if (!string.IsNullOrEmpty(newClientOutput))
+                            {
+                                _logger.LogDebug($"Client output after input: {newClientOutput}");
+                            }
+                            if (!string.IsNullOrEmpty(newServerOutput))
+                            {
+                                _logger.LogDebug($"Server output after input: {newServerOutput}");
+                            }
                         }
                         break;
 
@@ -417,6 +502,8 @@ namespace SolutionGrader.UI.Services
                             await _dockerGrading.StopApplicationsInContainerAsync(
                                 environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client"), ct);
                             clientStarted = false; // Reset so it can be started again
+                            // Reset cumulative client output since process was stopped
+                            previousClientOutput = "";
                             _logger.LogInfo($"[Stage {stage}] Client stopped - can be restarted by a subsequent StartClient action");
                         }
                         else
@@ -432,6 +519,8 @@ namespace SolutionGrader.UI.Services
                             await _dockerGrading.StopApplicationsInContainerAsync(
                                 environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server"), ct);
                             serverStarted = false; // Reset so it can be started again
+                            // Reset cumulative server output since process was stopped
+                            previousServerOutput = "";
                             _logger.LogInfo($"[Stage {stage}] Server stopped - can be restarted by a subsequent StartServer action");
                         }
                         else
