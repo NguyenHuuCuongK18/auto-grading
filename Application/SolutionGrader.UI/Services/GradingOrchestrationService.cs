@@ -48,6 +48,7 @@ namespace SolutionGrader.UI.Services
         private readonly TestKitDiscoveryService _testKitDiscovery;
         private readonly TestKitConfigService _testKitConfigService;
         private readonly DockerCommandExecutor _dockerExecutor;
+        private ResultWriterService? _resultWriter;
         
         private CancellationTokenSource? _cancellationTokenSource;
         private readonly object _lockObject = new object();
@@ -117,6 +118,12 @@ namespace SolutionGrader.UI.Services
             _cancellationTokenSource = new CancellationTokenSource();
             var ct = _cancellationTokenSource.Token;
 
+            // Initialize result writer for saving StudentsSolution.xlsx
+            var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
+                ? config.SaveResultFolderPath 
+                : Path.Combine(config.SubmitFolderPath, "Results");
+            _resultWriter = new ResultWriterService(_logger, resultPath);
+
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
             sessionState.SessionStartTime = DateTime.Now;
@@ -124,6 +131,7 @@ namespace SolutionGrader.UI.Services
             sessionState.NotRunCount = students.Count(s => s.Status == GradingStatus.Not_Run);
 
             _logger.LogInfo($"Starting grading for {students.Count} students");
+            _logger.LogInfo($"Results will be saved to: {resultPath}");
             SessionStateChanged?.Invoke(this, sessionState);
 
             try
@@ -156,6 +164,10 @@ namespace SolutionGrader.UI.Services
                     sessionState.SuccessCount = students.Count(s => s.Status == GradingStatus.Success);
                     sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
                     SessionStateChanged?.Invoke(this, sessionState);
+
+                    // Write StudentsSolution.xlsx after each student completes
+                    // This ensures results are saved incrementally in case of interruption
+                    _resultWriter.WriteStudentsSolutionSummary(students);
                 }
             }
             catch (OperationCanceledException)
@@ -168,6 +180,9 @@ namespace SolutionGrader.UI.Services
             }
             finally
             {
+                // Write final StudentsSolution.xlsx
+                _resultWriter?.WriteStudentsSolutionSummary(students);
+
                 sessionState.IsRunning = false;
                 sessionState.SessionEndTime = DateTime.Now;
                 sessionState.CurrentStudentCode = null;
