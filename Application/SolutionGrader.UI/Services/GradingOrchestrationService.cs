@@ -359,8 +359,17 @@ namespace SolutionGrader.UI.Services
                 if (string.IsNullOrEmpty(dbContainer))
                     _logger.LogWarning("Database container name not configured");
 
-                // The actual container setup is handled by the existing EnvironmentManagerInvoker
-                // This sets up all configured containers (server, client, database)
+                // EnvironmentManagerInvoker is the bridge to the EnvironmentManager executable
+                // which handles Docker container lifecycle operations:
+                // - Creates Docker network for inter-container communication
+                // - Pulls required Docker images (code image for server/client, MSSQL image for database)
+                // - Creates and configures containers with proper port mappings and environment variables
+                // - Sets up database container with MSSQL server
+                // - Copies solution files to containers (but does NOT start executables)
+                // 
+                // The invoker serializes the environment configuration to JSON/Base64 and passes it
+                // to the EnvironmentManager executable which performs the actual Docker operations.
+                // This separation allows the UI to run on systems without direct Docker access.
                 EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupContainer(environment, out var error);
                 
                 if (!string.IsNullOrEmpty(error))

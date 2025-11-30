@@ -33,13 +33,15 @@ namespace SolutionGrader.UI.Services
             public int CodeContainerInternalPort { get; set; } = 5000;
             public int CodeContainerHostPort { get; set; } = 5000;
             
-            // Database configurations
+            // Database configurations - values are read from Environment.xlsx
+            // Note: Password is intentionally left empty and should be read from Environment.xlsx
+            // or environment variable AUTOGRADING_DB_PASSWORD for security
             public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
             public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
             public int DatabaseContainerInternalPort { get; set; } = 1433;
             public int DatabaseContainerHostPort { get; set; } = 1434;
             public string DatabaseUsername { get; set; } = "sa";
-            public string DatabasePassword { get; set; } = "Khanh@2721";
+            public string DatabasePassword { get; set; } = System.Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") ?? "";
             public string DefaultDatabaseName { get; set; } = "";
             public string DefaultDatabaseFilePath { get; set; } = "";
             

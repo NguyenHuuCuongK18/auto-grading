@@ -31,7 +31,9 @@ namespace SolutionGrader.UI.Models
         private int _databaseContainerInternalPort = 1433;
         private int _databaseContainerHostPort = 1434;
         private string _databaseUsername = "sa";
-        private string _databasePassword = "Khanh@2721";
+        // Database password should be read from Environment.xlsx or environment variable
+        // Do not hardcode passwords in production code
+        private string _databasePassword = Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") ?? "";
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
