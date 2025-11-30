@@ -422,16 +422,19 @@ namespace SolutionGrader.Core.Services
         /// - The port becomes available (returns true)
         /// - Maximum wait time is exceeded (returns false)
         /// - Cancellation is requested
+        /// 
+        /// NOTE: TCP sockets can remain in TIME_WAIT state for up to 2-4 minutes after close.
+        /// We use SO_REUSEADDR to allow rebinding even if socket is in TIME_WAIT.
         /// </summary>
         /// <param name="port">The TCP port to wait for</param>
         /// <param name="ct">Cancellation token</param>
-        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 10)</param>
+        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 30 to handle TIME_WAIT)</param>
         /// <returns>True if port is available, false if timeout exceeded</returns>
-        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 10)
+        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 30)
         {
             var startTime = DateTime.UtcNow;
-            int delayMs = 100; // Start with 100ms delay, increase exponentially
-            const int maxDelayMs = 1000; // Cap at 1 second
+            int delayMs = 200; // Start with 200ms delay, increase exponentially
+            const int maxDelayMs = 2000; // Cap at 2 seconds
             
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released...");
             
@@ -440,6 +443,8 @@ namespace SolutionGrader.Core.Services
                 if (IsPortAvailable(port))
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is now available");
+                    // Add a small delay after port becomes available to ensure clean state
+                    await Task.Delay(500, ct);
                     return true;
                 }
                 
@@ -455,7 +460,7 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Checks if a TCP port is available (not in use by any process).
-        /// Attempts to bind to the port; if successful, the port is available.
+        /// Uses SO_REUSEADDR to handle TIME_WAIT state - allows binding even if socket is closing.
         /// </summary>
         /// <param name="port">The TCP port to check</param>
         /// <returns>True if port is available, false if in use</returns>
@@ -464,6 +469,11 @@ namespace SolutionGrader.Core.Services
             try
             {
                 using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+                // Allow reuse of the address even if it's in TIME_WAIT state
+                listener.Server.SetSocketOption(
+                    System.Net.Sockets.SocketOptionLevel.Socket, 
+                    System.Net.Sockets.SocketOptionName.ReuseAddress, 
+                    true);
                 listener.Start();
                 listener.Stop();
                 return true;

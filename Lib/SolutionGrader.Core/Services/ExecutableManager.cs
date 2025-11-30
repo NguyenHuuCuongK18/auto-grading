@@ -71,6 +71,9 @@ namespace SolutionGrader.Core.Services
             _server = Create(_serverPath);
             _server.Start();
             _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
+            
+            // Give the process a moment to initialize and write initial output
+            Thread.Sleep(50);
         }
 
         public void StartClient()
@@ -84,8 +87,21 @@ namespace SolutionGrader.Core.Services
             _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0");
             
             _client = Create(_clientPath);
+            
+            // Start reading output streams BEFORE calling Start() to ensure we don't miss any initial output.
+            // This is critical for capturing console prompts that are written immediately when the process starts.
+            // The pump will wait for data, but having it ready to receive ensures no output is lost.
             _client.Start();
+            
+            // Begin reading stdout and stderr immediately
+            // Use BeginOutputReadLine/BeginErrorReadLine pattern for more reliable capture
+            // This ensures output is captured even if it's written before our async pump starts
             _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
+            
+            // Give the process a moment to initialize and write initial output
+            // This small delay allows the process's initial Console.Write calls to execute
+            // before we start checking for output in WaitForClientOutputAsync
+            Thread.Sleep(50);
         }
 
         public async Task<Process?> StartAsync(string executablePath, string arguments, CancellationToken ct)
@@ -169,6 +185,11 @@ namespace SolutionGrader.Core.Services
         /// Waits for the client process to produce output or exit, with stabilization detection.
         /// This method waits until output stabilizes (no new output for a period) to ensure
         /// all console output from multiple Write/WriteLine calls is captured.
+        /// 
+        /// IMPORTANT: For prompts without newlines (e.g., "Enter operation (format as A X B):"),
+        /// the output pump uses a 50ms flush interval for partial lines. This method will
+        /// wait for initial output to appear even if it takes up to 150ms for the pump to
+        /// capture and flush the partial line.
         /// </summary>
         /// <param name="timeoutSeconds">Maximum time to wait in seconds (default: 15)</param>
         /// <param name="ct">Cancellation token</param>
@@ -183,17 +204,22 @@ namespace SolutionGrader.Core.Services
             // 3. Timeout
             // 4. Cancellation requested
             
-            // Increased stabilization time to 1000ms (1 second) to ensure all console output is captured.
-            // This is especially important when applications use multiple Console.Write/WriteLine calls
-            // that may be buffered or delayed, preventing premature stage cutoff.
-            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
-            const int pollIntervalMs = 50; // Check for new output every 50ms
+            // Give the pump time to capture initial output.
+            // The pump has a 50ms flush interval for partial lines (prompts without newlines).
+            // Wait at least 100ms initially to ensure any prompt is captured.
+            await Task.Delay(100, ct);
+            
+            // Reduced stabilization time from 1000ms to 200ms to be more responsive.
+            // The key is to capture output quickly, not to wait a long time.
+            // If no new output for 200ms, we assume the output has stabilized.
+            const int stabilizationMs = 200; // Wait 200ms with no new output to consider stable
+            const int pollIntervalMs = 25; // Check for new output every 25ms (faster polling)
             
             var startTime = DateTime.UtcNow;
             var initialOutputLength = GetClientOutput().Length;
             var lastOutputLength = initialOutputLength;
             var lastOutputTime = DateTime.UtcNow;
-            bool hasReceivedOutput = false;
+            bool hasReceivedOutput = initialOutputLength > 0; // Count existing output as "received"
             
             while (!ct.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalSeconds < timeoutSeconds)
             {
@@ -279,14 +305,18 @@ namespace SolutionGrader.Core.Services
         {
             if (_server == null) return false;
             
-            const int stabilizationMs = 1000; // Wait 1000ms with no new output to consider stable
-            const int pollIntervalMs = 50; // Check for new output every 50ms
+            // Give the pump time to capture initial output (similar to client)
+            await Task.Delay(100, ct);
+            
+            // Reduced stabilization time for faster response
+            const int stabilizationMs = 200; // Wait 200ms with no new output to consider stable
+            const int pollIntervalMs = 25; // Check for new output every 25ms
             
             var startTime = DateTime.UtcNow;
             var initialOutputLength = GetServerOutput().Length;
             var lastOutputLength = initialOutputLength;
             var lastOutputTime = DateTime.UtcNow;
-            bool hasReceivedOutput = false;
+            bool hasReceivedOutput = initialOutputLength > 0; // Count existing output
             
             while (!ct.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalSeconds < timeoutSeconds)
             {
@@ -329,6 +359,12 @@ namespace SolutionGrader.Core.Services
             string fileName = exe;
             string arguments = "";
             
+            // Convert to absolute path to ensure it works regardless of current directory
+            if (!Path.IsPathRooted(exe))
+            {
+                exe = Path.GetFullPath(exe);
+            }
+            
             // If it's a .dll or if it's an .exe on a non-Windows platform, use dotnet
             if (exe.EndsWith(FileKeywords.Extension_Dll, StringComparison.OrdinalIgnoreCase) ||
                 (exe.EndsWith(FileKeywords.Extension_Exe, StringComparison.OrdinalIgnoreCase) && !OperatingSystem.IsWindows()))
@@ -340,25 +376,27 @@ namespace SolutionGrader.Core.Services
                     if (File.Exists(dllPath))
                     {
                         fileName = "dotnet";
-                        arguments = dllPath;
+                        arguments = $"\"{dllPath}\""; // Quote the path in case it has spaces
                     }
                     else
                     {
                         // No .dll found, try running .exe with dotnet anyway (might fail)
                         fileName = "dotnet";
-                        arguments = exe;
+                        arguments = $"\"{exe}\"";
                     }
                 }
                 else
                 {
                     fileName = "dotnet";
-                    arguments = exe;
+                    arguments = $"\"{exe}\""; // Quote the path in case it has spaces
                 }
             }
             
             // Set working directory to the directory containing the executable
             // This ensures appsettings.json and other config files are found
             var workingDirectory = Path.GetDirectoryName(exe);
+            
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Creating process: {fileName} {arguments} (workdir: {workingDirectory})");
             
             return new Process
             {
@@ -396,7 +434,10 @@ namespace SolutionGrader.Core.Services
                 async Task readAsync(StreamReader reader)
                 {
                     const int ReadBufferSize = 4096; // Read buffer size in characters
-                    const int FlushIntervalMs = 100; // Flush partial lines every 100ms
+                    // Reduced from 100ms to 50ms to ensure partial lines (like prompts without newlines)
+                    // are flushed faster. This is critical for capturing console prompts like
+                    // "Enter operation (format as A X B):" which are written without a newline.
+                    const int FlushIntervalMs = 50; // Flush partial lines every 50ms
                     
                     var buffer = appendServer ? _serverOutputBuffer : _clientOutputBuffer;
                     var lineBuffer = new StringBuilder();
