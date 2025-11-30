@@ -76,16 +76,17 @@ namespace SolutionGrader.UI.Services
     /// <summary>
     /// Logging service implementation that writes to both console and file.
     /// 
-    /// Supports per-student logging with the format: Log_{StudentCode}_{Date}
-    /// This matches the SampleLogging folder structure where debug content
-    /// is redirected to student-specific log folders.
+    /// All logs are now consolidated into a single "Logs" folder for easy management.
+    /// This addresses the requirement that "logging should be in a single folder so its easy to check".
     /// 
     /// Log structure:
     /// - {SaveFolder}/Logs/System_{DateTime}.log - System-wide logs
-    /// - {SaveFolder}/Logs/{PaperNo}/Log_{StudentCode}_{yyyyMMdd}/grading_{HHmmss}.log - Per-student logs organized by paper
+    /// - {SaveFolder}/Logs/Log_{StudentCode}_{yyyyMMdd}_{Paper}/grading_{HHmmss}.log - Per-student logs
     /// 
-    /// The paper number organization (1/, 2/, etc.) ensures logs are grouped by exam paper,
-    /// making it easier to review and debug grading for specific exam versions.
+    /// All logs are in one place (Logs folder) making it easy to:
+    /// - Review grading session results
+    /// - Debug issues across multiple students
+    /// - Archive or clean up logs
     /// </summary>
     public class LoggingService : ILoggingService, IDisposable
     {
@@ -133,11 +134,16 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Sets the current student context for logging with paper number.
-        /// Logs will be redirected to the student-specific log folder organized by paper.
-        /// Format: {PaperNo}/Log_{StudentCode}_{Date}
+        /// All logs are now consolidated into a single "Logs" folder for easy management.
+        /// Format: Logs/Log_{StudentCode}_{Date}_{Paper}/grading_{Time}.log
+        /// 
+        /// This consolidation makes it easier to:
+        /// - Find all logs in one place
+        /// - Review grading session results
+        /// - Debug issues across multiple students/papers
         /// </summary>
         /// <param name="studentCode">Student code identifier</param>
-        /// <param name="paperNo">Paper number for organizing logs (e.g., "1", "2")</param>
+        /// <param name="paperNo">Paper number (included in folder name for context)</param>
         public void SetStudentContext(string? studentCode, string? paperNo)
         {
             lock (_lock)
@@ -152,24 +158,18 @@ namespace SolutionGrader.UI.Services
 
                 if (!string.IsNullOrEmpty(studentCode))
                 {
-                    // Create student-specific log folder and file organized by paper number
-                    // Format: {PaperNo}/Log_{StudentCode}_{Date} - matching the requirements
-                    string studentLogDir;
-                    if (!string.IsNullOrEmpty(paperNo))
+                    // All logs are consolidated into a single "Logs" folder
+                    // Format: Logs/Log_{StudentCode}_{Date}_{Paper}
+                    // This makes it easy to find all logs in one place
+                    var logDir = Path.Combine(_baseLogPath, "Logs");
+                    if (!Directory.Exists(logDir))
                     {
-                        // Organize by paper number: e.g., "1/Log_cuongnhhe186494_20251130"
-                        var paperDir = Path.Combine(_baseLogPath, "Logs", paperNo);
-                        if (!Directory.Exists(paperDir))
-                        {
-                            Directory.CreateDirectory(paperDir);
-                        }
-                        studentLogDir = Path.Combine(paperDir, $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                        Directory.CreateDirectory(logDir);
                     }
-                    else
-                    {
-                        // Fallback to non-paper-organized structure
-                        studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
-                    }
+                    
+                    // Include paper number in folder name if provided (for context)
+                    var folderSuffix = !string.IsNullOrEmpty(paperNo) ? $"_Paper{paperNo}" : "";
+                    var studentLogDir = Path.Combine(logDir, $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}{folderSuffix}");
 
                     if (!Directory.Exists(studentLogDir))
                     {

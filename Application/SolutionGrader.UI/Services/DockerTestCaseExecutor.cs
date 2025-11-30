@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
 using Domain.Entities.Main;
+using Domain.Entities.Constants;
 using Environment = Domain.Entities.Main.Environment;
 
 namespace SolutionGrader.UI.Services
@@ -100,7 +101,8 @@ namespace SolutionGrader.UI.Services
                 }
                 await WriteTestCaseResultAsync(
                     tcResultDir, testCaseName, tcResult.Passed, tcResult.EarnedMark, testCaseMaxMark,
-                    tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, tcResult.Actions, ct);
+                    tcResult.ClientOutputs, tcResult.ServerOutputs, tcResult.ExpectedOutputs, 
+                    tcResult.ExpectedNetworkFlows, tcResult.Actions, ct);
                 
                 // IMPORTANT: Stop all dotnet processes in containers between test cases
                 // This kills the server/client processes to release ports before the next test case
@@ -179,6 +181,7 @@ namespace SolutionGrader.UI.Services
             public Dictionary<int, string> ClientOutputs { get; set; } = new Dictionary<int, string>();
             public Dictionary<int, string> ServerOutputs { get; set; } = new Dictionary<int, string>();
             public Dictionary<int, TestKitConfigService.ExpectedOutput> ExpectedOutputs { get; set; } = new Dictionary<int, TestKitConfigService.ExpectedOutput>();
+            public List<TestKitConfigService.ExpectedNetworkFlow> ExpectedNetworkFlows { get; set; } = new List<TestKitConfigService.ExpectedNetworkFlow>();
             public List<(int Stage, string Input, string Action)> Actions { get; set; } = new List<(int, string, string)>();
         }
 
@@ -214,6 +217,14 @@ namespace SolutionGrader.UI.Services
                 var expectedOutputs = _testKitConfigService.GetExpectedOutputs(testCasePath);
                 result.ExpectedOutputs = expectedOutputs;
                 _logger.LogInfo($"Loaded expected outputs for {expectedOutputs.Count} stages");
+                
+                // Read expected network flow from Network sheet
+                var expectedNetworkFlows = _testKitConfigService.GetExpectedNetworkFlow(testCasePath);
+                result.ExpectedNetworkFlows = expectedNetworkFlows;
+                if (expectedNetworkFlows.Count > 0)
+                {
+                    _logger.LogInfo($"Loaded {expectedNetworkFlows.Count} expected network flow entries from Detail.xlsx");
+                }
 
                 // Execute actions and capture outputs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(environment, actions, ct);
@@ -341,7 +352,11 @@ namespace SolutionGrader.UI.Services
                             if (clientStarted)
                             {
                                 _logger.LogInfo($"[Stage {stage}] Client started successfully, waiting for initialization...");
-                                await Task.Delay(2000, ct); // Wait for client to fully start
+                                // Wait for client to fully start and capture initial output
+                                // Increased to 3000ms because some test kits expect console output
+                                // that appears immediately when the client starts, and 2000ms may not
+                                // be enough to capture all initial output on slower systems.
+                                await Task.Delay(3000, ct);
                                 clientOutputs[stage] = await _dockerGrading.GetClientOutputAsync(environment, ct);
                                 _logger.LogInfo($"[Stage {stage}] Client output captured ({clientOutputs[stage]?.Length ?? 0} chars)");
                                 if (!string.IsNullOrEmpty(clientOutputs[stage]))
@@ -396,13 +411,33 @@ namespace SolutionGrader.UI.Services
                         break;
 
                     case "CLOSECLIENT":
-                        _logger.LogInfo($"[Stage {stage}] CloseClient action - will be cleaned up at end");
-                        // Client cleanup handled at end of test case
+                        _logger.LogInfo($"[Stage {stage}] CloseClient action - stopping client process...");
+                        if (clientStarted)
+                        {
+                            await _dockerGrading.StopApplicationsInContainerAsync(
+                                environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client"), ct);
+                            clientStarted = false; // Reset so it can be started again
+                            _logger.LogInfo($"[Stage {stage}] Client stopped - can be restarted by a subsequent StartClient action");
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Client was not running, skipping CloseClient");
+                        }
                         break;
 
                     case "CLOSESERVER":
-                        _logger.LogInfo($"[Stage {stage}] CloseServer action - will be cleaned up at end");
-                        // Server cleanup handled at end of test case
+                        _logger.LogInfo($"[Stage {stage}] CloseServer action - stopping server process...");
+                        if (serverStarted)
+                        {
+                            await _dockerGrading.StopApplicationsInContainerAsync(
+                                environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server"), ct);
+                            serverStarted = false; // Reset so it can be started again
+                            _logger.LogInfo($"[Stage {stage}] Server stopped - can be restarted by a subsequent StartServer action");
+                        }
+                        else
+                        {
+                            _logger.LogDebug($"[Stage {stage}] Server was not running, skipping CloseServer");
+                        }
                         break;
 
                     default:
@@ -491,13 +526,17 @@ namespace SolutionGrader.UI.Services
         /// - Client sheet: Client console comparisons
         /// - Server sheet: Server console comparisons
         /// - Database sheet: Database comparisons (placeholder)
-        /// - Network sheet: Network traffic comparisons (placeholder)
+        /// - Network sheet: Network traffic comparisons with expected flow from Detail.xlsx
+        /// 
+        /// The Network sheet is populated with expected network flow from the test kit,
+        /// which defines the TCP handshake and data patterns that should occur.
         /// </summary>
         private async Task WriteTestCaseResultAsync(
             string tcResultDir, string testCaseName, bool passed, 
             double earnedMark, double maxMark, 
             Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs,
             Dictionary<int, TestKitConfigService.ExpectedOutput> expectedOutputs,
+            List<TestKitConfigService.ExpectedNetworkFlow> expectedNetworkFlows,
             List<(int Stage, string Input, string Action)> actions,
             CancellationToken ct)
         {

@@ -358,6 +358,24 @@ namespace SolutionGrader.UI.Services
             public string? ClientConsole { get; set; }
             public string? ServerConsole { get; set; }
         }
+        
+        /// <summary>
+        /// Represents expected network traffic for a specific stage from Detail.xlsx Network sheet.
+        /// The Network sheet defines the expected TCP handshake and data flow patterns.
+        /// </summary>
+        public class ExpectedNetworkFlow
+        {
+            public int Stage { get; set; }
+            public string? Time { get; set; }
+            public string? Info { get; set; }
+            public string? Source { get; set; }
+            public string? Destination { get; set; }
+            public string? Flags { get; set; }
+            public string? State { get; set; }
+            public string? Data { get; set; }
+            public string? SourceRole { get; set; }
+            public string? DestinationRole { get; set; }
+        }
 
         /// <summary>
         /// Reads the expected outputs from Detail.xlsx Client and Server sheets.
@@ -430,6 +448,109 @@ namespace SolutionGrader.UI.Services
             }
 
             return expectedOutputs;
+        }
+        
+        /// <summary>
+        /// Reads the expected network flow from Detail.xlsx Network sheet.
+        /// The Network sheet defines the expected TCP handshake (SYN, SYN-ACK, ACK)
+        /// and data flow patterns that should occur during the test case.
+        /// 
+        /// This is the whole point of network monitoring - to capture and verify
+        /// the TCP/UDP communication patterns between client and server.
+        /// </summary>
+        /// <param name="testCasePath">Path to the test case folder</param>
+        /// <returns>List of expected network flow entries</returns>
+        public List<ExpectedNetworkFlow> GetExpectedNetworkFlow(string testCasePath)
+        {
+            var networkFlows = new List<ExpectedNetworkFlow>();
+            
+            var detailPath = Path.Combine(testCasePath, "Detail.xlsx");
+            if (!File.Exists(detailPath))
+            {
+                _logger.LogWarning($"Detail.xlsx not found in {testCasePath}");
+                return networkFlows;
+            }
+
+            try
+            {
+                using var workbook = new XLWorkbook(detailPath);
+                
+                // Read Network sheet for expected network traffic patterns
+                if (workbook.TryGetWorksheet("Network", out var networkSheet))
+                {
+                    _logger.LogInfo("Found Network sheet in Detail.xlsx - reading expected network flow");
+                    
+                    // Get header row to find column indices
+                    var headerRow = networkSheet.Row(1);
+                    var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    
+                    for (int col = 1; col <= headerRow.LastCellUsed()?.Address.ColumnNumber; col++)
+                    {
+                        var headerName = headerRow.Cell(col).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrEmpty(headerName))
+                        {
+                            headers[headerName] = col;
+                        }
+                    }
+                    
+                    _logger.LogDebug($"Network sheet columns: {string.Join(", ", headers.Keys)}");
+                    
+                    var rows = networkSheet.RowsUsed().Skip(1); // Skip header
+                    foreach (var row in rows)
+                    {
+                        var flow = new ExpectedNetworkFlow();
+                        
+                        // Read stage
+                        if (headers.TryGetValue("Stage", out var stageCol))
+                        {
+                            var stageValue = row.Cell(stageCol).GetValue<string>();
+                            if (int.TryParse(stageValue, out var stage))
+                            {
+                                flow.Stage = stage;
+                            }
+                        }
+                        
+                        // Read other columns
+                        if (headers.TryGetValue("Time", out var timeCol))
+                            flow.Time = row.Cell(timeCol).GetValue<string>();
+                        if (headers.TryGetValue("Info", out var infoCol))
+                            flow.Info = row.Cell(infoCol).GetValue<string>();
+                        if (headers.TryGetValue("Source", out var srcCol))
+                            flow.Source = row.Cell(srcCol).GetValue<string>();
+                        if (headers.TryGetValue("Destination", out var dstCol))
+                            flow.Destination = row.Cell(dstCol).GetValue<string>();
+                        if (headers.TryGetValue("Flags", out var flagsCol))
+                            flow.Flags = row.Cell(flagsCol).GetValue<string>();
+                        if (headers.TryGetValue("State", out var stateCol))
+                            flow.State = row.Cell(stateCol).GetValue<string>();
+                        if (headers.TryGetValue("Data", out var dataCol))
+                            flow.Data = row.Cell(dataCol).GetValue<string>();
+                        if (headers.TryGetValue("SourceRole", out var srcRoleCol))
+                            flow.SourceRole = row.Cell(srcRoleCol).GetValue<string>();
+                        if (headers.TryGetValue("DestinationRole", out var dstRoleCol))
+                            flow.DestinationRole = row.Cell(dstRoleCol).GetValue<string>();
+                        
+                        // Only add if there's meaningful data
+                        if (!string.IsNullOrEmpty(flow.Flags) || !string.IsNullOrEmpty(flow.Data))
+                        {
+                            networkFlows.Add(flow);
+                            _logger.LogDebug($"Expected Network flow at Stage {flow.Stage}: [{flow.Flags}] {flow.SourceRole}->{flow.DestinationRole}");
+                        }
+                    }
+                    
+                    _logger.LogInfo($"Loaded {networkFlows.Count} expected network flow entries");
+                }
+                else
+                {
+                    _logger.LogDebug("No Network sheet found in Detail.xlsx - network grading will be skipped for this test case");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error reading Detail.xlsx for expected network flow: {ex.Message}");
+            }
+
+            return networkFlows;
         }
     }
 }

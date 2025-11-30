@@ -165,13 +165,16 @@ namespace SolutionGrader.Core.Services
                                 break;
                             }
                             
-                            // Wait briefly for client output to stabilize after startup
+                            // Wait for client output to stabilize after startup
                             // No health check is performed because:
                             // 1. Student code may fail to start properly - that's their bug to fix  
                             // 2. The test kit steps will naturally fail if client isn't working
                             //
-                            // We just wait for initial output to be captured, then let the test continue.
-                            await _proc.WaitForClientOutputAsync(3, ct);
+                            // We wait for initial output to be captured, then let the test continue.
+                            // Increased to 5 seconds because some test kits expect console output
+                            // that appears immediately when the client starts, and 3 seconds may not
+                            // be enough to capture all initial output on slower systems.
+                            await _proc.WaitForClientOutputAsync(5, ct);
                             
                             var clientOutput = _proc.GetClientOutput();
                             var outputPreview = clientOutput.Length > 100 
