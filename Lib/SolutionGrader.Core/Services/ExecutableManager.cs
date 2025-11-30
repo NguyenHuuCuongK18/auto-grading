@@ -33,6 +33,12 @@ namespace SolutionGrader.Core.Services
         // This approach checks console output length changes rather than relying solely on stdout capture timing
         private int _lastClientOutputLength = 0;
         private int _lastServerOutputLength = 0;
+        
+        /// <summary>
+        /// Timeout for waiting for the stdout pump to start reading after process starts.
+        /// This ensures we don't miss early output from the process.
+        /// </summary>
+        private static readonly TimeSpan PumpStartTimeout = TimeSpan.FromSeconds(2);
 
         public ExecutableManager(IRunContext run) { _run = run; }
 
@@ -104,10 +110,9 @@ namespace SolutionGrader.Core.Services
             _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
             
             // Wait for pump to start reading (ensures we don't miss early output)
-            // Timeout after 2 seconds to prevent indefinite blocking
-            if (!_serverPumpStarted.Wait(TimeSpan.FromSeconds(2)))
+            if (!_serverPumpStarted.Wait(PumpStartTimeout))
             {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Server pump did not signal start within timeout");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Server pump did not signal start within {PumpStartTimeout.TotalSeconds}s timeout");
             }
         }
 
@@ -132,10 +137,9 @@ namespace SolutionGrader.Core.Services
             _ = PumpAsync(_client, FileKeywords.FileName_ClientLog, appendServer: false);
             
             // Wait for pump to start reading (ensures we don't miss early output)
-            // Timeout after 2 seconds to prevent indefinite blocking
-            if (!_clientPumpStarted.Wait(TimeSpan.FromSeconds(2)))
+            if (!_clientPumpStarted.Wait(PumpStartTimeout))
             {
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Client pump did not signal start within timeout");
+                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Warning: Client pump did not signal start within {PumpStartTimeout.TotalSeconds}s timeout");
             }
         }
 

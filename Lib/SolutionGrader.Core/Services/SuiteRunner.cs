@@ -476,16 +476,43 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Attempts to find and kill any process listening on the specified port.
         /// This is a best-effort cleanup to help release ports faster.
-        /// Uses netstat -ano on Windows to find listening processes.
-        /// NOTE: The netstat parsing assumes Windows format which may not work on Linux.
+        /// Uses System.Net.NetworkInformation for cross-platform support.
+        /// Falls back to netstat -ano on Windows if needed.
         /// </summary>
         /// <param name="port">The TCP port to clean up</param>
         private static void TryKillProcessOnPort(int port)
         {
             try
             {
-                // Try to find processes using netstat and kill them
-                // This is a best-effort approach and may not work in all scenarios
+                // First try cross-platform approach using System.Net.NetworkInformation
+                // This is more reliable but doesn't give us PID information directly
+                var listeners = System.Net.NetworkInformation.IPGlobalProperties
+                    .GetIPGlobalProperties()
+                    .GetActiveTcpListeners();
+                
+                bool portInUse = listeners.Any(ep => ep.Port == port);
+                if (!portInUse)
+                {
+                    return; // Port not in use, nothing to do
+                }
+                
+                // Port is in use - try Windows-specific netstat to find and kill the process
+                // This is best-effort and may fail on non-Windows systems
+                TryKillProcessOnPortWindows(port);
+            }
+            catch
+            {
+                // Best effort - ignore errors
+            }
+        }
+        
+        /// <summary>
+        /// Windows-specific implementation using netstat to find and kill processes on a port.
+        /// </summary>
+        private static void TryKillProcessOnPortWindows(int port)
+        {
+            try
+            {
                 // Windows netstat -ano format: "  TCP    0.0.0.0:5000    0.0.0.0:0    LISTENING    1234"
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
@@ -503,41 +530,32 @@ namespace SolutionGrader.Core.Services
                 process.WaitForExit(5000);
                 
                 // Parse netstat output to find PIDs using the port
-                // Format on Windows: "  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       1234"
-                // The PID is the last numeric column when LISTENING
-                var lines = output.Split('\n');
-                foreach (var line in lines)
+                // Use regex for more precise port matching to avoid matching 15000 when looking for 5000
+                var portPattern = new System.Text.RegularExpressions.Regex(
+                    $@"^\s*TCP\s+\S+:({port})\s+\S+\s+LISTENING\s+(\d+)", 
+                    System.Text.RegularExpressions.RegexOptions.Multiline | 
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                
+                var matches = portPattern.Matches(output);
+                foreach (System.Text.RegularExpressions.Match match in matches)
                 {
-                    // Look for lines with our port in LISTENING state
-                    if (!line.Contains($":{port}") || !line.Contains("LISTENING"))
-                        continue;
-                    
-                    // Parse the line by splitting on whitespace
-                    var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    
-                    // Expect at least 5 parts: Protocol, Local Address, Foreign Address, State, PID
-                    if (parts.Length < 5)
-                        continue;
-                    
-                    // Validate the port is in the local address (second column)
-                    if (!parts[1].EndsWith($":{port}") && !parts[1].Contains($":{port} "))
-                        continue;
-                    
-                    // PID should be the last element and be a valid number
-                    var pidStr = parts[parts.Length - 1].Trim();
-                    if (int.TryParse(pidStr, out var pid) && pid > 0)
+                    if (match.Groups.Count >= 3)
                     {
-                        try
+                        var pidStr = match.Groups[2].Value;
+                        if (int.TryParse(pidStr, out var pid) && pid > 0)
                         {
-                            var proc = System.Diagnostics.Process.GetProcessById(pid);
-                            if (proc != null && !proc.HasExited)
+                            try
                             {
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Killing process {pid} using port {port}");
-                                proc.Kill();
-                                proc.WaitForExit(2000);
+                                var proc = System.Diagnostics.Process.GetProcessById(pid);
+                                if (proc != null && !proc.HasExited)
+                                {
+                                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Killing process {pid} using port {port}");
+                                    proc.Kill();
+                                    proc.WaitForExit(2000);
+                                }
                             }
+                            catch { /* Process may have already exited */ }
                         }
-                        catch { /* Process may have already exited */ }
                     }
                 }
             }
