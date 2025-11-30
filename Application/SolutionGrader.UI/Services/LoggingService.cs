@@ -24,6 +24,15 @@ namespace SolutionGrader.UI.Services
         void SetStudentContext(string? studentCode);
         
         /// <summary>
+        /// Sets the current student context for logging with paper number organization.
+        /// Logs will be redirected to the paper-organized student-specific log folder.
+        /// Format: {PaperNo}/Log_{StudentCode}_{Date}
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organizing logs (e.g., "1", "2")</param>
+        void SetStudentContext(string? studentCode, string? paperNo);
+        
+        /// <summary>
         /// Gets all logs for display in the UI.
         /// </summary>
         string GetAllLogs();
@@ -163,7 +172,7 @@ namespace SolutionGrader.UI.Services
                         AutoFlush = true
                     };
 
-                    LogInfo($"Started logging for student: {studentCode}" + (paperNo != null ? $" (Paper {paperNo})" : ""));
+                    LogInfo($"Started logging for student: {studentCode}{(paperNo != null ? $" (Paper {paperNo})" : "")}");
                 }
             }
         }

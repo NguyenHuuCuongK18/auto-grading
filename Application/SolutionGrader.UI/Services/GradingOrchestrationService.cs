@@ -162,15 +162,8 @@ namespace SolutionGrader.UI.Services
             GradingConfiguration config,
             CancellationToken ct)
         {
-            // Set student context with paper number for organized logging
-            if (_logger is LoggingService loggingService)
-            {
-                loggingService.SetStudentContext(student.StudentCode, student.PaperNo);
-            }
-            else
-            {
-                _logger.SetStudentContext(student.StudentCode);
-            }
+            // Set student context with paper number for organized logging (paper/Log_StudentCode_Date)
+            _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
             student.StartTime = DateTime.Now;
             student.Status = GradingStatus.InProgress;
@@ -946,9 +939,9 @@ namespace SolutionGrader.UI.Services
                 }
                 else
                 {
-                    _logger.LogWarning($"Server may not have started properly in {serverContainerName}");
-                    // Still return true as the action was attempted - actual validation is separate
-                    return true;
+                    _logger.LogWarning($"Server may not have started properly in {serverContainerName} - execution will continue but results may be affected");
+                    // Return false to indicate uncertain state - let the test case fail if server is truly not working
+                    return false;
                 }
             }
             catch (Exception ex)
@@ -1001,12 +994,13 @@ namespace SolutionGrader.UI.Services
                 if (clientStarted)
                 {
                     _logger.LogInfo($"Client started successfully in {clientContainerName}");
+                    return true;
                 }
                 else
                 {
-                    _logger.LogWarning($"Client may not have started properly in {clientContainerName}");
+                    _logger.LogWarning($"Client may not have started properly in {clientContainerName} - execution will continue but results may be affected");
+                    return false;
                 }
-                return true;
             }
             catch (Exception ex)
             {
@@ -1071,6 +1065,7 @@ namespace SolutionGrader.UI.Services
             catch (Exception ex)
             {
                 _logger.LogWarning($"Error stopping client container: {ex.Message}");
+                _logger.LogInfo("Container stop failure is non-critical, continuing...");
                 return true; // Not critical if stop fails
             }
         }
@@ -1098,7 +1093,8 @@ namespace SolutionGrader.UI.Services
             catch (Exception ex)
             {
                 _logger.LogWarning($"Error stopping server container: {ex.Message}");
-                return true;
+                _logger.LogInfo("Container stop failure is non-critical, continuing...");
+                return true; // Not critical if stop fails
             }
         }
 

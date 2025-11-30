@@ -308,14 +308,7 @@ namespace SolutionGrader.UI
         private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
-            if (_logger is LoggingService loggingService)
-            {
-                loggingService.SetStudentContext(student.StudentCode, student.PaperNo);
-            }
-            else
-            {
-                _logger.SetStudentContext(student.StudentCode);
-            }
+            _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
             try
             {
