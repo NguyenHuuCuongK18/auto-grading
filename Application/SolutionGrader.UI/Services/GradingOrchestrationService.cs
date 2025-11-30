@@ -242,7 +242,7 @@ namespace SolutionGrader.UI.Services
                 student.ProgressPercent = 50;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                await CopyFilesToContainersAsync(student, environment, ct);
+                await CopyFilesToContainersAsync(environment, ct);
 
                 // Step 6: Execute grading
                 student.ProgressPercent = 70;
@@ -562,10 +562,12 @@ namespace SolutionGrader.UI.Services
         /// Copies student solution files to Docker containers using Lib folder's EnvironmentManagerInvoker.
         /// 
         /// REFACTORED: Now delegates to EnvironmentManagerInvoker.TrySetupQuestion() which handles
-        /// copying files to both Server and Client containers.
+        /// copying files to both Server and Client containers based on environment configuration.
         /// This ensures identical file copying behavior between CLI and UI.
+        /// 
+        /// Note: The student parameter was removed as file paths come from environment configuration.
         /// </summary>
-        private async Task CopyFilesToContainersAsync(StudentSolution student, Environment environment, CancellationToken ct)
+        private async Task CopyFilesToContainersAsync(Environment environment, CancellationToken ct)
         {
             _logger.LogInfo("Copying files to containers via Lib folder's EnvironmentManagerInvoker...");
 

@@ -69,8 +69,15 @@ namespace SolutionGrader.UI.Services
                     UseInnerTestCaseEnvironment = useInnerEnv
                 };
 
-                // Create all the services exactly as the CLI does
-                // This ensures IDENTICAL behavior between CLI and UI
+                // Create all the services exactly as the CLI does (SolutionGrader.Cli/Program.cs)
+                // This ensures IDENTICAL behavior between CLI and UI.
+                // 
+                // NOTE: This service creation is intentionally duplicated from CLI's Program.cs
+                // to ensure both maintain identical dependency configuration. Any changes to
+                // grading behavior should be made in the Lib folder's services themselves,
+                // not in the service creation logic here.
+                //
+                // TODO: Consider extracting to a factory class if this becomes a maintenance burden.
                 IFileService files = new FileService();
                 var env = new EnvironmentResetService(files);
                 var suite = new ExcelSuiteLoader();
@@ -151,8 +158,16 @@ namespace SolutionGrader.UI.Services
                     UseInnerTestCaseEnvironment = true
                 };
 
-                // Use the simple SuiteRunner constructor for ExecutePaper
-                // (ExecutePaper has its own internal service creation)
+                // ExecutePaper uses SuiteRunner's parameterless constructor because it has its own
+                // internal service creation flow (see SuiteRunner.ExecutePaper method).
+                // This is intentionally different from ExecuteSuiteAsync which requires explicit
+                // service injection for the orchestrator-based grading flow.
+                //
+                // The ExecutePaper method handles:
+                // - Loading environment via EnvironmentService.GetEnvironment()
+                // - Setting up containers via EnvironmentManagerInvoker.TrySetupContainer()
+                // - Copying files via EnvironmentManagerInvoker.TrySetupQuestion()
+                // - Cleanup via EnvironmentManagerInvoker.TryDisposeContainer()
                 var runner = new SuiteRunner();
                 
                 _uiLogger.LogInfo($"[LibGradingService] Results will be saved to: {timestampedResultRoot}");
