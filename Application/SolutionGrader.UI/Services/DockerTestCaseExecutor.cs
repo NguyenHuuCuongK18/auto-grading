@@ -236,7 +236,7 @@ namespace SolutionGrader.UI.Services
                 {
                     totalComparisons++;
                     var actualClient = clientOutputs.TryGetValue(stage, out var co) ? co : "";
-                    if (CompareOutput(expected.ClientConsole, actualClient))
+                    if (TextComparisonUtility.CompareOutput(expected.ClientConsole, actualClient))
                     {
                         passedComparisons++;
                         _logger.LogInfo($"[Stage {stage}] Client comparison: PASS");
@@ -254,7 +254,7 @@ namespace SolutionGrader.UI.Services
                 {
                     totalComparisons++;
                     var actualServer = serverOutputs.TryGetValue(stage, out var so) ? so : "";
-                    if (CompareOutput(expected.ServerConsole, actualServer))
+                    if (TextComparisonUtility.CompareOutput(expected.ServerConsole, actualServer))
                     {
                         passedComparisons++;
                         _logger.LogInfo($"[Stage {stage}] Server comparison: PASS");
@@ -278,31 +278,6 @@ namespace SolutionGrader.UI.Services
             _logger.LogInfo($"Test case {testCaseName}: {passedComparisons}/{totalComparisons} comparisons passed, earned {earnedPoints:F2}/{maxMark} points");
 
             return (earnedPoints, passed);
-        }
-
-        /// <summary>
-        /// Compares expected output with actual output (flexible matching).
-        /// </summary>
-        private bool CompareOutput(string expected, string actual)
-        {
-            if (string.IsNullOrEmpty(expected)) return true;
-            if (string.IsNullOrEmpty(actual)) return false;
-
-            // Normalize for comparison
-            var normalizedExpected = NormalizeText(expected);
-            var normalizedActual = NormalizeText(actual);
-
-            // Check if actual contains expected
-            return normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Normalizes text for comparison.
-        /// </summary>
-        private string NormalizeText(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return "";
-            return System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
         }
 
         /// <summary>

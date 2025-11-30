@@ -786,31 +786,6 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Compares expected output with actual output (flexible matching).
-        /// </summary>
-        private bool CompareOutput(string? expected, string actual)
-        {
-            if (string.IsNullOrEmpty(expected)) return true;
-            if (string.IsNullOrEmpty(actual)) return false;
-
-            // Normalize for comparison
-            var normalizedExpected = NormalizeText(expected);
-            var normalizedActual = NormalizeText(actual);
-
-            // Check if actual contains expected
-            return normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Normalizes text for comparison.
-        /// </summary>
-        private string NormalizeText(string? text)
-        {
-            if (string.IsNullOrEmpty(text)) return "";
-            return System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
-        }
-
-        /// <summary>
         /// Finds the student's executable file from the solution path.
         /// Looks for .exe files in publish/bin folders.
         /// </summary>
@@ -1527,7 +1502,7 @@ namespace SolutionGrader.UI.Services
                             pointsPossible = pointsPerComparison
                         };
 
-                        bool clientMatch = CompareOutput(expected.ClientConsole, clientStep.actualOutput ?? "");
+                        bool clientMatch = TextComparisonUtility.CompareOutput(expected.ClientConsole, clientStep.actualOutput);
                         clientStep.passed = clientMatch;
                         clientStep.result = clientMatch ? "PASS" : "FAIL";
                         clientStep.pointsAwarded = clientMatch ? pointsPerComparison : 0;
@@ -1559,7 +1534,7 @@ namespace SolutionGrader.UI.Services
                             pointsPossible = pointsPerComparison
                         };
 
-                        bool serverMatch = CompareOutput(expected.ServerConsole, serverStep.actualOutput ?? "");
+                        bool serverMatch = TextComparisonUtility.CompareOutput(expected.ServerConsole, serverStep.actualOutput);
                         serverStep.passed = serverMatch;
                         serverStep.result = serverMatch ? "PASS" : "FAIL";
                         serverStep.pointsAwarded = serverMatch ? pointsPerComparison : 0;
