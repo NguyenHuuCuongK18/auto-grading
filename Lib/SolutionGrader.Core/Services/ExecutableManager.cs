@@ -34,12 +34,28 @@ namespace SolutionGrader.Core.Services
             _clientPath = clientPath;
             _serverPath = serverPath;
             _client = null; _server = null;
-            _clientOutputBuffer.Clear();
-            _serverOutputBuffer.Clear();
+            ClearConsoleBuffers();
             _clientStartQuestionCode = null;
             _clientStartStageLabel = null;
             _serverStartQuestionCode = null;
             _serverStartStageLabel = null;
+        }
+        
+        /// <summary>
+        /// Clears all console output buffers. Call this between test cases to ensure 
+        /// each test case starts with a fresh console state.
+        /// </summary>
+        public void ClearConsoleBuffers()
+        {
+            lock (_clientOutputBuffer)
+            {
+                _clientOutputBuffer.Clear();
+            }
+            lock (_serverOutputBuffer)
+            {
+                _serverOutputBuffer.Clear();
+            }
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Console buffers cleared");
         }
 
         public void StartServer()
@@ -357,7 +373,14 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                using var sw = new StreamWriter(Path.Combine(AppContext.BaseDirectory, logName), append: true, Encoding.UTF8);
+                // Write logs to the grading session folder instead of AppContext.BaseDirectory
+                // This keeps all logs organized in one place for each grading session
+                var logDir = !string.IsNullOrEmpty(_run.ResultRoot) && Directory.Exists(_run.ResultRoot)
+                    ? _run.ResultRoot
+                    : AppContext.BaseDirectory;
+                var logPath = Path.Combine(logDir, logName);
+                
+                using var sw = new StreamWriter(logPath, append: true, Encoding.UTF8);
                 sw.AutoFlush = true;
 
                 async Task readAsync(StreamReader reader)

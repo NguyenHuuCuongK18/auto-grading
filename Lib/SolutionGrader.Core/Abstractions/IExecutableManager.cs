@@ -19,4 +19,10 @@ public interface IExecutableManager
     System.Threading.Tasks.Task<bool> WaitForServerOutputAsync(int timeoutSeconds = 5, System.Threading.CancellationToken ct = default);
     string GetClientOutput();
     string GetServerOutput();
+    
+    /// <summary>
+    /// Clears all console output buffers. Call this between test cases to ensure 
+    /// each test case starts with a fresh console state.
+    /// </summary>
+    void ClearConsoleBuffers();
 }
