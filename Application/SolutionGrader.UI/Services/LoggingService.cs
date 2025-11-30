@@ -115,9 +115,11 @@ namespace SolutionGrader.UI.Services
                 Directory.CreateDirectory(logDir);
             }
 
-            // Create system log file
+            // Create system log file with FileShare.ReadWrite to allow deletion while app is running
             var systemLogPath = Path.Combine(logDir, $"System_{DateTime.Now:yyyyMMdd_HHmmss}.log");
-            _systemLogWriter = new StreamWriter(systemLogPath, true, Encoding.UTF8)
+            _systemLogWriter = new StreamWriter(
+                new FileStream(systemLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                Encoding.UTF8)
             {
                 AutoFlush = true
             };
@@ -174,8 +176,11 @@ namespace SolutionGrader.UI.Services
                         Directory.CreateDirectory(studentLogDir);
                     }
 
+                    // Create student log file with FileShare.ReadWrite to allow deletion while app is running
                     var studentLogPath = Path.Combine(studentLogDir, $"grading_{DateTime.Now:HHmmss}.log");
-                    _currentStudentLogWriter = new StreamWriter(studentLogPath, true, Encoding.UTF8)
+                    _currentStudentLogWriter = new StreamWriter(
+                        new FileStream(studentLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                        Encoding.UTF8)
                     {
                         AutoFlush = true
                     };
