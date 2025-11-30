@@ -23,6 +23,28 @@ namespace SolutionGrader.Core.Services
         private string? _clientStartStageLabel;
         private string? _serverStartQuestionCode;
         private string? _serverStartStageLabel;
+        
+        // Constants for timing configuration
+        /// <summary>
+        /// Initial delay before checking for output after starting a process.
+        /// This allows the process to initialize and produce initial output.
+        /// </summary>
+        private const int InitialOutputCaptureDelayMs = 100;
+        
+        /// <summary>
+        /// Delay after starting a process to ensure the output pump is ready.
+        /// </summary>
+        private const int ProcessStartupDelayMs = 50;
+        
+        /// <summary>
+        /// Time to wait for output to stabilize (no new output) before considering capture complete.
+        /// </summary>
+        private const int OutputStabilizationMs = 200;
+        
+        /// <summary>
+        /// Polling interval when checking for new output.
+        /// </summary>
+        private const int OutputPollingIntervalMs = 25;
 
         public ExecutableManager(IRunContext run) { _run = run; }
 
@@ -73,7 +95,7 @@ namespace SolutionGrader.Core.Services
             _ = PumpAsync(_server, FileKeywords.FileName_ServerLog, appendServer: true);
             
             // Give the process a moment to initialize and write initial output
-            Thread.Sleep(50);
+            Thread.Sleep(ProcessStartupDelayMs);
         }
 
         public void StartClient()
@@ -101,7 +123,7 @@ namespace SolutionGrader.Core.Services
             // Give the process a moment to initialize and write initial output
             // This small delay allows the process's initial Console.Write calls to execute
             // before we start checking for output in WaitForClientOutputAsync
-            Thread.Sleep(50);
+            Thread.Sleep(ProcessStartupDelayMs);
         }
 
         public async Task<Process?> StartAsync(string executablePath, string arguments, CancellationToken ct)
@@ -206,14 +228,7 @@ namespace SolutionGrader.Core.Services
             
             // Give the pump time to capture initial output.
             // The pump has a 50ms flush interval for partial lines (prompts without newlines).
-            // Wait at least 100ms initially to ensure any prompt is captured.
-            await Task.Delay(100, ct);
-            
-            // Reduced stabilization time from 1000ms to 200ms to be more responsive.
-            // The key is to capture output quickly, not to wait a long time.
-            // If no new output for 200ms, we assume the output has stabilized.
-            const int stabilizationMs = 200; // Wait 200ms with no new output to consider stable
-            const int pollIntervalMs = 25; // Check for new output every 25ms (faster polling)
+            await Task.Delay(InitialOutputCaptureDelayMs, ct);
             
             var startTime = DateTime.UtcNow;
             var initialOutputLength = GetClientOutput().Length;
@@ -227,7 +242,7 @@ namespace SolutionGrader.Core.Services
                 if (_client.HasExited)
                 {
                     // Process exited - wait a bit more for any buffered output to flush
-                    await Task.Delay(200, ct);
+                    await Task.Delay(OutputStabilizationMs, ct);
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {LoggingKeywords.MSG_CLIENT_PROCESS_EXITED}");
                     return hasReceivedOutput;
                 }
@@ -244,7 +259,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // If we have received output and it has stabilized (no new output for stabilization period)
-                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= stabilizationMs)
+                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= OutputStabilizationMs)
                 {
                     var totalOutputReceived = currentOutputLength - initialOutputLength;
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_CLIENT_INPUT} {string.Format(LoggingKeywords.MSG_CLIENT_PRODUCED_OUTPUT, totalOutputReceived)} (stabilized)");
@@ -252,7 +267,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Short delay before checking again
-                await Task.Delay(pollIntervalMs, ct);
+                await Task.Delay(OutputPollingIntervalMs, ct);
             }
             
             // Timeout or cancellation
@@ -306,11 +321,7 @@ namespace SolutionGrader.Core.Services
             if (_server == null) return false;
             
             // Give the pump time to capture initial output (similar to client)
-            await Task.Delay(100, ct);
-            
-            // Reduced stabilization time for faster response
-            const int stabilizationMs = 200; // Wait 200ms with no new output to consider stable
-            const int pollIntervalMs = 25; // Check for new output every 25ms
+            await Task.Delay(InitialOutputCaptureDelayMs, ct);
             
             var startTime = DateTime.UtcNow;
             var initialOutputLength = GetServerOutput().Length;
@@ -324,7 +335,7 @@ namespace SolutionGrader.Core.Services
                 if (_server.HasExited)
                 {
                     // Process exited - wait a bit more for any buffered output to flush
-                    await Task.Delay(200, ct);
+                    await Task.Delay(OutputStabilizationMs, ct);
                     return hasReceivedOutput;
                 }
                 
@@ -340,13 +351,13 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // If we have received output and it has stabilized (no new output for stabilization period)
-                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= stabilizationMs)
+                if (hasReceivedOutput && (DateTime.UtcNow - lastOutputTime).TotalMilliseconds >= OutputStabilizationMs)
                 {
                     return true;
                 }
                 
                 // Short delay before checking again
-                await Task.Delay(pollIntervalMs, ct);
+                await Task.Delay(OutputPollingIntervalMs, ct);
             }
             
             return hasReceivedOutput;

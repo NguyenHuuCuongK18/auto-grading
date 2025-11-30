@@ -432,9 +432,13 @@ namespace SolutionGrader.Core.Services
         /// <returns>True if port is available, false if timeout exceeded</returns>
         private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 30)
         {
-            var startTime = DateTime.UtcNow;
-            int delayMs = 200; // Start with 200ms delay, increase exponentially
+            // Constants for port release timing
+            const int initialDelayMs = 200; // Start with 200ms delay
             const int maxDelayMs = 2000; // Cap at 2 seconds
+            const int portStabilizationDelayMs = 500; // Wait after port available to ensure clean state
+            
+            var startTime = DateTime.UtcNow;
+            int delayMs = initialDelayMs;
             
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released...");
             
@@ -444,7 +448,7 @@ namespace SolutionGrader.Core.Services
                 {
                     Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is now available");
                     // Add a small delay after port becomes available to ensure clean state
-                    await Task.Delay(500, ct);
+                    await Task.Delay(portStabilizationDelayMs, ct);
                     return true;
                 }
                 
