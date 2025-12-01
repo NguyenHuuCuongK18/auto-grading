@@ -76,12 +76,48 @@ namespace GradingServices
         public string SubmitFolderPath { get; set; } = string.Empty;
         public string TestKitFolderPath { get; set; } = string.Empty;
         public string SaveResultFolderPath { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// If true, student provides the client code. If false, use golden client from testkit.
+        /// </summary>
         public bool HasClient { get; set; } = true;
+        
+        /// <summary>
+        /// If true, student provides the server code. If false, use golden server from testkit.
+        /// </summary>
         public bool HasServer { get; set; } = true;
-        public string ClientProjectName { get; set; } = "Client";
-        public string ServerProjectName { get; set; } = "Server";
-        public int ServerPort { get; set; } = 5000;
+        
+        /// <summary>
+        /// Student's client project folder name (e.g., "Q12").
+        /// </summary>
+        public string ClientProjectName { get; set; } = "Q12";
+        
+        /// <summary>
+        /// Student's server project folder name (e.g., "Q11").
+        /// </summary>
+        public string ServerProjectName { get; set; } = "Q11";
+        
+        /// <summary>
+        /// Server port from Environment.xlsx (Code_Container_Host_Port).
+        /// </summary>
+        public int ServerPort { get; set; } = 8000;
+        
+        /// <summary>
+        /// Maps paper numbers to testkit folder names.
+        /// </summary>
         public Dictionary<string, string> PaperToTestKitMapping { get; set; } = new();
+        
+        /// <summary>
+        /// Path to golden client in testkit (e.g., "Meta/Given/Client").
+        /// Used when HasClient is false.
+        /// </summary>
+        public string GoldenClientPath { get; set; } = "Meta/Given/Client";
+        
+        /// <summary>
+        /// Path to golden server in testkit (e.g., "Meta/Given/Server").
+        /// Used when HasServer is false.
+        /// </summary>
+        public string GoldenServerPath { get; set; } = "Meta/Given/Server";
     }
 
     /// <summary>

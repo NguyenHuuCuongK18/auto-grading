@@ -356,10 +356,28 @@ namespace GradingServices
                 {
                     await _containerService.CreateClientContainerAsync("student", clientPath, ct);
                 }
+                else if (!config.HasClient)
+                {
+                    // Use golden client from testkit
+                    var goldenClientPath = Path.Combine(testKitPath, config.GoldenClientPath);
+                    if (Directory.Exists(goldenClientPath))
+                    {
+                        await _containerService.CreateClientContainerAsync("golden", goldenClientPath, ct);
+                    }
+                }
                 
                 if (config.HasServer && !string.IsNullOrEmpty(serverPath))
                 {
                     await _containerService.CreateServerContainerAsync("student", serverPath, ct);
+                }
+                else if (!config.HasServer)
+                {
+                    // Use golden server from testkit
+                    var goldenServerPath = Path.Combine(testKitPath, config.GoldenServerPath);
+                    if (Directory.Exists(goldenServerPath))
+                    {
+                        await _containerService.CreateServerContainerAsync("golden", goldenServerPath, ct);
+                    }
                 }
 
                 // Execute stages

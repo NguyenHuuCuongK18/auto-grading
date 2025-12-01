@@ -45,12 +45,12 @@ namespace GradingServices
         private string _lastClientOutput = string.Empty;
         private string _lastServerOutput = string.Empty;
 
-        // Container configuration
-        private const string DefaultImageName = "fptuxaes/aes-dotnet8:latest";
-        private const string DatabaseImageName = "mcr.microsoft.com/mssql/server:2022-latest";
+        // Container configuration - from Environment.xlsx
+        private const string DefaultImageName = "fptuxaes/aes-dotnet8-console:latest";  // Built from DockerImage/Dockerfile
+        private const string DatabaseImageName = "mcr.microsoft.com/mssql/server:2019-latest";  // Database_Image_Name
         private const string ContainerPrefix = "ag-";
 
-        public DockerContainerService(string networkName = "ag-network", int serverPort = 5000)
+        public DockerContainerService(string networkName = "auto-grading-network", int serverPort = 8000)
         {
             _executor = new DockerCommandExecutor();
             _networkName = networkName;

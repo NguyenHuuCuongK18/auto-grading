@@ -93,16 +93,21 @@ namespace GradingRunner
                     ?? Path.Combine(repoRoot, "Submit"),
                 
                 TestKitFolderPath = Environment.GetEnvironmentVariable("TESTKIT_FOLDER") 
-                    ?? Path.Combine(repoRoot, "TestKit"),
+                    ?? Path.Combine(repoRoot, "TestKit", "TestKit"),
                 
                 SaveResultFolderPath = Environment.GetEnvironmentVariable("OUTPUT_FOLDER") 
                     ?? Path.Combine(repoRoot, "GradingResults"),
 
-                HasClient = true,
-                HasServer = true,
+                // Student provides Client (Q12), Golden Server from testkit (Meta/Given/Server)
+                HasClient = true,   // Student provides client
+                HasServer = false,  // Use golden server from testkit
                 ClientProjectName = "Q12",
-                ServerProjectName = "Q11",
-                ServerPort = 5000,
+                ServerProjectName = "Q11",  // Not used when HasServer = false
+                ServerPort = 8000,  // From Environment.xlsx: Code_Container_Host_Port
+                
+                // Golden paths in testkit
+                GoldenClientPath = "Meta/Given/Client",
+                GoldenServerPath = "Meta/Given/Server",
 
                 // Default mapping: Paper 1 -> Q1 testkit (Q2 only if it exists)
                 PaperToTestKitMapping = new Dictionary<string, string>
@@ -121,6 +126,8 @@ namespace GradingRunner
             Console.WriteLine($"Submit folder: {_config.SubmitFolderPath}");
             Console.WriteLine($"TestKit folder: {_config.TestKitFolderPath}");
             Console.WriteLine($"Output folder: {_config.SaveResultFolderPath}");
+            Console.WriteLine($"Server port: {_config.ServerPort}");
+            Console.WriteLine($"Student provides: Client={_config.HasClient}, Server={_config.HasServer}");
             Console.WriteLine();
         }
 
