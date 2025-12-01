@@ -231,6 +231,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Stops all dotnet processes inside a container.
         /// This is used between test cases to ensure the port is released.
+        /// Uses multiple kill signals and waits for processes to fully terminate.
         /// </summary>
         public async Task<bool> StopApplicationsInContainerAsync(string containerName, CancellationToken ct = default)
         {
@@ -238,42 +239,24 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                // Kill all dotnet processes in the container using pkill
-                // This releases the ports before starting a new test case
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "docker",
-                    Arguments = $"exec {containerName} pkill -9 dotnet",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                // First, try graceful termination with SIGTERM
+                await ExecuteDockerCommandAsync($"exec {containerName} pkill -15 dotnet", ct);
+                
+                // Give processes a moment to terminate gracefully
+                await Task.Delay(500, ct);
+                
+                // Force kill any remaining processes with SIGKILL
+                await ExecuteDockerCommandAsync($"exec {containerName} pkill -9 dotnet", ct);
+                
+                // Wait a bit more for kernel to clean up
+                await Task.Delay(500, ct);
+                
+                // Also kill any remaining sleep processes that may hold pipes open
+                await ExecuteDockerCommandAsync($"exec {containerName} pkill -9 sleep", ct);
 
-                using var process = System.Diagnostics.Process.Start(psi);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync(ct);
-                    // pkill returns 0 if at least one process matched, 1 if no process matched
-                    // Both are acceptable outcomes
-                }
-
-                // Also clean up named pipes to ensure clean restart
-                var cleanupPsi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "docker",
-                    Arguments = $"exec {containerName} sh -c \"rm -f /tmp/*_input_pipe 2>/dev/null || true\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var cleanupProcess = System.Diagnostics.Process.Start(cleanupPsi);
-                if (cleanupProcess != null)
-                {
-                    await cleanupProcess.WaitForExitAsync(ct);
-                }
+                // Clean up named pipes to ensure clean restart
+                await ExecuteDockerCommandAsync(
+                    $"exec {containerName} sh -c \"rm -f /tmp/*_input_pipe 2>/dev/null || true\"", ct);
 
                 _logger.LogInfo($"Stopped dotnet processes in container {containerName}");
                 return true;
@@ -286,8 +269,33 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
+        /// Executes a docker command and waits for completion.
+        /// </summary>
+        private async Task<int> ExecuteDockerCommandAsync(string arguments, CancellationToken ct)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process != null)
+            {
+                await process.WaitForExitAsync(ct);
+                return process.ExitCode;
+            }
+            return -1;
+        }
+
+        /// <summary>
         /// Stops all applications in all containers (server and client).
         /// Called between test cases to ensure clean state and release ports.
+        /// Waits for port to be released inside the container using netstat check.
         /// </summary>
         public async Task StopAllApplicationsAsync(Environment environment, CancellationToken ct = default)
         {
@@ -295,10 +303,15 @@ namespace SolutionGrader.UI.Services
             
             var serverContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName);
             var clientContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName);
+            var port = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerInternalPort, "5000");
 
             if (!string.IsNullOrEmpty(serverContainer))
             {
                 await StopApplicationsInContainerAsync(serverContainer, ct);
+                
+                // Wait for port to be released inside the container
+                // This is crucial because the socket TIME_WAIT state is per-container
+                await WaitForPortReleaseInContainerAsync(serverContainer, port, ct);
             }
 
             if (!string.IsNullOrEmpty(clientContainer))
@@ -306,9 +319,63 @@ namespace SolutionGrader.UI.Services
                 await StopApplicationsInContainerAsync(clientContainer, ct);
             }
 
-            // Wait for ports to be fully released
-            await Task.Delay(1000, ct);
-            _logger.LogInfo("All applications stopped");
+            _logger.LogInfo("All applications stopped and ports released");
+        }
+
+        /// <summary>
+        /// Waits for a specific port to be released inside a container.
+        /// Uses ss/netstat to check if any process is listening on the port.
+        /// </summary>
+        private async Task<bool> WaitForPortReleaseInContainerAsync(
+            string containerName, 
+            string port, 
+            CancellationToken ct, 
+            int maxWaitSeconds = 10)
+        {
+            _logger.LogInfo($"Waiting for port {port} to be released in container {containerName}...");
+            
+            var startTime = DateTime.UtcNow;
+            const int pollIntervalMs = 500;
+            
+            while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds && !ct.IsCancellationRequested)
+            {
+                // Check if any process is listening on the port inside the container
+                // Use ss (socket statistics) which is available in most containers
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = $"exec {containerName} sh -c \"ss -tln | grep -q ':{port} ' && echo IN_USE || echo AVAILABLE\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process != null)
+                {
+                    var output = await process.StandardOutput.ReadToEndAsync(ct);
+                    await process.WaitForExitAsync(ct);
+                    
+                    if (output.Trim() == "AVAILABLE")
+                    {
+                        _logger.LogInfo($"Port {port} is now available in container {containerName}");
+                        return true;
+                    }
+                }
+                
+                await Task.Delay(pollIntervalMs, ct);
+            }
+            
+            _logger.LogWarning($"Port {port} may still be in use in container {containerName} after {maxWaitSeconds}s");
+            
+            // As a last resort, try to forcefully release the port by killing any process using it
+            _logger.LogInfo($"Attempting to force release port {port} in container {containerName}...");
+            await ExecuteDockerCommandAsync(
+                $"exec {containerName} sh -c \"fuser -k {port}/tcp 2>/dev/null || true\"", ct);
+            await Task.Delay(500, ct);
+            
+            return false;
         }
 
         /// <summary>
