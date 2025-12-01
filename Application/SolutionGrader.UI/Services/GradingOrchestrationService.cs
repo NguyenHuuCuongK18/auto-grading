@@ -658,18 +658,16 @@ namespace SolutionGrader.UI.Services
                 {
                     _logger.LogInfo($"Setting up Client container: {clientContainer}");
                     
-                    // Client container uses same code image but different port mapping
-                    // Client typically doesn't need to expose a port since it initiates connections
-                    // Using ClientPortOffset to avoid port conflicts with server container
-                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + ClientPortOffset : 5001;
-                    
+                    // Client container does NOT need port mapping!
+                    // The client only initiates connections to the server - it doesn't listen on any port.
+                    // Using 0 for both ports tells RunContainer to skip the -p flag entirely.
                     var clientDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
                     {
                         ImageName = codeImageName,
                         ContainerName = clientContainer,
                         DockerNetwork = network,
-                        ContainerPort = int.TryParse(internalPort, out var cip) ? cip : 5000,
-                        HostPort = clientPort,
+                        ContainerPort = 0,  // No port mapping needed for client
+                        HostPort = 0,       // No port mapping needed for client
                         EnvironmentVariables = new Dictionary<string, string>
                         {
                             { "DOTNET_RUNNING_IN_CONTAINER", "true" }
@@ -677,7 +675,7 @@ namespace SolutionGrader.UI.Services
                     };
                     
                     _dockerExecutor.RunContainer(clientDockerBase);
-                    _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
+                    _logger.LogInfo($"Client container '{clientContainer}' started (no port mapping - client only connects to server)");
                 }
 
                 await Task.Delay(500, ct); // Brief wait for all containers to be ready

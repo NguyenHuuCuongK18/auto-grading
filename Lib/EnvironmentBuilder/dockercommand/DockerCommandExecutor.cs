@@ -307,12 +307,19 @@ namespace EnvironmentBuilder.DockerCommand
                 foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
                     envVars += $"-e {kv.Key}={kv.Value} ";
 
+                // Build port mapping string - skip if ports are <= 0 (client containers don't need port mapping)
+                string portMapping = "";
+                if (dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0)
+                {
+                    portMapping = $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} ";
+                }
+
                 string command = $@"docker run -d " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
-                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{portMapping}" +
                                  $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
             }
@@ -695,7 +702,15 @@ namespace EnvironmentBuilder.DockerCommand
             string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
             ExecDockerCommand(startDoorstopCommand, 60000);
 
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            // Start the .NET application with proper output settings:
+            // - DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1: Disable .NET's internal console buffering
+            // - DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION=1: Preserve ANSI codes
+            // - stdbuf -o0 -e0: Disable libc's stdout/stderr buffering (for Console.Write without \n)
+            // - Output to /proc/1/fd/1: Write directly to PID 1's stdout for docker logs capture
+            // - 2>&1: Merge stderr into stdout so docker logs captures everything
+            // Note: Lines without \n may still be buffered by docker's logging driver.
+            // The workaround is to ensure GetContainerLogsAsync captures the latest state.
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 -e DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 

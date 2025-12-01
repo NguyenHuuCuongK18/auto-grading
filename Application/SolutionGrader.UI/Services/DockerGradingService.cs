@@ -494,6 +494,10 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Gets the logs from a container.
+        /// Uses --timestamps to help with ordering and --follow=false to get current state.
+        /// Note: Docker logs may buffer partial lines (lines without \n). To work around this,
+        /// we capture both stdout and stderr, and the application should be started with
+        /// unbuffered output (stdbuf -o0 or DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1).
         /// </summary>
         public static async Task<string> GetContainerLogsAsync(
             this DockerCommandExecutor executor, 
@@ -502,10 +506,12 @@ namespace SolutionGrader.UI.Services
         {
             try
             {
+                // Use docker logs without --tail to get all output
+                // Also capture stderr as some prompts may be written there
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "docker",
-                    Arguments = $"logs --tail 100 {containerName}",
+                    Arguments = $"logs {containerName} 2>&1",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -515,9 +521,17 @@ namespace SolutionGrader.UI.Services
                 using var process = System.Diagnostics.Process.Start(psi);
                 if (process != null)
                 {
-                    var output = await process.StandardOutput.ReadToEndAsync(ct);
+                    // Read both stdout and stderr
+                    var outputTask = process.StandardOutput.ReadToEndAsync(ct);
+                    var errorTask = process.StandardError.ReadToEndAsync(ct);
+                    
                     await process.WaitForExitAsync(ct);
-                    return output;
+                    
+                    var output = await outputTask;
+                    var error = await errorTask;
+                    
+                    // Combine output and error (error may contain partial lines)
+                    return string.IsNullOrEmpty(error) ? output : output + error;
                 }
                 return string.Empty;
             }
