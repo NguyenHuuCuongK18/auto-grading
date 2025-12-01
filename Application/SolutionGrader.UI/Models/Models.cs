@@ -74,6 +74,11 @@ namespace SolutionGrader.UI.Models
         /// </summary>
         public Dictionary<string, string> PaperToTestKitMapping { get; set; } = new();
 
+        /// <summary>
+        /// Papers that have no corresponding testkit. Students for these papers will be skipped during grading.
+        /// </summary>
+        public HashSet<string> UnmappedPapers { get; set; } = new();
+
         // Database configuration properties for Docker container
         public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2022-latest";
         public string DatabaseContainerName { get; set; } = "ag-database";

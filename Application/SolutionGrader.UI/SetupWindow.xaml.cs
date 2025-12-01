@@ -194,7 +194,8 @@ namespace SolutionGrader.UI
         }
 
         /// <summary>
-        /// Validates that all papers in Submit folder have corresponding testkits.
+        /// Validates testkit mappings and warns about unmapped papers.
+        /// Allows proceeding with missing testkits - students for those papers will be skipped during grading.
         /// </summary>
         private bool ValidateTestKitMapping()
         {
@@ -222,8 +223,16 @@ namespace SolutionGrader.UI
 
             if (unmappedPapers.Count > 0)
             {
-                txtValidation.Text = $"No testkit found for paper(s): {string.Join(", ", unmappedPapers)}. Please update Mapping.xlsx or add Q{{n}} folders.";
-                return false;
+                // Store unmapped papers in configuration so GradingWindow can skip them
+                _configuration.UnmappedPapers = unmappedPapers.ToHashSet();
+                
+                // Show warning but allow proceeding - students for these papers will be skipped
+                txtValidation.Text = $"Warning: No testkit for paper(s): {string.Join(", ", unmappedPapers)}. Students for these papers will be skipped during grading.";
+                txtValidation.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 165, 0)); // Orange warning
+            }
+            else
+            {
+                _configuration.UnmappedPapers = new System.Collections.Generic.HashSet<string>();
             }
 
             return true;

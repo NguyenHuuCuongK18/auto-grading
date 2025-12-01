@@ -140,6 +140,16 @@ namespace SolutionGrader.UI
                 // Load test kit configs for each paper to get max marks
                 foreach (var student in students)
                 {
+                    // Check if this paper is unmapped (no testkit)
+                    if (_configuration.UnmappedPapers.Contains(student.PaperNo))
+                    {
+                        student.StatusMessage = $"No test kit for paper {student.PaperNo} - will be skipped";
+                        student.Status = GradingStatus.Not_Run;
+                        _students.Add(student);
+                        _filteredStudents.Add(student);
+                        continue;
+                    }
+                    
                     // Get test kit config for this paper to set max mark (use mapping from configuration)
                     var testKitPath = _testKitDiscovery.GetTestKitForPaper(
                         _configuration.TestKitFolderPath, 
@@ -159,8 +169,8 @@ namespace SolutionGrader.UI
                     }
                     else
                     {
-                        // No test kit for this paper - log only for this paper's students
-                        student.StatusMessage = $"No test kit for paper {student.PaperNo}";
+                        // No test kit for this paper - mark as skipped
+                        student.StatusMessage = $"No test kit for paper {student.PaperNo} - will be skipped";
                     }
                     
                     _students.Add(student);
@@ -315,6 +325,16 @@ namespace SolutionGrader.UI
             
             try
             {
+                // Skip students with unmapped papers
+                if (_configuration.UnmappedPapers.Contains(student.PaperNo))
+                {
+                    student.Status = GradingStatus.Not_Run;
+                    student.StatusMessage = $"Skipped - No test kit for paper {student.PaperNo}";
+                    _logger.LogWarning($"Skipping {student.StudentCode} - no test kit for paper {student.PaperNo}");
+                    UpdateStudentInUI(student);
+                    return;
+                }
+                
                 // NOTE: Do NOT change status to InProgress here - let the orchestration service handle it
                 // This was causing the filter in StartGradingAsync to skip students
                 student.StartTime = DateTime.Now;
