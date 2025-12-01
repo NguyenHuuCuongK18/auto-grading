@@ -110,6 +110,15 @@ namespace SolutionGrader.ConsoleTest
                 return 0;
             }
 
+            // Determine the actual test kit root (may be nested as TestKit/TestKit)
+            var actualTestKitRoot = testKitFolder;
+            var nestedPath = Path.Combine(testKitFolder, "TestKit");
+            if (Directory.Exists(nestedPath))
+            {
+                actualTestKitRoot = nestedPath;
+                Console.WriteLine($"Using nested TestKit folder: {actualTestKitRoot}");
+            }
+
             // Create services
             IFileService fileService = new FileService();
             IRunContext runContext = new RunContext();
@@ -129,8 +138,19 @@ namespace SolutionGrader.ConsoleTest
 
                 try
                 {
+                    // Find test kit for this paper
+                    var studentTestKitPath = GetTestKitForPaper(actualTestKitRoot, student.Paper);
+                    if (string.IsNullOrEmpty(studentTestKitPath))
+                    {
+                        Console.WriteLine($"No test kit found for paper {student.Paper}, skipping");
+                        failCount++;
+                        continue;
+                    }
+
+                    Console.WriteLine($"Using test kit: {Path.GetFileName(studentTestKitPath)}");
+
                     // Build config from Environment.xlsx
-                    var config = LoadEnvironmentConfig(testKitFolder);
+                    var config = LoadEnvironmentConfig(studentTestKitPath);
 
                     // Add student-specific paths
                     config[DomainEnvConfig.CodeFilePath] = student.ServerPath ?? "";
@@ -144,7 +164,7 @@ namespace SolutionGrader.ConsoleTest
 
                     var marks = await gradingService.GradeStudentAsync(
                         student.Path,
-                        testKitFolder,
+                        studentTestKitPath,
                         studentResultPath,
                         config);
 
@@ -312,6 +332,75 @@ namespace SolutionGrader.ConsoleTest
             }
 
             return config;
+        }
+
+        /// <summary>
+        /// Finds the test kit path for a specific paper number.
+        /// Checks Mapping.xlsx first, then uses naming conventions.
+        /// </summary>
+        private static string? GetTestKitForPaper(string testKitRoot, string paperNo)
+        {
+            // Check Mapping.xlsx
+            var mappingPath = Path.Combine(testKitRoot, "Mapping.xlsx");
+            if (File.Exists(mappingPath))
+            {
+                try
+                {
+                    using var workbook = new ClosedXML.Excel.XLWorkbook(mappingPath);
+                    var ws = workbook.Worksheets.FirstOrDefault();
+                    if (ws != null)
+                    {
+                        // Find columns
+                        int paperCol = -1, testKitCol = -1;
+                        for (int col = 1; col <= 10; col++)
+                        {
+                            var header = ws.Cell(1, col).GetString().Trim().ToUpperInvariant();
+                            if (header == "PAPERNO" || header == "PAPER") paperCol = col;
+                            else if (header == "TESTKIT" || header == "TEST_KIT") testKitCol = col;
+                        }
+
+                        if (paperCol > 0 && testKitCol > 0)
+                        {
+                            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+                            for (int row = 2; row <= lastRow; row++)
+                            {
+                                var paper = ws.Cell(row, paperCol).GetString().Trim();
+                                if (paper == paperNo)
+                                {
+                                    var testKit = ws.Cell(row, testKitCol).GetString().Trim();
+                                    var mappedPath = Path.Combine(testKitRoot, testKit);
+                                    if (Directory.Exists(mappedPath))
+                                    {
+                                        Console.WriteLine($"Found mapping: Paper {paperNo} -> {testKit}");
+                                        return mappedPath;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { /* Continue with convention matching */ }
+            }
+
+            // Try naming conventions
+            var testKitFolders = Directory.GetDirectories(testKitRoot)
+                .Where(d => !Path.GetFileName(d).StartsWith("."))
+                .ToList();
+
+            // Try Q{paperNo}
+            var match = testKitFolders.FirstOrDefault(f => 
+                Path.GetFileName(f).Equals($"Q{paperNo}", StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+
+            // Try folders containing the paper number
+            match = testKitFolders.FirstOrDefault(f => 
+                Path.GetFileName(f).Contains(paperNo, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+
+            // If only one test kit, use it
+            if (testKitFolders.Count == 1) return testKitFolders[0];
+
+            return null;
         }
 
         /// <summary>

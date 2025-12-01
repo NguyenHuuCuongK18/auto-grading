@@ -728,6 +728,50 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
         }
 
+        /// <summary>
+        /// Deploys server files to the container WITHOUT starting the application.
+        /// Use this when you need on-demand server startup.
+        /// After calling this, use StartServerApplication() to start the application.
+        /// </summary>
+        public void DeployServerFilesOnly()
+        {
+            try
+            {
+                // Copy all publish files to container:/apps
+                dockerCommandExecutor.CopyFileToContainer(
+                    questionConfigs[EnvironmentConfiguration.CodeFilePath],
+                    questionConfigs[EnvironmentConfiguration.CodeContainerName] + ":/apps"
+                );
+                Console.WriteLine($"[Server] Files deployed to container");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error deploying server files: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Starts the server application after files have been deployed.
+        /// Must call DeployServerFilesOnly() before calling this method.
+        /// </summary>
+        public void StartServerApplication()
+        {
+            try
+            {
+                dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
+                    questionConfigs[EnvironmentConfiguration.CodeContainerName],
+                    questionConfigs[EnvironmentConfiguration.StudentQuestionName],
+                    questionConfigs[EnvironmentConfiguration.DockerServerPath],
+                    questionConfigs[EnvironmentConfiguration.CodeContainerInternalPort]
+                );
+                Console.WriteLine($"[Server] Application started on port {questionConfigs[EnvironmentConfiguration.CodeContainerInternalPort]}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error starting server application: {ex.Message}");
+            }
+        }
+
         // This is client
         private void CopyGivenConsolePublishFolder()
         {
@@ -752,6 +796,50 @@ namespace DotNetEnvironmentManagerHelper.Services
                 // log
                 //logger.LogErr($"Error copying publish file. Details: {ex.Message}");
                 return;
+            }
+        }
+
+        /// <summary>
+        /// Deploys client files to the container WITHOUT starting the application.
+        /// Use this when you need on-demand client startup.
+        /// After calling this, use StartClientApplication() to start the application.
+        /// </summary>
+        public void DeployClientFilesOnly()
+        {
+            try
+            {
+                // Copy all publish files to container:/apps
+                dockerCommandExecutor.CopyFileToContainer(
+                    questionConfigs[EnvironmentConfiguration.GivenConsolePath],
+                    questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName] + ":/apps"
+                );
+                Console.WriteLine($"[Client] Files deployed to container");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error deploying client files: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Starts the client application after files have been deployed.
+        /// Must call DeployClientFilesOnly() before calling this method.
+        /// </summary>
+        public void StartClientApplication()
+        {
+            try
+            {
+                dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
+                    questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName],
+                    questionConfigs[EnvironmentConfiguration.GivenConsoleAppName],
+                    questionConfigs[EnvironmentConfiguration.DockerClientPath],
+                    "-1"
+                );
+                Console.WriteLine($"[Client] Application started");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error starting client application: {ex.Message}");
             }
         }
 

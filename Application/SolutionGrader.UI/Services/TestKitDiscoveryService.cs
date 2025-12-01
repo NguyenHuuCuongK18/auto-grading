@@ -12,24 +12,27 @@ namespace SolutionGrader.UI.Services
     /// 
     /// Expected TestKit folder structure:
     /// TestKit/
-    ///   {TestKitName}/  (e.g., Q1, HTTP_1, TCP_3)
-    ///     Environment.xlsx  - Configuration for Docker setup
-    ///     Header.xlsx       - Test case headers with max marks
-    ///     Meta/
-    ///       Given/          - "Golden" client/server implementations
-    ///         Client/
-    ///         Server/
-    ///       runtimes/       - Runtime dependencies
-    ///     TC1/
-    ///       Detail.xlsx     - Test steps for this test case
-    ///       Environment.xlsx - Optional per-TC environment override
-    ///       Header.xlsx     - Optional per-TC marks
-    ///     TC2/
-    ///       ...
+    ///   TestKit/              - The actual test kits folder
+    ///     Mapping.xlsx        - Maps paper numbers to test kit names
+    ///     Q1/                 - Test kit folder
+    ///       Environment.xlsx  - Configuration for Docker setup
+    ///       Header.xlsx       - Test case headers with max marks
+    ///       Meta/
+    ///         Given/          - "Golden" client/server implementations
+    ///           Client/
+    ///           Server/
+    ///         runtimes/       - Runtime dependencies
+    ///       TC1/
+    ///         Detail.xlsx     - Test steps for this test case
+    ///         Environment.xlsx - Optional per-TC environment override
+    ///         Header.xlsx     - Optional per-TC marks
+    ///       TC2/
+    ///         ...
     /// </summary>
     public class TestKitDiscoveryService
     {
         private readonly ILoggingService _logger;
+        private Dictionary<string, string>? _mappingCache;
 
         public TestKitDiscoveryService(ILoggingService logger)
         {
@@ -37,10 +40,84 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
+        /// Loads the paper-to-testkit mapping from Mapping.xlsx.
+        /// The Mapping.xlsx should have columns: PaperNo (or Paper), TestKit (or TestKitName)
+        /// </summary>
+        /// <param name="testKitFolderPath">Root TestKit folder path (may contain TestKit subfolder).</param>
+        /// <returns>Dictionary mapping paper numbers to test kit names.</returns>
+        public Dictionary<string, string> LoadMapping(string testKitFolderPath)
+        {
+            if (_mappingCache != null) return _mappingCache;
+
+            _mappingCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            // Try TestKit/TestKit/Mapping.xlsx first (nested structure)
+            var mappingPath = Path.Combine(testKitFolderPath, "TestKit", "Mapping.xlsx");
+            if (!File.Exists(mappingPath))
+            {
+                // Try TestKit/Mapping.xlsx
+                mappingPath = Path.Combine(testKitFolderPath, "Mapping.xlsx");
+            }
+
+            if (!File.Exists(mappingPath))
+            {
+                _logger.LogDebug("No Mapping.xlsx found, will use naming convention for matching");
+                return _mappingCache;
+            }
+
+            try
+            {
+                using var workbook = new XLWorkbook(mappingPath);
+                var worksheet = workbook.Worksheets.FirstOrDefault();
+                if (worksheet == null) return _mappingCache;
+
+                // Find columns
+                var headerRow = worksheet.Row(1);
+                int paperCol = -1;
+                int testKitCol = -1;
+
+                for (int col = 1; col <= (headerRow.LastCellUsed()?.Address.ColumnNumber ?? 10); col++)
+                {
+                    var header = headerRow.Cell(col).GetString().Trim().ToUpperInvariant();
+                    if (header == "PAPERNO" || header == "PAPER" || header == "PAPER_NO" || header == "ĐỀ")
+                        paperCol = col;
+                    else if (header == "TESTKIT" || header == "TEST_KIT" || header == "TESTKITNAME" || header == "BỘKIỂMTRA")
+                        testKitCol = col;
+                }
+
+                if (paperCol < 0 || testKitCol < 0)
+                {
+                    _logger.LogWarning("Mapping.xlsx does not have required columns (PaperNo, TestKit)");
+                    return _mappingCache;
+                }
+
+                // Read mappings
+                var lastRow = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+                for (int row = 2; row <= lastRow; row++)
+                {
+                    var paper = worksheet.Cell(row, paperCol).GetString().Trim();
+                    var testKit = worksheet.Cell(row, testKitCol).GetString().Trim();
+
+                    if (!string.IsNullOrEmpty(paper) && !string.IsNullOrEmpty(testKit))
+                    {
+                        _mappingCache[paper] = testKit;
+                        _logger.LogDebug($"Loaded mapping: Paper {paper} -> TestKit {testKit}");
+                    }
+                }
+
+                _logger.LogInfo($"Loaded {_mappingCache.Count} paper-to-testkit mappings from Mapping.xlsx");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to load Mapping.xlsx", ex);
+            }
+
+            return _mappingCache;
+        }
+
+        /// <summary>
         /// Gets the test kit path for a specific paper number.
-        /// Uses naming convention to match papers to test kits:
-        /// - Q{paperNo} matches paper number directly
-        /// - Or first test kit if only one exists
+        /// First checks Mapping.xlsx, then uses naming convention.
         /// </summary>
         /// <param name="testKitFolderPath">Root TestKit folder path.</param>
         /// <param name="paperNo">Paper number to find test kit for.</param>
@@ -53,8 +130,29 @@ namespace SolutionGrader.UI.Services
                 return null;
             }
 
+            // Determine the actual test kit root (may be nested as TestKit/TestKit)
+            var actualRoot = testKitFolderPath;
+            var nestedPath = Path.Combine(testKitFolderPath, "TestKit");
+            if (Directory.Exists(nestedPath) && File.Exists(Path.Combine(nestedPath, "Mapping.xlsx")))
+            {
+                actualRoot = nestedPath;
+                _logger.LogDebug($"Using nested TestKit folder: {actualRoot}");
+            }
+
+            // First check Mapping.xlsx
+            var mapping = LoadMapping(testKitFolderPath);
+            if (mapping.TryGetValue(paperNo, out var mappedTestKit))
+            {
+                var mappedPath = Path.Combine(actualRoot, mappedTestKit);
+                if (Directory.Exists(mappedPath))
+                {
+                    _logger.LogDebug($"Found mapped test kit for paper {paperNo}: {mappedTestKit}");
+                    return mappedPath;
+                }
+            }
+
             // Get all test kit folders (contain Environment.xlsx or Header.xlsx)
-            var testKitFolders = GetTestKitFolders(testKitFolderPath);
+            var testKitFolders = GetTestKitFolders(actualRoot);
 
             if (testKitFolders.Count == 0)
             {
