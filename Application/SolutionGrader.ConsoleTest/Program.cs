@@ -172,6 +172,7 @@ namespace SolutionGrader.ConsoleTest
             int successCount = 0;
             int failCount = 0;
             var results = new List<(string Student, string Paper, double Mark, double MaxMark, string Status)>();
+            var allTestCaseResults = new Dictionary<StudentSolution, Dictionary<string, (bool Passed, double Mark, double MaxMark, string? ErrorNotes)>>();
 
             foreach (var student in students)
             {
@@ -248,12 +249,14 @@ namespace SolutionGrader.ConsoleTest
                     }
 
                     // Grade the student
-                    var mark = await GradeStudentWithDockerAsync(
+                    var (mark, tcResults) = await GradeStudentWithDockerAsync(
                         student, testKitPath, testKitConfig, config,
                         clientPath, serverPath, clientDllPath, serverDllPath,
                         logger);
 
                     student.Mark = mark;
+                    allTestCaseResults[student] = tcResults;
+                    
                     var status = mark == testKitConfig.TotalMaxMark ? "PASS" :
                                  mark > 0 ? "PARTIAL" : "FAIL";
 
@@ -283,7 +286,197 @@ namespace SolutionGrader.ConsoleTest
                 Console.WriteLine($"  {r.Student} (Paper {r.Paper}): {r.Mark}/{r.MaxMark} - {r.Status}");
             }
 
+            // Write results in SampleLogging format
+            Console.WriteLine($"\n[OUTPUT] Writing results to {config.SaveResultFolderPath}...");
+            WriteResultsInSampleLoggingFormat(config, students, allTestCaseResults, logger);
+            Console.WriteLine("[OUTPUT] Results written ✓");
+
             return failCount > 0 ? 1 : 0;
+        }
+
+        /// <summary>
+        /// Writes grading results in the SampleLogging format to Excel files.
+        /// Creates: StudentsSolution.xlsx per paper, OverallSummary.xlsx per student,
+        /// and TC{n}_Result.xlsx per test case.
+        /// </summary>
+        private static void WriteResultsInSampleLoggingFormat(
+            GradingConfiguration config,
+            List<StudentSolution> students,
+            Dictionary<StudentSolution, Dictionary<string, (bool Passed, double Mark, double MaxMark, string? ErrorNotes)>> allTestCaseResults,
+            ILoggingService logger)
+        {
+            try
+            {
+                // Group students by paper
+                var groupedByPaper = students.GroupBy(s => s.PaperNo);
+
+                foreach (var paperGroup in groupedByPaper)
+                {
+                    var paperNo = paperGroup.Key;
+                    var paperStudents = paperGroup.ToList();
+
+                    // Create paper folder structure
+                    var paperFolder = Path.Combine(config.SaveResultFolderPath, paperNo);
+                    var studentFolder = Path.Combine(paperFolder, "student");
+                    Directory.CreateDirectory(studentFolder);
+
+                    // Write StudentsSolution.xlsx for this paper
+                    WriteStudentsSolution(Path.Combine(paperFolder, "StudentsSolution.xlsx"), paperStudents);
+                    Console.WriteLine($"  Written: {paperNo}/StudentsSolution.xlsx");
+
+                    // Write per-student results
+                    foreach (var student in paperStudents)
+                    {
+                        var studentPath = Path.Combine(studentFolder, student.StudentCode);
+                        Directory.CreateDirectory(studentPath);
+
+                        if (allTestCaseResults.TryGetValue(student, out var tcResults))
+                        {
+                            // Write OverallSummary.xlsx
+                            WriteOverallSummary(Path.Combine(studentPath, "OverallSummary.xlsx"), tcResults);
+
+                            // Write TC folders and results
+                            foreach (var (tcName, result) in tcResults)
+                            {
+                                var tcFolder = Path.Combine(studentPath, tcName.Replace("_", ""));
+                                Directory.CreateDirectory(tcFolder);
+                                
+                                WriteTcResult(Path.Combine(tcFolder, $"{tcName.Replace("_", "")}_Result.xlsx"), tcName, result);
+                                WriteGradeDetail(Path.Combine(tcFolder, "GradeDetail.xlsx"), tcName, result);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OUTPUT] Error writing results: {ex.Message}");
+            }
+        }
+
+        private static void WriteStudentsSolution(string path, List<StudentSolution> students)
+        {
+            using var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet("Summary");
+
+            ws.Cell(1, 1).Value = "StudentCode";
+            ws.Cell(1, 2).Value = "Status";
+            ws.Cell(1, 3).Value = "Mark";
+            ws.Cell(1, 4).Value = "MaxMark";
+            ws.Cell(1, 5).Value = "Percentage";
+
+            var headerRange = ws.Range(1, 1, 1, 5);
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Fill.BackgroundColor = XLColor.LightBlue;
+
+            int row = 2;
+            foreach (var s in students.OrderBy(s => s.StudentCode))
+            {
+                ws.Cell(row, 1).Value = s.StudentCode;
+                ws.Cell(row, 2).Value = s.Mark >= s.MaxMark ? "PASS" : s.Mark > 0 ? "PARTIAL" : "FAIL";
+                ws.Cell(row, 3).Value = s.Mark;
+                ws.Cell(row, 4).Value = s.MaxMark;
+                ws.Cell(row, 5).Value = s.MaxMark > 0 ? $"{(s.Mark / s.MaxMark * 100):F1}%" : "N/A";
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+            workbook.SaveAs(path);
+        }
+
+        private static void WriteOverallSummary(string path, Dictionary<string, (bool Passed, double Mark, double MaxMark, string? ErrorNotes)> tcResults)
+        {
+            using var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet("Summary");
+
+            ws.Cell(1, 1).Value = "TestCase";
+            ws.Cell(1, 2).Value = "Passed";
+            ws.Cell(1, 3).Value = "PointsAwarded";
+            ws.Cell(1, 4).Value = "PointsPossible";
+            ws.Cell(1, 5).Value = "ErrorNotes";
+
+            var headerRange = ws.Range(1, 1, 1, 5);
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Fill.BackgroundColor = XLColor.LightBlue;
+
+            int row = 2;
+            foreach (var (tc, result) in tcResults.OrderBy(t => t.Key))
+            {
+                ws.Cell(row, 1).Value = tc;
+                ws.Cell(row, 2).Value = result.Passed ? "PASS" : "FAIL";
+                ws.Cell(row, 3).Value = result.Mark;
+                ws.Cell(row, 4).Value = result.MaxMark;
+                ws.Cell(row, 5).Value = result.ErrorNotes ?? string.Empty;
+
+                ws.Cell(row, 2).Style.Fill.BackgroundColor = result.Passed ? XLColor.LightGreen : XLColor.LightPink;
+                row++;
+            }
+
+            ws.Columns().AdjustToContents();
+            workbook.SaveAs(path);
+        }
+
+        private static void WriteTcResult(string path, string tcName, (bool Passed, double Mark, double MaxMark, string? ErrorNotes) result)
+        {
+            using var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet("Result");
+
+            ws.Cell(1, 1).Value = "StepId";
+            ws.Cell(1, 2).Value = "Stage";
+            ws.Cell(1, 3).Value = "Action";
+            ws.Cell(1, 4).Value = "Passed";
+            ws.Cell(1, 5).Value = "Message";
+            ws.Cell(1, 6).Value = "DurationMs";
+
+            var headerRange = ws.Range(1, 1, 1, 6);
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Fill.BackgroundColor = XLColor.LightBlue;
+
+            // Write a summary row for the test case
+            ws.Cell(2, 1).Value = $"{tcName}-SUMMARY";
+            ws.Cell(2, 2).Value = "ALL";
+            ws.Cell(2, 3).Value = "GRADE";
+            ws.Cell(2, 4).Value = result.Passed;
+            ws.Cell(2, 5).Value = result.ErrorNotes ?? "Test case completed";
+            ws.Cell(2, 6).Value = 0;
+
+            ws.Columns().AdjustToContents();
+            workbook.SaveAs(path);
+        }
+
+        private static void WriteGradeDetail(string path, string tcName, (bool Passed, double Mark, double MaxMark, string? ErrorNotes) result)
+        {
+            using var workbook = new XLWorkbook();
+            
+            // User sheet
+            var userWs = workbook.AddWorksheet("User");
+            userWs.Cell(1, 1).Value = "Stage";
+            userWs.Cell(1, 2).Value = "Input";
+            userWs.Cell(1, 3).Value = "Action";
+
+            // Client sheet
+            var clientWs = workbook.AddWorksheet("Client");
+            clientWs.Cell(1, 1).Value = "Stage";
+            clientWs.Cell(1, 2).Value = "Console";
+
+            // Server sheet
+            var serverWs = workbook.AddWorksheet("Server");
+            serverWs.Cell(1, 1).Value = "Stage";
+            serverWs.Cell(1, 2).Value = "Console";
+
+            // Database sheet
+            var dbWs = workbook.AddWorksheet("Database");
+            
+            // Network sheet with actual vs expected
+            var netWs = workbook.AddWorksheet("Network");
+            netWs.Cell(1, 1).Value = "Stage";
+            netWs.Cell(1, 2).Value = "Result";
+            netWs.Cell(1, 3).Value = "Notes";
+            netWs.Cell(2, 1).Value = "ALL";
+            netWs.Cell(2, 2).Value = result.Passed ? "PASS" : "FAIL";
+            netWs.Cell(2, 3).Value = result.ErrorNotes ?? "";
+
+            workbook.SaveAs(path);
         }
 
         /// <summary>
@@ -312,8 +505,9 @@ namespace SolutionGrader.ConsoleTest
         /// Grades a student using Docker containers.
         /// Calls DotNetEnvironmentManagerHelper directly instead of via EnvironmentManager.exe
         /// to work cross-platform (Linux).
+        /// Returns (totalMark, testCaseResults) tuple for writing to Excel files.
         /// </summary>
-        private static async Task<double> GradeStudentWithDockerAsync(
+        private static async Task<(double TotalMark, Dictionary<string, (bool Passed, double Mark, double MaxMark, string? ErrorNotes)> TestCaseResults)> GradeStudentWithDockerAsync(
             StudentSolution student,
             string testKitPath,
             TestKitConfig testKitConfig,
@@ -325,6 +519,7 @@ namespace SolutionGrader.ConsoleTest
             ILoggingService logger)
         {
             double totalMark = 0;
+            var testCaseResults = new Dictionary<string, (bool Passed, double Mark, double MaxMark, string? ErrorNotes)>();
 
             // Build environment config
             var env = BuildEnvironmentConfig(config, testKitConfig, clientPath, serverPath, clientDllPath, serverDllPath);
@@ -345,7 +540,7 @@ namespace SolutionGrader.ConsoleTest
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[ENV] Container setup failed: {ex.Message}");
-                    return 0;
+                    return (0, testCaseResults);
                 }
 
                 // Setup environment for question (deploy files and start apps)
@@ -358,12 +553,12 @@ namespace SolutionGrader.ConsoleTest
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[ENV] Question setup failed: {ex.Message}");
-                    return 0;
+                    return (0, testCaseResults);
                 }
 
                 await Task.Delay(3000); // Wait for apps to start
 
-                // Execute each test case
+                // Execute each test case and collect results for logging
                 foreach (var tcName in testKitConfig.TestCases)
                 {
                     Console.WriteLine($"\n[TC] {tcName}");
@@ -372,14 +567,33 @@ namespace SolutionGrader.ConsoleTest
                     if (!File.Exists(detailPath))
                     {
                         Console.WriteLine($"  SKIP: Detail.xlsx not found");
+                        testCaseResults[tcName] = (false, 0, 0, "Detail.xlsx not found");
                         continue;
                     }
 
                     var tcMaxMark = GetTestCaseMark(testKitPath, tcName);
-                    var tcMark = await ExecuteTestCaseAsync(tcName, detailPath, env, config, logger);
+                    var (tcMark, passed, errorNotes) = await ExecuteTestCaseAsync(tcName, detailPath, env, config, logger);
 
-                    Console.WriteLine($"  Result: {tcMark}/{tcMaxMark}");
+                    Console.WriteLine($"  Result: {tcMark}/{tcMaxMark} ({(passed ? "PASS" : "FAIL")})");
                     totalMark += tcMark;
+                    
+                    testCaseResults[tcName] = (passed, tcMark, tcMaxMark, errorNotes);
+                }
+
+                // Output test case results summary
+                Console.WriteLine("\n[SUMMARY] Test Case Results:");
+                foreach (var (tc, result) in testCaseResults)
+                {
+                    var status = result.Passed ? "PASS" : "FAIL";
+                    Console.WriteLine($"  {tc}: {status} ({result.Mark}/{result.MaxMark})");
+                    if (!result.Passed && !string.IsNullOrEmpty(result.ErrorNotes))
+                    {
+                        // Truncate error notes for console display
+                        var notes = result.ErrorNotes.Length > 200 
+                            ? result.ErrorNotes.Substring(0, 200) + "..." 
+                            : result.ErrorNotes;
+                        Console.WriteLine($"    Error: {notes}");
+                    }
                 }
             }
             finally
@@ -395,21 +609,24 @@ namespace SolutionGrader.ConsoleTest
                 }
             }
 
-            return totalMark;
+            return (totalMark, testCaseResults);
         }
 
         /// <summary>
         /// Executes a single test case.
         /// Reads steps from Detail.xlsx User sheet, expected outputs from Client/Server sheets.
         /// Uses docker attach to capture actual outputs and compares with expected.
+        /// Returns (mark, passed, errorNotes) tuple.
         /// </summary>
-        private static async Task<double> ExecuteTestCaseAsync(
+        private static async Task<(double Mark, bool Passed, string? ErrorNotes)> ExecuteTestCaseAsync(
             string tcName,
             string detailPath,
             Domain.Entities.Main.Environment env,
             GradingConfiguration config,
             ILoggingService logger)
         {
+            var errors = new List<string>();
+            
             try
             {
                 var steps = ReadDetailSteps(detailPath);
@@ -425,7 +642,7 @@ namespace SolutionGrader.ConsoleTest
 
                 var executor = new DockerCommandExecutor();
                 bool allPassed = true;
-                var stageOutputs = new Dictionary<int, (string? Client, string? Server)>();
+                var failedStages = new List<int>();
 
                 // Execute each step
                 foreach (var step in steps)
@@ -466,39 +683,61 @@ namespace SolutionGrader.ConsoleTest
                 string actualClientOutput = GetContainerOutput(executor, clientContainer);
                 string actualServerOutput = GetContainerOutput(executor, serverContainer);
 
-                // Compare outputs - check if expected patterns exist in actual output
+                Console.WriteLine($"  [DEBUG] Client output length: {actualClientOutput.Length}");
+                Console.WriteLine($"  [DEBUG] Server output length: {actualServerOutput.Length}");
+
+                // Compare client outputs for each stage with non-empty expectations
                 foreach (var (stage, expectedOut) in expectedClient)
                 {
                     if (string.IsNullOrEmpty(expectedOut)) continue;
                     
-                    bool match = CompareOutput(expectedOut, actualClientOutput);
+                    var (match, errorMsg) = CompareOutputWithDetails(expectedOut, actualClientOutput, $"Client Stage {stage}");
                     if (!match)
                     {
-                        Console.WriteLine($"  [FAIL] Client output stage {stage} mismatch");
+                        Console.WriteLine($"  [FAIL] {errorMsg}");
+                        errors.Add($"Stage {stage}:\n  - Console Output: {errorMsg}");
+                        failedStages.Add(stage);
                         allPassed = false;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  [PASS] Client output stage {stage}");
                     }
                 }
 
+                // Compare server outputs for each stage with non-empty expectations
                 foreach (var (stage, expectedOut) in expectedServer)
                 {
                     if (string.IsNullOrEmpty(expectedOut)) continue;
                     
-                    bool match = CompareOutput(expectedOut, actualServerOutput);
+                    var (match, errorMsg) = CompareOutputWithDetails(expectedOut, actualServerOutput, $"Server Stage {stage}");
                     if (!match)
                     {
-                        Console.WriteLine($"  [FAIL] Server output stage {stage} mismatch");
+                        Console.WriteLine($"  [FAIL] {errorMsg}");
+                        errors.Add($"Stage {stage}:\n  - Console Output: {errorMsg}");
+                        if (!failedStages.Contains(stage))
+                            failedStages.Add(stage);
                         allPassed = false;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  [PASS] Server output stage {stage}");
                     }
                 }
 
                 // Return full mark if passed, 0 otherwise
                 var maxMark = GetTestCaseMark(Path.GetDirectoryName(Path.GetDirectoryName(detailPath)) ?? "", tcName);
-                return allPassed ? maxMark : 0;
+                
+                var errorNotes = errors.Count > 0 
+                    ? $"Failed {failedStages.Count} step(s):\n{string.Join("\n", errors)}"
+                    : null;
+
+                return (allPassed ? maxMark : 0, allPassed, errorNotes);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"  Error: {ex.Message}");
-                return 0;
+                return (0, false, $"Exception: {ex.Message}");
             }
         }
 
@@ -551,25 +790,119 @@ namespace SolutionGrader.ConsoleTest
         }
 
         /// <summary>
-        /// Compares expected output with actual output.
-        /// Returns true if the expected pattern is found in actual output.
-        /// Empty expected output always matches (no expectation defined).
+        /// Compares expected output with actual output using proper normalization.
+        /// This follows the same logic as DataComparisonService for consistent grading.
+        /// Returns (match, errorMessage) tuple.
+        /// </summary>
+        private static (bool Match, string? ErrorMessage) CompareOutputWithDetails(string expected, string actual, string context)
+        {
+            // Empty expected means no expectation - always pass
+            if (string.IsNullOrWhiteSpace(expected)) 
+                return (true, null);
+            
+            // If expected is defined but actual is empty, fail
+            if (string.IsNullOrWhiteSpace(actual)) 
+                return (false, $"{context}: Expected output defined but no actual output captured");
+
+            // Normalize both using the same logic as DataComparisonService
+            var normalizedExpected = NormalizeOutput(expected);
+            var normalizedActual = NormalizeOutput(actual);
+
+            // Exact match after normalization
+            if (normalizedExpected == normalizedActual)
+                return (true, null);
+
+            // Try aggressive normalization (remove all whitespace and punctuation)
+            var aggressiveExpected = StripAggressive(normalizedExpected);
+            var aggressiveActual = StripAggressive(normalizedActual);
+
+            if (aggressiveExpected == aggressiveActual)
+                return (true, null);
+
+            // Failed - build detailed error message
+            var firstDiffIdx = FindFirstDifference(normalizedExpected, normalizedActual);
+            var errorMsg = $"{context}: Text Content Mismatch: Content differs at position {firstDiffIdx}\n" +
+                          $"Expected (normalized): {FormatForDisplay(expected, 100)}\n" +
+                          $"Actual (normalized): {FormatForDisplay(actual, 100)}";
+
+            return (false, errorMsg);
+        }
+
+        /// <summary>
+        /// Normalizes output for comparison - matches DataComparisonService logic.
+        /// </summary>
+        private static string NormalizeOutput(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+
+            // Strip BOM
+            if (s.Length > 0 && s[0] == '\uFEFF') s = s.Substring(1);
+
+            // Normalize line endings
+            s = s.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            // Replace all Unicode whitespace variants with regular spaces
+            s = s.Replace("\u00A0", " ")
+                 .Replace("\u2002", " ")
+                 .Replace("\u2003", " ")
+                 .Replace("\u2009", " ")
+                 .Replace("\u200A", " ")
+                 .Replace("\u202F", " ")
+                 .Replace("\u205F", " ")
+                 .Replace("\u3000", " ")
+                 .Replace("\t", " ");
+
+            // Trim each line and remove empty lines
+            var lines = s.Split('\n')
+                         .Select(line => line.Trim())
+                         .Where(line => !string.IsNullOrWhiteSpace(line))
+                         .ToArray();
+            
+            // Join with single space
+            s = string.Join(" ", lines);
+
+            // Collapse multiple spaces
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+
+            return s.Trim().ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Ultra-aggressive normalization - removes all whitespace and common punctuation.
+        /// </summary>
+        private static string StripAggressive(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", "");
+            s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
+            return s;
+        }
+
+        private static int FindFirstDifference(string a, string b)
+        {
+            var min = Math.Min(a.Length, b.Length);
+            for (int i = 0; i < min; i++)
+            {
+                if (a[i] != b[i]) return i;
+            }
+            return a.Length != b.Length ? min : -1;
+        }
+
+        private static string FormatForDisplay(string s, int maxLength)
+        {
+            if (string.IsNullOrEmpty(s)) return "(empty)";
+            s = s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+            if (s.Length <= maxLength) return s;
+            return s.Substring(0, maxLength) + "...";
+        }
+
+        /// <summary>
+        /// Legacy comparison method for backward compatibility.
         /// </summary>
         private static bool CompareOutput(string expected, string actual)
         {
-            // Empty expected means no expectation - always pass
-            if (string.IsNullOrWhiteSpace(expected)) return true;
-            
-            // If expected is defined but actual is empty, check if expected was just whitespace
-            // (which would have been caught above)
-            if (string.IsNullOrWhiteSpace(actual)) return false;
-
-            // Normalize line endings and whitespace
-            var normalizedExpected = expected.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
-            var normalizedActual = actual.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
-
-            // Check if expected pattern exists in actual output
-            return normalizedActual.Contains(normalizedExpected);
+            var (match, _) = CompareOutputWithDetails(expected, actual, "Output");
+            return match;
         }
 
         private static List<(int Stage, string? Action, string? Input)> ReadDetailSteps(string detailPath)
