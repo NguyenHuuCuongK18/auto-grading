@@ -851,7 +851,7 @@ namespace SolutionGrader.Cli.Services
                                     // Wait for application to start and output to be captured
                                     await Task.Delay(StartupDelayMs);
                                     
-                                    // Get output using attachment (preferred) or fall back to docker logs
+                                    // Get output using attachment (preferred) or fall back to application log
                                     string newOutput;
                                     if (serverAttachment.IsRunning && serverAttachment.OutputLength > 0)
                                     {
@@ -860,9 +860,13 @@ namespace SolutionGrader.Cli.Services
                                     }
                                     else
                                     {
-                                        // Fall back to docker logs if attachment isn't working
-                                        var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
-                                        newOutput = output;
+                                        // Use application log file for reliable output capture
+                                        var output = _dockerExecutor.GetApplicationLog(serverContainer, serverContainer) ?? "";
+                                        newOutput = output.Length > serverBaseline ? output.Substring(serverBaseline) : output;
+                                        if (!string.IsNullOrEmpty(newOutput))
+                                        {
+                                            serverBaseline = output.Length;
+                                        }
                                     }
                                     
                                     serverOutputs[stage] = newOutput;
@@ -893,18 +897,38 @@ namespace SolutionGrader.Cli.Services
                                     // Wait for application to start and output to be captured
                                     await Task.Delay(StartupDelayMs);
                                     
-                                    // Get output using attachment (preferred) or fall back to docker logs
-                                    string newOutput;
-                                    if (clientAttachment.IsRunning && clientAttachment.OutputLength > 0)
+                                    // Get output using attachment (preferred) or fall back to application log file
+                                    // Retry if output is empty (timing issue on first test case)
+                                    // Use more retries with longer waits for the first test case
+                                    string newOutput = "";
+                                    int retryCount = 0;
+                                    const int maxRetries = 5;  // Increased retries for first test case
+                                    const int retryDelayMs = 2000;  // 2 second delay between retries
+                                    
+                                    while (string.IsNullOrEmpty(newOutput) && retryCount < maxRetries)
                                     {
-                                        newOutput = clientAttachment.GetNewOutputSince(clientBaseline);
-                                        clientBaseline = clientAttachment.OutputLength;
-                                    }
-                                    else
-                                    {
-                                        // Fall back to docker logs if attachment isn't working
-                                        var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-                                        newOutput = output;
+                                        if (clientAttachment.IsRunning && clientAttachment.OutputLength > 0)
+                                        {
+                                            newOutput = clientAttachment.GetNewOutputSince(clientBaseline);
+                                            clientBaseline = clientAttachment.OutputLength;
+                                        }
+                                        else
+                                        {
+                                            // Use application log file for reliable output capture
+                                            var output = _dockerExecutor.GetApplicationLog(clientContainer, clientContainer) ?? "";
+                                            newOutput = output.Length > clientBaseline ? output.Substring(clientBaseline) : output;
+                                            if (!string.IsNullOrEmpty(newOutput))
+                                            {
+                                                clientBaseline = output.Length;
+                                            }
+                                        }
+                                        
+                                        if (string.IsNullOrEmpty(newOutput) && retryCount < maxRetries - 1)
+                                        {
+                                            Console.WriteLine($"    Waiting for client output... (retry {retryCount + 1}/{maxRetries})");
+                                            await Task.Delay(retryDelayMs);
+                                        }
+                                        retryCount++;
                                     }
                                     
                                     clientOutputs[stage] = newOutput;
@@ -928,10 +952,10 @@ namespace SolutionGrader.Cli.Services
                                 // 1. Client to send request to server
                                 // 2. Server to process and respond
                                 // 3. Client to receive and display response
-                                // 4. Console output to be captured by attachments
+                                // 4. Console output to be captured
                                 await Task.Delay(InputProcessingDelayMs);
 
-                                // Capture client output
+                                // Capture client output from application log
                                 string newClientOutput;
                                 if (clientAttachment != null && clientAttachment.IsRunning)
                                 {
@@ -940,11 +964,15 @@ namespace SolutionGrader.Cli.Services
                                 }
                                 else
                                 {
-                                    var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-                                    newClientOutput = output;
+                                    var output = _dockerExecutor.GetApplicationLog(clientContainer, clientContainer) ?? "";
+                                    newClientOutput = output.Length > clientBaseline ? output.Substring(clientBaseline) : "";
+                                    if (!string.IsNullOrEmpty(newClientOutput))
+                                    {
+                                        clientBaseline = output.Length;
+                                    }
                                 }
 
-                                // Capture server output
+                                // Capture server output from application log
                                 string newServerOutput;
                                 if (serverAttachment != null && serverAttachment.IsRunning)
                                 {
@@ -953,8 +981,12 @@ namespace SolutionGrader.Cli.Services
                                 }
                                 else
                                 {
-                                    var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
-                                    newServerOutput = output;
+                                    var output = _dockerExecutor.GetApplicationLog(serverContainer, serverContainer) ?? "";
+                                    newServerOutput = output.Length > serverBaseline ? output.Substring(serverBaseline) : "";
+                                    if (!string.IsNullOrEmpty(newServerOutput))
+                                    {
+                                        serverBaseline = output.Length;
+                                    }
                                 }
 
                                 clientOutputs[stage] = newClientOutput;

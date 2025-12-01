@@ -726,6 +726,15 @@ namespace EnvironmentBuilder.DockerCommand
             }
             catch { /* Ignore - pipe may not exist */ }
             
+            // Remove existing log file (ignore errors)
+            string logFile = $"/tmp/{appName}_output.log";
+            try
+            {
+                string removeLogCommand = $"{containerName} rm -f {logFile}";
+                ExecDockerCommand(removeLogCommand, 5000);
+            }
+            catch { /* Ignore */ }
+            
             // Wait for port to be released after killing processes
             Thread.Sleep(1000);
 
@@ -735,11 +744,34 @@ namespace EnvironmentBuilder.DockerCommand
             string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
             ExecDockerCommand(startDoorstopCommand, 60000);
 
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            // Modified: Write output to BOTH /proc/1/fd/1 (docker logs) AND a log file
+            // The log file provides reliable output capture even when docker logs has buffering issues
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -oL -eL dotnet {appPath} 2>&1 < {inputPipe} | tee {logFile} > /proc/1/fd/1\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 
             Console.WriteLine($"[{appName}] Application started. Monitor with: docker logs -f {containerName}");
+        }
+
+        /// <summary>
+        /// Get the application output log from the container.
+        /// This reads from the log file created by StartApplicationInContainer.
+        /// </summary>
+        /// <param name="containerName">Container name</param>
+        /// <param name="appName">Application name</param>
+        /// <returns>The application output</returns>
+        public string GetApplicationLog(string containerName, string appName)
+        {
+            try
+            {
+                string logFile = $"/tmp/{appName}_output.log";
+                string command = $"docker exec {containerName} cat {logFile}";
+                return RunCommand(command);
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private bool IsProcessRunning(string containerName, string processName)
