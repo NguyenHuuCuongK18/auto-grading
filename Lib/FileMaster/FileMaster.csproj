@@ -6,7 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- Shell32 COM reference only on Windows for fallback zip extraction -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <COMReference Include="Shell32">
       <WrapperTool>tlbimp</WrapperTool>
       <VersionMinor>0</VersionMinor>
