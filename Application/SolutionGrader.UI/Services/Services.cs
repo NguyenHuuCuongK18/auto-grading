@@ -303,8 +303,13 @@ namespace SolutionGrader.UI.Services
                 // Skip header row
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
-                    var paperNo = row.Cell(1).GetValue<string>();
-                    var questionKit = row.Cell(3).GetValue<string>(); // Column 3 is QuestionKit
+                    // Get the raw cell value and convert to string to handle both numeric and text values
+                    var paperNoCell = row.Cell(1);
+                    var questionKitCell = row.Cell(3); // Column 3 is QuestionKit
+                    
+                    // Convert to string, handling numeric values
+                    var paperNo = paperNoCell.GetString().Trim();
+                    var questionKit = questionKitCell.GetString().Trim();
 
                     if (!string.IsNullOrWhiteSpace(paperNo) && !string.IsNullOrWhiteSpace(questionKit))
                     {
