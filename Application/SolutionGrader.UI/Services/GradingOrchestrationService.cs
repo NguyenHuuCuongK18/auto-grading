@@ -473,14 +473,9 @@ namespace SolutionGrader.UI.Services
                 return (false, "No point allocation found in test kit. Cannot run grading.");
             }
 
-            // Verify each test case has a valid mark
-            foreach (var tc in testKitConfig.TestCases)
-            {
-                if (tc.MaxMark <= 0)
-                {
-                    return (false, $"Test case '{tc.Name}' has no point allocation. Cannot run grading.");
-                }
-            }
+            // TestCases is a list of test case folder names (strings).
+            // Individual marks are read from Header.xlsx by TestKitConfigService.
+            // If TotalMaxMark > 0, we have valid point allocation.
 
             return (true, string.Empty);
         }
@@ -534,20 +529,18 @@ namespace SolutionGrader.UI.Services
                 }
             }
 
-            // Step 5: Determine which students can be graded
+            // Step 5: Determine which students cannot be graded
+            // Note: This method only populates result.StudentsWithoutTestKit.
+            // The caller is responsible for updating student status after reviewing the validation result.
             foreach (var student in students)
             {
                 if (papersWithoutMapping.Contains(student.PaperNo))
                 {
                     result.StudentsWithoutTestKit.Add(student.StudentCode);
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = $"No test kit mapping for paper {student.PaperNo}";
                 }
                 else if (result.TestKitErrors.ContainsKey(student.PaperNo))
                 {
                     result.StudentsWithoutTestKit.Add(student.StudentCode);
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = result.TestKitErrors[student.PaperNo];
                 }
             }
 
@@ -555,6 +548,34 @@ namespace SolutionGrader.UI.Services
             result.CanProceed = students.Count > result.StudentsWithoutTestKit.Count;
 
             return result;
+        }
+
+        /// <summary>
+        /// Updates student statuses based on validation result.
+        /// Call this after ValidateGradingSetup to mark students that cannot be graded.
+        /// </summary>
+        public void ApplyValidationToStudents(GradingValidationResult result, List<StudentSolution> students)
+        {
+            foreach (var student in students)
+            {
+                if (result.StudentsWithoutTestKit.Contains(student.StudentCode))
+                {
+                    student.Status = GradingStatus.Failed;
+                    
+                    if (result.PapersWithoutMapping.Contains(student.PaperNo))
+                    {
+                        student.StatusMessage = $"No test kit mapping for paper {student.PaperNo}";
+                    }
+                    else if (result.TestKitErrors.TryGetValue(student.PaperNo, out var errorMessage))
+                    {
+                        student.StatusMessage = errorMessage;
+                    }
+                    else
+                    {
+                        student.StatusMessage = "Cannot be graded (validation failed)";
+                    }
+                }
+            }
         }
 
         #endregion

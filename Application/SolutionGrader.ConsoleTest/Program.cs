@@ -310,6 +310,8 @@ namespace SolutionGrader.ConsoleTest
 
         /// <summary>
         /// Grades a student using Docker containers.
+        /// Calls DotNetEnvironmentManagerHelper directly instead of via EnvironmentManager.exe
+        /// to work cross-platform (Linux).
         /// </summary>
         private static async Task<double> GradeStudentWithDockerAsync(
             StudentSolution student,
@@ -327,23 +329,37 @@ namespace SolutionGrader.ConsoleTest
             // Build environment config
             var env = BuildEnvironmentConfig(config, testKitConfig, clientPath, serverPath, clientDllPath, serverDllPath);
 
+            // Use EnvironmentSetupService directly (cross-platform, no external executable)
+            var envService = new DotNetEnvironmentManagerHelper.Services.EnvironmentSetupService();
+
             try
             {
                 Console.WriteLine("\n[ENV] Setting up Docker containers...");
 
-                if (!EnvironmentManagerInvoker.TrySetupContainer(env, out var containerError))
+                // Setup containers directly via service
+                try
                 {
-                    Console.WriteLine($"[ENV] Container setup failed: {containerError}");
+                    envService.SetupContainerForTestKit(env);
+                    Console.WriteLine("[ENV] Containers created ✓");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ENV] Container setup failed: {ex.Message}");
                     return 0;
                 }
-                Console.WriteLine("[ENV] Containers created");
 
-                if (!EnvironmentManagerInvoker.TrySetupQuestion(env, out var questionError))
+                // Setup environment for question (deploy files and start apps)
+                try
                 {
-                    Console.WriteLine($"[ENV] Question setup failed: {questionError}");
+                    envService.SetupEnvironmentForQuestion(env);
+                    envService.ExecuteSetupEnvironmentForQuestionBySteps();
+                    Console.WriteLine("[ENV] Files deployed and apps started ✓");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ENV] Question setup failed: {ex.Message}");
                     return 0;
                 }
-                Console.WriteLine("[ENV] Files deployed");
 
                 await Task.Delay(3000); // Wait for apps to start
 
@@ -369,7 +385,14 @@ namespace SolutionGrader.ConsoleTest
             finally
             {
                 Console.WriteLine("\n[ENV] Cleaning up...");
-                EnvironmentManagerInvoker.TryDisposeContainer(env, out _);
+                try
+                {
+                    envService.DisposeContainerForTestKit(env);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ENV] Cleanup error: {ex.Message}");
+                }
             }
 
             return totalMark;
