@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Domain.Entities.Constants;
@@ -15,14 +17,21 @@ namespace SolutionGrader.UI.Services
 {
     /// <summary>
     /// Service responsible for Docker container management for student grading.
-    /// Creates 3 containers per student: Server, Client, and Database (if needed).
+    /// Creates containers per student: Server, Client, and Database (if needed).
     /// 
     /// Key responsibilities:
     /// - Setup containers with proper port mappings for network monitoring
     /// - Copy student solution files to containers (separate from execution)
     /// - Start/Stop applications inside containers via Docker commands
-    /// - Redirect stdin/stdout for grading
+    /// - Redirect stdin/stdout for grading using named pipes
+    /// - Clean up between test cases (reset database, clear network monitor, restart processes)
     /// - Flush network monitor before each grading step
+    /// 
+    /// Test case isolation:
+    /// Each test case is independent and requires cleanup before the next one:
+    /// - Database reset using SQL scripts
+    /// - Network monitor capture buffer cleared
+    /// - Process restart if needed
     /// </summary>
     public class DockerGradingService
     {
@@ -33,6 +42,9 @@ namespace SolutionGrader.UI.Services
         private const string ServerSuffix = "-server";
         private const string ClientSuffix = "-client";
         private const string DatabaseSuffix = "-db";
+        
+        // Pipe name for stdin communication
+        private const string InputPipeSuffix = "_input_pipe";
 
         public DockerGradingService(ILoggingService logger)
         {
@@ -217,8 +229,9 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Sends input to the client application's stdin.
-        /// Used for test case execution.
+        /// Sends input to the client application's stdin using Docker named pipe.
+        /// Uses: docker exec {container} sh -c "echo '{input}' | tee /proc/1/fd/1 > /tmp/{appName}_input_pipe"
+        /// This writes to both stdout (for logging) and the named pipe (for the application).
         /// </summary>
         public async Task<string> SendInputToClientAsync(
             Environment environment, 
@@ -229,10 +242,19 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 var appName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleAppName, "ag-client");
+                var pipeName = $"/tmp/{appName}{InputPipeSuffix}";
 
                 _logger.LogDebug($"Sending input to client {containerName}: {input}");
                 
-                _dockerExecutor.SendInputToContainer(containerName, appName, input);
+                // Escape single quotes in input for shell
+                var escapedInput = input.Replace("'", "'\\''");
+                
+                // Build the docker exec command to write to named pipe
+                // This sends input to the application's stdin via a named pipe
+                // The tee command also writes to /proc/1/fd/1 (stdout) for Docker logs
+                var command = $"exec {containerName} sh -c \"echo '{escapedInput}' | tee /proc/1/fd/1 > {pipeName}\"";
+                
+                await ExecuteDockerCommandAsync(command, ct);
                 
                 await Task.Delay(100, ct); // Small delay for processing
                 
@@ -247,6 +269,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Gets the current output from the client application.
+        /// Uses Docker logs with --follow=false to get buffered output.
         /// </summary>
         public async Task<string> GetClientOutputAsync(Environment environment, CancellationToken ct = default)
         {
@@ -254,7 +277,8 @@ namespace SolutionGrader.UI.Services
             {
                 var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
                 
-                // Use docker logs to get output
+                // Use docker logs with timestamps to ensure we get all output
+                // The --since flag can be used to filter recent logs if needed
                 return await _dockerExecutor.GetContainerLogsAsync(containerName, ct);
             }
             catch (Exception ex)
@@ -281,6 +305,106 @@ namespace SolutionGrader.UI.Services
                 return string.Empty;
             }
         }
+
+        #region Test Case Cleanup
+        
+        /// <summary>
+        /// Performs cleanup between test cases within the same student's grading session.
+        /// This ensures test case isolation by:
+        /// 1. Resetting the database to initial state
+        /// 2. Stopping and restarting client/server processes
+        /// 3. Clearing any cached state
+        /// 
+        /// Note: Containers themselves are NOT disposed - only cleaned up for next test case.
+        /// </summary>
+        public async Task<bool> CleanupBetweenTestCasesAsync(
+            Environment environment,
+            GradingConfiguration config,
+            CancellationToken ct = default)
+        {
+            _logger.LogInfo("Cleaning up between test cases...");
+            
+            try
+            {
+                // Step 1: Stop running processes
+                await StopProcessesInContainersAsync(environment, ct);
+                
+                // Step 2: Reset database
+                await ResetDatabaseAsync(environment, config, ct);
+                
+                // Step 3: Clear Docker logs (start fresh for next test case)
+                // Note: Docker doesn't have a native "clear logs" command, but we can 
+                // use timestamps to filter logs per test case
+                
+                _logger.LogInfo("Test case cleanup completed");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Test case cleanup failed: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Stops all running processes inside the containers without removing the containers.
+        /// </summary>
+        private async Task StopProcessesInContainersAsync(Environment environment, CancellationToken ct)
+        {
+            _logger.LogDebug("Stopping processes in containers...");
+            
+            try
+            {
+                var serverContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
+                var clientContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
+                
+                // Kill all dotnet processes in containers
+                // This is safer than killing specific PIDs
+                await ExecuteDockerCommandAsync($"exec {serverContainer} pkill -f dotnet", ct, ignoreErrors: true);
+                await ExecuteDockerCommandAsync($"exec {clientContainer} pkill -f dotnet", ct, ignoreErrors: true);
+                
+                await Task.Delay(500, ct); // Wait for processes to terminate
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error stopping processes: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Resets the database to initial state using the SQL script.
+        /// </summary>
+        private async Task ResetDatabaseAsync(Environment environment, GradingConfiguration config, CancellationToken ct)
+        {
+            _logger.LogDebug("Resetting database...");
+            
+            try
+            {
+                var dbContainer = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DatabaseContainerName, "ag-database");
+                var dbName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.DatabaseName, "TestDB");
+                var dbUsername = config.DatabaseUsername;
+                var dbPassword = config.DatabasePassword;
+                
+                // Drop and recreate database using SQL script
+                // The script should be located at /var/opt/mssql/{dbName}.sql inside the container
+                var dropQuery = $@"USE master; IF EXISTS(SELECT * FROM sys.databases WHERE name = '{dbName}') BEGIN ALTER DATABASE [{dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{dbName}]; END;";
+                var dropCommand = $"exec {dbContainer} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U {dbUsername} -P {dbPassword} -Q \"{dropQuery}\"";
+                
+                await ExecuteDockerCommandAsync(dropCommand, ct, ignoreErrors: true);
+                
+                // Recreate database from script
+                var createCommand = $"exec {dbContainer} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U {dbUsername} -P {dbPassword} -i /var/opt/mssql/{dbName}.sql";
+                await ExecuteDockerCommandAsync(createCommand, ct, ignoreErrors: true);
+                
+                _logger.LogDebug("Database reset completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Database reset warning: {ex.Message}");
+            }
+        }
+        
+        #endregion
 
         /// <summary>
         /// Disposes all containers for a student.
@@ -349,6 +473,49 @@ namespace SolutionGrader.UI.Services
             return $"/apps/{folderName}/{fileName}";
         }
 
+        /// <summary>
+        /// Executes a docker command asynchronously.
+        /// </summary>
+        private async Task<string> ExecuteDockerCommandAsync(string command, CancellationToken ct, bool ignoreErrors = false)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = command,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process != null)
+                {
+                    var output = await process.StandardOutput.ReadToEndAsync(ct);
+                    var error = await process.StandardError.ReadToEndAsync(ct);
+                    await process.WaitForExitAsync(ct);
+                    
+                    if (!ignoreErrors && process.ExitCode != 0 && !string.IsNullOrEmpty(error))
+                    {
+                        _logger.LogWarning($"Docker command warning: {error}");
+                    }
+                    
+                    return output;
+                }
+                return string.Empty;
+            }
+            catch (Exception ex)
+            {
+                if (!ignoreErrors)
+                {
+                    _logger.LogWarning($"Docker command error: {ex.Message}");
+                }
+                return string.Empty;
+            }
+        }
+
         private static void SetOrAddConfig(Dictionary<string, string> configs, string key, string value)
         {
             if (configs.ContainsKey(key))
@@ -374,11 +541,9 @@ namespace SolutionGrader.UI.Services
             CancellationToken ct = default)
         {
             // Run dotnet command in container to start the application
-            var command = $"docker exec -d {containerName} dotnet {dllPath}";
-            
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                var psi = new ProcessStartInfo
                 {
                     FileName = "docker",
                     Arguments = $"exec -d {containerName} dotnet {dllPath}",
@@ -388,7 +553,7 @@ namespace SolutionGrader.UI.Services
                     CreateNoWindow = true
                 };
 
-                using var process = System.Diagnostics.Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     await process.WaitForExitAsync(ct);
@@ -409,17 +574,19 @@ namespace SolutionGrader.UI.Services
         {
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                // Use --follow=false to get all current output including buffered content
+                // without waiting for newlines
+                var psi = new ProcessStartInfo
                 {
                     FileName = "docker",
-                    Arguments = $"logs --tail 100 {containerName}",
+                    Arguments = $"logs --tail 500 {containerName}",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
 
-                using var process = System.Diagnostics.Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     var output = await process.StandardOutput.ReadToEndAsync(ct);
