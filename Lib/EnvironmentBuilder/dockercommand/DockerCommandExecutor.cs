@@ -297,10 +297,23 @@ namespace EnvironmentBuilder.DockerCommand
                 if (!string.IsNullOrEmpty(dockerBase.DockerNetwork))
                     CreateNetwork(dockerBase.DockerNetwork, timeoutInMilliseconds);
 
+                // IMPORTANT: Always remove existing container to ensure clean state
+                // This prevents "Address already in use" errors from old containers that
+                // might have processes still holding ports. Force removal (-f) stops
+                // and removes the container regardless of its state.
                 if (IsContainerExist(dockerBase.ContainerName))
                 {
-                    StartExistedContainer(dockerBase.ContainerName);
-                    return;
+                    Console.WriteLine($"[Docker] Removing existing container: {dockerBase.ContainerName}");
+                    try
+                    {
+                        RemoveContainer(dockerBase.ContainerName, 30000);
+                        // Brief wait for Docker to release resources
+                        Thread.Sleep(500);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Docker] Warning: Could not remove existing container: {ex.Message}");
+                    }
                 }
 
                 string envVars = "";

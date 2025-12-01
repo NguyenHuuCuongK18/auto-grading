@@ -691,6 +691,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Cleans up existing containers BEFORE setting up new ones.
         /// This is called at the start of SetupContainersAsync to prevent port conflicts.
+        /// Uses force removal to ensure containers and their port bindings are released.
         /// </summary>
         private async Task CleanupExistingContainersAsync(string? serverContainer, string? clientContainer, string? dbContainer, CancellationToken ct)
         {
@@ -699,26 +700,35 @@ namespace SolutionGrader.UI.Services
                 // Remove any existing containers with the same names to avoid port conflicts
                 // Using force removal (docker rm -f) which will stop and remove the container
                 
-                if (!string.IsNullOrEmpty(serverContainer) && _dockerExecutor.IsContainerExist(serverContainer))
+                var containersToRemove = new List<string>();
+                
+                if (!string.IsNullOrEmpty(serverContainer))
+                    containersToRemove.Add(serverContainer);
+                if (!string.IsNullOrEmpty(clientContainer))
+                    containersToRemove.Add(clientContainer);
+                if (!string.IsNullOrEmpty(dbContainer))
+                    containersToRemove.Add(dbContainer);
+
+                foreach (var container in containersToRemove)
                 {
-                    _logger.LogDebug($"Removing existing server container: {serverContainer}");
-                    try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+                    // Always try to remove - don't check if exists first
+                    // This ensures we catch containers in any state
+                    _logger.LogDebug($"Force removing container (if exists): {container}");
+                    try 
+                    { 
+                        _dockerExecutor.RemoveContainer(container); 
+                    } 
+                    catch 
+                    { 
+                        // Ignore - container may not exist
+                    }
                 }
 
-                if (!string.IsNullOrEmpty(clientContainer) && _dockerExecutor.IsContainerExist(clientContainer))
-                {
-                    _logger.LogDebug($"Removing existing client container: {clientContainer}");
-                    try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
-                }
-
-                if (!string.IsNullOrEmpty(dbContainer) && _dockerExecutor.IsContainerExist(dbContainer))
-                {
-                    _logger.LogDebug($"Removing existing database container: {dbContainer}");
-                    try { _dockerExecutor.RemoveContainer(dbContainer); } catch { }
-                }
-
-                // Wait for Docker to release resources
-                await Task.Delay(500, ct);
+                // Wait for Docker to release all resources (port bindings, networks, etc.)
+                // This is crucial because Docker's port unbinding can be async
+                await Task.Delay(1000, ct);
+                
+                _logger.LogInfo("Container cleanup complete - ports should be released");
             }
             catch (Exception ex)
             {
