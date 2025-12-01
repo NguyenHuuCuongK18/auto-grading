@@ -278,11 +278,17 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace EnvironmentBuilder.CommandSupporter
 {
     public class CommandExecutor
     {
+        /// <summary>
+        /// Determines if running on Windows platform.
+        /// </summary>
+        private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
         public bool RunCommand(
             string command,
             string workingDirectory = "",
@@ -359,13 +365,22 @@ namespace EnvironmentBuilder.CommandSupporter
             string workingDirectory,
             Dictionary<string, string> environmentVariables)
         {
-            var processInfo = new ProcessStartInfo("cmd.exe", $"/c {command}")
+            ProcessStartInfo processInfo;
+            
+            if (IsWindows)
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                processInfo = new ProcessStartInfo("cmd.exe", $"/c {command}");
+            }
+            else
+            {
+                // On Linux/Unix, use /bin/sh
+                processInfo = new ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"");
+            }
+            
+            processInfo.RedirectStandardOutput = true;
+            processInfo.RedirectStandardError = true;
+            processInfo.UseShellExecute = false;
+            processInfo.CreateNoWindow = true;
 
             if (!string.IsNullOrEmpty(workingDirectory))
             {

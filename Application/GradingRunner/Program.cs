@@ -110,13 +110,19 @@ namespace GradingRunner
                 ServerProjectName = "Q11",
                 ServerPort = 5000,
 
-                // Default mapping: Paper 1 -> Q1 testkit
+                // Default mapping: Paper 1 -> Q1 testkit (Q2 only if it exists)
                 PaperToTestKitMapping = new Dictionary<string, string>
                 {
-                    { "1", "Q1" },
-                    { "2", "Q2" }
+                    { "1", "Q1" }
                 }
             };
+            
+            // Add Q2 mapping only if it exists
+            var q2Path = Path.Combine(_config.TestKitFolderPath, "Q2");
+            if (Directory.Exists(q2Path))
+            {
+                _config.PaperToTestKitMapping["2"] = "Q2";
+            }
 
             Console.WriteLine($"Submit folder: {_config.SubmitFolderPath}");
             Console.WriteLine($"TestKit folder: {_config.TestKitFolderPath}");

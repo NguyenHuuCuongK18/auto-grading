@@ -316,6 +316,8 @@ namespace GradingServices
                 PointsPossible = pointsPossible
             };
 
+            bool networkMonitorActive = false;
+
             try
             {
                 // Read Detail.xlsx for stages
@@ -328,10 +330,23 @@ namespace GradingServices
                     return result;
                 }
 
-                // Start network monitor
+                // Start network monitor (optional - gracefully fail if no privileges)
                 if (_networkMonitor != null)
                 {
-                    await _networkMonitor.StartAsync(config.ServerPort, ct);
+                    try
+                    {
+                        await _networkMonitor.StartAsync(config.ServerPort, ct);
+                        networkMonitorActive = _networkMonitor.IsCapturing;
+                        if (!networkMonitorActive)
+                        {
+                            progress?.Report("WARNING: Network monitor not active (requires sudo). Network checks will be skipped.");
+                        }
+                    }
+                    catch (Exception netEx)
+                    {
+                        progress?.Report($"WARNING: Network monitor failed: {netEx.Message}. Network checks will be skipped.");
+                        networkMonitorActive = false;
+                    }
                 }
 
                 // Setup containers
@@ -363,34 +378,34 @@ namespace GradingServices
                         case "STARTCLIENT":
                             await _containerService.StartClientApplicationAsync(ct);
                             currentStage = stage.StageNumber;
-                            _networkMonitor?.SetStage(currentStage);
+                            if (networkMonitorActive) _networkMonitor?.SetStage(currentStage);
                             await Task.Delay(Common.GradingConstants.PostStageChangeDelayMs, ct);
                             break;
 
                         case "STARTSERVER":
                             await _containerService.StartServerApplicationAsync(ct);
                             currentStage = stage.StageNumber;
-                            _networkMonitor?.SetStage(currentStage);
+                            if (networkMonitorActive) _networkMonitor?.SetStage(currentStage);
                             await Task.Delay(Common.GradingConstants.PostStageChangeDelayMs, ct);
                             break;
 
                         case "INPUT":
                             await _containerService.SendClientInputAsync(stage.Input ?? "", ct);
                             currentStage = stage.StageNumber;
-                            _networkMonitor?.SetStage(currentStage);
+                            if (networkMonitorActive) _networkMonitor?.SetStage(currentStage);
                             await Task.Delay(Common.GradingConstants.PostInputDelayMs, ct);
                             break;
 
                         case "CLOSECLIENT":
                             await _containerService.StopClientContainerAsync(ct);
                             currentStage = stage.StageNumber;
-                            _networkMonitor?.SetStage(currentStage);
+                            if (networkMonitorActive) _networkMonitor?.SetStage(currentStage);
                             break;
 
                         case "CLOSESERVER":
                             await _containerService.StopServerContainerAsync(ct);
                             currentStage = stage.StageNumber;
-                            _networkMonitor?.SetStage(currentStage);
+                            if (networkMonitorActive) _networkMonitor?.SetStage(currentStage);
                             break;
                     }
 
@@ -402,7 +417,7 @@ namespace GradingServices
                 }
 
                 // Stop network monitor
-                if (_networkMonitor != null)
+                if (networkMonitorActive && _networkMonitor != null)
                 {
                     await _networkMonitor.StopAsync();
                 }
@@ -411,7 +426,7 @@ namespace GradingServices
                 result.StageResults = await CompareStageOutputsAsync(
                     stages, 
                     dockerService, 
-                    _networkMonitor, 
+                    networkMonitorActive ? _networkMonitor : null, 
                     testKitPath, 
                     testCaseName);
 
@@ -432,7 +447,7 @@ namespace GradingServices
             finally
             {
                 // Ensure network monitor is stopped
-                if (_networkMonitor != null)
+                if (networkMonitorActive && _networkMonitor != null)
                 {
                     try { await _networkMonitor.StopAsync(); } catch { }
                 }

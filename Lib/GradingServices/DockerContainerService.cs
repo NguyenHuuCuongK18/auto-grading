@@ -524,33 +524,78 @@ namespace GradingServices
         }
 
         /// <summary>
-        /// Finds a .dll file in the container's /apps directory.
+        /// Finds the main application .dll file in the container's /apps directory.
+        /// Looks for DLLs named Project*, Q11*, Q12*, Client*, Server* etc.
         /// </summary>
         private async Task<string?> FindDllInContainerAsync(string containerName, CancellationToken ct)
         {
             try
             {
-                var output = RunDockerExecAndCapture(containerName, "find /apps -name '*.dll' -type f | head -5");
+                // Find all DLLs, excluding runtimes and known framework DLLs
+                var output = RunDockerExecAndCapture(containerName, "find /apps -name '*.dll' -type f 2>/dev/null | grep -v 'runtimes/' | head -50");
                 var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
                 
-                // Look for common DLL patterns
+                // Priority patterns for finding the main application DLL
+                var priorityPatterns = new[]
+                {
+                    "Project1", "Project2", "Project3", "Project4", "Project5",
+                    "Q11", "Q12", "Q13", "Q14", "Q15",
+                    "Client", "Server",
+                    "Calculator"
+                };
+                
+                // Framework DLLs to exclude
+                var excludePatterns = new[]
+                {
+                    "Microsoft.", "System.", "Newtonsoft.", "Dapper.",
+                    "ClosedXML", "EPPlus", "DocumentFormat", "SkiaSharp",
+                    "runtimes/", "ref/", "analyzers/"
+                };
+                
+                // First pass: look for priority pattern DLLs
                 foreach (var line in lines)
                 {
                     var trimmed = line.Trim();
-                    if (trimmed.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
-                        !trimmed.Contains("runtimes/") &&
-                        !trimmed.Contains("Microsoft.") &&
-                        !trimmed.Contains("System."))
+                    if (!trimmed.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                        
+                    var fileName = Path.GetFileName(trimmed);
+                    
+                    // Check if it's a priority pattern
+                    if (priorityPatterns.Any(p => fileName.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
                     {
+                        // Verify it's not an excluded pattern
+                        if (!excludePatterns.Any(e => fileName.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            Console.WriteLine($"[Docker] Found application DLL: {trimmed}");
+                            return trimmed;
+                        }
+                    }
+                }
+                
+                // Second pass: look for any non-framework DLL
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    if (!trimmed.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                        
+                    var fileName = Path.GetFileName(trimmed);
+                    
+                    // Verify it's not an excluded pattern
+                    if (!excludePatterns.Any(e => fileName.Contains(e, StringComparison.OrdinalIgnoreCase) || trimmed.Contains(e)))
+                    {
+                        Console.WriteLine($"[Docker] Found potential application DLL: {trimmed}");
                         return trimmed;
                     }
                 }
 
-                // If no match, return first .dll found
-                return lines.FirstOrDefault()?.Trim();
+                Console.WriteLine($"[Docker] No application DLL found in container {containerName}");
+                return null;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"[Docker] Error finding DLL: {ex.Message}");
                 return null;
             }
         }
