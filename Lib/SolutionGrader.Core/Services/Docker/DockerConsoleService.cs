@@ -135,8 +135,24 @@ public class DockerConsoleService : IDockerConsoleService, IDisposable
             {
                 if (!_attachProcess.HasExited)
                 {
-                    // Send Ctrl+C equivalent to detach gracefully
-                    _attachProcess.Kill();
+                    // Try graceful shutdown first by closing StandardInput
+                    try
+                    {
+                        _attachProcess.StandardInput.Close();
+                        
+                        // Give process time to exit gracefully
+                        var exited = _attachProcess.WaitForExit(2000);
+                        
+                        if (!exited)
+                        {
+                            // Force kill if graceful shutdown didn't work
+                            _attachProcess.Kill();
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Process may have already exited
+                    }
                 }
                 
                 _attachProcess.WaitForExit(1000);

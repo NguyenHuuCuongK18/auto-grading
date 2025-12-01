@@ -450,8 +450,10 @@ public class DockerGradingService : IDockerGradingService, IDisposable
     private async Task StartApplicationAsync(string containerName, string appName, string dllPath, CancellationToken ct)
     {
         var pipePath = $"/tmp/{appName}_input_pipe";
+        // Escape the DLL path for shell safety - replace any potentially dangerous characters
+        var safeDllPath = EscapeShellArgument(dllPath);
         var cmd = $"exec -d -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} " +
-                  $"sh -c \"stdbuf -o0 -e0 dotnet {dllPath} > /proc/1/fd/1 2>&1 < {pipePath}\"";
+                  $"sh -c \"stdbuf -o0 -e0 dotnet {safeDllPath} > /proc/1/fd/1 2>&1 < {pipePath}\"";
         
         await RunDockerCommandAsync(cmd, ct);
     }
@@ -459,11 +461,27 @@ public class DockerGradingService : IDockerGradingService, IDisposable
     private async Task SendInputToContainerAsync(string containerName, string appName, string input, CancellationToken ct)
     {
         var pipePath = $"/tmp/{appName}_input_pipe";
-        var safeInput = input.Replace("'", "'\\''").Replace("\n", "");
-        var cmd = $"exec {containerName} sh -c \"echo '{safeInput}' | tee /proc/1/fd/1 > {pipePath}\"";
+        // Use printf for better handling of special characters and newlines
+        // This properly escapes and preserves newlines in input
+        var safeInput = EscapeShellArgument(input);
+        var cmd = $"exec {containerName} sh -c \"printf '%s\\n' {safeInput} | tee /proc/1/fd/1 > {pipePath}\"";
         
         await RunDockerCommandAsync(cmd, ct);
         Console.WriteLine($"[DockerGrading] Sent input to {appName}: {input}");
+    }
+    
+    /// <summary>
+    /// Escapes a string for safe use in shell commands.
+    /// Uses single-quote escaping which is the safest for shell arguments.
+    /// </summary>
+    private static string EscapeShellArgument(string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+            return "''";
+        
+        // Single quotes prevent interpretation of all special characters except single quote
+        // For single quotes in the input, we close the single quote, add an escaped single quote, and reopen
+        return "'" + arg.Replace("'", "'\"'\"'") + "'";
     }
     
     private async Task StopAndRemoveContainerAsync(string containerName, CancellationToken ct)
@@ -502,7 +520,8 @@ public class DockerGradingService : IDockerGradingService, IDisposable
     }
     
     /// <summary>
-    /// Disposes resources.
+    /// Disposes resources synchronously.
+    /// Note: For async disposal, call DisposeEnvironmentAsync directly.
     /// </summary>
     public void Dispose()
     {
@@ -510,7 +529,20 @@ public class DockerGradingService : IDockerGradingService, IDisposable
             return;
         
         _disposed = true;
-        DisposeEnvironmentAsync().Wait();
+        
+        // Use ConfigureAwait(false) to avoid deadlocks when called from synchronous context
+        try
+        {
+            DisposeEnvironmentAsync()
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DockerGrading] Error during dispose: {ex.Message}");
+        }
+        
         GC.SuppressFinalize(this);
     }
 }

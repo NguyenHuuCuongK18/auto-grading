@@ -140,7 +140,11 @@ public class TestKitConfigService
         int markColumn = -1;
         int nameColumn = -1;
         
-        for (int col = 1; col <= worksheet.LastColumnUsed()?.ColumnNumber(); col++)
+        var lastCol = worksheet.LastColumnUsed();
+        if (lastCol == null)
+            return;
+        
+        for (int col = 1; col <= lastCol.ColumnNumber(); col++)
         {
             var cellValue = headerRow.Cell(col).GetString();
             if (cellValue.Contains("Mark", StringComparison.OrdinalIgnoreCase))
@@ -157,7 +161,14 @@ public class TestKitConfigService
         
         // Sum up marks from test cases
         double totalMark = 0;
-        for (int row = 2; row <= worksheet.LastRowUsed()?.RowNumber(); row++)
+        var lastRow = worksheet.LastRowUsed();
+        if (lastRow == null)
+        {
+            config.TotalMaxMark = totalMark;
+            return;
+        }
+        
+        for (int row = 2; row <= lastRow.RowNumber(); row++)
         {
             if (markColumn > 0)
             {

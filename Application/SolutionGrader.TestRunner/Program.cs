@@ -415,8 +415,9 @@ public class Program
     {
         try
         {
-            // Check for libpcap on Linux
-            if (OperatingSystem.IsLinux())
+            // Check for libpcap on Linux using RuntimeInformation for better compatibility
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Linux))
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
