@@ -74,6 +74,18 @@ namespace SolutionGrader.UI.Models
         /// </summary>
         public Dictionary<string, string> PaperToTestKitMapping { get; set; } = new();
 
+        // Database configuration properties for Docker container
+        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2022-latest";
+        public string DatabaseContainerName { get; set; } = "ag-database";
+        public int DatabaseContainerInternalPort { get; set; } = 1433;
+        public int DatabaseContainerHostPort { get; set; } = 1433;
+        public string DatabaseUsername { get; set; } = "sa";
+        public string DatabasePassword { get; set; } = "YourStrong@Passw0rd";
+        
+        // Code container ports
+        public int CodeContainerInternalPort { get; set; } = 5000;
+        public int CodeContainerHostPort { get; set; } = 5000;
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -96,6 +108,8 @@ namespace SolutionGrader.UI.Models
         private string _message = string.Empty;
         private DateTime? _startTime;
         private DateTime? _endTime;
+        private int _progressPercent;
+        private bool _isSelected;
 
         public string StudentCode
         {
@@ -133,9 +147,29 @@ namespace SolutionGrader.UI.Models
             set { _maxScore = value; OnPropertyChanged(); OnPropertyChanged(nameof(ScoreDisplay)); }
         }
 
+        // Aliases for existing UI code compatibility
+        public double Mark
+        {
+            get => _score;
+            set { _score = value; OnPropertyChanged(); OnPropertyChanged(nameof(ScoreDisplay)); }
+        }
+
+        public double MaxMark
+        {
+            get => _maxScore;
+            set { _maxScore = value; OnPropertyChanged(); OnPropertyChanged(nameof(ScoreDisplay)); }
+        }
+
         public string ScoreDisplay => $"{Score:F2}/{MaxScore:F2}";
 
         public string Message
+        {
+            get => _message;
+            set { _message = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusMessage)); }
+        }
+
+        // Alias for existing UI code compatibility
+        public string StatusMessage
         {
             get => _message;
             set { _message = value; OnPropertyChanged(); }
@@ -156,6 +190,18 @@ namespace SolutionGrader.UI.Models
         public TimeSpan? Duration => EndTime.HasValue && StartTime.HasValue
             ? EndTime.Value - StartTime.Value
             : null;
+
+        public int ProgressPercent
+        {
+            get => _progressPercent;
+            set { _progressPercent = value; OnPropertyChanged(); }
+        }
+
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { _isSelected = value; OnPropertyChanged(); }
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
 

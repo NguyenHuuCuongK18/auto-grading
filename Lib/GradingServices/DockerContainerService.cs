@@ -204,7 +204,8 @@ namespace GradingServices
         }
 
         /// <summary>
-        /// Starts the client application inside the container and attaches for console reading.
+        /// Starts the client application inside the container.
+        /// Uses file-based output capture instead of docker attach for accurate console reading.
         /// </summary>
         public async Task<bool> StartClientApplicationAsync(CancellationToken ct = default)
         {
@@ -213,12 +214,18 @@ namespace GradingServices
 
             try
             {
-                // Create named pipe for input
+                // Create named pipe for input and output log file
                 var inputPipe = $"/tmp/{_clientContainerName}_input_pipe";
-                RunDockerExec(_clientContainerName, $"mkfifo {inputPipe}", waitForExit: true);
+                var outputLog = $"/tmp/{_clientContainerName}_output.log";
+                
+                // Create the named pipe for input
+                RunDockerExec(_clientContainerName, $"mkfifo {inputPipe} 2>/dev/null || true", waitForExit: true);
+                
+                // Create empty output log
+                RunDockerExec(_clientContainerName, $"touch {outputLog}", waitForExit: true);
 
                 // Start a background process to keep the pipe open
-                RunDockerExec(_clientContainerName, $"sh -c 'sleep 100000 > {inputPipe}'", waitForExit: false);
+                RunDockerExec(_clientContainerName, $"sh -c 'sleep 100000 > {inputPipe} &'", waitForExit: false);
                 await Task.Delay(500, ct);
 
                 // Find the DLL to run
@@ -229,13 +236,21 @@ namespace GradingServices
                     return false;
                 }
 
-                // Start the application with input from pipe
-                var startCmd = $"sh -c 'stdbuf -o0 -e0 dotnet {dllPath} < {inputPipe}'";
-                RunDockerExec(_clientContainerName, startCmd, waitForExit: false);
-                await Task.Delay(500, ct);
+                // Store the DLL path and output log for later reference
+                _clientDllPath = dllPath;
+                _clientOutputLog = outputLog;
+                _clientInputPipe = inputPipe;
 
-                // Start attach process for reading output
-                StartAttachProcess(_clientContainerName, ref _clientAttachProcess, _clientOutputBuffer, _clientLock);
+                // Start the application with input from pipe and redirect output to log file
+                // Using stdbuf -oL for line-buffered output for real-time capture
+                var startCmd = $"sh -c 'stdbuf -oL dotnet {dllPath} < {inputPipe} >> {outputLog} 2>&1 &'";
+                RunDockerExec(_clientContainerName, startCmd, waitForExit: false);
+                
+                // Wait for application to initialize and produce initial output
+                await Task.Delay(1500, ct);
+                
+                // Read initial output
+                await ReadContainerOutputAsync(_clientContainerName, outputLog, _clientOutputBuffer, _clientLock, ct);
 
                 Console.WriteLine($"[Docker] Client application started with DLL: {dllPath}");
                 return true;
@@ -247,8 +262,16 @@ namespace GradingServices
             }
         }
 
+        // Store paths for output reading
+        private string? _clientDllPath;
+        private string? _serverDllPath;
+        private string? _clientOutputLog;
+        private string? _serverOutputLog;
+        private string? _clientInputPipe;
+
         /// <summary>
-        /// Starts the server application inside the container and attaches for console reading.
+        /// Starts the server application inside the container.
+        /// Uses file-based output capture instead of docker attach for accurate console reading.
         /// </summary>
         public async Task<bool> StartServerApplicationAsync(CancellationToken ct = default)
         {
@@ -257,6 +280,10 @@ namespace GradingServices
 
             try
             {
+                // Create output log file
+                var outputLog = $"/tmp/{_serverContainerName}_output.log";
+                RunDockerExec(_serverContainerName, $"touch {outputLog}", waitForExit: true);
+
                 // Find the DLL to run
                 var dllPath = await FindDllInContainerAsync(_serverContainerName, ct);
                 if (string.IsNullOrEmpty(dllPath))
@@ -265,13 +292,20 @@ namespace GradingServices
                     return false;
                 }
 
-                // Start the server application (no input pipe needed for server typically)
-                var startCmd = $"sh -c 'stdbuf -o0 -e0 dotnet {dllPath}'";
-                RunDockerExec(_serverContainerName, startCmd, waitForExit: false);
-                await Task.Delay(500, ct);
+                // Store paths for later reference
+                _serverDllPath = dllPath;
+                _serverOutputLog = outputLog;
 
-                // Start attach process for reading output
-                StartAttachProcess(_serverContainerName, ref _serverAttachProcess, _serverOutputBuffer, _serverLock);
+                // Start the server application with output redirected to log file
+                // Using stdbuf -oL for line-buffered output
+                var startCmd = $"sh -c 'stdbuf -oL dotnet {dllPath} >> {outputLog} 2>&1 &'";
+                RunDockerExec(_serverContainerName, startCmd, waitForExit: false);
+                
+                // Wait for server to initialize and produce initial output
+                await Task.Delay(1500, ct);
+                
+                // Read initial output
+                await ReadContainerOutputAsync(_serverContainerName, outputLog, _serverOutputBuffer, _serverLock, ct);
 
                 Console.WriteLine($"[Docker] Server application started with DLL: {dllPath}");
                 return true;
@@ -321,13 +355,23 @@ namespace GradingServices
                 var safeInput = SanitizeShellInput(input);
                 
                 // Send input via echo to named pipe
-                var command = $"sh -c \"echo '{safeInput}' | tee /proc/1/fd/1 > {inputPipe}\"";
+                var command = $"sh -c \"echo '{safeInput}' > {inputPipe}\"";
                 RunDockerExec(_clientContainerName, command, waitForExit: true);
                 
                 Console.WriteLine($"[Docker] Sent input to client: {input}");
                 
                 // Wait for output to stabilize (1-2 seconds as specified)
                 await Task.Delay(Common.GradingConstants.PostInputDelayMs, ct);
+                
+                // Read updated output from both client and server
+                if (!string.IsNullOrEmpty(_clientOutputLog))
+                {
+                    await ReadContainerOutputAsync(_clientContainerName, _clientOutputLog, _clientOutputBuffer, _clientLock, ct);
+                }
+                if (!string.IsNullOrEmpty(_serverOutputLog) && !string.IsNullOrEmpty(_serverContainerName))
+                {
+                    await ReadContainerOutputAsync(_serverContainerName, _serverOutputLog, _serverOutputBuffer, _serverLock, ct);
+                }
                 
                 return true;
             }
@@ -339,24 +383,52 @@ namespace GradingServices
         }
 
         /// <summary>
-        /// Gets the current client console output from the attached process.
+        /// Reads output from a container's log file.
         /// </summary>
-        public Task<string> GetClientConsoleOutputAsync(CancellationToken ct = default)
+        private async Task ReadContainerOutputAsync(string containerName, string logPath, StringBuilder outputBuffer, object lockObj, CancellationToken ct)
         {
-            lock (_clientLock)
+            try
             {
-                return Task.FromResult(_clientOutputBuffer.ToString());
+                var output = RunDockerExecAndCapture(containerName, $"cat {logPath} 2>/dev/null || echo ''");
+                lock (lockObj)
+                {
+                    outputBuffer.Clear();
+                    outputBuffer.Append(output);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker] Error reading output from {containerName}: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Gets the current server console output from the attached process.
+        /// Gets the current client console output from the log file.
         /// </summary>
-        public Task<string> GetServerConsoleOutputAsync(CancellationToken ct = default)
+        public async Task<string> GetClientConsoleOutputAsync(CancellationToken ct = default)
         {
+            if (!string.IsNullOrEmpty(_clientContainerName) && !string.IsNullOrEmpty(_clientOutputLog))
+            {
+                await ReadContainerOutputAsync(_clientContainerName, _clientOutputLog, _clientOutputBuffer, _clientLock, ct);
+            }
+            lock (_clientLock)
+            {
+                return _clientOutputBuffer.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Gets the current server console output from the log file.
+        /// </summary>
+        public async Task<string> GetServerConsoleOutputAsync(CancellationToken ct = default)
+        {
+            if (!string.IsNullOrEmpty(_serverContainerName) && !string.IsNullOrEmpty(_serverOutputLog))
+            {
+                await ReadContainerOutputAsync(_serverContainerName, _serverOutputLog, _serverOutputBuffer, _serverLock, ct);
+            }
             lock (_serverLock)
             {
-                return Task.FromResult(_serverOutputBuffer.ToString());
+                return _serverOutputBuffer.ToString();
             }
         }
 

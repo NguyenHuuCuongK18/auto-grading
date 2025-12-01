@@ -21,6 +21,9 @@
     <ProjectReference Include="..\..\Lib\Domain\Domain.csproj" />
     <ProjectReference Include="..\..\Lib\EnvironmentBuilder\EnvironmentBuilder.csproj" />
     <ProjectReference Include="..\..\Lib\FileMaster\FileMaster.csproj" />
+    <ProjectReference Include="..\..\Lib\GradingServices\GradingServices.csproj" />
+    <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
+    <ProjectReference Include="..\..\Lib\Common\Common.csproj" />
   </ItemGroup>
 
 </Project>

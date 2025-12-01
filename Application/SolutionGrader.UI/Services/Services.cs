@@ -27,6 +27,7 @@ namespace SolutionGrader.UI.Services
     public class LoggingService : ILoggingService
     {
         private readonly string _logFolder;
+        private string? _currentStudentContext;
 
         public event EventHandler<LogEventArgs>? LogAdded;
 
@@ -46,6 +47,22 @@ namespace SolutionGrader.UI.Services
         public void LogInfo(string message) => Log(message, LogLevel.Info);
         public void LogWarning(string message) => Log(message, LogLevel.Warning);
         public void LogError(string message) => Log(message, LogLevel.Error);
+        
+        /// <summary>
+        /// Logs an error with exception details.
+        /// </summary>
+        public void LogError(string message, Exception ex)
+        {
+            Log($"{message}: {ex.Message}", LogLevel.Error);
+        }
+
+        /// <summary>
+        /// Sets the current student context for logging.
+        /// </summary>
+        public void SetStudentContext(string? studentCode)
+        {
+            _currentStudentContext = studentCode;
+        }
     }
 
     /// <summary>
@@ -212,10 +229,12 @@ namespace SolutionGrader.UI.Services
 
     /// <summary>
     /// Service that orchestrates grading operations.
+    /// Integrates with GradingService for Docker-based grading.
     /// </summary>
     public class GradingOrchestrationService
     {
         private readonly ILoggingService _logger;
+        private GradingServices.GradingService? _gradingService;
 
         public event EventHandler<StudentSolution>? StudentGradingStarted;
         public event EventHandler<StudentSolution>? StudentGradingCompleted;
@@ -228,13 +247,58 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Grades a single student.
+        /// Initializes the grading service with the configuration.
+        /// </summary>
+        public void Initialize(GradingConfiguration config)
+        {
+            try
+            {
+                // Create the Docker container service
+                var containerService = new GradingServices.DockerContainerService(
+                    networkName: "ag-network",
+                    serverPort: 5000
+                );
+
+                // Create the network monitor (may fail if no sudo)
+                NetworkMonitor.NetworkMonitorService? networkMonitor = null;
+                try
+                {
+                    networkMonitor = new NetworkMonitor.NetworkMonitorService();
+                    _logger.LogInfo("Network monitor initialized");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Network monitor initialization failed: {ex.Message}. Network checks will be skipped.");
+                }
+
+                // Create the grading service
+                _gradingService = new GradingServices.GradingService(
+                    containerService,
+                    networkMonitor
+                );
+
+                _logger.LogInfo("Grading service initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to initialize grading service: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Grades a single student using the GradingService.
         /// </summary>
         public async Task<bool> GradeStudentAsync(
             StudentSolution student,
             GradingConfiguration config,
             CancellationToken ct)
         {
+            if (_gradingService == null)
+            {
+                Initialize(config);
+            }
+
             try
             {
                 student.Status = GradingStatus.InProgress;
@@ -242,20 +306,50 @@ namespace SolutionGrader.UI.Services
                 StudentGradingStarted?.Invoke(this, student);
 
                 _logger.LogInfo($"Starting grading for {student.StudentCode}");
-                StudentProgressUpdated?.Invoke(this, (student, "Initializing..."));
 
-                // TODO: Integrate with GradingService from GradingServices library
-                // For now, simulate grading
-                await Task.Delay(2000, ct);
+                // Create progress reporter
+                var progress = new Progress<string>(msg =>
+                {
+                    StudentProgressUpdated?.Invoke(this, (student, msg));
+                });
 
-                student.Status = GradingStatus.Success;
-                student.Score = 1.0;
-                student.MaxScore = 1.0;
+                // Get testkit path from configuration
+                var testKitPath = Path.Combine(config.TestKitFolderPath, config.PaperToTestKitMapping.GetValueOrDefault(student.PaperNo, "Q1"));
+
+                // Create grading configuration for the service
+                var gradingConfig = new GradingServices.GradingConfiguration
+                {
+                    SubmitFolderPath = config.SubmitFolderPath,
+                    TestKitFolderPath = config.TestKitFolderPath,
+                    SaveResultFolderPath = config.SaveResultFolderPath,
+                    HasClient = config.HasClient,
+                    HasServer = config.HasServer,
+                    ClientProjectName = config.ClientProjectName,
+                    ServerProjectName = config.ServerProjectName,
+                    ServerPort = 5000,
+                    PaperToTestKitMapping = config.PaperToTestKitMapping
+                };
+
+                // Call the GradingService
+                var result = await _gradingService!.GradeStudentAsync(
+                    student.StudentCode,
+                    student.PaperNo,
+                    testKitPath,
+                    student.SolutionPath,
+                    gradingConfig,
+                    progress,
+                    ct
+                );
+
+                // Update student result
+                student.Status = result.Passed ? GradingStatus.Success : GradingStatus.Failed;
+                student.Score = result.TotalPointsAwarded;
+                student.MaxScore = result.TotalPointsPossible;
                 student.EndTime = DateTime.Now;
-                student.Message = "Grading completed";
+                student.Message = result.ErrorMessage ?? (result.Passed ? "All tests passed" : "Some tests failed");
 
                 StudentGradingCompleted?.Invoke(this, student);
-                return true;
+                return result.Passed;
             }
             catch (OperationCanceledException)
             {
@@ -282,6 +376,12 @@ namespace SolutionGrader.UI.Services
             GradingConfiguration config,
             CancellationToken ct)
         {
+            // Initialize grading service once
+            if (_gradingService == null)
+            {
+                Initialize(config);
+            }
+
             SessionStateChanged?.Invoke(this, GradingSessionState.Running);
 
             foreach (var student in students)
@@ -296,6 +396,18 @@ namespace SolutionGrader.UI.Services
             }
 
             SessionStateChanged?.Invoke(this, GradingSessionState.Completed);
+        }
+
+        /// <summary>
+        /// Starts grading for the given students (compatible with existing UI code).
+        /// </summary>
+        public async Task StartGradingAsync(
+            List<StudentSolution> students,
+            GradingConfiguration config,
+            GradingSessionState sessionState)
+        {
+            using var cts = new CancellationTokenSource();
+            await GradeStudentsAsync(students, config, cts.Token);
         }
     }
 
