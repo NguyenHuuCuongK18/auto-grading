@@ -73,24 +73,25 @@ public class Program
         // Use default grading configuration (DateTime/Time excluded from grading, GraderPort = 8888)
         var gradingConfig = GradingConfig.Default;
 
-        // AppsettingsCreationService now uses GraderPort from GradingConfig
-        var appsettings = new AppsettingsCreationService(gradingConfig);
+        // AppsettingsCreationService - parameterless constructor
+        var appsettings = new AppsettingsCreationService();
 
         IRunContext runctx = new RunContext();
 
         IExecutableManager proc = new ExecutableManager(runctx);
         
-        // NEW: Use NetworkMonitorService instead of MiddlewareProxyService
-        // The network monitor passively sniffs packets instead of proxying traffic
-        INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
+        // Use MiddlewareProxyService for network traffic proxying
+        IMiddlewareService mw = new MiddlewareProxyService(runctx);
         
         IDataComparisonService cmp = new DataComparisonService(runctx);
-        IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
+        IDetailLogService log = new ExcelDetailLogService(files, runctx);
 
-        IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
+        // Executor constructor: proc, mw, cmp, log, run, gradingConfig
+        IExecutor exec = new Executor(proc, mw, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
+        // SuiteRunner constructor: files, env, suite, parse, exec, rep, proc, mw, log, run, appsettings
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, mw, log, runctx, appsettings);
         
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
 
