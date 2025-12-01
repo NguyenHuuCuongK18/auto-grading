@@ -121,6 +121,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Waits for a TCP port to be released (no longer in use).
         /// This is crucial between test cases to prevent "Address already in use" errors.
+        /// Uses SO_REUSEADDR socket option to properly handle TIME_WAIT state.
         /// </summary>
         /// <param name="port">The TCP port to wait for</param>
         /// <param name="ct">Cancellation token</param>
@@ -128,9 +129,9 @@ namespace SolutionGrader.UI.Services
         /// <returns>True if port is available, false if timeout exceeded</returns>
         private async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 10)
         {
+            // Simple 100ms polling interval - no exponential backoff needed with SO_REUSEADDR
+            const int pollIntervalMs = 100;
             var startTime = DateTime.UtcNow;
-            int delayMs = 100; // Start with 100ms delay, increase exponentially
-            const int maxDelayMs = 1000; // Cap at 1 second
             
             _logger.LogInfo($"Waiting for port {port} to be released...");
             
@@ -142,10 +143,14 @@ namespace SolutionGrader.UI.Services
                     return true;
                 }
                 
-                await Task.Delay(delayMs, ct);
-                
-                // Exponential backoff
-                delayMs = Math.Min(delayMs * 2, maxDelayMs);
+                await Task.Delay(pollIntervalMs, ct);
+            }
+            
+            // Even if timeout, try one more time - SO_REUSEADDR handles TIME_WAIT gracefully
+            if (IsPortAvailable(port))
+            {
+                _logger.LogInfo($"Port {port} is now available (with SO_REUSEADDR)");
+                return true;
             }
             
             _logger.LogWarning($"Warning: Port {port} may still be in use after {maxWaitSeconds}s wait");
@@ -153,19 +158,34 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Checks if a TCP port is available (not in use by any process).
+        /// Checks if a TCP port is available for binding.
+        /// Uses SO_REUSEADDR to handle TIME_WAIT state - allows binding even if socket is closing.
+        /// This is the proper way to handle port reuse without arbitrary delays.
         /// </summary>
         private static bool IsPortAvailable(int port)
         {
             try
             {
-                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
-                listener.Start();
-                listener.Stop();
+                using var socket = new System.Net.Sockets.Socket(
+                    System.Net.Sockets.AddressFamily.InterNetwork,
+                    System.Net.Sockets.SocketType.Stream,
+                    System.Net.Sockets.ProtocolType.Tcp);
+                
+                // SO_REUSEADDR allows binding to a port in TIME_WAIT state
+                // This is the standard solution for quick server restart
+                socket.SetSocketOption(
+                    System.Net.Sockets.SocketOptionLevel.Socket,
+                    System.Net.Sockets.SocketOptionName.ReuseAddress,
+                    true);
+                
+                // Try to bind to the port
+                socket.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
+                
                 return true;
             }
             catch (System.Net.Sockets.SocketException)
             {
+                // Port is actively in use (not just TIME_WAIT)
                 return false;
             }
         }

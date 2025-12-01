@@ -21,19 +21,25 @@ namespace SolutionGrader.UI.Services
 {
     /// <summary>
     /// Main service that orchestrates the grading process for student solutions.
-    /// Uses DOCKER containers for executing and grading student code.
+    /// Now uses the Lib folder's SuiteRunner for grading, providing identical behavior
+    /// between CLI and UI.
     /// 
     /// Key responsibilities:
     /// 1. Discover student solutions from submit folder
     /// 2. Match students with test kits by paper number
-    /// 3. Execute grading in Docker containers (server, client, database)
-    /// 4. Read test steps from Detail.xlsx and execute them (StartServer, StartClient, Input)
-    /// 5. Compare outputs against expected values from Client/Server/Network sheets
-    /// 6. Calculate points and write results in SampleLogging format
+    /// 3. Execute grading via LibGradingService (which uses Lib folder's SuiteRunner)
+    /// 4. Parse results from generated Excel files
+    /// 5. Update UI with progress and results
     /// 
-    /// Port Configuration:
-    /// - Code_Container_Internal_Port: The port the app listens on inside the container
-    /// - Code_Container_Host_Port: The port exposed to host for network monitoring
+    /// The Lib folder's SuiteRunner handles:
+    /// - Process management (ExecutableManager) - runs .NET apps natively
+    /// - Network capture (NetworkMonitorService) - captures TCP/HTTP traffic
+    /// - Output comparison (DataComparisonService) - validates client/server output
+    /// - Result logging (ExcelDetailLogService) - writes detailed Excel reports
+    /// 
+    /// Note: For network capture to work, elevated permissions are required:
+    /// - Windows: NPcap with WinPcap Compatible Mode
+    /// - Linux: sudo or CAP_NET_RAW capability
     /// </summary>
     public class GradingOrchestrationService
     {
@@ -190,7 +196,14 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Grades a single student's solution.
+        /// Grades a single student's solution using the Lib folder's SuiteRunner.
+        /// This provides identical grading behavior between CLI and UI.
+        /// 
+        /// The Lib folder's SuiteRunner handles:
+        /// - Process management (ExecutableManager)
+        /// - Network capture (NetworkMonitorService)  
+        /// - Output comparison (DataComparisonService)
+        /// - Result logging (ExcelDetailLogService)
         /// </summary>
         private async Task GradeStudentAsync(
             StudentSolution student, 
@@ -224,56 +237,85 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"Using test kit: {testKitPath}");
 
-                // Step 2: Load environment configuration
-                student.ProgressPercent = 20;
-                StudentProgressUpdated?.Invoke(this, student);
-
-                var envPath = _testKitDiscovery.GetEnvironmentPath(testKitPath);
-                if (string.IsNullOrEmpty(envPath))
-                {
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = "Environment.xlsx not found in test kit";
-                    _logger.LogError(student.StatusMessage);
-                    return;
-                }
-
-                var environment = LoadEnvironment(envPath);
-                
-                // Step 3: Configure environment for this student
+                // Step 2: Determine client/server executables
                 student.ProgressPercent = 30;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                ConfigureEnvironmentForStudent(environment, student, config, testKitPath);
+                // Find the student's solution files
+                string? clientExePath = student.ClientDllPath;
+                string? serverExePath = student.ServerDllPath;
 
-                // Step 4: Setup Docker containers
-                student.ProgressPercent = 40;
-                StudentProgressUpdated?.Invoke(this, student);
+                // Fallback to Meta/Given folder if student didn't provide client or server
+                var metaPath = Path.Combine(testKitPath, "Meta", "Given");
+                
+                if (string.IsNullOrEmpty(clientExePath) && config.HasClient)
+                {
+                    var metaClientPath = Path.Combine(metaPath, "Client");
+                    if (Directory.Exists(metaClientPath))
+                    {
+                        clientExePath = FindDllInDirectory(metaClientPath, config.ClientProjectName);
+                        if (!string.IsNullOrEmpty(clientExePath))
+                        {
+                            _logger.LogInfo($"Using Meta/Given/Client: {clientExePath}");
+                        }
+                    }
+                }
 
-                await SetupContainersAsync(environment, ct);
+                if (string.IsNullOrEmpty(serverExePath) && config.HasServer)
+                {
+                    var metaServerPath = Path.Combine(metaPath, "Server");
+                    if (Directory.Exists(metaServerPath))
+                    {
+                        serverExePath = FindDllInDirectory(metaServerPath, config.ServerProjectName);
+                        if (!string.IsNullOrEmpty(serverExePath))
+                        {
+                            _logger.LogInfo($"Using Meta/Given/Server: {serverExePath}");
+                        }
+                    }
+                }
 
-                // Step 5: Copy student solution files to containers
+                _logger.LogInfo($"Client executable: {clientExePath ?? "(none)"}");
+                _logger.LogInfo($"Server executable: {serverExePath ?? "(none)"}");
+
+                // Step 3: Create result directory
                 student.ProgressPercent = 50;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                await CopyFilesToContainersAsync(student, environment, ct);
+                var studentResultRoot = _logger.GetStudentResultFolder(student.StudentCode, student.PaperNo);
+                if (!Directory.Exists(studentResultRoot))
+                {
+                    Directory.CreateDirectory(studentResultRoot);
+                }
 
-                // Step 6: Execute grading
+                // Step 4: Execute grading using LibGradingService (which calls Lib folder's SuiteRunner)
+                _logger.LogInfo("=".PadRight(60, '='));
+                _logger.LogInfo($"Starting LIB-BASED grading for student: {student.StudentCode}");
+                _logger.LogInfo("This uses the same grading logic as the CLI (SuiteRunner)");
+                _logger.LogInfo("=".PadRight(60, '='));
+
                 student.ProgressPercent = 70;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                var result = await ExecuteGradingAsync(student, environment, testKitPath, config, ct);
+                var libGrading = new LibGradingService(_logger);
+                var exitCode = await libGrading.ExecuteSuiteAsync(
+                    suitePath: testKitPath,
+                    resultRoot: studentResultRoot,
+                    clientExePath: clientExePath,
+                    serverExePath: serverExePath,
+                    useInnerEnv: true,
+                    ct: ct);
 
-                // Step 7: Collect results and cleanup
+                // Step 5: Parse results from the generated files
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                await WriteResultsAsync(student, result, ct);
-                await CleanupContainersAsync(environment, ct);
+                var (totalMark, message) = ParseGradingResultsFromLib(studentResultRoot);
 
                 // Mark as complete
-                student.Status = result.success ? GradingStatus.Success : GradingStatus.Failed;
-                student.Mark = result.mark;
-                student.StatusMessage = result.message;
+                bool success = exitCode == 1 || totalMark > 0;
+                student.Status = success ? GradingStatus.Success : GradingStatus.Failed;
+                student.Mark = totalMark;
+                student.StatusMessage = message;
                 student.ProgressPercent = 100;
 
                 _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}, Status: {student.Status}");
@@ -295,6 +337,75 @@ namespace SolutionGrader.UI.Services
                 student.EndTime = DateTime.Now;
                 StudentGradingCompleted?.Invoke(this, student);
                 _logger.SetStudentContext(null);
+            }
+        }
+
+        /// <summary>
+        /// Parses grading results from the Lib folder's output files.
+        /// Looks for OverallSummary.xlsx in the most recent GradeResult folder.
+        /// </summary>
+        private (double totalMark, string message) ParseGradingResultsFromLib(string studentResultRoot)
+        {
+            try
+            {
+                // Find the most recent GradeResult folder
+                var gradeResultFolders = Directory.GetDirectories(studentResultRoot, "GradeResult_*")
+                    .OrderByDescending(d => d)
+                    .ToList();
+
+                if (gradeResultFolders.Count == 0)
+                {
+                    _logger.LogWarning("No GradeResult folder found");
+                    return (0, "No results generated");
+                }
+
+                var latestFolder = gradeResultFolders[0];
+                var summaryPath = Path.Combine(latestFolder, "OverallSummary.xlsx");
+
+                if (!File.Exists(summaryPath))
+                {
+                    _logger.LogWarning($"OverallSummary.xlsx not found in {latestFolder}");
+                    return (0, "Summary file not found");
+                }
+
+                // Parse the Excel file
+                double totalMark = 0;
+                var messages = new List<string>();
+
+                using (var workbook = new ClosedXML.Excel.XLWorkbook(summaryPath))
+                {
+                    var ws = workbook.Worksheets.First();
+                    int row = 2; // Skip header
+
+                    while (!ws.Cell(row, 1).IsEmpty())
+                    {
+                        var testCase = ws.Cell(row, 1).GetString();
+                        var result = ws.Cell(row, 2).GetString();
+
+                        if (testCase.Equals("TOTAL", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Parse total from format "X.XX / Y.YY"
+                            var parts = result.Split('/');
+                            if (parts.Length >= 1 && double.TryParse(parts[0].Trim(), out var mark))
+                            {
+                                totalMark = mark;
+                            }
+                        }
+                        else
+                        {
+                            messages.Add($"{testCase}: {result}");
+                        }
+
+                        row++;
+                    }
+                }
+
+                return (totalMark, string.Join(", ", messages));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error parsing Lib grading results: {ex.Message}");
+                return (0, $"Error parsing results: {ex.Message}");
             }
         }
 
