@@ -325,6 +325,46 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Run a container with TTY support (-t flag) for reliable console output capture.
+        /// This is required when using docker attach to read output without buffering issues.
+        /// </summary>
+        /// <param name="dockerBase">Container configuration</param>
+        /// <param name="timeoutInMilliseconds">Timeout for the operation</param>
+        public void RunContainerWithTty(DockerBase dockerBase, int timeoutInMilliseconds = 120000)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(dockerBase.DockerNetwork))
+                    CreateNetwork(dockerBase.DockerNetwork, timeoutInMilliseconds);
+
+                if (IsContainerExist(dockerBase.ContainerName))
+                {
+                    RemoveContainer(dockerBase.ContainerName, timeoutInMilliseconds);
+                }
+
+                string envVars = "";
+                foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
+                    envVars += $"-e {kv.Key}={kv.Value} ";
+
+                // Add -t flag for TTY allocation - this resolves output buffering issues
+                // when using docker attach to read console output
+                string command = $@"docker run -d -t " +
+                                 "--privileged " +
+                                 $"--name {dockerBase.ContainerName} " +
+                                 $"--network {dockerBase.DockerNetwork} " +
+                                 $"{envVars} " +
+                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{dockerBase.ImageName}";
+                _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                Console.WriteLine($"[Docker] Container {dockerBase.ContainerName} started with TTY support");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error while try to run container {dockerBase.ContainerName} with TTY. Details: {ex.Message}");
+            }
+        }
+
 
         public void RemoveContainer(string containerName, int timeoutInMilliseconds = 30000)
         {

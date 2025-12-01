@@ -28,14 +28,17 @@ namespace SolutionGrader.Cli.Services
         // Configuration constants for timing and defaults
         private const int StartupDelayMs = 3000;          // Delay after starting client/server
         private const int InputProcessingDelayMs = 5000;  // Delay after sending input
+        private const int AttachReadDelayMs = 2000;       // Delay to allow console output to be captured via attach
         private const string DefaultDatabaseName = "Library";
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
+        private readonly DockerConsoleManager _consoleManager;
 
         public CliDockerGradingService()
         {
             _dockerExecutor = new DockerCommandExecutor();
+            _consoleManager = new DockerConsoleManager();
         }
 
         /// <summary>
@@ -457,10 +460,10 @@ namespace SolutionGrader.Cli.Services
             }
             catch { }
 
-            // Create server container
+            // Create server container with TTY support for reliable output capture
             if (!string.IsNullOrEmpty(student.ServerDllPath))
             {
-                Console.WriteLine($"[Docker] Creating server container: {serverContainer}");
+                Console.WriteLine($"[Docker] Creating server container with TTY: {serverContainer}");
                 var serverBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
                 {
                     ImageName = testKitConfig.CodeImageName,
@@ -470,16 +473,18 @@ namespace SolutionGrader.Cli.Services
                     HostPort = config.CodeContainerHostPort,
                     EnvironmentVariables = new Dictionary<string, string>
                     {
-                        { "DOTNET_RUNNING_IN_CONTAINER", "true" }
+                        { "DOTNET_RUNNING_IN_CONTAINER", "true" },
+                        { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }  // Disable output buffering
                     }
                 };
-                _dockerExecutor.RunContainer(serverBase);
+                // Use RunContainerWithTty for reliable console output capture via docker attach
+                _dockerExecutor.RunContainerWithTty(serverBase);
             }
 
-            // Create client container
+            // Create client container with TTY support
             if (!string.IsNullOrEmpty(student.ClientDllPath))
             {
-                Console.WriteLine($"[Docker] Creating client container: {clientContainer}");
+                Console.WriteLine($"[Docker] Creating client container with TTY: {clientContainer}");
                 var clientBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
                 {
                     ImageName = testKitConfig.CodeImageName,
@@ -489,10 +494,12 @@ namespace SolutionGrader.Cli.Services
                     HostPort = config.CodeContainerHostPort + 1,
                     EnvironmentVariables = new Dictionary<string, string>
                     {
-                        { "DOTNET_RUNNING_IN_CONTAINER", "true" }
+                        { "DOTNET_RUNNING_IN_CONTAINER", "true" },
+                        { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }  // Disable output buffering
                     }
                 };
-                _dockerExecutor.RunContainer(clientBase);
+                // Use RunContainerWithTty for reliable console output capture via docker attach
+                _dockerExecutor.RunContainerWithTty(clientBase);
             }
 
             // Copy files to containers
@@ -502,7 +509,7 @@ namespace SolutionGrader.Cli.Services
             // This is CRITICAL - student code reads configuration from appsettings.json
             GenerateAppsettingsInContainers(student, config, testKitConfig, serverContainer, clientContainer);
 
-            Console.WriteLine("[Docker] Containers ready.");
+            Console.WriteLine("[Docker] Containers ready with TTY support for console attachment.");
         }
 
         /// <summary>
@@ -789,7 +796,13 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
-        /// Execute actions and capture outputs using stage-based approach.
+        /// Execute actions and capture outputs using docker attach for reliable console output.
+        /// 
+        /// This method uses docker attach instead of docker logs to solve the buffering issue.
+        /// The approach:
+        /// 1. When starting a container app, create a DockerConsoleAttachment that attaches to the container
+        /// 2. The attachment reads console output in real-time via docker attach --sig-proxy=false
+        /// 3. Stage markers track output per stage for comparison
         /// </summary>
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
             StudentInfo student, List<(int Stage, string Input, string Action)> actions,
@@ -799,108 +812,197 @@ namespace SolutionGrader.Cli.Services
             var clientOutputs = new Dictionary<int, string>();
             var serverOutputs = new Dictionary<int, string>();
             
-            // Initialize with current Docker logs to properly track "new" output for this test case.
-            // This is important because Docker logs accumulate across the container's lifetime,
-            // and we only want to capture output generated during THIS test case.
-            string previousClientOutput = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-            string previousServerOutput = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
+            // Console attachments for reliable output capture
+            DockerConsoleAttachment? clientAttachment = null;
+            DockerConsoleAttachment? serverAttachment = null;
+            
+            // Track output baselines for calculating "new" output per stage
+            int clientBaseline = 0;
+            int serverBaseline = 0;
 
-            foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
+            try
             {
-                Console.WriteLine($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
-
-                switch (action.ToUpperInvariant())
+                foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
                 {
-                    case "STARTSERVER":
-                        if (!string.IsNullOrEmpty(student.ServerDllPath))
-                        {
-                            var serverDirPath = Path.GetDirectoryName(student.ServerDllPath);
-                            if (serverDirPath != null)
+                    Console.WriteLine($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
+
+                    switch (action.ToUpperInvariant())
+                    {
+                        case "STARTSERVER":
+                            if (!string.IsNullOrEmpty(student.ServerDllPath))
                             {
-                                var serverDir = Path.GetFileName(serverDirPath);
-                                var serverDll = Path.GetFileName(student.ServerDllPath);
-                                var dockerPath = $"/apps/{serverDir}/{serverDll}";
+                                var serverDirPath = Path.GetDirectoryName(student.ServerDllPath);
+                                if (serverDirPath != null)
+                                {
+                                    var serverDir = Path.GetFileName(serverDirPath);
+                                    var serverDll = Path.GetFileName(student.ServerDllPath);
+                                    var dockerPath = $"/apps/{serverDir}/{serverDll}";
 
-                                _dockerExecutor.WaitForPublishConsoleFileDeployment(
-                                    serverContainer, serverContainer, dockerPath,
-                                    config.CodeContainerInternalPort.ToString(), 30000);
+                                    // Start the application inside the container
+                                    _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                        serverContainer, serverContainer, dockerPath,
+                                        config.CodeContainerInternalPort.ToString(), 30000);
 
-                                // Wait for application to fully start and output to be flushed
-                                await Task.Delay(StartupDelayMs);
-                                var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
-                                var newOutput = output.Length > previousServerOutput.Length ? output.Substring(previousServerOutput.Length) : output;
-                                serverOutputs[stage] = newOutput;
-                                previousServerOutput = output;
-                                Console.WriteLine($"    Server started, output: {newOutput.Length} chars");
+                                    // Create and start console attachment for server
+                                    serverAttachment = _consoleManager.CreateAttachment(serverContainer, $"Server-{serverContainer}");
+                                    serverAttachment.StartAttachment();
+                                    serverAttachment.StartStage(stage);
+
+                                    // Wait for application to start and output to be captured
+                                    await Task.Delay(StartupDelayMs);
+                                    
+                                    // Get output using attachment (preferred) or fall back to docker logs
+                                    string newOutput;
+                                    if (serverAttachment.IsRunning && serverAttachment.OutputLength > 0)
+                                    {
+                                        newOutput = serverAttachment.GetNewOutputSince(serverBaseline);
+                                        serverBaseline = serverAttachment.OutputLength;
+                                    }
+                                    else
+                                    {
+                                        // Fall back to docker logs if attachment isn't working
+                                        var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
+                                        newOutput = output;
+                                    }
+                                    
+                                    serverOutputs[stage] = newOutput;
+                                    Console.WriteLine($"    Server started, output: {newOutput.Length} chars (attach: {serverAttachment?.IsRunning ?? false})");
+                                }
                             }
-                        }
-                        break;
+                            break;
 
-                    case "STARTCLIENT":
-                        if (!string.IsNullOrEmpty(student.ClientDllPath))
-                        {
-                            var clientDirPath = Path.GetDirectoryName(student.ClientDllPath);
-                            if (clientDirPath != null)
+                        case "STARTCLIENT":
+                            if (!string.IsNullOrEmpty(student.ClientDllPath))
                             {
-                                var clientDir = Path.GetFileName(clientDirPath);
-                                var clientDll = Path.GetFileName(student.ClientDllPath);
-                                var dockerPath = $"/apps/{clientDir}/{clientDll}";
+                                var clientDirPath = Path.GetDirectoryName(student.ClientDllPath);
+                                if (clientDirPath != null)
+                                {
+                                    var clientDir = Path.GetFileName(clientDirPath);
+                                    var clientDll = Path.GetFileName(student.ClientDllPath);
+                                    var dockerPath = $"/apps/{clientDir}/{clientDll}";
 
-                                _dockerExecutor.WaitForPublishConsoleFileDeployment(
-                                    clientContainer, clientContainer, dockerPath, "-1", 30000);
+                                    // Start the application inside the container
+                                    _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                        clientContainer, clientContainer, dockerPath, "-1", 30000);
 
-                                // Wait for application to fully start and output to be flushed
-                                await Task.Delay(StartupDelayMs);
-                                var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-                                var newOutput = output.Length > previousClientOutput.Length ? output.Substring(previousClientOutput.Length) : output;
-                                clientOutputs[stage] = newOutput;
-                                previousClientOutput = output;
-                                Console.WriteLine($"    Client started, output: {newOutput.Length} chars");
+                                    // Create and start console attachment for client
+                                    clientAttachment = _consoleManager.CreateAttachment(clientContainer, $"Client-{clientContainer}");
+                                    clientAttachment.StartAttachment();
+                                    clientAttachment.StartStage(stage);
+
+                                    // Wait for application to start and output to be captured
+                                    await Task.Delay(StartupDelayMs);
+                                    
+                                    // Get output using attachment (preferred) or fall back to docker logs
+                                    string newOutput;
+                                    if (clientAttachment.IsRunning && clientAttachment.OutputLength > 0)
+                                    {
+                                        newOutput = clientAttachment.GetNewOutputSince(clientBaseline);
+                                        clientBaseline = clientAttachment.OutputLength;
+                                    }
+                                    else
+                                    {
+                                        // Fall back to docker logs if attachment isn't working
+                                        var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
+                                        newOutput = output;
+                                    }
+                                    
+                                    clientOutputs[stage] = newOutput;
+                                    Console.WriteLine($"    Client started, output: {newOutput.Length} chars (attach: {clientAttachment?.IsRunning ?? false})");
+                                }
                             }
-                        }
-                        break;
+                            break;
 
-                    case "INPUT":
-                        if (!string.IsNullOrEmpty(input))
-                        {
-                            _dockerExecutor.SendInputToContainer(clientContainer, clientContainer, input);
-                            
-                            // Wait longer for the input to be processed and response to be received
-                            // The client needs time to:
-                            // 1. Send the request to server
-                            // 2. Server processes and responds
-                            // 3. Client receives response and prints it
-                            // 4. Client prints next prompt
-                            // Also wait for output buffers to be flushed to Docker logs
-                            await Task.Delay(InputProcessingDelayMs);
+                        case "INPUT":
+                            if (!string.IsNullOrEmpty(input))
+                            {
+                                // Mark new stage for output capture
+                                clientAttachment?.StartStage(stage);
+                                serverAttachment?.StartStage(stage);
+                                
+                                // Send input to client container
+                                _dockerExecutor.SendInputToContainer(clientContainer, clientContainer, input);
+                                
+                                // Wait for the input to be processed and response to be captured
+                                // This delay allows:
+                                // 1. Client to send request to server
+                                // 2. Server to process and respond
+                                // 3. Client to receive and display response
+                                // 4. Console output to be captured by attachments
+                                await Task.Delay(InputProcessingDelayMs);
 
-                            var clientOutput = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-                            var serverOutput = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
+                                // Capture client output
+                                string newClientOutput;
+                                if (clientAttachment != null && clientAttachment.IsRunning)
+                                {
+                                    newClientOutput = clientAttachment.GetNewOutputSince(clientBaseline);
+                                    clientBaseline = clientAttachment.OutputLength;
+                                }
+                                else
+                                {
+                                    var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
+                                    newClientOutput = output;
+                                }
 
-                            var newClientOutput = clientOutput.Length > previousClientOutput.Length ? clientOutput.Substring(previousClientOutput.Length) : "";
-                            var newServerOutput = serverOutput.Length > previousServerOutput.Length ? serverOutput.Substring(previousServerOutput.Length) : "";
+                                // Capture server output
+                                string newServerOutput;
+                                if (serverAttachment != null && serverAttachment.IsRunning)
+                                {
+                                    newServerOutput = serverAttachment.GetNewOutputSince(serverBaseline);
+                                    serverBaseline = serverAttachment.OutputLength;
+                                }
+                                else
+                                {
+                                    var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
+                                    newServerOutput = output;
+                                }
 
-                            clientOutputs[stage] = newClientOutput;
-                            serverOutputs[stage] = newServerOutput;
-                            previousClientOutput = clientOutput;
-                            previousServerOutput = serverOutput;
+                                clientOutputs[stage] = newClientOutput;
+                                serverOutputs[stage] = newServerOutput;
 
-                            Console.WriteLine($"    Input sent, client: {newClientOutput.Length} chars, server: {newServerOutput.Length} chars");
-                        }
-                        break;
+                                Console.WriteLine($"    Input sent, client: {newClientOutput.Length} chars, server: {newServerOutput.Length} chars");
+                            }
+                            break;
 
-                    case "CLOSECLIENT":
-                        try { _dockerExecutor.StopContainer(clientContainer); } catch { }
-                        previousClientOutput = "";
-                        break;
+                        case "CLOSECLIENT":
+                            // Stop client attachment before stopping container
+                            if (clientAttachment != null)
+                            {
+                                clientAttachment.StopAttachment();
+                                _consoleManager.RemoveAttachment(clientContainer);
+                                clientAttachment = null;
+                            }
+                            try { _dockerExecutor.StopContainer(clientContainer); } catch { }
+                            clientBaseline = 0;
+                            break;
 
-                    case "CLOSESERVER":
-                        try { _dockerExecutor.StopContainer(serverContainer); } catch { }
-                        previousServerOutput = "";
-                        break;
+                        case "CLOSESERVER":
+                            // Stop server attachment before stopping container
+                            if (serverAttachment != null)
+                            {
+                                serverAttachment.StopAttachment();
+                                _consoleManager.RemoveAttachment(serverContainer);
+                                serverAttachment = null;
+                            }
+                            try { _dockerExecutor.StopContainer(serverContainer); } catch { }
+                            serverBaseline = 0;
+                            break;
+                    }
+
+                    await Task.Delay(200);
                 }
-
-                await Task.Delay(200);
+            }
+            finally
+            {
+                // Clean up attachments
+                if (clientAttachment != null)
+                {
+                    _consoleManager.RemoveAttachment(clientContainer);
+                }
+                if (serverAttachment != null)
+                {
+                    _consoleManager.RemoveAttachment(serverContainer);
+                }
             }
 
             return (clientOutputs, serverOutputs);
@@ -991,11 +1093,15 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
-        /// Cleanup between test cases.
+        /// Cleanup between test cases - stops applications and console attachments.
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
             Console.WriteLine("[Cleanup] Stopping applications between test cases...");
+
+            // Remove any console attachments first
+            _consoleManager.RemoveAttachment(serverContainer);
+            _consoleManager.RemoveAttachment(clientContainer);
 
             // Kill dotnet processes in containers using ExecDockerCommand
             try
@@ -1030,11 +1136,14 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
-        /// Cleanup containers after grading.
+        /// Cleanup containers after grading - removes containers and all attachments.
         /// </summary>
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
         {
             Console.WriteLine("[Cleanup] Removing containers...");
+
+            // Remove all console attachments
+            _consoleManager.RemoveAllAttachments();
 
             try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
             try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
