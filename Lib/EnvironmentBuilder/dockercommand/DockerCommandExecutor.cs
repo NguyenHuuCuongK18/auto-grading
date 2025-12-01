@@ -715,15 +715,36 @@ namespace EnvironmentBuilder.DockerCommand
             return !string.IsNullOrWhiteSpace(output);
         }
 
+        /// <summary>
+        /// Runs a shell command and returns the output.
+        /// Cross-platform: uses cmd.exe on Windows, /bin/bash on Linux/macOS.
+        /// </summary>
         private string RunCommand(string cmd)
         {
-            var psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+            ProcessStartInfo psi;
+            
+            if (OperatingSystem.IsWindows())
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
+            else
+            {
+                // On Linux/macOS, use bash or sh
+                var shell = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+                psi = new ProcessStartInfo(shell, $"-c \"{cmd.Replace("\"", "\\\"")}\"")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
 
             using Process proc = Process.Start(psi);
             string output = proc.StandardOutput.ReadToEnd();
