@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Models;
 
-namespace SolutionGrader.UI.Services
+namespace SolutionGrader.Core.Services.UI
 {
     /// <summary>
     /// Service for discovering student submissions in the Submit folder.

@@ -2,9 +2,9 @@ using System;
 using System.IO;
 using System.Linq;
 using ClosedXML.Excel;
-using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Models;
 
-namespace SolutionGrader.UI.Services
+namespace SolutionGrader.Core.Services.UI
 {
     /// <summary>
     /// Service for loading test kit configuration from Excel files.
