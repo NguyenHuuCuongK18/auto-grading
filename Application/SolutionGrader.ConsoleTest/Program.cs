@@ -400,6 +400,8 @@ namespace SolutionGrader.ConsoleTest
 
         /// <summary>
         /// Executes a single test case.
+        /// Reads steps from Detail.xlsx User sheet, expected outputs from Client/Server sheets.
+        /// Uses docker attach to capture actual outputs and compares with expected.
         /// </summary>
         private static async Task<double> ExecuteTestCaseAsync(
             string tcName,
@@ -411,37 +413,154 @@ namespace SolutionGrader.ConsoleTest
             try
             {
                 var steps = ReadDetailSteps(detailPath);
+                var expectedClient = ReadExpectedOutput(detailPath, "Client");
+                var expectedServer = ReadExpectedOutput(detailPath, "Server");
+                
                 Console.WriteLine($"  Steps: {steps.Count}");
 
                 string clientContainer = env.Configs.GetValueOrDefault(EnvConfig.GivenConsoleContainerName, "ag-client");
+                string serverContainer = env.Configs.GetValueOrDefault(EnvConfig.CodeContainerName, "ag-server");
                 string clientAppName = config.ClientProjectName;
+                string serverAppName = config.ServerProjectName;
 
                 var executor = new DockerCommandExecutor();
+                bool allPassed = true;
+                var stageOutputs = new Dictionary<int, (string? Client, string? Server)>();
 
+                // Execute each step
                 foreach (var step in steps)
                 {
                     switch (step.Action?.ToUpperInvariant())
                     {
+                        case "STARTCLIENT":
+                            Console.WriteLine($"  [StartClient] Stage {step.Stage}");
+                            await Task.Delay(1000);
+                            break;
+                            
+                        case "STARTSERVER":
+                            Console.WriteLine($"  [StartServer] Stage {step.Stage}");
+                            await Task.Delay(1000);
+                            break;
+                            
                         case "INPUT":
                             if (!string.IsNullOrEmpty(step.Input))
                             {
                                 Console.WriteLine($"  [INPUT] {step.Input}");
                                 executor.SendInputToContainer(clientContainer, clientAppName, step.Input);
-                                await Task.Delay(2000);
+                                await Task.Delay(2000); // Wait for processing
                             }
+                            break;
+                            
+                        case "WAIT":
+                            var waitMs = int.TryParse(step.Input, out var ms) ? ms : 1000;
+                            Console.WriteLine($"  [WAIT] {waitMs}ms");
+                            await Task.Delay(waitMs);
                             break;
                     }
                 }
 
-                // TODO: Implement actual comparison logic
-                // For now, placeholder
-                return 0;
+                // Capture and compare outputs
+                await Task.Delay(2000); // Wait for all output to be produced
+
+                // Get actual container outputs
+                string actualClientOutput = GetContainerOutput(executor, clientContainer);
+                string actualServerOutput = GetContainerOutput(executor, serverContainer);
+
+                // Compare outputs - check if expected patterns exist in actual output
+                foreach (var (stage, expectedOut) in expectedClient)
+                {
+                    if (string.IsNullOrEmpty(expectedOut)) continue;
+                    
+                    bool match = CompareOutput(expectedOut, actualClientOutput);
+                    if (!match)
+                    {
+                        Console.WriteLine($"  [FAIL] Client output stage {stage} mismatch");
+                        allPassed = false;
+                    }
+                }
+
+                foreach (var (stage, expectedOut) in expectedServer)
+                {
+                    if (string.IsNullOrEmpty(expectedOut)) continue;
+                    
+                    bool match = CompareOutput(expectedOut, actualServerOutput);
+                    if (!match)
+                    {
+                        Console.WriteLine($"  [FAIL] Server output stage {stage} mismatch");
+                        allPassed = false;
+                    }
+                }
+
+                // Return full mark if passed, 0 otherwise
+                var maxMark = GetTestCaseMark(Path.GetDirectoryName(Path.GetDirectoryName(detailPath)) ?? "", tcName);
+                return allPassed ? maxMark : 0;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"  Error: {ex.Message}");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// Reads expected output from a Detail.xlsx sheet (Client or Server).
+        /// Returns dictionary of stage -> expected console output.
+        /// </summary>
+        private static Dictionary<int, string> ReadExpectedOutput(string detailPath, string sheetName)
+        {
+            var outputs = new Dictionary<int, string>();
+            try
+            {
+                using var wb = new XLWorkbook(detailPath);
+                var ws = wb.Worksheet(sheetName);
+                if (ws == null) return outputs;
+
+                var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+                for (int row = 2; row <= lastRow; row++)
+                {
+                    var stageStr = ws.Cell(row, 1).GetString()?.Trim();
+                    var console = ws.Cell(row, 2).GetString()?.Trim();
+                    
+                    if (!string.IsNullOrEmpty(stageStr) && int.TryParse(stageStr, out var stage))
+                    {
+                        outputs[stage] = console ?? "";
+                    }
+                }
+            }
+            catch { }
+            return outputs;
+        }
+
+        /// <summary>
+        /// Gets the current output from a container.
+        /// </summary>
+        private static string GetContainerOutput(DockerCommandExecutor executor, string containerName)
+        {
+            try
+            {
+                return executor.GetContainerLogs(containerName) ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// Compares expected output with actual output.
+        /// Returns true if the expected pattern is found in actual output.
+        /// </summary>
+        private static bool CompareOutput(string expected, string actual)
+        {
+            if (string.IsNullOrWhiteSpace(expected)) return true;
+            if (string.IsNullOrWhiteSpace(actual)) return false;
+
+            // Normalize line endings and whitespace
+            var normalizedExpected = expected.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+            var normalizedActual = actual.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+
+            // Check if expected pattern exists in actual output
+            return normalizedActual.Contains(normalizedExpected);
         }
 
         private static List<(int Stage, string? Action, string? Input)> ReadDetailSteps(string detailPath)
