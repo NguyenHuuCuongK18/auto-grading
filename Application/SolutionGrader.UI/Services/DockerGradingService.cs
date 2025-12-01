@@ -198,7 +198,15 @@ namespace SolutionGrader.UI.Services
         {
             try
             {
-                var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "ag-client");
+                var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.GivenConsoleContainerName, "");
+                
+                // Use default if empty or null
+                if (string.IsNullOrWhiteSpace(containerName))
+                {
+                    containerName = "ag-client";
+                }
+                
+                _logger.LogDebug($"Getting client output from container: '{containerName}'");
                 
                 // Use docker logs to get output
                 return await _dockerExecutor.GetContainerLogsAsync(containerName, ct);
@@ -217,7 +225,15 @@ namespace SolutionGrader.UI.Services
         {
             try
             {
-                var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "ag-server");
+                var containerName = environment.Configs.GetValueOrDefault(EnvironmentConfiguration.CodeContainerName, "");
+                
+                // Use default if empty or null
+                if (string.IsNullOrWhiteSpace(containerName))
+                {
+                    containerName = "ag-server";
+                }
+                
+                _logger.LogDebug($"Getting server output from container: '{containerName}'");
                 
                 return await _dockerExecutor.GetContainerLogsAsync(containerName, ct);
             }
@@ -504,6 +520,13 @@ namespace SolutionGrader.UI.Services
             string containerName, 
             CancellationToken ct = default)
         {
+            // Validate container name to prevent "docker logs requires 1 argument" error
+            if (string.IsNullOrWhiteSpace(containerName))
+            {
+                Console.WriteLine("[ERROR] GetContainerLogsAsync: containerName is null or empty!");
+                return string.Empty;
+            }
+            
             try
             {
                 // Use docker logs without --tail to get all output
@@ -518,6 +541,8 @@ namespace SolutionGrader.UI.Services
                     CreateNoWindow = true
                 };
 
+                Console.WriteLine($"[Debug] Running: docker logs {containerName}");
+                
                 using var process = System.Diagnostics.Process.Start(psi);
                 if (process != null)
                 {
@@ -530,13 +555,21 @@ namespace SolutionGrader.UI.Services
                     var output = await outputTask;
                     var error = await errorTask;
                     
-                    // Combine output and error (error may contain partial lines)
+                    // Check for docker command errors (not container app errors)
+                    if (error.Contains("docker:") || error.Contains("Error response from daemon"))
+                    {
+                        Console.WriteLine($"[ERROR] Docker logs command failed: {error}");
+                        return string.Empty;
+                    }
+                    
+                    // Combine output and error (error may contain partial lines from the app)
                     return string.IsNullOrEmpty(error) ? output : output + error;
                 }
                 return string.Empty;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"[ERROR] GetContainerLogsAsync exception: {ex.Message}");
                 return string.Empty;
             }
         }
