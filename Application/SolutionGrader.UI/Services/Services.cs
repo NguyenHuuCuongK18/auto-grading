@@ -19,6 +19,7 @@ namespace SolutionGrader.UI.Services
         void LogInfo(string message);
         void LogWarning(string message);
         void LogError(string message);
+        void LogError(string message, Exception ex);
     }
 
     /// <summary>
@@ -143,6 +144,14 @@ namespace SolutionGrader.UI.Services
             var allStudents = DiscoverStudents(submitFolder);
             return allStudents.Where(s => s.PaperNo == paperNo).ToList();
         }
+
+        /// <summary>
+        /// Discovers students using the configuration (for compatibility with UI code).
+        /// </summary>
+        public List<StudentSolution> DiscoverStudents(string submitFolder, GradingConfiguration config)
+        {
+            return DiscoverStudents(submitFolder);
+        }
     }
 
     /// <summary>
@@ -205,7 +214,7 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Gets the test kit path for a given paper number.
+        /// Gets the test kit path for a given paper number using dictionary mapping.
         /// </summary>
         public string? GetTestKitForPaper(string paperNo, Dictionary<string, string> mapping)
         {
@@ -213,6 +222,34 @@ namespace SolutionGrader.UI.Services
             {
                 return testKitName;
             }
+            return null;
+        }
+
+        /// <summary>
+        /// Gets the test kit path for a given paper by searching the test kit folder.
+        /// Returns the full path to the matching Q{n} folder.
+        /// </summary>
+        public string? GetTestKitForPaper(string testKitFolder, string paperNo)
+        {
+            if (!Directory.Exists(testKitFolder))
+            {
+                return null;
+            }
+
+            // Try Q{paperNo} convention (Q1, Q2, etc.)
+            var testKitPath = Path.Combine(testKitFolder, $"Q{paperNo}");
+            if (Directory.Exists(testKitPath))
+            {
+                return testKitPath;
+            }
+
+            // Try Paper{paperNo} convention
+            testKitPath = Path.Combine(testKitFolder, $"Paper{paperNo}");
+            if (Directory.Exists(testKitPath))
+            {
+                return testKitPath;
+            }
+
             return null;
         }
     }
@@ -306,7 +343,7 @@ namespace SolutionGrader.UI.Services
 
         public event EventHandler<StudentSolution>? StudentGradingStarted;
         public event EventHandler<StudentSolution>? StudentGradingCompleted;
-        public event EventHandler<(StudentSolution Student, string Message)>? StudentProgressUpdated;
+        public event EventHandler<StudentSolution>? StudentProgressUpdated;
         public event EventHandler<GradingSessionState>? SessionStateChanged;
 
         public GradingOrchestrationService(ILoggingService logger)
@@ -355,7 +392,7 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Grades a single student using the GradingService.
+        /// Grades a single student using the GradingService from Lib.
         /// </summary>
         public async Task<bool> GradeStudentAsync(
             StudentSolution student,
@@ -378,13 +415,11 @@ namespace SolutionGrader.UI.Services
                 // Create progress reporter
                 var progress = new Progress<string>(msg =>
                 {
-                    StudentProgressUpdated?.Invoke(this, (student, msg));
+                    _logger.LogInfo(msg);
+                    StudentProgressUpdated?.Invoke(this, student);
                 });
 
-                // Get testkit path from configuration
-                var testKitPath = Path.Combine(config.TestKitFolderPath, config.PaperToTestKitMapping.GetValueOrDefault(student.PaperNo, "Q1"));
-
-                // Create grading configuration for the service
+                // Create grading configuration for the Lib service
                 var gradingConfig = new GradingServices.GradingConfiguration
                 {
                     SubmitFolderPath = config.SubmitFolderPath,
@@ -394,30 +429,28 @@ namespace SolutionGrader.UI.Services
                     HasServer = config.HasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
-                    ServerPort = 5000,
+                    ServerPort = config.ServerPort,
                     PaperToTestKitMapping = config.PaperToTestKitMapping
                 };
 
-                // Call the GradingService
+                // Call the Lib GradingService (5 args: studentCode, paperNo, config, progress, ct)
                 var result = await _gradingService!.GradeStudentAsync(
                     student.StudentCode,
                     student.PaperNo,
-                    testKitPath,
-                    student.SolutionPath,
                     gradingConfig,
                     progress,
                     ct
                 );
 
-                // Update student result
-                student.Status = result.Passed ? GradingStatus.Success : GradingStatus.Failed;
+                // Update student result from Lib result
+                student.Status = result.Success ? GradingStatus.Success : GradingStatus.Failed;
                 student.Score = result.TotalPointsAwarded;
                 student.MaxScore = result.TotalPointsPossible;
                 student.EndTime = DateTime.Now;
-                student.Message = result.ErrorMessage ?? (result.Passed ? "All tests passed" : "Some tests failed");
+                student.Message = result.ErrorMessage ?? (result.Success ? "All tests passed" : "Some tests failed");
 
                 StudentGradingCompleted?.Invoke(this, student);
-                return result.Passed;
+                return result.Success;
             }
             catch (OperationCanceledException)
             {
@@ -450,20 +483,20 @@ namespace SolutionGrader.UI.Services
                 Initialize(config);
             }
 
-            SessionStateChanged?.Invoke(this, GradingSessionState.Running);
+            SessionStateChanged?.Invoke(this, new GradingSessionState { IsRunning = true });
 
             foreach (var student in students)
             {
                 if (ct.IsCancellationRequested)
                 {
-                    SessionStateChanged?.Invoke(this, GradingSessionState.Cancelled);
+                    SessionStateChanged?.Invoke(this, new GradingSessionState { IsRunning = false });
                     return;
                 }
 
                 await GradeStudentAsync(student, config, ct);
             }
 
-            SessionStateChanged?.Invoke(this, GradingSessionState.Completed);
+            SessionStateChanged?.Invoke(this, new GradingSessionState { IsRunning = false });
         }
 
         /// <summary>
@@ -474,8 +507,10 @@ namespace SolutionGrader.UI.Services
             GradingConfiguration config,
             GradingSessionState sessionState)
         {
+            sessionState.IsRunning = true;
             using var cts = new CancellationTokenSource();
             await GradeStudentsAsync(students, config, cts.Token);
+            sessionState.IsRunning = false;
         }
 
         /// <summary>
@@ -484,7 +519,15 @@ namespace SolutionGrader.UI.Services
         public void PauseGrading()
         {
             _logger.LogInfo("Grading paused");
-            SessionStateChanged?.Invoke(this, GradingSessionState.Paused);
+        }
+
+        /// <summary>
+        /// Pauses the current grading session with state update.
+        /// </summary>
+        public void PauseGrading(GradingSessionState sessionState)
+        {
+            sessionState.IsPaused = true;
+            _logger.LogInfo("Grading paused");
         }
 
         /// <summary>
@@ -493,7 +536,15 @@ namespace SolutionGrader.UI.Services
         public void ResumeGrading()
         {
             _logger.LogInfo("Grading resumed");
-            SessionStateChanged?.Invoke(this, GradingSessionState.Running);
+        }
+
+        /// <summary>
+        /// Resumes the current grading session with state update.
+        /// </summary>
+        public void ResumeGrading(GradingSessionState sessionState)
+        {
+            sessionState.IsPaused = false;
+            _logger.LogInfo("Grading resumed");
         }
 
         /// <summary>
@@ -510,6 +561,15 @@ namespace SolutionGrader.UI.Services
                 student.ProgressPercent = 0;
             }
             _logger.LogInfo("All student statuses reset");
+        }
+
+        /// <summary>
+        /// Resets all student statuses with session state update.
+        /// </summary>
+        public void ResetAllStatuses(IEnumerable<StudentSolution> students, GradingSessionState sessionState)
+        {
+            ResetAllStatuses(students);
+            sessionState.Reset();
         }
 
         /// <summary>
@@ -554,6 +614,53 @@ namespace SolutionGrader.UI.Services
             try
             {
                 var filePath = Path.Combine(_outputFolder, paperNo, "StudentsSolution.xlsx");
+                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
+                using var wb = new XLWorkbook();
+                var ws = wb.AddWorksheet("Sheet1");
+
+                // Header
+                ws.Cell(1, 1).Value = "No";
+                ws.Cell(1, 2).Value = "StudentCode";
+                ws.Cell(1, 3).Value = "ExamPaper";
+                ws.Cell(1, 4).Value = "Status";
+                ws.Cell(1, 5).Value = "FinalResult";
+                ws.Cell(1, 6).Value = "StartDate";
+                ws.Cell(1, 7).Value = "EndDate";
+                ws.Row(1).Style.Font.Bold = true;
+
+                int row = 2;
+                foreach (var student in students)
+                {
+                    ws.Cell(row, 1).Value = row - 1;
+                    ws.Cell(row, 2).Value = student.StudentCode;
+                    ws.Cell(row, 3).Value = student.PaperNo;
+                    ws.Cell(row, 4).Value = student.Status.ToString();
+                    ws.Cell(row, 5).Value = student.Score;
+                    ws.Cell(row, 6).Value = student.StartTime?.ToString("dd-MM-yyyy HH:mm:ss") ?? "";
+                    ws.Cell(row, 7).Value = student.EndTime?.ToString("dd-MM-yyyy HH:mm:ss") ?? "";
+                    row++;
+                }
+
+                ws.Columns().AdjustToContents();
+                wb.SaveAs(filePath);
+
+                _logger.LogInfo($"Written StudentsSolution.xlsx to {filePath}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to write StudentsSolution.xlsx: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Writes summary for all students (single output file for all papers).
+        /// </summary>
+        public void WriteStudentsSolutionSummary(IEnumerable<StudentSolution> students)
+        {
+            try
+            {
+                var filePath = Path.Combine(_outputFolder, "StudentsSolution.xlsx");
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
                 using var wb = new XLWorkbook();

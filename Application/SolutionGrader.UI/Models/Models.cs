@@ -227,7 +227,82 @@ namespace SolutionGrader.UI.Models
     /// <summary>
     /// State of the grading session.
     /// </summary>
-    public enum GradingSessionState
+    public class GradingSessionState : INotifyPropertyChanged
+    {
+        private bool _isRunning;
+        private bool _isPaused;
+        private int _totalStudents;
+        private int _completedCount;
+        private int _notRunCount;
+        private int _passedCount;
+        private int _failedCount;
+
+        public bool IsRunning
+        {
+            get => _isRunning;
+            set { _isRunning = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanPause)); }
+        }
+
+        public bool IsPaused
+        {
+            get => _isPaused;
+            set { _isPaused = value; OnPropertyChanged(); }
+        }
+
+        public bool CanPause => IsRunning && !IsPaused;
+
+        public int TotalStudents
+        {
+            get => _totalStudents;
+            set { _totalStudents = value; OnPropertyChanged(); }
+        }
+
+        public int CompletedCount
+        {
+            get => _completedCount;
+            set { _completedCount = value; OnPropertyChanged(); }
+        }
+
+        public int NotRunCount
+        {
+            get => _notRunCount;
+            set { _notRunCount = value; OnPropertyChanged(); }
+        }
+
+        public int PassedCount
+        {
+            get => _passedCount;
+            set { _passedCount = value; OnPropertyChanged(); }
+        }
+
+        public int FailedCount
+        {
+            get => _failedCount;
+            set { _failedCount = value; OnPropertyChanged(); }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+
+        public void Reset()
+        {
+            IsRunning = false;
+            IsPaused = false;
+            CompletedCount = 0;
+            PassedCount = 0;
+            FailedCount = 0;
+            NotRunCount = TotalStudents;
+        }
+    }
+
+    /// <summary>
+    /// Session state enum for compatibility.
+    /// </summary>
+    public enum SessionStateEnum
     {
         Idle,
         Running,
