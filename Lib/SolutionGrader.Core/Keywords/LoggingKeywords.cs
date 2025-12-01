@@ -16,6 +16,7 @@ public static class LoggingKeywords
     public const string LOG_PREFIX_TCP_PROXY_ERR = "[TCP Proxy ERR]";
     public const string LOG_PREFIX_CLIENT_INPUT = "[ClientInput]";
     public const string LOG_PREFIX_DATABASE_CONFIG = "[DatabaseConfig]";
+    public const string LOG_PREFIX_NETWORK_MONITOR = "[NetworkMonitor]";
 
     // Suite messages
     public const string MSG_SUITE_LOADING = "Loading test suite from: {0}";

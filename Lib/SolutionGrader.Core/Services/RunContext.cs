@@ -56,6 +56,12 @@ namespace SolutionGrader.Core.Services
         public void SetServerResponse(string questionCode, string stage, string content)
             => SetCapture(FileKeywords.Folder_ServersResponse, questionCode, stage, content);
 
+        public void AppendServerRequestCapture(string questionCode, string stage, string content)
+            => AppendCapture(FileKeywords.Folder_ServersRequest, questionCode, stage, content);
+
+        public void AppendServerResponseCapture(string questionCode, string stage, string content)
+            => AppendCapture(FileKeywords.Folder_ServersResponse, questionCode, stage, content);
+
         public bool TryGetCapturedOutput(string captureKey, out string? content)
         {
             if (_captures.TryGetValue(captureKey, out var builder))

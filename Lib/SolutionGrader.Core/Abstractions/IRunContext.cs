@@ -21,6 +21,10 @@
         void SetServerRequest(string questionCode, string stage, string content);
         void SetServerResponse(string questionCode, string stage, string content);
         
+        // Append methods for network capture
+        void AppendServerRequestCapture(string questionCode, string stage, string content);
+        void AppendServerResponseCapture(string questionCode, string stage, string content);
+        
         // HTTP metadata capture
         void SetHttpMetadata(string questionCode, string stage, string httpMethod, int statusCode, int byteSize);
         bool TryGetHttpMetadata(string questionCode, string stage, out string? httpMethod, out int? statusCode, out int? byteSize);

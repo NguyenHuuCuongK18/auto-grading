@@ -73,21 +73,22 @@ public class Program
         // Use default grading configuration (DateTime/Time excluded from grading, GraderPort = 8888)
         var gradingConfig = GradingConfig.Default;
 
-        // AppsettingsCreationService now uses GraderPort from GradingConfig
-        var appsettings = new AppsettingsCreationService(gradingConfig);
+        // AppsettingsCreationService uses ports from environment config
+        var appsettings = new AppsettingsCreationService();
 
         IRunContext runctx = new RunContext();
 
         IExecutableManager proc = new ExecutableManager(runctx);
         
-        // NEW: Use NetworkMonitorService instead of MiddlewareProxyService
-        // The network monitor passively sniffs packets instead of proxying traffic
-        INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
+        // Use NetworkMonitorService which implements both INetworkMonitorService and IMiddlewareService
+        // The network monitor can passively sniff packets when libpcap is available
+        var networkMonitor = new NetworkMonitorService(runctx);
         
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
 
-        IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
+        // Executor needs IMiddlewareService - NetworkMonitorService implements it
+        IExecutor exec = new Executor(proc, networkMonitor, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
 
         var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
