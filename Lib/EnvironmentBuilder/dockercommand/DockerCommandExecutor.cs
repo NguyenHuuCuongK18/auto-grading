@@ -327,13 +327,20 @@ namespace EnvironmentBuilder.DockerCommand
                     portMapping = $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} ";
                 }
 
+                // CRITICAL: Override the image's ENTRYPOINT with "tail -f /dev/null"
+                // The base image (fptuxaes/aes-dotnet8) has an entrypoint.sh that starts NGINX and other services
+                // which would bind to ports and cause "Address already in use" errors.
+                // By overriding with "tail -f /dev/null", the container just stays running without starting services.
+                // The actual application is started later via docker exec when StartServer/StartClient is called.
                 string command = $@"docker run -d " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
                                  $"{portMapping}" +
-                                 $"{dockerBase.ImageName}";
+                                 "--entrypoint tail " +
+                                 $"{dockerBase.ImageName} " +
+                                 "-f /dev/null";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
             }
             catch (Exception ex)
