@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
@@ -367,6 +368,257 @@ namespace SolutionGrader.UI.Services
         {
             var discoveryService = new StudentDiscoveryService(_logger);
             return discoveryService.DiscoverStudents(config.SubmitFolderPath, config);
+        }
+
+        #region Validation Methods
+
+        /// <summary>
+        /// Validates the grading configuration before allowing user to proceed.
+        /// Returns a list of validation errors; empty list means valid.
+        /// 
+        /// Validation rules:
+        /// - If no test case detected → cannot run test
+        /// - If no point allocation → cannot run test
+        /// - If no testkit for a paper → cannot run test for that paper
+        /// - If testkit has no mapping → user cannot proceed to next screen
+        /// </summary>
+        public List<string> ValidateConfiguration(GradingConfiguration config)
+        {
+            var errors = new List<string>();
+
+            // Validate paths exist
+            if (string.IsNullOrEmpty(config.SubmitFolderPath) || !Directory.Exists(config.SubmitFolderPath))
+            {
+                errors.Add("Submit folder path is invalid or does not exist.");
+            }
+
+            if (string.IsNullOrEmpty(config.TestKitFolderPath) || !Directory.Exists(config.TestKitFolderPath))
+            {
+                errors.Add("TestKit folder path is invalid or does not exist.");
+            }
+
+            if (string.IsNullOrEmpty(config.SaveResultFolderPath))
+            {
+                errors.Add("Save result folder path is required.");
+            }
+
+            // Validate project names are provided when needed
+            if (config.HasClient && string.IsNullOrEmpty(config.ClientProjectName))
+            {
+                errors.Add("Client is enabled but client project name is not provided.");
+            }
+
+            if (config.HasServer && string.IsNullOrEmpty(config.ServerProjectName))
+            {
+                errors.Add("Server is enabled but server project name is not provided.");
+            }
+
+            if (!config.HasClient && !config.HasServer)
+            {
+                errors.Add("At least one of Client or Server must be enabled.");
+            }
+
+            return errors;
+        }
+
+        /// <summary>
+        /// Validates the test kit mapping for available papers.
+        /// If testkit has no mapping, user cannot proceed to next screen.
+        /// Returns papers without mapping.
+        /// </summary>
+        public List<string> ValidateTestKitMapping(string testKitFolderPath, IEnumerable<string> paperNumbers)
+        {
+            var papersWithoutMapping = new List<string>();
+
+            foreach (var paperNo in paperNumbers)
+            {
+                var testKitPath = _testKitService.GetTestKitForPaper(testKitFolderPath, paperNo);
+                if (string.IsNullOrEmpty(testKitPath))
+                {
+                    papersWithoutMapping.Add(paperNo);
+                }
+            }
+
+            return papersWithoutMapping;
+        }
+
+        /// <summary>
+        /// Validates a specific test kit has test cases and point allocation.
+        /// If no test case detected → cannot run test.
+        /// If no point allocation → cannot run test.
+        /// </summary>
+        public (bool IsValid, string ErrorMessage) ValidateTestKit(string testKitPath)
+        {
+            if (string.IsNullOrEmpty(testKitPath) || !Directory.Exists(testKitPath))
+            {
+                return (false, "Test kit path is invalid or does not exist.");
+            }
+
+            var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
+            
+            if (testKitConfig == null)
+            {
+                return (false, "Failed to load test kit configuration.");
+            }
+
+            // Check for test cases
+            if (testKitConfig.TestCases == null || testKitConfig.TestCases.Count == 0)
+            {
+                return (false, "No test cases detected in test kit. Cannot run grading.");
+            }
+
+            // Check for point allocation
+            if (testKitConfig.TotalMaxMark <= 0)
+            {
+                return (false, "No point allocation found in test kit. Cannot run grading.");
+            }
+
+            // Verify each test case has a valid mark
+            foreach (var tc in testKitConfig.TestCases)
+            {
+                if (tc.MaxMark <= 0)
+                {
+                    return (false, $"Test case '{tc.Name}' has no point allocation. Cannot run grading.");
+                }
+            }
+
+            return (true, string.Empty);
+        }
+
+        /// <summary>
+        /// Validates all configuration and test kits for the given students.
+        /// Returns a comprehensive validation result.
+        /// </summary>
+        public GradingValidationResult ValidateGradingSetup(
+            GradingConfiguration config,
+            List<StudentSolution> students)
+        {
+            var result = new GradingValidationResult();
+
+            // Step 1: Validate basic configuration
+            var configErrors = ValidateConfiguration(config);
+            result.ConfigurationErrors.AddRange(configErrors);
+
+            if (configErrors.Count > 0)
+            {
+                result.CanProceed = false;
+                return result;
+            }
+
+            // Step 2: Get unique papers from students
+            var papers = new HashSet<string>(students.Select(s => s.PaperNo));
+
+            // Step 3: Validate mapping for each paper
+            var papersWithoutMapping = ValidateTestKitMapping(config.TestKitFolderPath, papers);
+            result.PapersWithoutMapping.AddRange(papersWithoutMapping);
+
+            if (papersWithoutMapping.Count == papers.Count)
+            {
+                // No papers have mapping - cannot proceed
+                result.CanProceed = false;
+                result.ConfigurationErrors.Add("No papers have valid test kit mapping. Cannot proceed.");
+                return result;
+            }
+
+            // Step 4: Validate each mapped test kit
+            foreach (var paperNo in papers.Except(papersWithoutMapping))
+            {
+                var testKitPath = _testKitService.GetTestKitForPaper(config.TestKitFolderPath, paperNo);
+                if (!string.IsNullOrEmpty(testKitPath))
+                {
+                    var (isValid, errorMessage) = ValidateTestKit(testKitPath);
+                    if (!isValid)
+                    {
+                        result.TestKitErrors[paperNo] = errorMessage;
+                    }
+                }
+            }
+
+            // Step 5: Determine which students can be graded
+            foreach (var student in students)
+            {
+                if (papersWithoutMapping.Contains(student.PaperNo))
+                {
+                    result.StudentsWithoutTestKit.Add(student.StudentCode);
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = $"No test kit mapping for paper {student.PaperNo}";
+                }
+                else if (result.TestKitErrors.ContainsKey(student.PaperNo))
+                {
+                    result.StudentsWithoutTestKit.Add(student.StudentCode);
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = result.TestKitErrors[student.PaperNo];
+                }
+            }
+
+            // Can proceed if at least some students can be graded
+            result.CanProceed = students.Count > result.StudentsWithoutTestKit.Count;
+
+            return result;
+        }
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Result of grading setup validation.
+    /// </summary>
+    public class GradingValidationResult
+    {
+        /// <summary>
+        /// Whether user can proceed to grading screen.
+        /// </summary>
+        public bool CanProceed { get; set; } = true;
+
+        /// <summary>
+        /// Configuration-level errors that prevent grading.
+        /// </summary>
+        public List<string> ConfigurationErrors { get; } = new List<string>();
+
+        /// <summary>
+        /// Papers that have no test kit mapping.
+        /// </summary>
+        public List<string> PapersWithoutMapping { get; } = new List<string>();
+
+        /// <summary>
+        /// Test kit errors per paper (no test cases, no point allocation).
+        /// </summary>
+        public Dictionary<string, string> TestKitErrors { get; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Students who cannot be graded due to missing/invalid test kit.
+        /// </summary>
+        public List<string> StudentsWithoutTestKit { get; } = new List<string>();
+
+        /// <summary>
+        /// Gets a human-readable summary of validation issues.
+        /// </summary>
+        public string GetSummary()
+        {
+            var lines = new List<string>();
+
+            if (ConfigurationErrors.Count > 0)
+            {
+                lines.Add("Configuration Errors:");
+                lines.AddRange(ConfigurationErrors.Select(e => $"  - {e}"));
+            }
+
+            if (PapersWithoutMapping.Count > 0)
+            {
+                lines.Add($"Papers without test kit mapping: {string.Join(", ", PapersWithoutMapping)}");
+            }
+
+            foreach (var kvp in TestKitErrors)
+            {
+                lines.Add($"Paper {kvp.Key}: {kvp.Value}");
+            }
+
+            if (StudentsWithoutTestKit.Count > 0)
+            {
+                lines.Add($"Students that cannot be graded: {StudentsWithoutTestKit.Count}");
+            }
+
+            return string.Join(Environment.NewLine, lines);
         }
     }
 }

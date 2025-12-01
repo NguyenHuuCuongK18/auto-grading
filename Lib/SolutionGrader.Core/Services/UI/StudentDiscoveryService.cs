@@ -152,7 +152,8 @@ namespace SolutionGrader.Core.Services.UI
             // Expected DLL name is projectName.dll (e.g., Project12.dll)
             var dllName = $"{projectName}.dll";
 
-            // Search recursively for the DLL file
+            // Search recursively for the DLL file using the exact user-specified name
+            // The examiner provides the correct project name via UI, so no guessing needed
             var dllFiles = Directory.GetFiles(solutionPath, dllName, SearchOption.AllDirectories);
 
             if (dllFiles.Length > 0)
@@ -163,33 +164,14 @@ namespace SolutionGrader.Core.Services.UI
                 return foundPath;
             }
 
-            // Try alternative names commonly used for client/server projects
-            // These are fallback patterns based on the project naming conventions
-            // The primary search uses the user-specified projectName
-            string[] alternativeNames = projectName.Contains("11") 
-                ? new[] { "Q11.dll", "Project11.dll", "Server.dll" }
-                : projectName.Contains("12")
-                    ? new[] { "Q12.dll", "Project12.dll", "Client.dll" }
-                    : new[] { "Q11.dll", "Q12.dll", "Project11.dll", "Project12.dll", "Client.dll", "Server.dll" };
-                    
-            foreach (var altName in alternativeNames)
+            // DLL not found - log appropriately
+            if (!required)
             {
-                if (altName == dllName) continue; // Already tried
-
-                var altFiles = Directory.GetFiles(solutionPath, altName, SearchOption.AllDirectories);
-                if (altFiles.Length > 0)
-                {
-                    var foundPath = Path.GetDirectoryName(altFiles[0]);
-                    _logger.LogDebug($"Found alternative {altName} at: {foundPath}");
-                    return foundPath;
-                }
+                _logger.LogDebug($"Optional DLL {dllName} not found in {solutionPath}");
+                return null;
             }
 
-            // If not required and not found, that's okay
-            if (!required)
-                return null;
-
-            _logger.LogWarning($"Could not find {dllName} in {solutionPath}");
+            _logger.LogWarning($"Required DLL {dllName} not found in {solutionPath}");
             return null;
         }
 
