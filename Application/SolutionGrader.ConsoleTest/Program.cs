@@ -33,7 +33,20 @@ namespace SolutionGrader.ConsoleTest
             {
                 var options = ParseArgs(args);
 
-                // Validate options
+                // Test Docker services (doesn't need submit/testkit folders)
+                if (options.ContainsKey("test-docker"))
+                {
+                    // Check Docker is running
+                    if (!IsDockerRunning())
+                    {
+                        Console.WriteLine("Error: Docker is not running. Please start Docker first.");
+                        return 1;
+                    }
+                    Console.WriteLine("Docker is running ✓");
+                    return await TestDockerServicesAsync() ? 0 : 1;
+                }
+
+                // Validate options for full grading
                 if (!options.TryGetValue("submit", out var submitFolder))
                 {
                     return PrintUsage();
@@ -67,19 +80,13 @@ namespace SolutionGrader.ConsoleTest
                 Console.WriteLine($"Output folder: {outputFolder}");
                 Console.WriteLine();
 
-                // Check Docker is running
+                // Check Docker is running for full grading
                 if (!IsDockerRunning())
                 {
                     Console.WriteLine("Error: Docker is not running. Please start Docker first.");
                     return 1;
                 }
                 Console.WriteLine("Docker is running ✓");
-
-                // Test the grading flow
-                if (options.ContainsKey("test-docker"))
-                {
-                    return await TestDockerServicesAsync() ? 0 : 1;
-                }
 
                 // Run the full grading flow
                 return await RunGradingAsync(submitFolder, testKitFolder, outputFolder);
