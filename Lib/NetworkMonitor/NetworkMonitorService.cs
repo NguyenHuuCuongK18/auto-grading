@@ -118,9 +118,21 @@ namespace NetworkMonitor
         private int _monitoredPort;
         private bool _isCapturing;
         private CancellationTokenSource? _cts;
+        private readonly string? _customInterface;
 
         public bool IsCapturing => _isCapturing;
         public int MonitoredPort => _monitoredPort;
+
+        /// <summary>
+        /// Creates a new NetworkMonitorService.
+        /// </summary>
+        /// <param name="customInterface">Optional custom network interface to use instead of loopback.
+        /// Examples: "br-xxxxx" for Docker bridge, "any" for all interfaces, "eth0" for specific NIC.
+        /// Default is null which uses loopback (lo) for localhost traffic on exposed ports.</param>
+        public NetworkMonitorService(string? customInterface = null)
+        {
+            _customInterface = customInterface;
+        }
 
         /// <summary>
         /// Starts network capture on the specified port.
@@ -149,18 +161,35 @@ namespace NetworkMonitor
                     throw new InvalidOperationException("No capture devices found. Ensure libpcap/Npcap is installed and you have sufficient privileges (sudo).");
                 }
 
-                // Find the loopback device or any suitable device
+                // List all available devices
                 foreach (var dev in devices)
                 {
                     Console.WriteLine($"[NetworkMonitor] Found device: {dev.Name} - {dev.Description}");
                 }
 
-                // Try to find loopback device first (for localhost traffic)
-                _device = devices.FirstOrDefault(d => 
-                    d.Name.Contains("lo", StringComparison.OrdinalIgnoreCase) ||
-                    d.Name.Contains("loopback", StringComparison.OrdinalIgnoreCase) ||
-                    d.Description?.Contains("loopback", StringComparison.OrdinalIgnoreCase) == true ||
-                    d.Name.Contains("Npcap Loopback", StringComparison.OrdinalIgnoreCase)) as ILiveDevice;
+                // If custom interface specified, use it
+                if (!string.IsNullOrEmpty(_customInterface))
+                {
+                    _device = devices.FirstOrDefault(d => 
+                        d.Name.Equals(_customInterface, StringComparison.OrdinalIgnoreCase) ||
+                        d.Name.StartsWith(_customInterface, StringComparison.OrdinalIgnoreCase)) as ILiveDevice;
+                    
+                    if (_device == null)
+                    {
+                        Console.WriteLine($"[NetworkMonitor] Custom interface '{_customInterface}' not found, falling back to default");
+                    }
+                }
+
+                // If no custom interface or not found, try loopback device (for localhost traffic on exposed ports)
+                // The network monitor runs OUTSIDE Docker, capturing traffic on the exposed host port
+                if (_device == null)
+                {
+                    _device = devices.FirstOrDefault(d => 
+                        d.Name.Contains("lo", StringComparison.OrdinalIgnoreCase) ||
+                        d.Name.Contains("loopback", StringComparison.OrdinalIgnoreCase) ||
+                        d.Description?.Contains("loopback", StringComparison.OrdinalIgnoreCase) == true ||
+                        d.Name.Contains("Npcap Loopback", StringComparison.OrdinalIgnoreCase)) as ILiveDevice;
+                }
 
                 // If no loopback, try any device
                 if (_device == null)

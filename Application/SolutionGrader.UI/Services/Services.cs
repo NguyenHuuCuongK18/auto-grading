@@ -24,10 +24,11 @@ namespace SolutionGrader.UI.Services
     /// <summary>
     /// Logging service for grading operations.
     /// </summary>
-    public class LoggingService : ILoggingService
+    public class LoggingService : ILoggingService, IDisposable
     {
         private readonly string _logFolder;
         private string? _currentStudentContext;
+        private string? _currentPaperContext;
 
         public event EventHandler<LogEventArgs>? LogAdded;
 
@@ -62,6 +63,23 @@ namespace SolutionGrader.UI.Services
         public void SetStudentContext(string? studentCode)
         {
             _currentStudentContext = studentCode;
+        }
+
+        /// <summary>
+        /// Sets the current student and paper context for logging.
+        /// </summary>
+        public void SetStudentContext(string? studentCode, string? paperNo)
+        {
+            _currentStudentContext = studentCode;
+            _currentPaperContext = paperNo;
+        }
+
+        /// <summary>
+        /// Disposes the logging service.
+        /// </summary>
+        public void Dispose()
+        {
+            // Nothing to dispose currently
         }
     }
 
@@ -115,6 +133,15 @@ namespace SolutionGrader.UI.Services
 
             _logger.LogInfo($"Discovered {students.Count} student submissions");
             return students;
+        }
+
+        /// <summary>
+        /// Discovers students from the submit folder for a specific paper.
+        /// </summary>
+        public List<StudentSolution> DiscoverStudents(string submitFolder, string paperNo)
+        {
+            var allStudents = DiscoverStudents(submitFolder);
+            return allStudents.Where(s => s.PaperNo == paperNo).ToList();
         }
     }
 
@@ -176,6 +203,35 @@ namespace SolutionGrader.UI.Services
             _logger.LogInfo($"Discovered {testKits.Count} test kits");
             return testKits;
         }
+
+        /// <summary>
+        /// Gets the test kit path for a given paper number.
+        /// </summary>
+        public string? GetTestKitForPaper(string paperNo, Dictionary<string, string> mapping)
+        {
+            if (mapping.TryGetValue(paperNo, out var testKitName))
+            {
+                return testKitName;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Configuration data loaded from testkit Header.xlsx.
+    /// </summary>
+    public class TestKitConfig
+    {
+        public Dictionary<string, double> PointAllocation { get; set; } = new();
+        public double TotalMaxMark { get; set; }
+        public int CodeContainerInternalPort { get; set; } = 5000;
+        public int CodeContainerHostPort { get; set; } = 5000;
+        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2022-latest";
+        public string DatabaseContainerName { get; set; } = "ag-database";
+        public int DatabaseContainerInternalPort { get; set; } = 1433;
+        public int DatabaseContainerHostPort { get; set; } = 1433;
+        public string DatabaseUsername { get; set; } = "sa";
+        public string DatabasePassword { get; set; } = "YourStrong@Passw0rd";
     }
 
     /// <summary>
@@ -188,6 +244,18 @@ namespace SolutionGrader.UI.Services
         public TestKitConfigService(ILoggingService logger)
         {
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Loads test kit configuration from Header.xlsx.
+        /// </summary>
+        public TestKitConfig LoadTestKitConfig(string testKitPath)
+        {
+            var config = new TestKitConfig();
+            var allocation = ReadPointAllocation(testKitPath);
+            config.PointAllocation = allocation;
+            config.TotalMaxMark = allocation.Values.Sum();
+            return config;
         }
 
         /// <summary>
@@ -408,6 +476,58 @@ namespace SolutionGrader.UI.Services
         {
             using var cts = new CancellationTokenSource();
             await GradeStudentsAsync(students, config, cts.Token);
+        }
+
+        /// <summary>
+        /// Pauses the current grading session.
+        /// </summary>
+        public void PauseGrading()
+        {
+            _logger.LogInfo("Grading paused");
+            SessionStateChanged?.Invoke(this, GradingSessionState.Paused);
+        }
+
+        /// <summary>
+        /// Resumes the current grading session.
+        /// </summary>
+        public void ResumeGrading()
+        {
+            _logger.LogInfo("Grading resumed");
+            SessionStateChanged?.Invoke(this, GradingSessionState.Running);
+        }
+
+        /// <summary>
+        /// Resets all student statuses to Not_Run.
+        /// </summary>
+        public void ResetAllStatuses(IEnumerable<StudentSolution> students)
+        {
+            foreach (var student in students)
+            {
+                student.Status = GradingStatus.Not_Run;
+                student.Score = 0;
+                student.MaxScore = 0;
+                student.Message = string.Empty;
+                student.ProgressPercent = 0;
+            }
+            _logger.LogInfo("All student statuses reset");
+        }
+
+        /// <summary>
+        /// Disposes a student's grading resources.
+        /// </summary>
+        public void DisposeStudent(StudentSolution student)
+        {
+            student.Status = GradingStatus.Disposed;
+            _logger.LogInfo($"Disposed student {student.StudentCode}");
+        }
+
+        /// <summary>
+        /// Discovers students from the configuration.
+        /// </summary>
+        public List<StudentSolution> DiscoverStudents(GradingConfiguration config)
+        {
+            var discoveryService = new StudentDiscoveryService(_logger);
+            return discoveryService.DiscoverStudents(config.SubmitFolderPath);
         }
     }
 
