@@ -187,6 +187,12 @@ namespace SolutionGrader.UI.Models
         /// Database password from Environment.xlsx.
         /// </summary>
         public string DatabasePassword { get; set; } = "YourStrong@Passw0rd";
+
+        /// <summary>
+        /// Raw environment configuration key-value pairs from Environment.xlsx.
+        /// Stores all values that don't have dedicated properties.
+        /// </summary>
+        public Dictionary<string, string> EnvironmentConfig { get; set; } = new();
     }
 
     /// <summary>

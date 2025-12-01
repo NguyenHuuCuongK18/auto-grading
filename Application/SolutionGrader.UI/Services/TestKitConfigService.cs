@@ -221,6 +221,11 @@ namespace SolutionGrader.UI.Services
                         case "PROTOCOL":
                             config.Protocol = value.ToUpperInvariant();
                             break;
+
+                        default:
+                            // Store all other values in EnvironmentConfig dictionary
+                            config.EnvironmentConfig[key] = value;
+                            break;
                     }
                 }
 

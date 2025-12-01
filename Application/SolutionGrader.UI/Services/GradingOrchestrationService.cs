@@ -1,8 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Services.Docker;
+using SolutionGrader.Core.Services;
+using SolutionGrader.Core.Abstractions;
+using DomainEnvConfig = Domain.Entities.Constants.EnvironmentConfiguration;
 
 namespace SolutionGrader.UI.Services
 {
@@ -30,6 +35,8 @@ namespace SolutionGrader.UI.Services
     public class GradingOrchestrationService
     {
         private readonly ILoggingService _logger;
+        private readonly TestKitDiscoveryService _testKitService;
+        private readonly TestKitConfigService _testKitConfigService;
         
         /// <summary>
         /// Event raised when grading starts for a student.
@@ -54,6 +61,8 @@ namespace SolutionGrader.UI.Services
         public GradingOrchestrationService(ILoggingService logger)
         {
             _logger = logger;
+            _testKitService = new TestKitDiscoveryService(logger);
+            _testKitConfigService = new TestKitConfigService(logger);
         }
 
         /// <summary>
@@ -134,6 +143,7 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Grades a single student.
         /// This is the main entry point for grading logic.
+        /// Uses DockerGradingService for actual Docker-based grading.
         /// </summary>
         private async Task GradeStudentAsync(
             StudentSolution student,
@@ -150,50 +160,72 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                // Note: The actual Docker-based grading implementation will be added here.
-                // For now, this is a placeholder that simulates the grading process.
-                // The implementation will use:
-                // - DockerContainerManager for container lifecycle
-                // - DockerConsoleReader for reading console output
-                // - Detail.xlsx parser from SolutionGrader.Core
-                // - NetworkMonitorService for traffic sniffing
-
-                // Step 1: Setup containers (20%)
-                _logger.LogInfo("Setting up Docker containers...");
-                student.StatusMessage = "Setting up containers...";
+                // Step 1: Find test kit for this student's paper (10%)
+                _logger.LogInfo("Finding test kit...");
+                student.StatusMessage = "Finding test kit...";
                 student.ProgressPercent = 10;
                 StudentProgressUpdated?.Invoke(this, student);
-                await Task.Delay(500, ct); // Placeholder for actual setup
 
-                // Step 2: Execute test cases (60%)
+                var testKitPath = _testKitService.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
+                if (string.IsNullOrEmpty(testKitPath))
+                {
+                    throw new InvalidOperationException($"No test kit found for paper {student.PaperNo}");
+                }
+
+                var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
+                if (testKitConfig == null)
+                {
+                    throw new InvalidOperationException($"Failed to load test kit configuration from {testKitPath}");
+                }
+
+                student.MaxMark = testKitConfig.TotalMaxMark;
+                _logger.LogInfo($"Using test kit: {testKitConfig.Name} (Max: {testKitConfig.TotalMaxMark} marks)");
+
+                // Step 2: Setup grading (20%)
+                _logger.LogInfo("Setting up Docker containers...");
+                student.StatusMessage = "Setting up containers...";
+                student.ProgressPercent = 20;
+                StudentProgressUpdated?.Invoke(this, student);
+
+                // Build configuration dictionary for DockerGradingService
+                var dockerConfig = BuildDockerConfig(student, config, testKitConfig);
+
+                // Create file service and detail log service
+                IFileService fileService = new FileService();
+                IRunContext runContext = new RunContext();
+                IDetailLogService logService = new ExcelDetailLogService(fileService, runContext);
+
+                // Step 3: Execute grading using DockerGradingService (60%)
                 _logger.LogInfo("Executing test cases...");
                 student.StatusMessage = "Running test cases...";
-                student.ProgressPercent = 30;
+                student.ProgressPercent = 40;
                 StudentProgressUpdated?.Invoke(this, student);
-                
-                // Simulated grading - actual implementation will iterate through Detail.xlsx steps
-                double totalMark = 0;
-                double maxMark = student.MaxMark;
-                
-                // TODO: Implement actual grading logic
-                // For now, use a simple pass-through that marks as successful
-                student.ProgressPercent = 70;
-                StudentProgressUpdated?.Invoke(this, student);
-                await Task.Delay(500, ct);
 
-                // Step 3: Cleanup (20%)
-                _logger.LogInfo("Cleaning up containers...");
-                student.StatusMessage = "Cleaning up...";
+                using var dockerGrading = new DockerGradingService(fileService, logService);
+                dockerGrading.LogMessage += (s, msg) =>
+                {
+                    _logger.LogInfo(msg);
+                };
+
+                var resultPath = Path.Combine(config.SaveResultFolderPath, student.PaperNo, "student", student.StudentCode);
+                Directory.CreateDirectory(resultPath);
+
+                var marks = await dockerGrading.GradeStudentAsync(
+                    student.SolutionPath,
+                    testKitPath,
+                    resultPath,
+                    dockerConfig,
+                    ct);
+
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
-                await Task.Delay(300, ct);
 
-                // Set final status
-                student.Mark = totalMark;
-                student.Status = GradingStatus.Success; // Will be set properly by actual implementation
+                // Step 4: Finalize (10%)
+                student.Mark = marks;
+                student.Status = marks > 0 ? GradingStatus.Success : GradingStatus.Failed;
                 student.ProgressPercent = 100;
                 student.EndTime = DateTime.Now;
-                student.StatusMessage = "Completed";
+                student.StatusMessage = $"Completed: {marks}/{student.MaxMark}";
 
                 _logger.LogInfo($"Grading completed for {student.StudentCode}: {student.Mark}/{student.MaxMark}");
             }
@@ -209,6 +241,63 @@ namespace SolutionGrader.UI.Services
             {
                 StudentGradingCompleted?.Invoke(this, student);
             }
+        }
+
+        /// <summary>
+        /// Builds Docker configuration dictionary from student and config.
+        /// </summary>
+        private Dictionary<string, string> BuildDockerConfig(
+            StudentSolution student,
+            GradingConfiguration config,
+            TestKitConfig testKitConfig)
+        {
+            var dockerConfig = new Dictionary<string, string>
+            {
+                // Network and container names
+                [DomainEnvConfig.DockerNetwork] = "ag-network",
+                [DomainEnvConfig.CodeContainerName] = "ag-server",
+                [DomainEnvConfig.GivenConsoleContainerName] = "ag-client",
+                [DomainEnvConfig.DatabaseContainerName] = "ag-db",
+
+                // Images
+                [DomainEnvConfig.CodeImageName] = "fptuxaes/aes-dotnet8:latest",
+                [DomainEnvConfig.GivenConsoleImageName] = "fptuxaes/aes-dotnet8:latest",
+                [DomainEnvConfig.DatabaseImageName] = "mcr.microsoft.com/mssql/server:2022-latest",
+
+                // Ports
+                [DomainEnvConfig.CodeContainerInternalPort] = "5001",
+                [DomainEnvConfig.CodeContainerHostPort] = "5001",
+                [DomainEnvConfig.DatabaseContainerInternalPort] = "1433",
+                [DomainEnvConfig.DatabaseContainerHostPort] = "1433",
+
+                // Database credentials
+                [DomainEnvConfig.DatabaseUsername] = "SA",
+                [DomainEnvConfig.DatabasePassword] = "YourStrong@Passw0rd",
+
+                // Student-specific paths
+                [DomainEnvConfig.CodeFilePath] = student.ServerPath ?? "",
+                [DomainEnvConfig.GivenConsolePath] = student.ClientPath ?? "",
+                [DomainEnvConfig.StudentQuestionName] = Path.GetFileName(student.ServerPath ?? config.ServerProjectName ?? "Server"),
+                [DomainEnvConfig.GivenConsoleAppName] = Path.GetFileName(student.ClientPath ?? config.ClientProjectName ?? "Client"),
+
+                // Docker paths for DLLs
+                [DomainEnvConfig.DockerServerPath] = $"/apps/{Path.GetFileName(student.ServerPath ?? "Server")}/{Path.GetFileName(student.ServerPath ?? "Server")}.dll",
+                [DomainEnvConfig.DockerClientPath] = $"/apps/{Path.GetFileName(student.ClientPath ?? "Client")}/{Path.GetFileName(student.ClientPath ?? "Client")}.dll"
+            };
+
+            // Add test kit configuration
+            if (testKitConfig.EnvironmentConfig != null)
+            {
+                foreach (var kvp in testKitConfig.EnvironmentConfig)
+                {
+                    if (!dockerConfig.ContainsKey(kvp.Key))
+                    {
+                        dockerConfig[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+
+            return dockerConfig;
         }
 
         /// <summary>
