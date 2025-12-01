@@ -1,7 +1,8 @@
 ﻿using EnvironmentBuilder.CommandSupporter;
 using Ionic.Zip;
 using System;
-using Shell32;
+// Shell32 is Windows-only and removed for cross-platform compatibility
+// using Shell32;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -12,6 +13,11 @@ namespace FileMaster.FileEngine
 {
     public class FileExtractor
     {
+        /// <summary>
+        /// Unzips a file to the destination folder.
+        /// Note: Shell32 functionality (Windows Shell extraction) has been removed for cross-platform compatibility.
+        /// Uses Ionic.Zip for extraction instead.
+        /// </summary>
         public static void Unzip(string sourceFile, string destination)
         {
             if (string.IsNullOrEmpty(sourceFile))
@@ -24,11 +30,8 @@ namespace FileMaster.FileEngine
             {
                 zips.ExtractAll(destination);
             }   
-            Shell sc = new Shell();
-            Folder SrcFlder = sc.NameSpace(sourceFile);
-            Folder DestFlder = sc.NameSpace(destination);
-            FolderItems items = SrcFlder.Items();
-            DestFlder.CopyHere(items, 20);
+            // Shell32 functionality removed for cross-platform compatibility
+            // The Ionic.Zip extraction above should be sufficient
         }
         public static void ExtractDestination(string zipPath, string destinationPath)
         {
