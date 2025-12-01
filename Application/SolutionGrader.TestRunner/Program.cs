@@ -365,13 +365,14 @@ public class Program
         
         IRunContext runctx = new RunContext();
         IExecutableManager proc = new ExecutableManager(runctx);
-        var networkMonitor = new NetworkMonitorService(runctx);
+        // No proxy needed - client connects directly to server
+        var middleware = new NetworkMonitorService(runctx);
         IDataComparisonService cmp = new DataComparisonService(runctx);
         IDetailLogService log = new ExcelDetailLogService(files, runctx);
-        IExecutor exec = new Executor(proc, networkMonitor, cmp, log, runctx, gradingConfig);
+        IExecutor exec = new Executor(proc, middleware, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
         
-        var runner = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
+        var runner = new SuiteRunner(files, env, suite, parse, exec, rep, proc, middleware, log, runctx, appsettings);
         
         var runArgs = new ExecuteSuiteArgs
         {

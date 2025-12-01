@@ -63,13 +63,15 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         }
 
         // Generate client appsettings.json if client path provided
+        // Client connects directly to server port (no proxy)
         if (!string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
         {
             var clientDir = Path.GetDirectoryName(clientExePath);
             if (!string.IsNullOrEmpty(clientDir))
             {
                 var clientAppsettingsPath = Path.Combine(clientDir, FileKeywords.FileName_AppSettings);
-                var clientConfig = CreateClientAppsettings(ipAddress, _proxyPort);
+                // Use _serverPort directly - client connects to server, no proxy
+                var clientConfig = CreateClientAppsettings(ipAddress, _serverPort);
                 File.WriteAllText(clientAppsettingsPath, JsonSerializer.Serialize(clientConfig, new JsonSerializerOptions 
                 { 
                     WriteIndented = true 

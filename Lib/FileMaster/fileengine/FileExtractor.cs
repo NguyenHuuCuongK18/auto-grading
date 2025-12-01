@@ -1,12 +1,6 @@
-﻿using EnvironmentBuilder.CommandSupporter;
-using Ionic.Zip;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+﻿using System;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace FileMaster.FileEngine
 {
@@ -37,7 +31,7 @@ namespace FileMaster.FileEngine
             {
                 using (Ionic.Zip.ZipFile zips = new Ionic.Zip.ZipFile(sourceFile))
                 {
-                    zips.ExtractAll(destination, ExtractExistingFileAction.OverwriteSilently);
+                    zips.ExtractAll(destination, Ionic.Zip.ExtractExistingFileAction.OverwriteSilently);
                 }
                 Console.WriteLine($"[FileExtractor] Extracted {sourceFile} to {destination} using DotNetZip");
                 return;
@@ -81,6 +75,9 @@ namespace FileMaster.FileEngine
             if (shellType == null)
                 throw new InvalidOperationException("Shell.Application COM type not available");
 
+            // Ensure destination directory exists before Shell32 can use it
+            Directory.CreateDirectory(destination);
+
             dynamic shell = Activator.CreateInstance(shellType)!;
             dynamic srcFolder = shell.NameSpace(sourceFile);
             dynamic destFolder = shell.NameSpace(destination);
@@ -121,7 +118,7 @@ namespace FileMaster.FileEngine
             {
                 using (Ionic.Zip.ZipFile zips = new Ionic.Zip.ZipFile(zipPath))
                 {
-                    zips.ExtractAll(destinationPath, ExtractExistingFileAction.OverwriteSilently);
+                    zips.ExtractAll(destinationPath, Ionic.Zip.ExtractExistingFileAction.OverwriteSilently);
                 }
                 Console.WriteLine($"Extracted {zipPath} to {destinationPath}");
                 return;
@@ -138,7 +135,7 @@ namespace FileMaster.FileEngine
                 {
                     ExtractWithShell32(zipPath, destinationPath);
                 }
-                catch
+                catch (Exception)
                 {
                     ExtractWithSystemIOCompression(zipPath, destinationPath);
                 }
