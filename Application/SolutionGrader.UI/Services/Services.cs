@@ -227,19 +227,42 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Gets the test kit path for a given paper by searching the test kit folder.
-        /// Returns the full path to the matching Q{n} folder.
+        /// First checks the PaperToTestKitMapping, then falls back to folder conventions.
+        /// Returns the full path to the matching question folder.
         /// </summary>
         public string? GetTestKitForPaper(string testKitFolder, string paperNo)
+        {
+            return GetTestKitForPaper(testKitFolder, paperNo, new Dictionary<string, string>());
+        }
+
+        /// <summary>
+        /// Gets the test kit path for a given paper by first checking the mapping dictionary,
+        /// then falling back to folder conventions (Q{n}, Paper{n}).
+        /// Returns the full path to the matching question folder.
+        /// </summary>
+        public string? GetTestKitForPaper(string testKitFolder, string paperNo, Dictionary<string, string> mapping)
         {
             if (!Directory.Exists(testKitFolder))
             {
                 return null;
             }
 
+            // First, try to use the mapping from Mapping.xlsx
+            if (mapping != null && mapping.TryGetValue(paperNo, out var testKitName))
+            {
+                var mappedPath = Path.Combine(testKitFolder, testKitName);
+                if (Directory.Exists(mappedPath))
+                {
+                    _logger.LogInfo($"Found testkit for paper {paperNo} from mapping: {mappedPath}");
+                    return mappedPath;
+                }
+            }
+
             // Try Q{paperNo} convention (Q1, Q2, etc.)
             var testKitPath = Path.Combine(testKitFolder, $"Q{paperNo}");
             if (Directory.Exists(testKitPath))
             {
+                _logger.LogInfo($"Found testkit for paper {paperNo} using Q{paperNo} convention: {testKitPath}");
                 return testKitPath;
             }
 
@@ -247,10 +270,77 @@ namespace SolutionGrader.UI.Services
             testKitPath = Path.Combine(testKitFolder, $"Paper{paperNo}");
             if (Directory.Exists(testKitPath))
             {
+                _logger.LogInfo($"Found testkit for paper {paperNo} using Paper{paperNo} convention: {testKitPath}");
                 return testKitPath;
             }
 
+            _logger.LogWarning($"No testkit found for paper {paperNo}");
             return null;
+        }
+
+        /// <summary>
+        /// Loads the paper-to-testkit mapping from Mapping.xlsx.
+        /// Format: PaperNo | Question | QuestionKit
+        /// Example: 1 | Q1 | Q1
+        /// Returns a dictionary mapping paper number (string) to testkit folder name (string).
+        /// </summary>
+        public Dictionary<string, string> LoadMappingFromExcel(string testKitFolder)
+        {
+            var mapping = new Dictionary<string, string>();
+            var mappingPath = Path.Combine(testKitFolder, "Mapping.xlsx");
+
+            if (!File.Exists(mappingPath))
+            {
+                _logger.LogWarning($"Mapping.xlsx not found: {mappingPath}");
+                return mapping;
+            }
+
+            try
+            {
+                using var wb = new XLWorkbook(mappingPath);
+                var ws = wb.Worksheet(1);
+
+                // Skip header row
+                foreach (var row in ws.RowsUsed().Skip(1))
+                {
+                    var paperNo = row.Cell(1).GetValue<string>();
+                    var questionKit = row.Cell(3).GetValue<string>(); // Column 3 is QuestionKit
+
+                    if (!string.IsNullOrWhiteSpace(paperNo) && !string.IsNullOrWhiteSpace(questionKit))
+                    {
+                        mapping[paperNo] = questionKit;
+                        _logger.LogInfo($"Loaded mapping: Paper {paperNo} -> {questionKit}");
+                    }
+                }
+
+                _logger.LogInfo($"Loaded {mapping.Count} paper-to-testkit mappings from Mapping.xlsx");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to read Mapping.xlsx: {ex.Message}");
+            }
+
+            return mapping;
+        }
+
+        /// <summary>
+        /// Validates that all discovered papers have corresponding testkits.
+        /// Returns a list of papers that have no mapping.
+        /// </summary>
+        public List<string> ValidateMappings(string testKitFolder, Dictionary<string, string> mapping, IEnumerable<string> paperNumbers)
+        {
+            var unmappedPapers = new List<string>();
+
+            foreach (var paperNo in paperNumbers.Distinct())
+            {
+                var testKitPath = GetTestKitForPaper(testKitFolder, paperNo, mapping);
+                if (string.IsNullOrEmpty(testKitPath))
+                {
+                    unmappedPapers.Add(paperNo);
+                }
+            }
+
+            return unmappedPapers;
         }
     }
 

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using SolutionGrader.UI.Models;
+using SolutionGrader.UI.Services;
 
 namespace SolutionGrader.UI
 {
@@ -24,11 +25,19 @@ namespace SolutionGrader.UI
     public partial class SetupWindow : Window
     {
         private readonly GradingConfiguration _configuration;
+        private readonly LoggingService _logger;
+        private readonly TestKitDiscoveryService _testKitDiscovery;
+        private readonly StudentDiscoveryService _studentDiscovery;
 
         public SetupWindow()
         {
             InitializeComponent();
             _configuration = new GradingConfiguration();
+            
+            // Initialize services for validation
+            _logger = new LoggingService(Path.GetTempPath());
+            _testKitDiscovery = new TestKitDiscoveryService(_logger);
+            _studentDiscovery = new StudentDiscoveryService(_logger);
 
             // Hook up events AFTER components are created to avoid early invocation
             chkHasClient.Checked += ChkHasClient_CheckedChanged;
@@ -81,7 +90,29 @@ namespace SolutionGrader.UI
             {
                 txtTestKitFolder.Text = dialog.SelectedPath;
                 _configuration.TestKitFolderPath = dialog.SelectedPath;
+                
+                // Load mapping from Mapping.xlsx
+                LoadTestKitMapping(dialog.SelectedPath);
+                
                 ValidateConfiguration();
+            }
+        }
+
+        /// <summary>
+        /// Loads the paper-to-testkit mapping from Mapping.xlsx in the testkit folder.
+        /// </summary>
+        private void LoadTestKitMapping(string testKitFolder)
+        {
+            var mapping = _testKitDiscovery.LoadMappingFromExcel(testKitFolder);
+            
+            if (mapping.Count == 0)
+            {
+                txtValidation.Text = "Warning: No paper-to-testkit mapping found in Mapping.xlsx. Will try folder conventions (Q1, Q2...).";
+            }
+            else
+            {
+                _configuration.PaperToTestKitMapping = mapping;
+                txtValidation.Text = $"Loaded {mapping.Count} paper mapping(s) from Mapping.xlsx.";
             }
         }
 
@@ -128,6 +159,12 @@ namespace SolutionGrader.UI
             {
                 return;
             }
+            
+            // Validate mapping for all discovered papers
+            if (!ValidateTestKitMapping())
+            {
+                return;
+            }
 
             // Create save folder if it doesn't exist
             if (!Directory.Exists(_configuration.SaveResultFolderPath))
@@ -154,6 +191,42 @@ namespace SolutionGrader.UI
             
             // Close this setup window
             this.Close();
+        }
+
+        /// <summary>
+        /// Validates that all papers in Submit folder have corresponding testkits.
+        /// </summary>
+        private bool ValidateTestKitMapping()
+        {
+            // Discover students to get all paper numbers
+            var students = _studentDiscovery.DiscoverStudents(_configuration.SubmitFolderPath);
+            
+            if (students.Count == 0)
+            {
+                txtValidation.Text = "No student submissions found in the Submit folder.";
+                return false;
+            }
+
+            // Get all unique paper numbers
+            var paperNumbers = new System.Collections.Generic.HashSet<string>();
+            foreach (var student in students)
+            {
+                paperNumbers.Add(student.PaperNo);
+            }
+
+            // Check each paper has a corresponding testkit
+            var unmappedPapers = _testKitDiscovery.ValidateMappings(
+                _configuration.TestKitFolderPath, 
+                _configuration.PaperToTestKitMapping, 
+                paperNumbers);
+
+            if (unmappedPapers.Count > 0)
+            {
+                txtValidation.Text = $"No testkit found for paper(s): {string.Join(", ", unmappedPapers)}. Please update Mapping.xlsx or add Q{{n}} folders.";
+                return false;
+            }
+
+            return true;
         }
 
         private bool ValidateConfiguration()

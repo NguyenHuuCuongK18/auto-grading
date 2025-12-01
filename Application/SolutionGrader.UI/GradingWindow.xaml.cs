@@ -140,8 +140,11 @@ namespace SolutionGrader.UI
                 // Load test kit configs for each paper to get max marks
                 foreach (var student in students)
                 {
-                    // Get test kit config for this paper to set max mark
-                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                    // Get test kit config for this paper to set max mark (use mapping from configuration)
+                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(
+                        _configuration.TestKitFolderPath, 
+                        student.PaperNo,
+                        _configuration.PaperToTestKitMapping);
                     if (!string.IsNullOrEmpty(testKitPath))
                     {
                         var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
@@ -321,8 +324,11 @@ namespace SolutionGrader.UI
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
-                // Check if test kit exists for this paper
-                var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                // Check if test kit exists for this paper (use mapping from configuration)
+                var testKitPath = _testKitDiscovery.GetTestKitForPaper(
+                    _configuration.TestKitFolderPath, 
+                    student.PaperNo, 
+                    _configuration.PaperToTestKitMapping);
                 if (string.IsNullOrEmpty(testKitPath))
                 {
                     student.Status = GradingStatus.Not_Run;
