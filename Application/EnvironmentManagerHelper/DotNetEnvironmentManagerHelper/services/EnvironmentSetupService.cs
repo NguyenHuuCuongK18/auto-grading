@@ -217,15 +217,19 @@ namespace DotNetEnvironmentManagerHelper.Services
                     EnvironmentConfiguration.GivenConsoleContainerName
                 );
 
-                int containerPort = int.Parse(TryGetValueOrDefault(
+                // Client container typically doesn't need exposed ports
+                // Parse with fallback to 0 if empty/invalid
+                string portStr = TryGetValueOrDefault(
                     questionConfigs,
                     EnvironmentConfiguration.GivenConsoleContainerInternalPort
-                ));
+                );
+                int containerPort = string.IsNullOrEmpty(portStr) ? 0 : int.Parse(portStr);
 
-                int hostPort = int.Parse(TryGetValueOrDefault(
+                string hostPortStr = TryGetValueOrDefault(
                     questionConfigs,
                     EnvironmentConfiguration.GivenConsoleContainerHostPort
-                ));
+                );
+                int hostPort = string.IsNullOrEmpty(hostPortStr) ? 0 : int.Parse(hostPortStr);
 
                 // setting up dotnet given console container
                 DockerBase dockerBase = new DockerBase

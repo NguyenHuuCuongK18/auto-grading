@@ -496,6 +496,16 @@ namespace SolutionGrader.ConsoleTest
             string? clientDllPath,
             string? serverDllPath)
         {
+            // Resolve relative paths from testkit Environment.xlsx to absolute paths
+            string testKitPath = testKitConfig.Path;
+            string defaultDbFile = Path.Combine(testKitPath, 
+                testKitConfig.EnvironmentConfig.GetValueOrDefault("Default_Database_File_Path", "Meta\\database.sql").Replace("\\", "/"));
+            string runtimesFolder = Path.Combine(testKitPath,
+                testKitConfig.EnvironmentConfig.GetValueOrDefault("Runtimes_Folder", "Meta/runtimes").Replace("\\", "/"));
+            
+            // Generate unique database name per student session
+            string databaseName = $"AG_Session_{DateTime.Now:HHmmss}";
+
             var env = new Domain.Entities.Main.Environment
             {
                 Configs = new Dictionary<string, string>
@@ -510,6 +520,10 @@ namespace SolutionGrader.ConsoleTest
                     [EnvConfig.GivenConsoleContainerName] = config.ClientContainerName,
                     [EnvConfig.GivenConsolePath] = clientPath ?? "",
                     [EnvConfig.GivenConsoleAppName] = config.ClientProjectName,
+                    // Client container doesn't need exposed ports (it connects to server)
+                    // But the setup code expects these values, so we set them to 0 to indicate "no port"
+                    [EnvConfig.GivenConsoleContainerInternalPort] = "0",
+                    [EnvConfig.GivenConsoleContainerHostPort] = "0",
                     [EnvConfig.StudentQuestionName] = config.ServerProjectName,
                     [EnvConfig.DatabaseImageName] = testKitConfig.DatabaseImageName,
                     [EnvConfig.DatabaseContainerName] = testKitConfig.DatabaseContainerName,
@@ -517,6 +531,20 @@ namespace SolutionGrader.ConsoleTest
                     [EnvConfig.DatabaseContainerHostPort] = testKitConfig.DatabaseContainerHostPort.ToString(),
                     [EnvConfig.DatabaseUsername] = testKitConfig.DatabaseUsername,
                     [EnvConfig.DatabasePassword] = testKitConfig.DatabasePassword,
+                    // Database script and name configuration
+                    [EnvConfig.DefaultDatabaseFilePath] = defaultDbFile,
+                    [EnvConfig.DefaultDatabaseName] = testKitConfig.EnvironmentConfig.GetValueOrDefault("Default_Database_Name", "PE_PRN"),
+                    [EnvConfig.DatabaseName] = databaseName,
+                    // Runtimes folder for copying DLLs
+                    [EnvConfig.RuntimesFolder] = runtimesFolder,
+                },
+                // Steps from Environment.xlsx Run sheet - defines the setup sequence
+                // These are the actions to perform when setting up the environment
+                Steps = new List<string>
+                {
+                    Domain.Entities.Constants.EnvironmentQAction.GenerateConnectionFile,
+                    Domain.Entities.Constants.EnvironmentQAction.CopyEssentialFilesAndFolders,
+                    Domain.Entities.Constants.EnvironmentQAction.GenerateDatabaseScript
                 }
             };
 
