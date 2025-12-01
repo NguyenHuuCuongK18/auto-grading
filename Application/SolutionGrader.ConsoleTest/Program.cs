@@ -527,7 +527,10 @@ namespace SolutionGrader.ConsoleTest
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [WARN] Failed to read expected output from {sheetName}: {ex.Message}");
+            }
             return outputs;
         }
 
@@ -540,8 +543,9 @@ namespace SolutionGrader.ConsoleTest
             {
                 return executor.GetContainerLogs(containerName) ?? "";
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"  [WARN] Failed to get logs from {containerName}: {ex.Message}");
                 return "";
             }
         }
@@ -549,10 +553,15 @@ namespace SolutionGrader.ConsoleTest
         /// <summary>
         /// Compares expected output with actual output.
         /// Returns true if the expected pattern is found in actual output.
+        /// Empty expected output always matches (no expectation defined).
         /// </summary>
         private static bool CompareOutput(string expected, string actual)
         {
+            // Empty expected means no expectation - always pass
             if (string.IsNullOrWhiteSpace(expected)) return true;
+            
+            // If expected is defined but actual is empty, check if expected was just whitespace
+            // (which would have been caught above)
             if (string.IsNullOrWhiteSpace(actual)) return false;
 
             // Normalize line endings and whitespace
@@ -581,7 +590,10 @@ namespace SolutionGrader.ConsoleTest
                     if (stage > 0) steps.Add((stage, action, input));
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [WARN] Failed to read Detail.xlsx steps: {ex.Message}");
+            }
             return steps;
         }
 
@@ -603,7 +615,10 @@ namespace SolutionGrader.ConsoleTest
                         return mark;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [WARN] Failed to read test case mark from Header.xlsx: {ex.Message}");
+            }
             return 1.0;
         }
 
@@ -622,8 +637,8 @@ namespace SolutionGrader.ConsoleTest
             string runtimesFolder = Path.Combine(testKitPath,
                 testKitConfig.EnvironmentConfig.GetValueOrDefault("Runtimes_Folder", "Meta/runtimes").Replace("\\", "/"));
             
-            // Generate unique database name per student session
-            string databaseName = $"AG_Session_{DateTime.Now:HHmmss}";
+            // Generate unique database name per student session using UTC time with milliseconds and a random suffix
+            string databaseName = $"AG_{DateTime.UtcNow:HHmmssfff}_{Guid.NewGuid().ToString("N").Substring(0, 6)}";
 
             var env = new Domain.Entities.Main.Environment
             {

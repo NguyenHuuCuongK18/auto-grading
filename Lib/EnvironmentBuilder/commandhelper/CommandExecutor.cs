@@ -373,8 +373,16 @@ namespace EnvironmentBuilder.CommandSupporter
             }
             else
             {
-                // Linux/macOS: use sh -c
-                processInfo = new ProcessStartInfo("/bin/sh", $"-c \"{command.Replace("\"", "\\\"")}\"")
+                // Linux/macOS: use sh -c with proper escaping
+                // Escape shell special characters: $, `, \, !, ", newlines
+                string escapedCommand = command
+                    .Replace("\\", "\\\\")  // Escape backslashes first
+                    .Replace("\"", "\\\"")  // Escape double quotes
+                    .Replace("$", "\\$")    // Escape dollar signs
+                    .Replace("`", "\\`")    // Escape backticks
+                    .Replace("!", "\\!");   // Escape exclamation marks
+                    
+                processInfo = new ProcessStartInfo("/bin/sh", $"-c \"{escapedCommand}\"")
                 {
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
