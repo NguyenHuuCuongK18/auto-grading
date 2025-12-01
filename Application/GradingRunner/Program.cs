@@ -84,14 +84,8 @@ namespace GradingRunner
         /// </summary>
         private static void InitializeConfiguration()
         {
-            var baseDir = AppContext.BaseDirectory;
-            
-            // Navigate to repository root (from bin/Debug/net8.0/)
-            var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
-            if (!Directory.Exists(Path.Combine(repoRoot, "Submit")))
-            {
-                repoRoot = Directory.GetCurrentDirectory();
-            }
+            // Find repository root by searching for marker files/folders
+            var repoRoot = FindRepositoryRoot();
 
             _config = new GradingConfiguration
             {
@@ -133,6 +127,58 @@ namespace GradingRunner
         /// <summary>
         /// Parses command line options.
         /// </summary>
+        /// <summary>
+        /// Finds the repository root by searching for marker files (Submit, TestKit folders or .sln file).
+        /// Searches upward from the current directory and from the executable location.
+        /// </summary>
+        private static string FindRepositoryRoot()
+        {
+            // Marker files/folders that indicate we're in the repo root
+            var markers = new[] { "Submit", "TestKit", "SolutionGrader.sln" };
+            
+            // First, check if current directory contains markers
+            var currentDir = Directory.GetCurrentDirectory();
+            if (ContainsMarkers(currentDir, markers))
+                return currentDir;
+                
+            // Search upward from current directory
+            var searchDir = currentDir;
+            for (int i = 0; i < 10; i++)
+            {
+                var parent = Directory.GetParent(searchDir);
+                if (parent == null) break;
+                
+                if (ContainsMarkers(parent.FullName, markers))
+                    return parent.FullName;
+                    
+                searchDir = parent.FullName;
+            }
+            
+            // Search upward from executable location
+            searchDir = AppContext.BaseDirectory;
+            for (int i = 0; i < 10; i++)
+            {
+                var parent = Directory.GetParent(searchDir);
+                if (parent == null) break;
+                
+                if (ContainsMarkers(parent.FullName, markers))
+                    return parent.FullName;
+                    
+                searchDir = parent.FullName;
+            }
+            
+            // Fall back to current directory
+            Console.WriteLine("WARNING: Could not find repository root. Using current directory.");
+            return currentDir;
+        }
+        
+        private static bool ContainsMarkers(string directory, string[] markers)
+        {
+            return markers.Any(m => 
+                Directory.Exists(Path.Combine(directory, m)) || 
+                File.Exists(Path.Combine(directory, m)));
+        }
+
         private static Dictionary<string, string> ParseOptions(string[] args)
         {
             var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

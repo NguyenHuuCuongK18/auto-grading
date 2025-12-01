@@ -284,6 +284,30 @@ namespace GradingServices
         }
 
         /// <summary>
+        /// Sanitizes input for safe shell execution.
+        /// Escapes special characters that could be used for command injection.
+        /// </summary>
+        private static string SanitizeShellInput(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return string.Empty;
+                
+            // Escape single quotes and other dangerous characters for shell safety
+            // For single-quoted strings in shell, the only escaping needed is for single quotes
+            var sanitized = input
+                .Replace("'", "'\\''")  // Escape single quotes
+                .Replace("$", "\\$")     // Escape dollar signs
+                .Replace("`", "\\`")     // Escape backticks
+                .Replace("\\", "\\\\")   // Escape backslashes (must be done carefully)
+                .Replace("!", "\\!");    // Escape history expansion
+                
+            // Remove null bytes and other control characters
+            sanitized = new string(sanitized.Where(c => c >= 32 || c == '\n' || c == '\r' || c == '\t').ToArray());
+            
+            return sanitized;
+        }
+
+        /// <summary>
         /// Sends input to the client container via named pipe.
         /// </summary>
         public async Task<bool> SendClientInputAsync(string input, CancellationToken ct = default)
@@ -294,7 +318,7 @@ namespace GradingServices
             try
             {
                 var inputPipe = $"/tmp/{_clientContainerName}_input_pipe";
-                var safeInput = input.Replace("'", "'\\''");
+                var safeInput = SanitizeShellInput(input);
                 
                 // Send input via echo to named pipe
                 var command = $"sh -c \"echo '{safeInput}' | tee /proc/1/fd/1 > {inputPipe}\"";
