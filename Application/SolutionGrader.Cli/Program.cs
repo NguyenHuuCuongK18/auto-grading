@@ -50,6 +50,9 @@ public class Program
     {
         if (!Need(a, "suite", "out")) return PrintUsage();
 
+        // Check network capture permissions and warn user
+        CheckNetworkCapturePermissions();
+
         // Create timestamped results folder
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var timestampedResultRoot = System.IO.Path.Combine(a["out"], string.Format(FileKeywords.Pattern_GradeResult, timestamp));
@@ -95,6 +98,52 @@ public class Program
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
 
         return await flow.ExecuteSuiteAsync(run);
+    }
+
+    /// <summary>
+    /// Checks if network capture permissions are available and warns user if not.
+    /// Network capture requires:
+    /// - Windows: NPcap installed with WinPcap Compatible Mode
+    /// - Linux/macOS: Running as root, or dotnet has CAP_NET_RAW capability
+    /// </summary>
+    private static void CheckNetworkCapturePermissions()
+    {
+        try
+        {
+            // Try to find any capture device to verify libpcap/npcap is available
+            var devices = SharpPcap.CaptureDeviceList.Instance;
+            if (devices.Count == 0)
+            {
+                Console.WriteLine("[Warning] No network capture devices found.");
+                Console.WriteLine("          Network validation tests will fail.");
+                if (OperatingSystem.IsWindows())
+                {
+                    Console.WriteLine("          Install NPcap from https://npcap.com/ with 'WinPcap Compatible Mode' enabled.");
+                }
+                else
+                {
+                    Console.WriteLine("          Install libpcap: apt install libpcap-dev (Ubuntu) or brew install libpcap (macOS)");
+                }
+                return;
+            }
+
+            // On Linux/macOS, warn about permission requirements
+            if (!OperatingSystem.IsWindows())
+            {
+                Console.WriteLine("[Network] Network capture devices found. If capture fails with PermissionDenied:");
+                Console.WriteLine("          Run with: sudo dotnet <your-command>");
+                Console.WriteLine("          Or set capabilities: sudo setcap cap_net_raw,cap_net_admin=eip $(which dotnet)");
+            }
+            else
+            {
+                Console.WriteLine("[Network] Network capture devices found.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] Could not verify network capture: {ex.Message}");
+            Console.WriteLine("          Network validation tests may fail.");
+        }
     }
 
     private static Dictionary<string, string> ParseArgs(string[] args)
@@ -147,6 +196,17 @@ Configuration:
   - Use database script from environment.xlsx (Default_Database_File_Path)
   - Use default timeout of 10 seconds per stage
   - Use suite-level environment.xlsx by default (unless --use-inner-env is specified)
+
+Network Capture Requirements:
+  For network traffic validation (TCP/HTTP flow grading), packet capture is required:
+  
+  Windows: Install NPcap (https://npcap.com/) with 'WinPcap Compatible Mode' enabled
+  Linux:   Install libpcap (apt install libpcap-dev) and run with sudo or set capabilities:
+           sudo setcap cap_net_raw,cap_net_admin=eip $(which dotnet)
+  macOS:   Install libpcap (brew install libpcap) and run with sudo
+  
+  Without elevated permissions, network validation tests will fail with 'No packets captured'.
+  Console output validation (Client/Server sheets) will still work without network capture.
 ");
         return -1;
     }
