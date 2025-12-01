@@ -325,6 +325,46 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Run a container with TTY support (-t flag) for reliable console output capture.
+        /// This is required when using docker attach to read output without buffering issues.
+        /// </summary>
+        /// <param name="dockerBase">Container configuration</param>
+        /// <param name="timeoutInMilliseconds">Timeout for the operation</param>
+        public void RunContainerWithTty(DockerBase dockerBase, int timeoutInMilliseconds = 120000)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(dockerBase.DockerNetwork))
+                    CreateNetwork(dockerBase.DockerNetwork, timeoutInMilliseconds);
+
+                if (IsContainerExist(dockerBase.ContainerName))
+                {
+                    RemoveContainer(dockerBase.ContainerName, timeoutInMilliseconds);
+                }
+
+                string envVars = "";
+                foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
+                    envVars += $"-e {kv.Key}={kv.Value} ";
+
+                // Add -t flag for TTY allocation - this resolves output buffering issues
+                // when using docker attach to read console output
+                string command = $@"docker run -d -t " +
+                                 "--privileged " +
+                                 $"--name {dockerBase.ContainerName} " +
+                                 $"--network {dockerBase.DockerNetwork} " +
+                                 $"{envVars} " +
+                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{dockerBase.ImageName}";
+                _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                Console.WriteLine($"[Docker] Container {dockerBase.ContainerName} started with TTY support");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error while try to run container {dockerBase.ContainerName} with TTY. Details: {ex.Message}");
+            }
+        }
+
 
         public void RemoveContainer(string containerName, int timeoutInMilliseconds = 30000)
         {
@@ -686,6 +726,15 @@ namespace EnvironmentBuilder.DockerCommand
             }
             catch { /* Ignore - pipe may not exist */ }
             
+            // Remove existing log file (ignore errors)
+            string logFile = $"/tmp/{appName}_output.log";
+            try
+            {
+                string removeLogCommand = $"{containerName} rm -f {logFile}";
+                ExecDockerCommand(removeLogCommand, 5000);
+            }
+            catch { /* Ignore */ }
+            
             // Wait for port to be released after killing processes
             Thread.Sleep(1000);
 
@@ -695,11 +744,34 @@ namespace EnvironmentBuilder.DockerCommand
             string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
             ExecDockerCommand(startDoorstopCommand, 60000);
 
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            // Modified: Write output to BOTH /proc/1/fd/1 (docker logs) AND a log file
+            // The log file provides reliable output capture even when docker logs has buffering issues
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -oL -eL dotnet {appPath} 2>&1 < {inputPipe} | tee {logFile} > /proc/1/fd/1\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 
             Console.WriteLine($"[{appName}] Application started. Monitor with: docker logs -f {containerName}");
+        }
+
+        /// <summary>
+        /// Get the application output log from the container.
+        /// This reads from the log file created by StartApplicationInContainer.
+        /// </summary>
+        /// <param name="containerName">Container name</param>
+        /// <param name="appName">Application name</param>
+        /// <returns>The application output</returns>
+        public string GetApplicationLog(string containerName, string appName)
+        {
+            try
+            {
+                string logFile = $"/tmp/{appName}_output.log";
+                string command = $"docker exec {containerName} cat {logFile}";
+                return RunCommand(command);
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private bool IsProcessRunning(string containerName, string processName)
@@ -715,15 +787,36 @@ namespace EnvironmentBuilder.DockerCommand
             return !string.IsNullOrWhiteSpace(output);
         }
 
+        /// <summary>
+        /// Runs a shell command and returns the output.
+        /// Cross-platform: uses cmd.exe on Windows, /bin/bash on Linux/macOS.
+        /// </summary>
         private string RunCommand(string cmd)
         {
-            var psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+            ProcessStartInfo psi;
+            
+            if (OperatingSystem.IsWindows())
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
+            else
+            {
+                // On Linux/macOS, use bash or sh
+                var shell = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+                psi = new ProcessStartInfo(shell, $"-c \"{cmd.Replace("\"", "\\\"")}\"")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
 
             using Process proc = Process.Start(psi);
             string output = proc.StandardOutput.ReadToEnd();
