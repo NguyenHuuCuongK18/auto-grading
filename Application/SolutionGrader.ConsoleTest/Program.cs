@@ -37,6 +37,14 @@ namespace SolutionGrader.ConsoleTest
     /// </summary>
     public class Program
     {
+        // Constants for consistency and maintainability
+        private const int ErrorNoteTruncationLength = 200;
+        private const int DisplayTruncationLength = 100;
+        
+        // Compiled regex for whitespace normalization (performance optimization)
+        private static readonly System.Text.RegularExpressions.Regex WhitespaceRegex = 
+            new System.Text.RegularExpressions.Regex(@"\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
         public static async Task<int> Main(string[] args)
         {
             Console.WriteLine("=== Docker Grading Console Test ===");
@@ -338,10 +346,11 @@ namespace SolutionGrader.ConsoleTest
                             // Write TC folders and results
                             foreach (var (tcName, result) in tcResults)
                             {
-                                var tcFolder = Path.Combine(studentPath, tcName.Replace("_", ""));
+                                var tcFolderName = NormalizeTcFolderName(tcName);
+                                var tcFolder = Path.Combine(studentPath, tcFolderName);
                                 Directory.CreateDirectory(tcFolder);
                                 
-                                WriteTcResult(Path.Combine(tcFolder, $"{tcName.Replace("_", "")}_Result.xlsx"), tcName, result);
+                                WriteTcResult(Path.Combine(tcFolder, $"{tcFolderName}_Result.xlsx"), tcName, result);
                                 WriteGradeDetail(Path.Combine(tcFolder, "GradeDetail.xlsx"), tcName, result);
                             }
                         }
@@ -352,6 +361,15 @@ namespace SolutionGrader.ConsoleTest
             {
                 Console.WriteLine($"[OUTPUT] Error writing results: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Normalizes test case name for use as folder name.
+        /// Removes underscores for consistent folder naming.
+        /// </summary>
+        private static string NormalizeTcFolderName(string tcName)
+        {
+            return tcName.Replace("_", "");
         }
 
         private static void WriteStudentsSolution(string path, List<StudentSolution> students)
@@ -588,9 +606,9 @@ namespace SolutionGrader.ConsoleTest
                     Console.WriteLine($"  {tc}: {status} ({result.Mark}/{result.MaxMark})");
                     if (!result.Passed && !string.IsNullOrEmpty(result.ErrorNotes))
                     {
-                        // Truncate error notes for console display
-                        var notes = result.ErrorNotes.Length > 200 
-                            ? result.ErrorNotes.Substring(0, 200) + "..." 
+                        // Truncate error notes for console display using constant
+                        var notes = result.ErrorNotes.Length > ErrorNoteTruncationLength 
+                            ? result.ErrorNotes.Substring(0, ErrorNoteTruncationLength) + "..." 
                             : result.ErrorNotes;
                         Console.WriteLine($"    Error: {notes}");
                     }
@@ -861,8 +879,8 @@ namespace SolutionGrader.ConsoleTest
             // Join with single space
             s = string.Join(" ", lines);
 
-            // Collapse multiple spaces
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+            // Collapse multiple spaces using compiled regex
+            s = WhitespaceRegex.Replace(s, " ");
 
             return s.Trim().ToLowerInvariant();
         }
@@ -873,7 +891,7 @@ namespace SolutionGrader.ConsoleTest
         private static string StripAggressive(string s)
         {
             if (string.IsNullOrEmpty(s)) return string.Empty;
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", "");
+            s = WhitespaceRegex.Replace(s, "");
             s = s.Replace(",", "").Replace(".", "").Replace(":", "").Replace(";", "");
             return s;
         }
@@ -891,9 +909,16 @@ namespace SolutionGrader.ConsoleTest
         private static string FormatForDisplay(string s, int maxLength)
         {
             if (string.IsNullOrEmpty(s)) return "(empty)";
-            s = s.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
-            if (s.Length <= maxLength) return s;
-            return s.Substring(0, maxLength) + "...";
+            
+            // Use StringBuilder for efficient string replacement
+            var sb = new System.Text.StringBuilder(s);
+            sb.Replace("\r", "\\r");
+            sb.Replace("\n", "\\n");
+            sb.Replace("\t", "\\t");
+            
+            var result = sb.ToString();
+            if (result.Length <= maxLength) return result;
+            return result.Substring(0, maxLength) + "...";
         }
 
         /// <summary>
