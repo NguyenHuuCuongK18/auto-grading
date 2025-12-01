@@ -699,8 +699,18 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
         }
 
-        // This is server
+        // This is server - copy files only without starting
         private void CopyPublishFolder()
+        {
+            CopyServerFilesOnly();
+            StartServerApplication();
+        }
+
+        /// <summary>
+        /// Copies server publish files to the container without starting the application.
+        /// Call StartServerApplication() separately to start the server.
+        /// </summary>
+        public void CopyServerFilesOnly()
         {
             try
             {
@@ -709,8 +719,23 @@ namespace DotNetEnvironmentManagerHelper.Services
                     questionConfigs[EnvironmentConfiguration.CodeFilePath],
                     questionConfigs[EnvironmentConfiguration.CodeContainerName] + ":/apps"
                 );
+            }
+            catch (Exception ex)
+            {
+                //logger.LogErr($"Error copying server files. Details: {ex.Message}");
+                return;
+            }
+        }
 
-                // wait for .net deployment
+        /// <summary>
+        /// Starts the server application inside its container.
+        /// Must be called after CopyServerFilesOnly().
+        /// </summary>
+        public void StartServerApplication()
+        {
+            try
+            {
+                // wait for .net deployment (this starts the application)
                 dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.CodeContainerName],
                     questionConfigs[EnvironmentConfiguration.StudentQuestionName],
@@ -720,16 +745,23 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
             catch (Exception ex)
             {
-                // log
-                //logger.LogErr("Error copying publish file");
-
-                //logger.LogErr($"Error copying publish file. Details: {ex.Message}");
+                //logger.LogErr($"Error starting server. Details: {ex.Message}");
                 return;
             }
         }
 
-        // This is client
+        // This is client - copy files only without starting
         private void CopyGivenConsolePublishFolder()
+        {
+            CopyClientFilesOnly();
+            StartClientApplication();
+        }
+
+        /// <summary>
+        /// Copies client (given console) publish files to the container without starting the application.
+        /// Call StartClientApplication() separately to start the client.
+        /// </summary>
+        public void CopyClientFilesOnly()
         {
             try
             {
@@ -738,8 +770,23 @@ namespace DotNetEnvironmentManagerHelper.Services
                     questionConfigs[EnvironmentConfiguration.GivenConsolePath],
                     questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName] + ":/apps"
                 );
+            }
+            catch (Exception ex)
+            {
+                //logger.LogErr($"Error copying client files. Details: {ex.Message}");
+                return;
+            }
+        }
 
-                // wait for .net deployment
+        /// <summary>
+        /// Starts the client (given console) application inside its container.
+        /// Must be called after CopyClientFilesOnly().
+        /// </summary>
+        public void StartClientApplication()
+        {
+            try
+            {
+                // wait for .net deployment (this starts the application)
                 dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName],
                     questionConfigs[EnvironmentConfiguration.GivenConsoleAppName],
@@ -749,8 +796,7 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
             catch (Exception ex)
             {
-                // log
-                //logger.LogErr($"Error copying publish file. Details: {ex.Message}");
+                //logger.LogErr($"Error starting client. Details: {ex.Message}");
                 return;
             }
         }

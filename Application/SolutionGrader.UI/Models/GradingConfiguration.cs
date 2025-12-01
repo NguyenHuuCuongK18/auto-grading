@@ -117,6 +117,81 @@ namespace SolutionGrader.UI.Models
             set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
         }
 
+        #region Database Configuration
+
+        private string _databaseImageName = "mcr.microsoft.com/mssql/server:2022-latest";
+        private string _databaseContainerName = "ag-database";
+        private int _databaseContainerInternalPort = 1433;
+        private int _databaseContainerHostPort = 1433;
+        private string _databaseUsername = "SA";
+        private string _databasePassword = "YourStrong@Passw0rd";
+        private string _saveResultFolderPath = string.Empty;
+
+        /// <summary>
+        /// Docker image name for the database container
+        /// </summary>
+        public string DatabaseImageName
+        {
+            get => _databaseImageName;
+            set { _databaseImageName = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Name of the database container
+        /// </summary>
+        public string DatabaseContainerName
+        {
+            get => _databaseContainerName;
+            set { _databaseContainerName = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Internal port for the database container
+        /// </summary>
+        public int DatabaseContainerInternalPort
+        {
+            get => _databaseContainerInternalPort;
+            set { _databaseContainerInternalPort = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Host port mapped to the database container
+        /// </summary>
+        public int DatabaseContainerHostPort
+        {
+            get => _databaseContainerHostPort;
+            set { _databaseContainerHostPort = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database username (e.g., SA for SQL Server)
+        /// </summary>
+        public string DatabaseUsername
+        {
+            get => _databaseUsername;
+            set { _databaseUsername = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Database password
+        /// </summary>
+        public string DatabasePassword
+        {
+            get => _databasePassword;
+            set { _databasePassword = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Path to save grading results
+        /// </summary>
+        public string SaveResultFolderPath
+        {
+            get => _saveResultFolderPath;
+            set { _saveResultFolderPath = value; OnPropertyChanged(); }
+        }
+
+        #endregion
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -138,7 +213,14 @@ namespace SolutionGrader.UI.Models
                 CodeContainerInternalPort = this.CodeContainerInternalPort,
                 CodeContainerHostPort = this.CodeContainerHostPort,
                 DockerNetwork = this.DockerNetwork,
-                GradingTimeoutSeconds = this.GradingTimeoutSeconds
+                GradingTimeoutSeconds = this.GradingTimeoutSeconds,
+                DatabaseImageName = this.DatabaseImageName,
+                DatabaseContainerName = this.DatabaseContainerName,
+                DatabaseContainerInternalPort = this.DatabaseContainerInternalPort,
+                DatabaseContainerHostPort = this.DatabaseContainerHostPort,
+                DatabaseUsername = this.DatabaseUsername,
+                DatabasePassword = this.DatabasePassword,
+                SaveResultFolderPath = this.SaveResultFolderPath
             };
         }
     }

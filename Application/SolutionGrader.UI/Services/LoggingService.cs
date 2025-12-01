@@ -23,6 +23,14 @@ namespace SolutionGrader.UI.Services
         void SetStudentContext(string? studentCode);
         
         /// <summary>
+        /// Sets the current student context for logging with paper organization.
+        /// Logs will be redirected to the paper/student-specific log folder.
+        /// </summary>
+        /// <param name="studentCode">Student code or null to clear context</param>
+        /// <param name="paperNo">Paper number for folder organization</param>
+        void SetStudentContext(string? studentCode, string? paperNo);
+        
+        /// <summary>
         /// Gets all logs for display in the UI.
         /// </summary>
         string GetAllLogs();
@@ -97,6 +105,12 @@ namespace SolutionGrader.UI.Services
         /// <inheritdoc/>
         public void SetStudentContext(string? studentCode)
         {
+            SetStudentContext(studentCode, null);
+        }
+
+        /// <inheritdoc/>
+        public void SetStudentContext(string? studentCode, string? paperNo)
+        {
             lock (_lock)
             {
                 // Close previous student log if exists
@@ -109,8 +123,19 @@ namespace SolutionGrader.UI.Services
                 if (!string.IsNullOrEmpty(studentCode))
                 {
                     // Create student-specific log folder and file
-                    // Format: Log_{StudentCode}_{Date}
-                    var studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    // Format: {paperNo}/student/{StudentCode} (matches SampleLogging format)
+                    string studentLogDir;
+                    if (!string.IsNullOrEmpty(paperNo))
+                    {
+                        // Paper-organized format: {paperNo}/student/{StudentCode}
+                        studentLogDir = Path.Combine(_baseLogPath, paperNo, "student", studentCode);
+                    }
+                    else
+                    {
+                        // Legacy format: Log_{StudentCode}_{Date}
+                        studentLogDir = Path.Combine(_baseLogPath, "Logs", $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}");
+                    }
+                    
                     if (!Directory.Exists(studentLogDir))
                     {
                         Directory.CreateDirectory(studentLogDir);
@@ -122,7 +147,7 @@ namespace SolutionGrader.UI.Services
                         AutoFlush = true
                     };
 
-                    LogInfo($"Started logging for student: {studentCode}");
+                    LogInfo($"Started logging for student: {studentCode}" + (!string.IsNullOrEmpty(paperNo) ? $" (Paper {paperNo})" : ""));
                 }
             }
         }
