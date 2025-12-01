@@ -698,6 +698,18 @@ namespace EnvironmentBuilder.DockerCommand
             }
             catch { /* Ignore - no processes to kill */ }
             
+            // Kill any process using common ports (5000, 8000, 8080) inside the container
+            // This handles cases where the base image has services running
+            foreach (var port in new[] { 5000, 8000, 8080 })
+            {
+                try
+                {
+                    string fuserCommand = $"{containerName} sh -c \"fuser -k {port}/tcp 2>/dev/null || true\"";
+                    ExecDockerCommand(fuserCommand, 5000);
+                }
+                catch { /* Ignore */ }
+            }
+            
             // Remove existing pipe if it exists (ignore errors)
             try
             {
