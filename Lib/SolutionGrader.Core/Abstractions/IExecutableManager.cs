@@ -19,4 +19,25 @@ public interface IExecutableManager
     System.Threading.Tasks.Task<bool> WaitForServerOutputAsync(int timeoutSeconds = 5, System.Threading.CancellationToken ct = default);
     string GetClientOutput();
     string GetServerOutput();
+    
+    /// <summary>
+    /// Marks the start of a new stage and takes a snapshot of current output positions.
+    /// Call this BEFORE executing stage actions to properly attribute output to stages.
+    /// </summary>
+    void BeginStage(string stage);
+    
+    /// <summary>
+    /// Marks the end of a stage and records the final output positions.
+    /// </summary>
+    void EndStage(string stage);
+    
+    /// <summary>
+    /// Gets the output that occurred ONLY during a specific stage (not accumulated).
+    /// </summary>
+    string GetClientStageOutput(string stage);
+    
+    /// <summary>
+    /// Gets the output that occurred ONLY during a specific stage (not accumulated).
+    /// </summary>
+    string GetServerStageOutput(string stage);
 }

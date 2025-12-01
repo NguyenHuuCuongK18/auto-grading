@@ -3,6 +3,7 @@ using System.Text;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 using System.IO;
+using System.Collections.Concurrent;
 
 
 namespace SolutionGrader.Core.Services
@@ -18,6 +19,15 @@ namespace SolutionGrader.Core.Services
         private readonly StringBuilder _clientOutputBuffer = new();
         private readonly StringBuilder _serverOutputBuffer = new();
         
+        // Stage-based output snapshots - stores output length at start of each stage
+        private readonly ConcurrentDictionary<string, int> _clientStageStartOffsets = new();
+        private readonly ConcurrentDictionary<string, int> _serverStageStartOffsets = new();
+        private readonly ConcurrentDictionary<string, int> _clientStageEndOffsets = new();
+        private readonly ConcurrentDictionary<string, int> _serverStageEndOffsets = new();
+        
+        // Track current stage for output attribution
+        private string _currentStage = "0";
+        
         // Capture context at process start time to ensure output is stored with correct stage
         private string? _clientStartQuestionCode;
         private string? _clientStartStageLabel;
@@ -28,6 +38,101 @@ namespace SolutionGrader.Core.Services
 
         public bool IsServerRunning => _server is { HasExited: false };
         public bool IsClientRunning => _client is { HasExited: false };
+        
+        /// <summary>
+        /// Marks the start of a new stage and takes a snapshot of current output positions.
+        /// Call this BEFORE executing stage actions to properly attribute output to stages.
+        /// </summary>
+        public void BeginStage(string stage)
+        {
+            // End previous stage if any
+            if (!string.IsNullOrEmpty(_currentStage) && _currentStage != stage)
+            {
+                EndStage(_currentStage);
+            }
+            
+            _currentStage = stage;
+            
+            // Record current output lengths as start of this stage
+            lock (_clientOutputBuffer)
+            {
+                _clientStageStartOffsets[stage] = _clientOutputBuffer.Length;
+            }
+            lock (_serverOutputBuffer)
+            {
+                _serverStageStartOffsets[stage] = _serverOutputBuffer.Length;
+            }
+            
+            Console.WriteLine($"[ExecutableManager] Stage {stage} started - Client offset: {_clientStageStartOffsets[stage]}, Server offset: {_serverStageStartOffsets[stage]}");
+        }
+        
+        /// <summary>
+        /// Marks the end of a stage and records the final output positions.
+        /// </summary>
+        public void EndStage(string stage)
+        {
+            lock (_clientOutputBuffer)
+            {
+                _clientStageEndOffsets[stage] = _clientOutputBuffer.Length;
+            }
+            lock (_serverOutputBuffer)
+            {
+                _serverStageEndOffsets[stage] = _serverOutputBuffer.Length;
+            }
+            
+            // Store stage-specific output in RunContext
+            var clientStageOutput = GetClientStageOutput(stage);
+            var serverStageOutput = GetServerStageOutput(stage);
+            
+            var questionCode = _run.CurrentQuestionCode ?? _clientStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+            
+            if (!string.IsNullOrEmpty(clientStageOutput))
+            {
+                _run.SetClientOutput(questionCode, stage, clientStageOutput);
+            }
+            if (!string.IsNullOrEmpty(serverStageOutput))
+            {
+                _run.SetServerOutput(questionCode, stage, serverStageOutput);
+            }
+            
+            Console.WriteLine($"[ExecutableManager] Stage {stage} ended - Client: {clientStageOutput?.Length ?? 0} chars, Server: {serverStageOutput?.Length ?? 0} chars");
+        }
+        
+        /// <summary>
+        /// Gets the output that occurred ONLY during a specific stage (not accumulated).
+        /// </summary>
+        public string GetClientStageOutput(string stage)
+        {
+            lock (_clientOutputBuffer)
+            {
+                var start = _clientStageStartOffsets.GetValueOrDefault(stage, 0);
+                var end = _clientStageEndOffsets.GetValueOrDefault(stage, _clientOutputBuffer.Length);
+                
+                if (end > start && end <= _clientOutputBuffer.Length)
+                {
+                    return _clientOutputBuffer.ToString(start, end - start);
+                }
+                return "";
+            }
+        }
+        
+        /// <summary>
+        /// Gets the output that occurred ONLY during a specific stage (not accumulated).
+        /// </summary>
+        public string GetServerStageOutput(string stage)
+        {
+            lock (_serverOutputBuffer)
+            {
+                var start = _serverStageStartOffsets.GetValueOrDefault(stage, 0);
+                var end = _serverStageEndOffsets.GetValueOrDefault(stage, _serverOutputBuffer.Length);
+                
+                if (end > start && end <= _serverOutputBuffer.Length)
+                {
+                    return _serverOutputBuffer.ToString(start, end - start);
+                }
+                return "";
+            }
+        }
 
         public void Init(string? clientPath, string? serverPath)
         {
@@ -36,6 +141,11 @@ namespace SolutionGrader.Core.Services
             _client = null; _server = null;
             _clientOutputBuffer.Clear();
             _serverOutputBuffer.Clear();
+            _clientStageStartOffsets.Clear();
+            _serverStageStartOffsets.Clear();
+            _clientStageEndOffsets.Clear();
+            _serverStageEndOffsets.Clear();
+            _currentStage = "0";
             _clientStartQuestionCode = null;
             _clientStartStageLabel = null;
             _serverStartQuestionCode = null;

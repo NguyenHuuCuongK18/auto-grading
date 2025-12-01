@@ -255,12 +255,41 @@ namespace SolutionGrader.Core.Services
                     catch { }
                 }, monitorCts.Token);
                 
+                int? lastTrackedStage = null;
+                
                 foreach (var step in steps)
                 {
                     using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     stepCts.CancelAfter(TimeSpan.FromSeconds(10));
 
                     var currentStage = TryParseStage(step.Id);
+                    
+                    // Begin new stage if stage changed - this captures output snapshot
+                    if (currentStage.HasValue && currentStage != lastTrackedStage)
+                    {
+                        // End previous stage first to finalize its output
+                        if (lastTrackedStage.HasValue)
+                        {
+                            _proc.EndStage(lastTrackedStage.Value.ToString());
+                            
+                            // Also notify network monitor
+                            if (_mw is INetworkMonitorService nm1)
+                            {
+                                nm1.EndStage(lastTrackedStage.Value.ToString());
+                            }
+                        }
+                        
+                        // Begin new stage - snapshot current output positions
+                        _proc.BeginStage(currentStage.Value.ToString());
+                        
+                        // Also notify network monitor
+                        if (_mw is INetworkMonitorService nm2)
+                        {
+                            nm2.BeginStage(currentStage.Value.ToString());
+                        }
+                        
+                        lastTrackedStage = currentStage;
+                    }
                     
                     // Stage change delay
                     if (previousStage.HasValue && currentStage.HasValue && currentStage != previousStage)
@@ -287,6 +316,16 @@ namespace SolutionGrader.Core.Services
                         Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {LoggingKeywords.MSG_TESTCASE_EXTRA_DELAY}");
                         await Task.Delay(1000, ct);
                         hasAddedComparisonDelay = true;
+                        
+                        // End current stage before comparison to capture final output
+                        if (lastTrackedStage.HasValue)
+                        {
+                            _proc.EndStage(lastTrackedStage.Value.ToString());
+                            if (_mw is INetworkMonitorService nm3)
+                            {
+                                nm3.EndStage(lastTrackedStage.Value.ToString());
+                            }
+                        }
                     }
                     
                     previousStage = currentStage;
