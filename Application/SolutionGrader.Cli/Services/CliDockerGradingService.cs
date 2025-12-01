@@ -85,9 +85,9 @@ namespace SolutionGrader.Cli.Services
             foreach (var student in students)
             {
                 gradedCount++;
-                Console.WriteLine($"\n{'='.ToString().PadRight(60, '=')}");
+                Console.WriteLine($"\n{new string('=', 60)}");
                 Console.WriteLine($"[{gradedCount}/{students.Count}] Grading student: {student.StudentCode} (Paper {student.PaperNo})");
-                Console.WriteLine($"{'='.ToString().PadRight(60, '=')}");
+                Console.WriteLine($"{new string('=', 60)}");
 
                 var result = await GradeStudentAsync(student, config);
                 allResults.Add(result);
@@ -100,9 +100,9 @@ namespace SolutionGrader.Cli.Services
             // Write overall summary
             await WriteStudentsSolutionSummaryAsync(config.SaveResultFolderPath, allResults);
 
-            Console.WriteLine($"\n{'='.ToString().PadRight(60, '=')}");
+            Console.WriteLine($"\n{new string('=', 60)}");
             Console.WriteLine("[DockerGrade] Grading Complete");
-            Console.WriteLine($"{'='.ToString().PadRight(60, '=')}");
+            Console.WriteLine($"{new string('=', 60)}");
             Console.WriteLine($"Results saved to: {config.SaveResultFolderPath}");
             Console.WriteLine($"Total students: {allResults.Count}");
             Console.WriteLine($"Passed: {passedCount}");
@@ -363,7 +363,10 @@ namespace SolutionGrader.Cli.Services
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARNING] Error loading Environment.xlsx: {ex.Message}");
+                }
             }
 
             // Load Header.xlsx
@@ -395,7 +398,10 @@ namespace SolutionGrader.Cli.Services
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARNING] Error loading Header.xlsx: {ex.Message}");
+                }
             }
 
             // Discover test cases
@@ -493,33 +499,39 @@ namespace SolutionGrader.Cli.Services
         {
             if (!string.IsNullOrEmpty(student.ServerDllPath))
             {
-                var serverDir = Path.GetDirectoryName(student.ServerDllPath)!;
-                var folderName = Path.GetFileName(serverDir);
-                try
+                var serverDir = Path.GetDirectoryName(student.ServerDllPath);
+                if (serverDir != null)
                 {
-                    _dockerExecutor.MakeDirectory(serverContainer, "/apps");
-                    _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
-                    Console.WriteLine($"[Docker] Copied server files to {serverContainer}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[WARNING] Failed to copy server files: {ex.Message}");
+                    var folderName = Path.GetFileName(serverDir);
+                    try
+                    {
+                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
+                        Console.WriteLine($"[Docker] Copied server files to {serverContainer}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARNING] Failed to copy server files: {ex.Message}");
+                    }
                 }
             }
 
             if (!string.IsNullOrEmpty(student.ClientDllPath))
             {
-                var clientDir = Path.GetDirectoryName(student.ClientDllPath)!;
-                var folderName = Path.GetFileName(clientDir);
-                try
+                var clientDir = Path.GetDirectoryName(student.ClientDllPath);
+                if (clientDir != null)
                 {
-                    _dockerExecutor.MakeDirectory(clientContainer, "/apps");
-                    _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
-                    Console.WriteLine($"[Docker] Copied client files to {clientContainer}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[WARNING] Failed to copy client files: {ex.Message}");
+                    var folderName = Path.GetFileName(clientDir);
+                    try
+                    {
+                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
+                        Console.WriteLine($"[Docker] Copied client files to {clientContainer}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARNING] Failed to copy client files: {ex.Message}");
+                    }
                 }
             }
 
@@ -592,7 +604,10 @@ namespace SolutionGrader.Cli.Services
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARNING] Error reading actions from Detail.xlsx: {ex.Message}");
+            }
             return actions;
         }
 
@@ -642,7 +657,10 @@ namespace SolutionGrader.Cli.Services
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARNING] Error reading expected outputs from Detail.xlsx: {ex.Message}");
+            }
             return outputs;
         }
 
@@ -668,39 +686,47 @@ namespace SolutionGrader.Cli.Services
                     case "STARTSERVER":
                         if (!string.IsNullOrEmpty(student.ServerDllPath))
                         {
-                            var serverDir = Path.GetFileName(Path.GetDirectoryName(student.ServerDllPath)!);
-                            var serverDll = Path.GetFileName(student.ServerDllPath);
-                            var dockerPath = $"/apps/{serverDir}/{serverDll}";
+                            var serverDirPath = Path.GetDirectoryName(student.ServerDllPath);
+                            if (serverDirPath != null)
+                            {
+                                var serverDir = Path.GetFileName(serverDirPath);
+                                var serverDll = Path.GetFileName(student.ServerDllPath);
+                                var dockerPath = $"/apps/{serverDir}/{serverDll}";
 
-                            _dockerExecutor.WaitForPublishConsoleFileDeployment(
-                                serverContainer, serverContainer, dockerPath,
-                                config.CodeContainerInternalPort.ToString(), 30000);
+                                _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                    serverContainer, serverContainer, dockerPath,
+                                    config.CodeContainerInternalPort.ToString(), 30000);
 
-                            await Task.Delay(2000);
-                            var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
-                            var newOutput = output.Length > previousServerOutput.Length ? output.Substring(previousServerOutput.Length) : output;
-                            serverOutputs[stage] = newOutput;
-                            previousServerOutput = output;
-                            Console.WriteLine($"    Server started, output: {newOutput.Length} chars");
+                                await Task.Delay(2000);
+                                var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
+                                var newOutput = output.Length > previousServerOutput.Length ? output.Substring(previousServerOutput.Length) : output;
+                                serverOutputs[stage] = newOutput;
+                                previousServerOutput = output;
+                                Console.WriteLine($"    Server started, output: {newOutput.Length} chars");
+                            }
                         }
                         break;
 
                     case "STARTCLIENT":
                         if (!string.IsNullOrEmpty(student.ClientDllPath))
                         {
-                            var clientDir = Path.GetFileName(Path.GetDirectoryName(student.ClientDllPath)!);
-                            var clientDll = Path.GetFileName(student.ClientDllPath);
-                            var dockerPath = $"/apps/{clientDir}/{clientDll}";
+                            var clientDirPath = Path.GetDirectoryName(student.ClientDllPath);
+                            if (clientDirPath != null)
+                            {
+                                var clientDir = Path.GetFileName(clientDirPath);
+                                var clientDll = Path.GetFileName(student.ClientDllPath);
+                                var dockerPath = $"/apps/{clientDir}/{clientDll}";
 
-                            _dockerExecutor.WaitForPublishConsoleFileDeployment(
-                                clientContainer, clientContainer, dockerPath, "-1", 30000);
+                                _dockerExecutor.WaitForPublishConsoleFileDeployment(
+                                    clientContainer, clientContainer, dockerPath, "-1", 30000);
 
-                            await Task.Delay(2000);
-                            var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
-                            var newOutput = output.Length > previousClientOutput.Length ? output.Substring(previousClientOutput.Length) : output;
-                            clientOutputs[stage] = newOutput;
-                            previousClientOutput = output;
-                            Console.WriteLine($"    Client started, output: {newOutput.Length} chars");
+                                await Task.Delay(2000);
+                                var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
+                                var newOutput = output.Length > previousClientOutput.Length ? output.Substring(previousClientOutput.Length) : output;
+                                clientOutputs[stage] = newOutput;
+                                previousClientOutput = output;
+                                Console.WriteLine($"    Client started, output: {newOutput.Length} chars");
+                            }
                         }
                         break;
 
