@@ -297,50 +297,23 @@ namespace EnvironmentBuilder.DockerCommand
                 if (!string.IsNullOrEmpty(dockerBase.DockerNetwork))
                     CreateNetwork(dockerBase.DockerNetwork, timeoutInMilliseconds);
 
-                // IMPORTANT: Always remove existing container to ensure clean state
-                // This prevents "Address already in use" errors from old containers that
-                // might have processes still holding ports. Force removal (-f) stops
-                // and removes the container regardless of its state.
                 if (IsContainerExist(dockerBase.ContainerName))
                 {
-                    Console.WriteLine($"[Docker] Removing existing container: {dockerBase.ContainerName}");
-                    try
-                    {
-                        RemoveContainer(dockerBase.ContainerName, 30000);
-                        // Brief wait for Docker to release resources
-                        Thread.Sleep(500);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Docker] Warning: Could not remove existing container: {ex.Message}");
-                    }
+                    StartExistedContainer(dockerBase.ContainerName);
+                    return;
                 }
 
                 string envVars = "";
                 foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
                     envVars += $"-e {kv.Key}={kv.Value} ";
 
-                // Build port mapping string - skip if ports are <= 0 (client containers don't need port mapping)
-                string portMapping = "";
-                if (dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0)
-                {
-                    portMapping = $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} ";
-                }
-
-                // CRITICAL: Override the image's ENTRYPOINT with "tail -f /dev/null"
-                // The base image (fptuxaes/aes-dotnet8) has an entrypoint.sh that starts NGINX and other services
-                // which would bind to ports and cause "Address already in use" errors.
-                // By overriding with "tail -f /dev/null", the container just stays running without starting services.
-                // The actual application is started later via docker exec when StartServer/StartClient is called.
                 string command = $@"docker run -d " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
-                                 $"{portMapping}" +
-                                 "--entrypoint tail " +
-                                 $"{dockerBase.ImageName} " +
-                                 "-f /dev/null";
+                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
             }
             catch (Exception ex)
@@ -685,64 +658,13 @@ namespace EnvironmentBuilder.DockerCommand
         {
             string inputPipe = $"/tmp/{appName}_input_pipe";
 
-            // IMPORTANT: Clean up any existing processes and pipes BEFORE starting
-            // This prevents "Address already in use" errors when restarting applications
-            Console.WriteLine($"[{appName}] Cleaning up any existing processes and pipes...");
-            
-            // Kill any existing dotnet processes in the container (ignore errors)
-            try
-            {
-                string killCommand = $"{containerName} pkill -9 dotnet";
-                ExecDockerCommand(killCommand, 5000);
-            }
-            catch { /* Ignore - no processes to kill */ }
-            
-            // Kill any existing sleep processes keeping pipes open (ignore errors)
-            try
-            {
-                string killSleepCommand = $"{containerName} pkill -9 sleep";
-                ExecDockerCommand(killSleepCommand, 5000);
-            }
-            catch { /* Ignore - no processes to kill */ }
-            
-            // Kill any process using common ports (5000, 8000, 8080) inside the container
-            // This handles cases where the base image has services running
-            foreach (var port in new[] { 5000, 8000, 8080 })
-            {
-                try
-                {
-                    string fuserCommand = $"{containerName} sh -c \"fuser -k {port}/tcp 2>/dev/null || true\"";
-                    ExecDockerCommand(fuserCommand, 5000);
-                }
-                catch { /* Ignore */ }
-            }
-            
-            // Remove existing pipe if it exists (ignore errors)
-            try
-            {
-                string removePipeCommand = $"{containerName} rm -f {inputPipe}";
-                ExecDockerCommand(removePipeCommand, 5000);
-            }
-            catch { /* Ignore - pipe may not exist */ }
-            
-            // Wait for port to be released after killing processes
-            Thread.Sleep(1000);
-
             string createInputFileCommand = $"{containerName} mkfifo \"{inputPipe}\"";
             ExecDockerCommand(createInputFileCommand, 60000);
 
             string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
             ExecDockerCommand(startDoorstopCommand, 60000);
 
-            // Start the .NET application with proper output settings:
-            // - DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1: Disable .NET's internal console buffering
-            // - DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION=1: Preserve ANSI codes
-            // - stdbuf -o0 -e0: Disable libc's stdout/stderr buffering (for Console.Write without \n)
-            // - Output to /proc/1/fd/1: Write directly to PID 1's stdout for docker logs capture
-            // - 2>&1: Merge stderr into stdout so docker logs captures everything
-            // Note: Lines without \n may still be buffered by docker's logging driver.
-            // The workaround is to ensure GetContainerLogsAsync captures the latest state.
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 -e DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 
