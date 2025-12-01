@@ -349,17 +349,22 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
-                // Update configuration with test kit port settings
+                // Update configuration with test kit settings from Environment.xlsx
+                // Port settings
                 _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
                 _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
+                
+                // Database settings (read from Environment.xlsx, never hardcoded)
                 _configuration.DatabaseImageName = testKitConfig.DatabaseImageName;
                 _configuration.DatabaseContainerName = testKitConfig.DatabaseContainerName;
                 _configuration.DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort;
                 _configuration.DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort;
                 _configuration.DatabaseUsername = testKitConfig.DatabaseUsername;
                 _configuration.DatabasePassword = testKitConfig.DatabasePassword;
+                _configuration.DatabaseName = testKitConfig.DatabaseName;
                 
                 _logger.LogInfo($"Using ports - Internal: {testKitConfig.CodeContainerInternalPort}, Host: {testKitConfig.CodeContainerHostPort}");
+                _logger.LogInfo($"Database config from Environment.xlsx - User: {testKitConfig.DatabaseUsername}, DB: {testKitConfig.DatabaseName}, Port: {testKitConfig.DatabaseContainerHostPort}");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally

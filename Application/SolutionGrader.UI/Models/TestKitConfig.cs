@@ -64,44 +64,55 @@ namespace SolutionGrader.UI.Models
         #endregion
 
         #region Database Configuration
+        // NOTE: All database configuration is read from Environment.xlsx
+        // No hardcoded defaults - these MUST be provided by the test kit
 
         /// <summary>
-        /// Docker image name for the database container (e.g., mcr.microsoft.com/mssql/server:2022-latest)
+        /// Docker image name for the database container.
+        /// Read from Environment.xlsx (Database_Image_Name key).
         /// </summary>
-        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2022-latest";
+        public string DatabaseImageName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Name of the database container
+        /// Name of the database container.
+        /// Read from Environment.xlsx (Database_Container_Name key).
         /// </summary>
-        public string DatabaseContainerName { get; set; } = "ag-database";
+        public string DatabaseContainerName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Internal port for the database container
+        /// Internal port for the database container.
+        /// Read from Environment.xlsx (Database_Container_Internal_Port key).
         /// </summary>
-        public int DatabaseContainerInternalPort { get; set; } = 1433;
+        public int DatabaseContainerInternalPort { get; set; }
 
         /// <summary>
-        /// Host port mapped to the database container
+        /// Host port mapped to the database container.
+        /// Read from Environment.xlsx (Database_Container_Host_Port key).
         /// </summary>
-        public int DatabaseContainerHostPort { get; set; } = 1433;
+        public int DatabaseContainerHostPort { get; set; }
 
         /// <summary>
-        /// Database username (e.g., SA for SQL Server)
+        /// Database username (e.g., SA for SQL Server).
+        /// Read from Environment.xlsx (Database_Username key).
         /// </summary>
-        public string DatabaseUsername { get; set; } = "SA";
+        public string DatabaseUsername { get; set; } = string.Empty;
 
         /// <summary>
-        /// Database password
+        /// Database password.
+        /// Read from Environment.xlsx (Database_Password key).
+        /// IMPORTANT: Never hardcode - always read from Environment.xlsx.
         /// </summary>
-        public string DatabasePassword { get; set; } = "YourStrong@Passw0rd";
+        public string DatabasePassword { get; set; } = string.Empty;
 
         /// <summary>
-        /// Default database name
+        /// Default database name.
+        /// Read from Environment.xlsx (Default_Database_Name key).
         /// </summary>
-        public string DatabaseName { get; set; } = "TestDB";
+        public string DatabaseName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Path to the default database script file
+        /// Path to the default database script file.
+        /// Read from Environment.xlsx (Default_Database_File_Path key).
         /// </summary>
         public string? DefaultDatabaseFilePath { get; set; }
 

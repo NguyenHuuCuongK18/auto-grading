@@ -119,16 +119,20 @@ namespace SolutionGrader.UI.Models
 
         #region Database Configuration
 
-        private string _databaseImageName = "mcr.microsoft.com/mssql/server:2022-latest";
-        private string _databaseContainerName = "ag-database";
-        private int _databaseContainerInternalPort = 1433;
-        private int _databaseContainerHostPort = 1433;
-        private string _databaseUsername = "SA";
-        private string _databasePassword = "YourStrong@Passw0rd";
+        // NOTE: Database configuration should be read from Environment.xlsx, not hardcoded
+        // These fields will be populated from TestKitConfig when loading a test kit
+        private string _databaseImageName = string.Empty;
+        private string _databaseContainerName = string.Empty;
+        private int _databaseContainerInternalPort;
+        private int _databaseContainerHostPort;
+        private string _databaseUsername = string.Empty;
+        private string _databasePassword = string.Empty;
+        private string _databaseName = string.Empty;
         private string _saveResultFolderPath = string.Empty;
 
         /// <summary>
-        /// Docker image name for the database container
+        /// Docker image name for the database container.
+        /// Read from Environment.xlsx (Database_Image_Name key).
         /// </summary>
         public string DatabaseImageName
         {
@@ -137,7 +141,8 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Name of the database container
+        /// Name of the database container.
+        /// Read from Environment.xlsx (Database_Container_Name key).
         /// </summary>
         public string DatabaseContainerName
         {
@@ -146,7 +151,8 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Internal port for the database container
+        /// Internal port for the database container.
+        /// Read from Environment.xlsx (Database_Container_Internal_Port key).
         /// </summary>
         public int DatabaseContainerInternalPort
         {
@@ -155,7 +161,8 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Host port mapped to the database container
+        /// Host port mapped to the database container.
+        /// Read from Environment.xlsx (Database_Container_Host_Port key).
         /// </summary>
         public int DatabaseContainerHostPort
         {
@@ -164,7 +171,8 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Database username (e.g., SA for SQL Server)
+        /// Database username (e.g., SA for SQL Server).
+        /// Read from Environment.xlsx (Database_Username key).
         /// </summary>
         public string DatabaseUsername
         {
@@ -173,12 +181,24 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Database password
+        /// Database password.
+        /// Read from Environment.xlsx (Database_Password key).
+        /// IMPORTANT: This should never be hardcoded - always read from Environment.xlsx.
         /// </summary>
         public string DatabasePassword
         {
             get => _databasePassword;
             set { _databasePassword = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Default database name.
+        /// Read from Environment.xlsx (Default_Database_Name key).
+        /// </summary>
+        public string DatabaseName
+        {
+            get => _databaseName;
+            set { _databaseName = value; OnPropertyChanged(); }
         }
 
         /// <summary>
@@ -220,6 +240,7 @@ namespace SolutionGrader.UI.Models
                 DatabaseContainerHostPort = this.DatabaseContainerHostPort,
                 DatabaseUsername = this.DatabaseUsername,
                 DatabasePassword = this.DatabasePassword,
+                DatabaseName = this.DatabaseName,
                 SaveResultFolderPath = this.SaveResultFolderPath
             };
         }
