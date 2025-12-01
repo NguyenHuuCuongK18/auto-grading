@@ -359,6 +359,9 @@ namespace SolutionGrader.Cli.Services
                                 case "databasepassword":
                                     config.DatabasePassword = value ?? "";
                                     break;
+                                case "defaultdatabasename":
+                                    config.DatabaseName = value ?? "Library";
+                                    break;
                             }
                         }
                     }
@@ -488,6 +491,10 @@ namespace SolutionGrader.Cli.Services
 
             // Copy files to containers
             await CopyFilesToContainersAsync(student, serverContainer, clientContainer);
+            
+            // Generate appsettings.json files in containers
+            // This is CRITICAL - student code reads configuration from appsettings.json
+            GenerateAppsettingsInContainers(student, config, testKitConfig, serverContainer, clientContainer);
 
             Console.WriteLine("[Docker] Containers ready.");
         }
@@ -536,6 +543,105 @@ namespace SolutionGrader.Cli.Services
             }
 
             await Task.Delay(500);
+        }
+
+        /// <summary>
+        /// Generate appsettings.json files for server and client in Docker containers.
+        /// This is CRITICAL - the student code reads configuration from appsettings.json.
+        /// </summary>
+        private void GenerateAppsettingsInContainers(
+            StudentInfo student, 
+            CliGradingConfiguration config, 
+            TestKitConfig testKitConfig,
+            string serverContainer, 
+            string clientContainer)
+        {
+            Console.WriteLine("[Appsettings] Generating configuration files...");
+            
+            // Build connection string for database
+            var connectionString = BuildConnectionString(config, testKitConfig);
+            
+            // For Docker networking, client connects to server container by name
+            // Server listens on 0.0.0.0 to accept connections from other containers
+            var serverIpAddress = "0.0.0.0";
+            var clientIpAddress = serverContainer; // Client connects to server container by DNS name
+            var port = config.CodeContainerInternalPort.ToString();
+            
+            // Generate server appsettings.json
+            if (!string.IsNullOrEmpty(student.ServerDllPath))
+            {
+                var serverDir = Path.GetDirectoryName(student.ServerDllPath);
+                if (serverDir != null)
+                {
+                    var folderName = Path.GetFileName(serverDir);
+                    var containerPath = $"/apps/{folderName}/appsettings.json";
+                    
+                    var serverConfig = $@"{{
+  ""ConnectionStrings"": {{
+    ""MyCnn"": ""{connectionString}""
+  }},
+  ""IpAddress"": ""{serverIpAddress}"",
+  ""Port"": ""{port}""
+}}";
+                    
+                    try
+                    {
+                        // Write to temp file then copy to container
+                        var tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
+                        File.WriteAllText(tempFile, serverConfig);
+                        _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
+                        File.Delete(tempFile);
+                        Console.WriteLine($"[Appsettings] Generated server config: IP={serverIpAddress}, Port={port}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARNING] Failed to generate server appsettings: {ex.Message}");
+                    }
+                }
+            }
+            
+            // Generate client appsettings.json
+            if (!string.IsNullOrEmpty(student.ClientDllPath))
+            {
+                var clientDir = Path.GetDirectoryName(student.ClientDllPath);
+                if (clientDir != null)
+                {
+                    var folderName = Path.GetFileName(clientDir);
+                    var containerPath = $"/apps/{folderName}/appsettings.json";
+                    
+                    var clientConfig = $@"{{
+  ""IpAddress"": ""{clientIpAddress}"",
+  ""Port"": ""{port}""
+}}";
+                    
+                    try
+                    {
+                        var tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
+                        File.WriteAllText(tempFile, clientConfig);
+                        _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
+                        File.Delete(tempFile);
+                        Console.WriteLine($"[Appsettings] Generated client config: IP={clientIpAddress}, Port={port}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARNING] Failed to generate client appsettings: {ex.Message}");
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Build database connection string from configuration.
+        /// </summary>
+        private string BuildConnectionString(CliGradingConfiguration config, TestKitConfig testKitConfig)
+        {
+            // For Docker, connect to database container by name or localhost with mapped port
+            var server = $"localhost,{config.DatabaseContainerHostPort}";
+            var database = testKitConfig.DatabaseName ?? "Library";
+            var username = config.DatabaseUsername ?? "sa";
+            var password = config.DatabasePassword ?? "YourStrong@Passw0rd";
+            
+            return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=true";
         }
 
         /// <summary>
@@ -674,8 +780,12 @@ namespace SolutionGrader.Cli.Services
         {
             var clientOutputs = new Dictionary<int, string>();
             var serverOutputs = new Dictionary<int, string>();
-            string previousClientOutput = "";
-            string previousServerOutput = "";
+            
+            // Initialize with current Docker logs to properly track "new" output for this test case.
+            // This is important because Docker logs accumulate across the container's lifetime,
+            // and we only want to capture output generated during THIS test case.
+            string previousClientOutput = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
+            string previousServerOutput = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
 
             foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
             {
@@ -697,7 +807,8 @@ namespace SolutionGrader.Cli.Services
                                     serverContainer, serverContainer, dockerPath,
                                     config.CodeContainerInternalPort.ToString(), 30000);
 
-                                await Task.Delay(2000);
+                                // Wait for application to fully start and output to be flushed
+                                await Task.Delay(3000);
                                 var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
                                 var newOutput = output.Length > previousServerOutput.Length ? output.Substring(previousServerOutput.Length) : output;
                                 serverOutputs[stage] = newOutput;
@@ -720,7 +831,8 @@ namespace SolutionGrader.Cli.Services
                                 _dockerExecutor.WaitForPublishConsoleFileDeployment(
                                     clientContainer, clientContainer, dockerPath, "-1", 30000);
 
-                                await Task.Delay(2000);
+                                // Wait for application to fully start and output to be flushed
+                                await Task.Delay(3000);
                                 var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
                                 var newOutput = output.Length > previousClientOutput.Length ? output.Substring(previousClientOutput.Length) : output;
                                 clientOutputs[stage] = newOutput;
@@ -734,7 +846,15 @@ namespace SolutionGrader.Cli.Services
                         if (!string.IsNullOrEmpty(input))
                         {
                             _dockerExecutor.SendInputToContainer(clientContainer, clientContainer, input);
-                            await Task.Delay(1000);
+                            
+                            // Wait longer for the input to be processed and response to be received
+                            // The client needs time to:
+                            // 1. Send the request to server
+                            // 2. Server processes and responds
+                            // 3. Client receives response and prints it
+                            // 4. Client prints next prompt
+                            // Also wait for output buffers to be flushed to Docker logs
+                            await Task.Delay(5000);
 
                             var clientOutput = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
                             var serverOutput = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
@@ -1116,6 +1236,7 @@ namespace SolutionGrader.Cli.Services
             public int CodeContainerHostPort { get; set; } = 8000;
             public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
             public string DockerNetwork { get; set; } = "auto-grading-network";
+            public string DatabaseName { get; set; } = "Library";
             public string DatabasePassword { get; set; } = "";
             public string Protocol { get; set; } = "TCP";
             public Dictionary<string, double> TestCaseMarks { get; set; } = new();
