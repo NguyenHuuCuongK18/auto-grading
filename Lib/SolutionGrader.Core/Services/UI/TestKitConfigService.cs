@@ -315,7 +315,10 @@ namespace SolutionGrader.Core.Services.UI
             }
 
             // Return default mark (evenly distributed)
-            return 2.5; // Default 10 points / 4 test cases
+            // Assumes default 10 points total / 4 test cases if not specified
+            const double DefaultTotalMarks = 10.0;
+            const double DefaultTestCaseCount = 4.0;
+            return DefaultTotalMarks / DefaultTestCaseCount;
         }
     }
 }

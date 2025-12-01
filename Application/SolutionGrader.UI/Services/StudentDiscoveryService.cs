@@ -163,8 +163,15 @@ namespace SolutionGrader.UI.Services
                 return foundPath;
             }
 
-            // Try alternative names: Q11.dll, Q12.dll
-            var alternativeNames = new[] { "Q11.dll", "Q12.dll", "Project11.dll", "Project12.dll" };
+            // Try alternative names commonly used for client/server projects
+            // These are fallback patterns based on the project naming conventions
+            // The primary search uses the user-specified projectName
+            string[] alternativeNames = projectName.Contains("11") 
+                ? new[] { "Q11.dll", "Project11.dll", "Server.dll" }
+                : projectName.Contains("12")
+                    ? new[] { "Q12.dll", "Project12.dll", "Client.dll" }
+                    : new[] { "Q11.dll", "Q12.dll", "Project11.dll", "Project12.dll", "Client.dll", "Server.dll" };
+                    
             foreach (var altName in alternativeNames)
             {
                 if (altName == dllName) continue; // Already tried

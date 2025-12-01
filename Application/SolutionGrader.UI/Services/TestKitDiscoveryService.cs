@@ -260,6 +260,10 @@ namespace SolutionGrader.UI.Services
         /// </summary>
         private int ExtractTestCaseNumber(string testCaseName)
         {
+            // Check if the test case name has at least 2 characters (for "TC" prefix)
+            if (string.IsNullOrEmpty(testCaseName) || testCaseName.Length < 2)
+                return 999;
+                
             // Remove "TC" prefix
             var remainder = testCaseName.Substring(2);
             
