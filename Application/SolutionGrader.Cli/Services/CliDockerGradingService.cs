@@ -25,6 +25,12 @@ namespace SolutionGrader.Cli.Services
     /// </summary>
     public class CliDockerGradingService
     {
+        // Configuration constants for timing and defaults
+        private const int StartupDelayMs = 3000;          // Delay after starting client/server
+        private const int InputProcessingDelayMs = 5000;  // Delay after sending input
+        private const string DefaultDatabaseName = "Library";
+        private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
+        
         private readonly DockerCommandExecutor _dockerExecutor;
 
         public CliDockerGradingService()
@@ -584,18 +590,24 @@ namespace SolutionGrader.Cli.Services
   ""Port"": ""{port}""
 }}";
                     
+                    string? tempFile = null;
                     try
                     {
                         // Write to temp file then copy to container
-                        var tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
+                        tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        File.Delete(tempFile);
                         Console.WriteLine($"[Appsettings] Generated server config: IP={serverIpAddress}, Port={port}");
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[WARNING] Failed to generate server appsettings: {ex.Message}");
+                    }
+                    finally
+                    {
+                        // Ensure temp file is cleaned up
+                        if (tempFile != null && File.Exists(tempFile))
+                            try { File.Delete(tempFile); } catch { }
                     }
                 }
             }
@@ -614,17 +626,23 @@ namespace SolutionGrader.Cli.Services
   ""Port"": ""{port}""
 }}";
                     
+                    string? tempFile = null;
                     try
                     {
-                        var tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
+                        tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        File.Delete(tempFile);
                         Console.WriteLine($"[Appsettings] Generated client config: IP={clientIpAddress}, Port={port}");
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[WARNING] Failed to generate client appsettings: {ex.Message}");
+                    }
+                    finally
+                    {
+                        // Ensure temp file is cleaned up
+                        if (tempFile != null && File.Exists(tempFile))
+                            try { File.Delete(tempFile); } catch { }
                     }
                 }
             }
@@ -637,9 +655,9 @@ namespace SolutionGrader.Cli.Services
         {
             // For Docker, connect to database container by name or localhost with mapped port
             var server = $"localhost,{config.DatabaseContainerHostPort}";
-            var database = testKitConfig.DatabaseName ?? "Library";
+            var database = testKitConfig.DatabaseName ?? DefaultDatabaseName;
             var username = config.DatabaseUsername ?? "sa";
-            var password = config.DatabasePassword ?? "YourStrong@Passw0rd";
+            var password = config.DatabasePassword ?? DefaultDatabasePassword;
             
             return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=true";
         }
@@ -808,7 +826,7 @@ namespace SolutionGrader.Cli.Services
                                     config.CodeContainerInternalPort.ToString(), 30000);
 
                                 // Wait for application to fully start and output to be flushed
-                                await Task.Delay(3000);
+                                await Task.Delay(StartupDelayMs);
                                 var output = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
                                 var newOutput = output.Length > previousServerOutput.Length ? output.Substring(previousServerOutput.Length) : output;
                                 serverOutputs[stage] = newOutput;
@@ -832,7 +850,7 @@ namespace SolutionGrader.Cli.Services
                                     clientContainer, clientContainer, dockerPath, "-1", 30000);
 
                                 // Wait for application to fully start and output to be flushed
-                                await Task.Delay(3000);
+                                await Task.Delay(StartupDelayMs);
                                 var output = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
                                 var newOutput = output.Length > previousClientOutput.Length ? output.Substring(previousClientOutput.Length) : output;
                                 clientOutputs[stage] = newOutput;
@@ -854,7 +872,7 @@ namespace SolutionGrader.Cli.Services
                             // 3. Client receives response and prints it
                             // 4. Client prints next prompt
                             // Also wait for output buffers to be flushed to Docker logs
-                            await Task.Delay(5000);
+                            await Task.Delay(InputProcessingDelayMs);
 
                             var clientOutput = _dockerExecutor.GetContainerLogs(clientContainer) ?? "";
                             var serverOutput = _dockerExecutor.GetContainerLogs(serverContainer) ?? "";
