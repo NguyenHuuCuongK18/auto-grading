@@ -1,0 +1,60 @@
+﻿[2025-12-01 13:17:20] [INFO] Starting grading for dongnvhe172649 (Paper 1)
+[2025-12-01 13:17:20] [DEBUG] Found exact test kit match for paper 1: Q1
+[2025-12-01 13:17:20] [DEBUG] Loaded marks from Header.xlsx: 0
+[2025-12-01 13:17:20] [DEBUG] Loaded environment config: Port 8000, Protocol TCP
+[2025-12-01 13:17:20] [INFO] Loaded test kit config: Q1 with 4 test cases, max mark: 0
+[2025-12-01 13:17:20] [INFO] Using ports - Internal: 8000, Host: 8000
+[2025-12-01 13:17:20] [INFO] Max mark from Header.xlsx: 0
+[2025-12-01 13:17:20] [INFO] Starting grading for 1 students
+[2025-12-01 13:17:20] [INFO] Starting grading for dongnvhe172649 (Paper 1)
+[2025-12-01 13:17:20] [INFO] Finding test kit...
+[2025-12-01 13:17:20] [DEBUG] Found exact test kit match for paper 1: Q1
+[2025-12-01 13:17:20] [DEBUG] Loaded marks from Header.xlsx: 0
+[2025-12-01 13:17:20] [DEBUG] Loaded environment config: Port 8000, Protocol TCP
+[2025-12-01 13:17:20] [INFO] Loaded test kit config: Q1 with 4 test cases, max mark: 0
+[2025-12-01 13:17:20] [INFO] Using test kit: Q1 (Max: 0 marks)
+[2025-12-01 13:17:20] [INFO] Setting up Docker containers...
+[2025-12-01 13:17:20] [INFO] Executing test cases...
+[2025-12-01 13:17:21] [INFO] Starting grading for student at C:\Users\PC\Documents\School\NET\auto-grading\Submit\1\dongnvhe172649\1\solution
+[2025-12-01 13:17:21] [INFO] Setting up Docker containers...
+[2025-12-01 13:17:21] [INFO] Starting database container...
+[2025-12-01 13:17:21] [INFO] Container setup complete
+[2025-12-01 13:17:22] [INFO] Found 4 test cases
+[2025-12-01 13:17:22] [INFO] Executing test case: TC1
+[2025-12-01 13:17:23] [INFO] Grading paused
+[2025-12-01 13:17:25] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:25] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:25] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:25] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:25] [INFO] Executing step 3: Input
+[2025-12-01 13:17:27] [INFO] Test case TC1: PASS (2.5/2.5)
+[2025-12-01 13:17:27] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:27] [INFO] Executing test case: TC2_Send
+[2025-12-01 13:17:31] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:31] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:31] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:31] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:31] [INFO] Executing step 3: Input
+[2025-12-01 13:17:32] [INFO] Test case TC2_Send: PASS (2.5/2.5)
+[2025-12-01 13:17:32] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:33] [INFO] Executing test case: TC3_ReqResNotC
+[2025-12-01 13:17:36] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:36] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:36] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:36] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:36] [INFO] Executing step 3: Input
+[2025-12-01 13:17:38] [INFO] Test case TC3_ReqResNotC: PASS (2.5/2.5)
+[2025-12-01 13:17:38] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:38] [INFO] Executing test case: TC4_Full
+[2025-12-01 13:17:41] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:41] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:41] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:41] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:41] [INFO] Executing step 3: Input
+[2025-12-01 13:17:43] [INFO] Test case TC4_Full: PASS (2.5/2.5)
+[2025-12-01 13:17:43] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:44] [INFO] Grading complete. Total marks: 10
+[2025-12-01 13:17:44] [INFO] Cleaning up containers...
+[2025-12-01 13:17:45] [INFO] Grading completed for dongnvhe172649: 10/0
+[2025-12-01 13:17:45] [INFO] Grading completed: 1 passed, 0 failed
+[2025-12-01 13:17:45] [INFO] Grading completed for dongnvhe172649. Mark: 10/0

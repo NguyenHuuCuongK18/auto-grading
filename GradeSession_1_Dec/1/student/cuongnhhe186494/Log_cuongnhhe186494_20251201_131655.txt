@@ -1,0 +1,60 @@
+﻿[2025-12-01 13:16:55] [INFO] Starting grading for cuongnhhe186494 (Paper 1)
+[2025-12-01 13:16:55] [DEBUG] Found exact test kit match for paper 1: Q1
+[2025-12-01 13:16:55] [DEBUG] Loaded marks from Header.xlsx: 0
+[2025-12-01 13:16:55] [DEBUG] Loaded environment config: Port 8000, Protocol TCP
+[2025-12-01 13:16:55] [INFO] Loaded test kit config: Q1 with 4 test cases, max mark: 0
+[2025-12-01 13:16:55] [INFO] Using ports - Internal: 8000, Host: 8000
+[2025-12-01 13:16:55] [INFO] Max mark from Header.xlsx: 0
+[2025-12-01 13:16:55] [INFO] Starting grading for 1 students
+[2025-12-01 13:16:56] [INFO] Starting grading for cuongnhhe186494 (Paper 1)
+[2025-12-01 13:16:56] [INFO] Finding test kit...
+[2025-12-01 13:16:56] [WARN] Mapping.xlsx does not have required columns (PaperNo, TestKit)
+[2025-12-01 13:16:56] [DEBUG] Found exact test kit match for paper 1: Q1
+[2025-12-01 13:16:56] [DEBUG] Loaded marks from Header.xlsx: 0
+[2025-12-01 13:16:56] [DEBUG] Loaded environment config: Port 8000, Protocol TCP
+[2025-12-01 13:16:56] [INFO] Loaded test kit config: Q1 with 4 test cases, max mark: 0
+[2025-12-01 13:16:56] [INFO] Using test kit: Q1 (Max: 0 marks)
+[2025-12-01 13:16:56] [INFO] Setting up Docker containers...
+[2025-12-01 13:16:56] [INFO] Executing test cases...
+[2025-12-01 13:16:56] [INFO] Starting grading for student at C:\Users\PC\Documents\School\NET\auto-grading\Submit\1\cuongnhhe186494\1\solution
+[2025-12-01 13:16:56] [INFO] Setting up Docker containers...
+[2025-12-01 13:16:56] [INFO] Starting database container...
+[2025-12-01 13:16:57] [INFO] Container setup complete
+[2025-12-01 13:16:58] [INFO] Found 4 test cases
+[2025-12-01 13:16:58] [INFO] Executing test case: TC1
+[2025-12-01 13:17:01] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:01] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:01] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:01] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:01] [INFO] Executing step 3: Input
+[2025-12-01 13:17:02] [INFO] Test case TC1: PASS (2.5/2.5)
+[2025-12-01 13:17:02] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:03] [INFO] Executing test case: TC2_Send
+[2025-12-01 13:17:06] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:06] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:06] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:06] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:06] [INFO] Executing step 3: Input
+[2025-12-01 13:17:08] [INFO] Test case TC2_Send: PASS (2.5/2.5)
+[2025-12-01 13:17:08] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:08] [INFO] Executing test case: TC3_ReqResNotC
+[2025-12-01 13:17:12] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:12] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:12] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:12] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:12] [INFO] Executing step 3: Input
+[2025-12-01 13:17:13] [INFO] Test case TC3_ReqResNotC: PASS (2.5/2.5)
+[2025-12-01 13:17:13] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:14] [INFO] Executing test case: TC4_Full
+[2025-12-01 13:17:17] [INFO] Executing step 1: StartClient
+[2025-12-01 13:17:17] [INFO] Unknown action: StartClient
+[2025-12-01 13:17:17] [INFO] Executing step 2: StartServer
+[2025-12-01 13:17:17] [INFO] Unknown action: StartServer
+[2025-12-01 13:17:17] [INFO] Executing step 3: Input
+[2025-12-01 13:17:19] [INFO] Test case TC4_Full: PASS (2.5/2.5)
+[2025-12-01 13:17:19] [INFO] Cleaning up for next test case...
+[2025-12-01 13:17:19] [INFO] Grading complete. Total marks: 10
+[2025-12-01 13:17:19] [INFO] Cleaning up containers...
+[2025-12-01 13:17:20] [INFO] Grading completed for cuongnhhe186494: 10/0
+[2025-12-01 13:17:20] [INFO] Grading completed: 1 passed, 0 failed
+[2025-12-01 13:17:20] [INFO] Grading completed for cuongnhhe186494. Mark: 10/0
