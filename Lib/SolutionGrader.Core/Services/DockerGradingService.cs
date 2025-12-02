@@ -1246,12 +1246,12 @@ namespace SolutionGrader.Core.Services
             // Step 1: Kill dotnet processes - use simple commands without complex shell syntax
             // On Windows, cmd.exe has issues with nested quotes, so we use simpler commands
             OnProgress($"Cleanup: Sending SIGTERM to dotnet in {serverContainer}...");
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -TERM -f dotnet", 5000); OnProgress("Cleanup: SIGTERM sent to server"); } 
-            catch (Exception ex) { OnProgress($"Cleanup: SIGTERM to server failed: {ex.Message}"); }
+            var serverTermResult = _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -TERM -f dotnet", 5000);
+            OnProgress($"Cleanup: Server SIGTERM result: {(serverTermResult ? "SUCCESS" : "FAILED (no process or error)")}");
             
             OnProgress($"Cleanup: Sending SIGTERM to dotnet in {clientContainer}...");
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -TERM -f dotnet", 5000); OnProgress("Cleanup: SIGTERM sent to client"); } 
-            catch (Exception ex) { OnProgress($"Cleanup: SIGTERM to client failed: {ex.Message}"); }
+            var clientTermResult = _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -TERM -f dotnet", 5000);
+            OnProgress($"Cleanup: Client SIGTERM result: {(clientTermResult ? "SUCCESS" : "FAILED (no process or error)")}");
             
             // Wait for graceful shutdown
             OnProgress("Cleanup: Waiting 1.5s for graceful shutdown...");
@@ -1259,23 +1259,20 @@ namespace SolutionGrader.Core.Services
             
             // Force kill if still running
             OnProgress("Cleanup: Sending SIGKILL to any remaining dotnet processes...");
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -KILL -f dotnet", 5000); } 
-            catch (Exception ex) { OnProgress($"Cleanup: SIGKILL to server failed (may be already dead): {ex.Message}"); }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -KILL -f dotnet", 5000); } 
-            catch (Exception ex) { OnProgress($"Cleanup: SIGKILL to client failed (may be already dead): {ex.Message}"); }
+            var serverKillResult = _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL -f dotnet", 5000);
+            var clientKillResult = _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL -f dotnet", 5000);
+            OnProgress($"Cleanup: SIGKILL results - Server: {(serverKillResult ? "killed" : "no process")}, Client: {(clientKillResult ? "killed" : "no process")}");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000); } catch { }
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000);
             
             // Step 3: Remove files from /apps folder and temp files
             OnProgress("Cleanup: Removing files from containers...");
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000); } catch { }
-            
-            Console.WriteLine("[Cleanup] Processes killed, files removed from containers");
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
             
             // Step 4: Clear network captures for next test case
             // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
