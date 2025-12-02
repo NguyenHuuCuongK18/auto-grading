@@ -357,9 +357,21 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
             }
             
-            // Create captured packet record
+            // Parse stage from string to int for storage
+            // If _currentStage is not a valid integer, default to 0 (initial stage before actions start)
+            if (!int.TryParse(_currentStage, out int stageNum))
+            {
+                if (!string.IsNullOrEmpty(_currentStage))
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Warning: Could not parse stage '{_currentStage}' as integer, using 0");
+                }
+                stageNum = 0;
+            }
+            
+            // Create captured packet record with stage stored at capture time
             var capturedPacket = new CapturedNetworkPacket
             {
+                Stage = stageNum,
                 Timestamp = rawPacket.Timeval.Date,
                 Flags = flags,
                 State = state,

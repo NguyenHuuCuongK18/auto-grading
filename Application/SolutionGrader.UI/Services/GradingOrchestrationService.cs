@@ -196,8 +196,10 @@ namespace SolutionGrader.UI.Services
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                // Result folder for this student: {resultPath}/{paperNo}/student/{studentCode}
-                var studentResultPath = Path.Combine(resultPath, student.PaperNo, "student", student.StudentCode);
+                // Result folder for this student - simplified to: {resultPath}/{studentCode}
+                // Previous structure: {resultPath}/{paperNo}/student/{studentCode}/GradeResult_date/{studentCode}
+                // New simplified structure: {resultPath}/{studentCode}
+                var studentResultPath = Path.Combine(resultPath, student.StudentCode);
                 
                 // Get student's DLL paths (client and/or server)
                 var clientDllPath = GetStudentExecutablePath(student, config, "Client");

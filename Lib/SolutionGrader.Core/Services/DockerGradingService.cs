@@ -46,11 +46,13 @@ namespace SolutionGrader.Core.Services
     /// </summary>
     public sealed class DockerGradingService
     {
-        // Timing constants
-        private const int StartupDelayMs = 3000;
-        private const int InputProcessingDelayMs = 5000;
+        // Timing constants - optimized for faster execution
+        // These are fallback values; prefer using config.TestCaseTimeoutSeconds
+        private const int StartupDelayMs = 1500;  // Reduced from 3000 - wait for process to start
+        private const int InputProcessingDelayMs = 2000;  // Reduced from 5000 - wait for input to be processed
         private const int OutputRetryMaxAttempts = 5;
-        private const int OutputRetryDelayMs = 1000;
+        private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
+        private const int DefaultTestCaseTimeoutSeconds = 15;  // 15 seconds per test case default
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
@@ -69,6 +71,24 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
+        }
+        
+        /// <summary>
+        /// Builds a safe shell command to kill dotnet processes in a container.
+        /// This command explicitly excludes PID 1 to avoid killing the container's main process.
+        /// </summary>
+        /// <param name="containerName">The Docker container name</param>
+        /// <returns>The safe kill command for docker exec</returns>
+        private static string BuildSafeDotnetKillCommand(string containerName)
+        {
+            // Find dotnet PIDs (excluding PID 1) and kill them
+            // - ps aux: list all processes
+            // - grep dotnet: filter for dotnet processes
+            // - grep -v grep: exclude the grep process itself
+            // - awk '{if ($2 != 1) print $2}': extract PIDs, excluding PID 1
+            // - xargs -r kill -9: kill the processes (-r means don't run if no input)
+            // - 2>/dev/null || true: suppress errors and always return success
+            return $"{containerName} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
         }
         
         /// <summary>
@@ -274,12 +294,34 @@ namespace SolutionGrader.Core.Services
                     }
                     isFirstTestCase = false;
                     
-                    OnProgress($"Executing test case: {testCase.Name}...");
+                    // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
+                    var testCaseTimeout = testCase.TimeoutSeconds;
+                    OnProgress($"Executing test case: {testCase.Name} (timeout: {testCaseTimeout}s)...");
                     
-                    var tcResult = await ExecuteTestCaseAsync(
-                        testCase, testKitConfig, config, 
-                        actualServerDllPath, actualClientDllPath,
-                        serverContainer, clientContainer, ct);
+                    using var testCaseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    testCaseCts.CancelAfter(TimeSpan.FromSeconds(testCaseTimeout));
+                    
+                    TestCaseResult tcResult;
+                    try
+                    {
+                        tcResult = await ExecuteTestCaseAsync(
+                            testCase, testKitConfig, config, 
+                            actualServerDllPath, actualClientDllPath,
+                            serverContainer, clientContainer, testCaseCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Test case timed out (not overall cancellation)
+                        OnProgress($"Test case {testCase.Name} timed out after {testCaseTimeout}s");
+                        tcResult = new TestCaseResult
+                        {
+                            TestCaseName = testCase.Name,
+                            MaxMark = testCase.MaxMark,
+                            EarnedMark = 0,
+                            Passed = false,
+                            ErrorMessage = $"Test case timed out after {testCaseTimeout} seconds"
+                        };
+                    }
                     
                     result.TestCaseResults.Add(tcResult);
                     
@@ -631,7 +673,10 @@ namespace SolutionGrader.Core.Services
             try
             {
                 // Clear network captures for this test case
+                // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
+                // only traffic from this test case is captured
                 _networkMonitor?.ClearCaptures();
+                _runContext.ClearNetworkCaptures();
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
                 // Read Detail.xlsx
@@ -729,7 +774,8 @@ namespace SolutionGrader.Core.Services
             {
                 packets.Add(new CapturedPacketInfo
                 {
-                    Stage = _runContext.CurrentStage ?? 0,
+                    // Use the stage stored at capture time, not the current stage
+                    Stage = packet.Stage,
                     Timestamp = packet.Timestamp,
                     Flags = packet.Flags,
                     State = packet.State,
@@ -878,12 +924,14 @@ namespace SolutionGrader.Core.Services
                         break;
                         
                     case "CLOSECLIENT":
-                        try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -f dotnet", 5000); } catch { }
+                        // Use safe kill method that excludes PID 1 to avoid killing the container
+                        try { _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(clientContainer), 5000); } catch { }
                         clientBaseline = 0;
                         break;
                         
                     case "CLOSESERVER":
-                        try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -f dotnet", 5000); } catch { }
+                        // Use safe kill method that excludes PID 1 to avoid killing the container
+                        try { _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(serverContainer), 5000); } catch { }
                         serverBaseline = 0;
                         break;
                 }
@@ -1072,7 +1120,7 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // Discover test cases
+            // Discover test cases and read per-test-case timeout from Header.xlsx
             tkConfig.TestCases = Directory.GetDirectories(testKitPath)
                 .Where(d => !Path.GetFileName(d).Equals("Meta", StringComparison.OrdinalIgnoreCase))
                 .Where(d => File.Exists(Path.Combine(d, "Detail.xlsx")))
@@ -1080,7 +1128,8 @@ namespace SolutionGrader.Core.Services
                 {
                     Name = Path.GetFileName(d),
                     Path = d,
-                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0
+                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
+                    TimeoutSeconds = ReadTestCaseTimeout(d, config.TestCaseTimeoutSeconds)
                 })
                 .OrderBy(tc => tc.Name)
                 .ToList();
@@ -1132,6 +1181,49 @@ namespace SolutionGrader.Core.Services
                 tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
             
             return tkConfig;
+        }
+        
+        /// <summary>
+        /// Reads the per-test-case timeout from the test case's Header.xlsx file.
+        /// Looks for the Testcase_Property sheet and finds the Timeout(Seconds) row.
+        /// Falls back to the default timeout if not found or on error.
+        /// </summary>
+        /// <param name="testCasePath">Path to the test case folder</param>
+        /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
+        /// <returns>Timeout in seconds</returns>
+        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
+        {
+            var headerPath = Path.Combine(testCasePath, "Header.xlsx");
+            if (!File.Exists(headerPath))
+                return defaultTimeout;
+            
+            try
+            {
+                using var wb = new XLWorkbook(headerPath);
+                if (wb.TryGetWorksheet("Testcase_Property", out var ws))
+                {
+                    foreach (var row in ws.RowsUsed())
+                    {
+                        var key = row.Cell(1).GetValue<string>()?.Trim();
+                        if (key?.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) == true ||
+                            key?.Equals("Timeout", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            var valueStr = row.Cell(2).GetValue<string>()?.Trim();
+                            if (int.TryParse(valueStr, out var timeout) && timeout > 0)
+                            {
+                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
+                                return timeout;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TestKit] Warning: Could not read timeout from {headerPath}: {ex.Message}");
+            }
+            
+            return defaultTimeout;
         }
         
         private List<(int Stage, string Input, string Action)> ReadActions(string detailPath)
@@ -1238,6 +1330,8 @@ namespace SolutionGrader.Core.Services
         /// CRITICAL: This cleanup must be thorough to prevent "Address already in use" errors.
         /// The files will be re-copied before the next test case starts.
         /// This approach is much faster than disposing/rebuilding containers.
+        /// 
+        /// OPTIMIZATION: Reduced delays from 1.5s to 500ms for faster cleanup.
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
@@ -1248,9 +1342,9 @@ namespace SolutionGrader.Core.Services
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown
-            OnProgress("Cleanup: Waiting 1.5s for graceful shutdown...");
-            await Task.Delay(1500);
+            // Wait for graceful shutdown - reduced from 1.5s to 500ms
+            OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
+            await Task.Delay(500);
             
             // Force kill any remaining dotnet processes
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
@@ -1258,15 +1352,15 @@ namespace SolutionGrader.Core.Services
             await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 3000);
             
             // Step 3: Remove files from /apps folder and temp files
             OnProgress("Cleanup: Removing files from containers...");
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             
             // Step 4: Clear network captures for next test case
             // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
@@ -1277,12 +1371,12 @@ namespace SolutionGrader.Core.Services
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 6: Wait for port release with timeout (5 seconds max, check every 200ms)
+            // Step 6: Wait for port release with timeout (3 seconds max, check every 100ms)
             OnProgress($"Cleanup: Waiting for port {hostPort} to be released...");
             var portCheckStart = DateTime.UtcNow;
             bool portReleased = false;
             
-            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 5)
+            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 3)
             {
                 try
                 {
@@ -1295,13 +1389,13 @@ namespace SolutionGrader.Core.Services
                 }
                 catch
                 {
-                    await Task.Delay(200);
+                    await Task.Delay(100);  // Reduced from 200ms
                 }
             }
             
             if (!portReleased)
             {
-                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 5s timeout - next test case may fail");
+                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 3s timeout - next test case may fail");
             }
             
             OnProgress("Cleanup: Complete, ready for next test case");
@@ -1321,8 +1415,9 @@ namespace SolutionGrader.Core.Services
             
             if (!success || string.IsNullOrEmpty(output))
             {
-                OnProgress($"Cleanup: {containerType} - Could not list processes (ps aux failed), trying pkill fallback...");
-                _dockerExecutor.TryExecDockerCommand($"{container} pkill -TERM -f dotnet", 5000);
+                OnProgress($"Cleanup: {containerType} - Could not list processes (ps aux failed), using safe kill fallback...");
+                // Use safe kill method that excludes PID 1 to avoid killing the container
+                _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(container), 5000);
                 return;
             }
             
@@ -1357,8 +1452,8 @@ namespace SolutionGrader.Core.Services
             
             if (!success || string.IsNullOrEmpty(output))
             {
-                // Fall back to pkill
-                _dockerExecutor.TryExecDockerCommand($"{container} pkill -9 -f dotnet", 5000);
+                // Use safe kill method that excludes PID 1 to avoid killing the container
+                _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(container), 5000);
                 return;
             }
             
@@ -1712,7 +1807,17 @@ namespace SolutionGrader.Core.Services
         public string? DatabaseUsername { get; set; } = "sa";
         public string? DatabasePassword { get; set; }
         
+        /// <summary>
+        /// Total grading timeout in seconds (overall timeout for all test cases).
+        /// Default: 60 seconds.
+        /// </summary>
         public int GradingTimeoutSeconds { get; set; } = 60;
+        
+        /// <summary>
+        /// Per-test-case timeout in seconds. If a test case takes longer than this,
+        /// it is stopped and marked as failed. Default: 15 seconds.
+        /// </summary>
+        public int TestCaseTimeoutSeconds { get; set; } = 15;
     }
     
     /// <summary>
@@ -1750,6 +1855,11 @@ namespace SolutionGrader.Core.Services
         public string Name { get; set; } = "";
         public string Path { get; set; } = "";
         public double MaxMark { get; set; }
+        /// <summary>
+        /// Per-test-case timeout in seconds, read from Header.xlsx Testcase_Property sheet.
+        /// Defaults to 15 seconds if not specified in the test kit.
+        /// </summary>
+        public int TimeoutSeconds { get; set; } = 15;
     }
     
     internal class ExpectedNetworkFlow

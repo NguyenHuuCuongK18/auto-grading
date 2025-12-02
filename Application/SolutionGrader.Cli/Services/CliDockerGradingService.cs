@@ -124,8 +124,9 @@ namespace SolutionGrader.Cli.Services
                     return result;
                 }
 
-                // Create student result path
-                var studentResultPath = Path.Combine(config.SaveResultFolderPath, student.PaperNo, "student", student.StudentCode);
+                // Create student result path - simplified to: {saveResultFolder}/{studentCode}
+                // This matches the UI's simplified structure
+                var studentResultPath = Path.Combine(config.SaveResultFolderPath, student.StudentCode);
                 Directory.CreateDirectory(studentResultPath);
 
                 // Build DockerGradingConfig from CLI config
@@ -144,7 +145,8 @@ namespace SolutionGrader.Cli.Services
                     DatabaseContainerHostPort = config.DatabaseContainerHostPort,
                     DatabaseUsername = config.DatabaseUsername,
                     DatabasePassword = config.DatabasePassword,
-                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds,
+                    TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds
                 };
 
                 // Create the SHARED services (same as SolutionGrader.UI)

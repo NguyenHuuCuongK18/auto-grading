@@ -70,9 +70,15 @@ namespace SolutionGrader.Cli.Services
         public string DockerNetwork { get; set; } = "auto-grading-network";
 
         /// <summary>
-        /// Timeout in seconds for grading operations
+        /// Timeout in seconds for grading operations (overall)
         /// </summary>
         public int GradingTimeoutSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Timeout in seconds per test case. If a test case exceeds this limit,
+        /// it is stopped and marked as failed. Default: 15 seconds.
+        /// </summary>
+        public int TestCaseTimeoutSeconds { get; set; } = 15;
 
         /// <summary>
         /// Database Docker image name (e.g., mcr.microsoft.com/mssql/server:2019-latest)
