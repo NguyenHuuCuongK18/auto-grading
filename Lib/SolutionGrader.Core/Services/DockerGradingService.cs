@@ -589,6 +589,14 @@ namespace SolutionGrader.Core.Services
                 var expectedOutputs = ReadExpectedOutputs(detailPath);
                 var expectedNetwork = ReadExpectedNetwork(detailPath);
                 
+                // Populate Actions for User sheet
+                result.Actions = actions.Select(a => new ActionRecord
+                {
+                    Stage = a.Stage,
+                    Input = a.Input,
+                    ActionType = a.Action
+                }).ToList();
+                
                 // Execute actions and capture outputs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(
                     actions, config, testKitConfig,
@@ -601,6 +609,21 @@ namespace SolutionGrader.Core.Services
                 
                 // Compare network (if expected)
                 var networkComparisons = CompareNetwork(expectedNetwork);
+                
+                // Get captured network packets for Network sheet
+                var capturedPackets = GetCapturedNetworkPackets();
+                result.NetworkCaptures = capturedPackets.Select(p => new NetworkCaptureRecord
+                {
+                    Stage = p.Stage,
+                    Timestamp = p.Timestamp,
+                    Flags = p.Flags,
+                    State = p.State,
+                    SourceRole = p.SourceRole,
+                    DestinationRole = p.DestinationRole,
+                    Data = p.Data,
+                    SourcePort = p.SourcePort,
+                    DestinationPort = p.DestinationPort
+                }).ToList();
                 
                 result.EarnedMark = earnedMark;
                 result.Passed = passed;
@@ -615,6 +638,50 @@ namespace SolutionGrader.Core.Services
             }
             
             return result;
+        }
+        
+        /// <summary>
+        /// Gets all captured network packets from the NetworkMonitor.
+        /// </summary>
+        private List<CapturedPacketInfo> GetCapturedNetworkPackets()
+        {
+            var packets = new List<CapturedPacketInfo>();
+            
+            if (_networkMonitor == null)
+                return packets;
+            
+            // Get all captured packets from the monitor
+            var capturedPackets = _runContext.GetCapturedNetworkPackets("", "");
+            foreach (var packet in capturedPackets)
+            {
+                packets.Add(new CapturedPacketInfo
+                {
+                    Stage = _runContext.CurrentStage ?? 0,
+                    Timestamp = packet.Timestamp,
+                    Flags = packet.Flags,
+                    State = packet.State,
+                    SourceRole = packet.SourceRole,
+                    DestinationRole = packet.DestinationRole,
+                    Data = packet.Data,
+                    SourcePort = packet.SourcePort,
+                    DestinationPort = packet.DestinationPort
+                });
+            }
+            
+            return packets;
+        }
+        
+        private class CapturedPacketInfo
+        {
+            public int Stage { get; set; }
+            public DateTime Timestamp { get; set; }
+            public string Flags { get; set; } = "";
+            public string State { get; set; } = "";
+            public string SourceRole { get; set; } = "";
+            public string DestinationRole { get; set; } = "";
+            public string? Data { get; set; }
+            public int SourcePort { get; set; }
+            public int DestinationPort { get; set; }
         }
         
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
@@ -1123,76 +1190,180 @@ namespace SolutionGrader.Core.Services
         
         #region Result Writing
         
+        /// <summary>
+        /// Writes test case result to GradeDetail.xlsx in the EXACT SampleLogging format:
+        /// - User sheet: Stage, Input, Action, DataType, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt
+        /// - Client sheet: Stage, Console, Input, DataType, Action, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt, ClientStdout
+        /// - Server sheet: Stage, Console, Input, DataType, Action, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt, ServerStdout
+        /// - Network sheet: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
+        /// - Database sheet: (empty)
+        /// </summary>
         private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result)
         {
             var detailPath = Path.Combine(tcResultPath, "GradeDetail.xlsx");
             using var wb = new XLWorkbook();
             
-            // User sheet
+            // === User Sheet ===
+            // Contains the action steps (StartClient, StartServer, Input, etc.)
             var userWs = wb.Worksheets.Add("User");
-            userWs.Cell(1, 1).Value = "TestCase";
-            userWs.Cell(1, 2).Value = "MaxMark";
-            userWs.Cell(1, 3).Value = "EarnedMark";
-            userWs.Cell(1, 4).Value = "Passed";
-            userWs.Row(1).Style.Font.Bold = true;
-            userWs.Cell(2, 1).Value = tcName;
-            userWs.Cell(2, 2).Value = result.MaxMark;
-            userWs.Cell(2, 3).Value = result.EarnedMark;
-            userWs.Cell(2, 4).Value = result.Passed ? "PASS" : "FAIL";
+            SetUserSheetHeaders(userWs);
+            int userRow = 2;
+            foreach (var action in result.Actions)
+            {
+                userWs.Cell(userRow, 1).Value = action.Stage;
+                userWs.Cell(userRow, 2).Value = action.Input ?? "";
+                userWs.Cell(userRow, 3).Value = action.ActionType ?? "";
+                // DataType, Result, etc. are optional for action rows
+                userRow++;
+            }
+            userWs.Columns().AdjustToContents();
             
-            // Client sheet
+            // === Client Sheet ===
+            // Contains client console output comparisons
             var clientWs = wb.Worksheets.Add("Client");
-            clientWs.Cell(1, 1).Value = "Stage";
-            clientWs.Cell(1, 2).Value = "Expected";
-            clientWs.Cell(1, 3).Value = "Actual";
-            clientWs.Cell(1, 4).Value = "Result";
-            clientWs.Row(1).Style.Font.Bold = true;
-            int row = 2;
+            SetClientSheetHeaders(clientWs);
+            int clientRow = 2;
             foreach (var comp in result.ClientComparisons)
             {
-                clientWs.Cell(row, 1).Value = comp.Stage;
-                clientWs.Cell(row, 2).Value = comp.Expected ?? "";
-                clientWs.Cell(row, 3).Value = comp.Actual ?? "";
-                clientWs.Cell(row, 4).Value = comp.Passed ? "PASS" : "FAIL";
-                row++;
+                clientWs.Cell(clientRow, 1).Value = comp.Stage;  // Stage
+                clientWs.Cell(clientRow, 2).Value = comp.Expected ?? "";  // Console (expected)
+                // Skip Input, DataType, Action
+                clientWs.Cell(clientRow, 6).Value = comp.Passed ? "PASS" : "FAIL";  // Result
+                clientWs.Cell(clientRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";  // ErrorCode
+                clientWs.Cell(clientRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";  // ErrorCategory
+                clientWs.Cell(clientRow, 9).Value = comp.PointsAwarded;  // PointsAwarded
+                clientWs.Cell(clientRow, 10).Value = comp.PointsPossible;  // PointsPossible
+                clientWs.Cell(clientRow, 11).Value = comp.DurationMs;  // DurationMs
+                clientWs.Cell(clientRow, 13).Value = comp.Passed ? "Text comparison passed: client output matches exactly" : "Text comparison failed: client output mismatch";  // Message
+                clientWs.Cell(clientRow, 19).Value = comp.Actual ?? "";  // ClientStdout
+                clientRow++;
             }
+            clientWs.Columns().AdjustToContents();
             
-            // Server sheet
+            // === Server Sheet ===
+            // Contains server console output comparisons
             var serverWs = wb.Worksheets.Add("Server");
-            serverWs.Cell(1, 1).Value = "Stage";
-            serverWs.Cell(1, 2).Value = "Expected";
-            serverWs.Cell(1, 3).Value = "Actual";
-            serverWs.Cell(1, 4).Value = "Result";
-            serverWs.Row(1).Style.Font.Bold = true;
-            row = 2;
+            SetServerSheetHeaders(serverWs);
+            int serverRow = 2;
             foreach (var comp in result.ServerComparisons)
             {
-                serverWs.Cell(row, 1).Value = comp.Stage;
-                serverWs.Cell(row, 2).Value = comp.Expected ?? "";
-                serverWs.Cell(row, 3).Value = comp.Actual ?? "";
-                serverWs.Cell(row, 4).Value = comp.Passed ? "PASS" : "FAIL";
-                row++;
+                serverWs.Cell(serverRow, 1).Value = comp.Stage;  // Stage
+                serverWs.Cell(serverRow, 2).Value = comp.Expected ?? "";  // Console (expected)
+                // Skip Input, DataType, Action
+                serverWs.Cell(serverRow, 6).Value = comp.Passed ? "PASS" : "FAIL";  // Result
+                serverWs.Cell(serverRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";  // ErrorCode
+                serverWs.Cell(serverRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";  // ErrorCategory
+                serverWs.Cell(serverRow, 9).Value = comp.PointsAwarded;  // PointsAwarded
+                serverWs.Cell(serverRow, 10).Value = comp.PointsPossible;  // PointsPossible
+                serverWs.Cell(serverRow, 11).Value = comp.DurationMs;  // DurationMs
+                serverWs.Cell(serverRow, 13).Value = comp.Passed ? "Text comparison passed: server output matches exactly" : "Text comparison failed: server output mismatch";  // Message
+                serverWs.Cell(serverRow, 19).Value = comp.Actual ?? "";  // ServerStdout
+                serverRow++;
+            }
+            serverWs.Columns().AdjustToContents();
+            
+            // === Database Sheet ===
+            // Empty placeholder for database operations
+            wb.Worksheets.Add("Database");
+            
+            // === Network Sheet ===
+            // Contains TCP packet captures in the EXACT SampleLogging format
+            var netWs = wb.Worksheets.Add("Network");
+            SetNetworkSheetHeaders(netWs);
+            int netRow = 2;
+            foreach (var packet in result.NetworkCaptures)
+            {
+                netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
+                netWs.Cell(netRow, 3).Value = "TCP";  // Info
+                netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
+                netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
+                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags (expected)
+                netWs.Cell(netRow, 7).Value = packet.State;  // State (expected)
+                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data (expected)
+                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole (expected)
+                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole (expected)
+                netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                netWs.Cell(netRow, 16).Value = "PASS";  // NetworkResult (captured = pass)
+                netRow++;
             }
             
-            // Network sheet
-            var netWs = wb.Worksheets.Add("Network");
-            netWs.Cell(1, 1).Value = "Stage";
-            netWs.Cell(1, 2).Value = "Expected";
-            netWs.Cell(1, 3).Value = "Actual";
-            netWs.Cell(1, 4).Value = "Result";
-            netWs.Row(1).Style.Font.Bold = true;
-            row = 2;
-            foreach (var comp in result.NetworkComparisons)
+            // If no captures but we have expected network flows, log them as FAIL
+            if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
             {
-                netWs.Cell(row, 1).Value = comp.Stage;
-                netWs.Cell(row, 2).Value = comp.Expected ?? "";
-                netWs.Cell(row, 3).Value = comp.Actual ?? "";
-                netWs.Cell(row, 4).Value = comp.Passed ? "PASS" : "FAIL";
-                row++;
+                foreach (var comp in result.NetworkComparisons)
+                {
+                    netWs.Cell(netRow, 1).Value = comp.Stage;
+                    netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
+                    netWs.Cell(netRow, 16).Value = "FAIL";  // NetworkResult
+                    netRow++;
+                }
             }
+            netWs.Columns().AdjustToContents();
             
             wb.SaveAs(detailPath);
+            
+            // Also write TC_Result.xlsx (summary file per test case)
+            var resultFilePath = Path.Combine(tcResultPath, $"{tcName}_Result.xlsx");
+            using var resultWb = new XLWorkbook();
+            var resultWs = resultWb.Worksheets.Add("Result");
+            resultWs.Cell(1, 1).Value = "TestCase";
+            resultWs.Cell(1, 2).Value = "Passed";
+            resultWs.Cell(1, 3).Value = "EarnedMark";
+            resultWs.Cell(1, 4).Value = "MaxMark";
+            resultWs.Row(1).Style.Font.Bold = true;
+            resultWs.Cell(2, 1).Value = tcName;
+            resultWs.Cell(2, 2).Value = result.Passed ? "PASS" : "FAIL";
+            resultWs.Cell(2, 3).Value = result.EarnedMark;
+            resultWs.Cell(2, 4).Value = result.MaxMark;
+            resultWs.Columns().AdjustToContents();
+            resultWb.SaveAs(resultFilePath);
+            
             await Task.CompletedTask;
+        }
+        
+        private static void SetUserSheetHeaders(IXLWorksheet ws)
+        {
+            var headers = new[] { "Stage", "Input", "Action", "DataType", "Result", "ErrorCode", "ErrorCategory", 
+                "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", "DiffIndex", 
+                "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
+        }
+        
+        private static void SetClientSheetHeaders(IXLWorksheet ws)
+        {
+            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode", 
+                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", 
+                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ClientStdout" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
+        }
+        
+        private static void SetServerSheetHeaders(IXLWorksheet ws)
+        {
+            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode", 
+                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", 
+                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ServerStdout" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
+        }
+        
+        private static void SetNetworkSheetHeaders(IXLWorksheet ws)
+        {
+            var headers = new[] { "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
+                "SourceRole", "DestinationRole", "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", 
+                "ActualData", "NetworkResult" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
         }
         
         private async Task WriteOverallSummaryAsync(string studentResultPath, List<TestCaseResult> results)
@@ -1338,7 +1509,7 @@ namespace SolutionGrader.Core.Services
     }
     
     /// <summary>
-    /// Result of a single test case.
+    /// Result of a single test case - matches SampleLogging format.
     /// </summary>
     public class TestCaseResult
     {
@@ -1347,13 +1518,35 @@ namespace SolutionGrader.Core.Services
         public double MaxMark { get; set; }
         public bool Passed { get; set; }
         public string? ErrorMessage { get; set; }
+        
+        /// <summary>Actions executed (StartClient, StartServer, Input, etc.) - for User sheet</summary>
+        public List<ActionRecord> Actions { get; set; } = new();
+        
+        /// <summary>Client console output comparisons - for Client sheet</summary>
         public List<ComparisonResult> ClientComparisons { get; set; } = new();
+        
+        /// <summary>Server console output comparisons - for Server sheet</summary>
         public List<ComparisonResult> ServerComparisons { get; set; } = new();
+        
+        /// <summary>Network flow comparisons - for Network sheet (expected vs actual)</summary>
         public List<ComparisonResult> NetworkComparisons { get; set; } = new();
+        
+        /// <summary>Captured network packets - for Network sheet (raw captures)</summary>
+        public List<NetworkCaptureRecord> NetworkCaptures { get; set; } = new();
     }
     
     /// <summary>
-    /// Comparison result for console output or network.
+    /// Action record for User sheet (StartClient, StartServer, Input, etc.)
+    /// </summary>
+    public class ActionRecord
+    {
+        public int Stage { get; set; }
+        public string? Input { get; set; }
+        public string? ActionType { get; set; }
+    }
+    
+    /// <summary>
+    /// Comparison result for console output or network - extended with SampleLogging fields.
     /// </summary>
     public class ComparisonResult
     {
@@ -1362,6 +1555,28 @@ namespace SolutionGrader.Core.Services
         public string? Expected { get; set; }
         public string? Actual { get; set; }
         public bool Passed { get; set; }
+        
+        // Additional fields for SampleLogging format
+        public double PointsAwarded { get; set; }
+        public double PointsPossible { get; set; }
+        public double DurationMs { get; set; }
+        public string? Message { get; set; }
+    }
+    
+    /// <summary>
+    /// Network capture record for Network sheet - matches SampleLogging format exactly.
+    /// </summary>
+    public class NetworkCaptureRecord
+    {
+        public int Stage { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string Flags { get; set; } = "";
+        public string State { get; set; } = "";
+        public string SourceRole { get; set; } = "";
+        public string DestinationRole { get; set; } = "";
+        public string? Data { get; set; }
+        public int SourcePort { get; set; }
+        public int DestinationPort { get; set; }
     }
     
     /// <summary>
