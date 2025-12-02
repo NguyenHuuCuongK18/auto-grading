@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Linq;
 using PacketDotNet;
 using SharpPcap;
 using SharpPcap.LibPcap;
@@ -26,6 +27,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     private readonly IRunContext _run;
     private readonly object _lock = new();
     private ICaptureDevice? _device;
+    private readonly List<ICaptureDevice> _devices = new();
     private CancellationTokenSource? _cts;
     private Task? _captureTask;
     private bool _isCapturing;
@@ -61,14 +63,27 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             if (_isCapturing) return;
             
+            if (MonitorPort <= 0)
+            {
+                var msg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: MonitorPort is not set to a valid port (>0). Cannot start capture.";
+                Console.WriteLine(msg);
+                throw new InvalidOperationException(msg);
+            }
+            
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} {string.Format(NetworkKeywords.MSG_MONITOR_STARTING, MonitorPort, ProtocolType)}");
             
             _serverPort = MonitorPort;
             _portRoleMap[_serverPort] = NetworkKeywords.Role_Server;
             
-            // Find a suitable capture device (loopback interface)
-            _device = FindLoopbackDevice();
-            if (_device == null)
+            // Find suitable capture devices (multiple to cover host loopback, Docker bridges, WSL/Hyper-V vSwitch)
+            _devices.Clear();
+            var found = FindCandidateDevices();
+            foreach (var dev in found)
+            {
+                _devices.Add(dev);
+            }
+
+            if (_devices.Count == 0)
             {
                 var errorMsg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: No suitable capture device found! Network monitoring is MANDATORY for grading. " +
                               "On Linux, ensure libpcap is installed and run with sudo. On Windows, ensure NPcap is installed.";
@@ -79,25 +94,55 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             
             try
             {
-                // Open the device for capture
-                if (_device is LibPcapLiveDevice libPcapDevice)
+                // Open each device and apply BPF filter
+                foreach (var dev in _devices)
                 {
-                    libPcapDevice.Open(DeviceModes.Promiscuous, 100);
+                    try
+                    {
+                        if (dev is LibPcapLiveDevice libPcapDevice)
+                        {
+                            libPcapDevice.Open(DeviceModes.Promiscuous, 100);
+                        }
+                        else
+                        {
+                            dev.Open(DeviceModes.Promiscuous);
+                        }
+
+                        // Prefer TCP filter; fall back to generic port filter if needed
+                        try
+                        {
+                            dev.Filter = $"tcp port {MonitorPort}";
+                        }
+                        catch
+                        {
+                            dev.Filter = $"port {MonitorPort}";
+                        }
+                    }
+                    catch (Exception openEx)
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Failed to open device {dev.Name}: {openEx.Message}");
+                    }
                 }
-                else
+
+                // Keep a reference to the first device for legacy code paths
+                _device = _devices.FirstOrDefault();
+                
+                if (_device == null)
                 {
-                    _device.Open(DeviceModes.Promiscuous);
+                    var errorMsg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: Failed to open any capture device for monitoring port {MonitorPort}.";
+                    Console.WriteLine(errorMsg);
+                    foreach (var d in _devices)
+                    {
+                        try { d.Close(); } catch { }
+                    }
+                    _devices.Clear();
+                    throw new InvalidOperationException(errorMsg);
                 }
                 
-                // Set capture filter for the port we're monitoring (both directions)
-                _device.Filter = $"port {MonitorPort}";
-                
-                // Create internal cancellation token source - NOT linked to external ct
-                // This prevents step-level timeouts from stopping the network monitor prematurely
                 _cts = new CancellationTokenSource();
                 _isCapturing = true;
                 
-                // Start capture in background
+                // Start capture in background on all opened devices
                 _captureTask = Task.Run(() => CaptureLoop(_cts.Token), _cts.Token);
                 
                 Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} {NetworkKeywords.MSG_MONITOR_STARTED}");
@@ -108,9 +153,13 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                               "Network monitoring is MANDATORY for grading. " +
                               "On Linux, ensure libpcap is installed and run with sudo. On Windows, ensure NPcap is installed.";
                 Console.WriteLine(errorMsg);
-                _device?.Close();
+                try { _device?.Close(); } catch { }
+                foreach (var d in _devices)
+                {
+                    try { d.Close(); } catch { }
+                }
                 _device = null;
-                // Network monitoring is mandatory - throw exception to fail grading
+                _devices.Clear();
                 throw new InvalidOperationException(errorMsg, ex);
             }
         }
@@ -142,6 +191,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             
             try
             {
+                foreach (var dev in _devices)
+                {
+                    try { dev.StopCapture(); } catch { }
+                }
                 _device?.StopCapture();
             }
             catch { }
@@ -161,11 +214,16 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             try
             {
+                foreach (var dev in _devices)
+                {
+                    try { dev.Close(); } catch { }
+                }
                 _device?.Close();
             }
             catch { }
             
             _device = null;
+            _devices.Clear();
             _cts?.Dispose();
             _cts = null;
             _captureTask = null;
@@ -259,9 +317,13 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     {
         try
         {
-            _device!.OnPacketArrival += OnPacketArrival;
-            _device.StartCapture();
-            
+            // Attach handler and start capture on all opened devices
+            foreach (var dev in _devices)
+            {
+                dev.OnPacketArrival += OnPacketArrival;
+                try { dev.StartCapture(); } catch (Exception startEx) { Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Failed to start capture on {dev.Name}: {startEx.Message}"); }
+            }
+
             // Keep running until cancelled
             while (!ct.IsCancellationRequested && _isCapturing)
             {
@@ -278,9 +340,9 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         }
         finally
         {
-            if (_device != null)
+            foreach (var dev in _devices)
             {
-                _device.OnPacketArrival -= OnPacketArrival;
+                try { dev.OnPacketArrival -= OnPacketArrival; } catch { }
             }
         }
     }
@@ -303,27 +365,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // ===================================================================================
-            // SIMPLIFIED PORT FILTERING LOGIC - Fixed to avoid over-aggressive filtering
-            // ===================================================================================
-            // Previous approach: Lock onto the first SYN packet as the "real" client.
-            // Problem: If a health check SYN arrives before the actual client SYN, we lock onto
-            // the wrong port and filter out ALL real client-server traffic!
-            //
-            // New approach: Accept ALL traffic involving the server port (_serverPort).
-            // The BPF filter "port {MonitorPort}" already limits packets to those involving our
-            // monitored port. We just track client ports for reference but don't filter based on them.
-            //
-            // This ensures network traffic is ALWAYS captured, even if health checks occur.
-            // The test kit comparison will validate the expected traffic flow, so spurious
-            // health check packets don't affect grading (they'll just be extra data).
-            // ===================================================================================
-            
             // Verify this packet involves our server port (should be guaranteed by BPF filter)
             bool involvesServerPort = (srcPort == _serverPort || dstPort == _serverPort);
             if (!involvesServerPort)
             {
-                // This shouldn't happen with BPF filter, but just in case
+                // Extra safety for devices where BPF filter couldn't be applied
                 return;
             }
             
@@ -363,7 +409,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             }
             
             // Parse stage from string to int for storage
-            // If _currentStage is not a valid integer, default to 0 (initial stage before actions start)
             if (!int.TryParse(_currentStage, out int stageNum))
             {
                 if (!string.IsNullOrEmpty(_currentStage))
@@ -373,7 +418,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 stageNum = 0;
             }
             
-            // Create captured packet record with stage stored at capture time
             var capturedPacket = new CapturedNetworkPacket
             {
                 Stage = stageNum,
@@ -387,10 +431,8 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 DestinationPort = dstPort
             };
             
-            // Store the captured packet for grading
             _run.AddCapturedNetworkPacket(_currentQuestionCode, _currentStage, capturedPacket);
             
-            // Log captured packet summary
             var logMessage = $"{NetworkKeywords.LOG_PREFIX_CAPTURE} {srcRole}->{dstRole} [{flags}] {state}";
             if (!string.IsNullOrEmpty(payload))
             {
@@ -401,7 +443,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             }
             Console.WriteLine(logMessage);
             
-            // Also store payload in RunContext for backward compatibility (for PSH packets)
             if (!string.IsNullOrEmpty(payload))
             {
                 StoreInRunContext(srcRole, payload);
@@ -673,9 +714,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         return 0;
     }
     
-    /// <summary>
-    /// Internal class to hold parsed HTTP data.
-    /// </summary>
     private class HttpData
     {
         public string? Method { get; set; }
@@ -687,13 +725,17 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         public string? Body { get; set; }
     }
     
-    private static ICaptureDevice? FindLoopbackDevice()
+    /// <summary>
+    /// Returns a list of candidate devices that are likely to carry traffic for localhost or Docker-exposed ports.
+    /// Captures across multiple to ensure we see the flow regardless of platform specifics (Loopback, Docker, WSL/Hyper-V).
+    /// </summary>
+    private static IEnumerable<ICaptureDevice> FindCandidateDevices()
     {
+        var selected = new List<ICaptureDevice>();
         try
         {
             var devices = CaptureDeviceList.Instance;
-            
-            // Check if we have any devices - if not, likely a permission issue
+
             if (devices == null || devices.Count == 0)
             {
                 Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: No capture devices found!");
@@ -701,104 +743,64 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
                 Console.WriteLine($"  2. On Windows: NPcap is not installed");
                 Console.WriteLine($"  3. On Docker: The container needs --cap-add=NET_RAW capability");
-                return null;
+                return selected;
             }
-            
-            // Debug: List all available devices
+
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices ({devices.Count} found):");
             foreach (var d in devices)
             {
                 Console.WriteLine($"  - {d.Name}: {d.Description}");
             }
-            
-            // DEVICE SELECTION STRATEGY:
-            // 
-            // ON WINDOWS: Use NPcap loopback adapter
-            //   - Traffic goes through loopback with port mapping (-p 8000:8000)
-            //   - This is the primary grading environment
-            //
-            // ON LINUX WITH DOCKER: Use Docker bridge interfaces
-            //   - Custom Docker networks (br-xxxxx) take PRIORITY over docker0
-            //   - docker0 is the default bridge but custom networks use their own bridge
-            //   - Traffic between containers on custom networks goes through br-xxxxx
-            //   - The bridge interface name corresponds to the network ID
-            
-            // PRIORITY 1 (Windows): NPcap loopback adapter
-            foreach (var dev in devices)
+
+            if (OperatingSystem.IsLinux())
             {
-                var description = dev.Description?.ToLowerInvariant() ?? "";
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                
-                if (description.Contains("loopback") || 
-                    name.Contains("loopback") ||
-                    name.Contains("npcap loopback") ||
-                    description.Contains("npcap loopback") ||
-                    name.Contains("\\device\\npf_loopback"))
+                foreach (var dev in devices)
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Windows loopback device: {dev.Name} ({dev.Description})");
-                    return dev;
+                    var name = dev.Name?.ToLowerInvariant() ?? string.Empty;
+                    if (name == "lo" || name.StartsWith("br-") || name == "docker0" || name.StartsWith("veth") || name.StartsWith("eth"))
+                    {
+                        selected.Add(dev);
+                    }
                 }
             }
-            
-            // PRIORITY 2 (Linux): Custom Docker bridge networks (br-xxxxx)
-            // These are created for custom Docker networks like "auto-grading-network"
-            // MUST check these BEFORE docker0 because custom networks use their own bridge
-            foreach (var dev in devices)
+            else
             {
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                
-                if (name.StartsWith("br-"))
+                // Prefer Npcap Loopback and any loopback-named device
+                foreach (var dev in devices)
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker custom bridge device: {dev.Name}");
-                    return dev;
+                    var desc = dev.Description ?? string.Empty;
+                    var name = dev.Name ?? string.Empty;
+                    if (desc.Contains("loopback", StringComparison.OrdinalIgnoreCase) || name.Contains("loopback", StringComparison.OrdinalIgnoreCase))
+                    {
+                        selected.Add(dev);
+                    }
+                }
+                // Add Hyper-V / vEthernet / WSL
+                foreach (var dev in devices)
+                {
+                    var desc = dev.Description ?? string.Empty;
+                    if (desc.Contains("hyper-v", StringComparison.OrdinalIgnoreCase) || desc.Contains("vethernet", StringComparison.OrdinalIgnoreCase) || desc.Contains("wsl", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!selected.Contains(dev)) selected.Add(dev);
+                    }
+                }
+                // Add physical network adapters as fallback
+                foreach (var dev in devices)
+                {
+                    var desc = dev.Description ?? string.Empty;
+                    if ((desc.Contains("ethernet", StringComparison.OrdinalIgnoreCase) || desc.Contains("wi-fi", StringComparison.OrdinalIgnoreCase) || desc.Contains("wireless", StringComparison.OrdinalIgnoreCase)) && !selected.Contains(dev))
+                    {
+                        selected.Add(dev);
+                    }
                 }
             }
-            
-            // PRIORITY 3 (Linux): Default Docker bridge (docker0)
-            // Only used if no custom bridge network is found
-            foreach (var dev in devices)
+
+            // If still none, include ALL devices as a last resort
+            if (selected.Count == 0)
             {
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                
-                if (name == "docker0")
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker default bridge device: {dev.Name}");
-                    return dev;
-                }
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: No preferred devices matched; falling back to ALL devices");
+                selected.AddRange(devices);
             }
-            
-            // PRIORITY 4 (Linux): Linux loopback device
-            // Fallback for non-Docker Linux testing
-            foreach (var dev in devices)
-            {
-                if (dev.Name == "lo")
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Linux loopback device: {dev.Name}");
-                    return dev;
-                }
-            }
-            
-            // PRIORITY 5: veth (virtual ethernet) interfaces
-            // These connect to Docker containers
-            foreach (var dev in devices)
-            {
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                if (name.StartsWith("veth"))
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found veth device: {dev.Name}");
-                    return dev;
-                }
-            }
-            
-            // LAST RESORT: Use first available device
-            if (devices.Count > 0)
-            {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Using first available device as last resort: {devices[0].Name} ({devices[0].Description})");
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This may not capture the correct traffic!");
-                return devices[0];
-            }
-            
-            return null;
         }
         catch (Exception ex)
         {
@@ -808,7 +810,15 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
             Console.WriteLine($"  2. On Windows: NPcap is not installed");
             Console.WriteLine($"  3. Insufficient permissions to access network interfaces");
-            return null;
         }
+
+        // De-duplicate by device name
+        var list = selected.GroupBy(d => d.Name).Select(g => g.First()).ToList();
+        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Selected devices ({list.Count}):");
+        foreach (var d in list)
+        {
+            Console.WriteLine($"  * {d.Name}: {d.Description}");
+        }
+        return list;
     }
 }
