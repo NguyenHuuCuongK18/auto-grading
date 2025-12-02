@@ -70,9 +70,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             _device = FindLoopbackDevice();
             if (_device == null)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} No suitable capture device found - network capture will be skipped");
-                // Continue without capture - this allows the system to work even if packet capture is unavailable
-                return;
+                var errorMsg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: No suitable capture device found! Network monitoring is MANDATORY for grading. " +
+                              "On Linux, ensure libpcap is installed and run with sudo. On Windows, ensure NPcap is installed.";
+                Console.WriteLine(errorMsg);
+                // Network monitoring is mandatory - throw exception to fail grading
+                throw new InvalidOperationException(errorMsg);
             }
             
             try

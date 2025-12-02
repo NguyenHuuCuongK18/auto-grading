@@ -1039,17 +1039,43 @@ namespace SolutionGrader.Cli.Services
                 var networkCaptures = GetCapturedPackets();
                 Console.WriteLine($"[NetworkMonitor] Captured {networkCaptures.Count} packets for test case {testCase.Name}");
 
+                // CRITICAL: Validate network monitoring is working
+                // If we expected network data but got none, this indicates a problem with network monitoring
+                if (expectedNetwork.Count > 0 && networkCaptures.Count == 0)
+                {
+                    Console.WriteLine("[NetworkMonitor] WARNING: Expected network traffic but captured NONE!");
+                    Console.WriteLine("[NetworkMonitor] This usually means:");
+                    Console.WriteLine("  1. Network monitor was not running with proper permissions (sudo on Linux)");
+                    Console.WriteLine("  2. libpcap is not installed (Linux) or NPcap is not installed (Windows)");
+                    Console.WriteLine("  3. The loopback interface was not found");
+                    Console.WriteLine("[NetworkMonitor] Network monitoring is MANDATORY - marking test case as FAILED");
+                }
+
                 // Compare outputs (client, server, and network)
                 var (earnedMark, passed, comparisons) = CompareOutputs(expectedOutputs, clientOutputs, serverOutputs, testCase.MaxMark);
                 var networkComparisons = CompareNetworkOutputs(expectedNetwork, networkCaptures);
 
-                result.EarnedMark = earnedMark;
-                result.Passed = passed;
+                // MANDATORY NETWORK CHECK: If expected network flows exist but no captures, fail the test case
+                bool networkCheckPassed = true;
+                if (expectedNetwork.Count > 0 && networkCaptures.Count == 0)
+                {
+                    networkCheckPassed = false;
+                    Console.WriteLine("[NetworkMonitor] FAILED: No network traffic captured but expected. Test case marked as FAILED.");
+                }
+
+                // Final result: must pass both output comparison AND network check
+                result.EarnedMark = (passed && networkCheckPassed) ? earnedMark : 0;
+                result.Passed = passed && networkCheckPassed;
                 result.Actions = actions.Select(a => new ActionInfo { Stage = a.Stage, Input = a.Input, ActionType = a.Action }).ToList();
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
                 result.NetworkCaptures = networkCaptures;
+                
+                if (!networkCheckPassed)
+                {
+                    result.ErrorMessage = "Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.";
+                }
             }
             catch (Exception ex)
             {
@@ -1554,30 +1580,59 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
-        /// Cleanup between test cases - stops applications and console attachments.
+        /// Cleanup between test cases - stops applications, console attachments, and releases ports.
+        /// 
+        /// CRITICAL: This cleanup must be thorough to prevent "Address already in use" errors.
+        /// The cleanup sequence is:
+        /// 1. Stop console attachments (stops reading output)
+        /// 2. Kill dotnet processes with SIGTERM first, then SIGKILL (graceful shutdown)
+        /// 3. Kill sleep processes that keep input pipes open
+        /// 4. Remove all files from /apps and temp files
+        /// 5. Clear network captures for next test case
+        /// 6. Wait for port release INSIDE the container (not just host)
+        /// 7. Verify host port is available
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
             Console.WriteLine("[Cleanup] Stopping applications between test cases...");
 
-            // Remove any console attachments first
+            // Step 1: Remove any console attachments first
             _consoleManager.RemoveAttachment(serverContainer);
             _consoleManager.RemoveAttachment(clientContainer);
 
-            // Kill dotnet processes in containers using ExecDockerCommand
-            try
-            {
-                _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -f dotnet", 5000);
-            }
-            catch { }
+            // Step 2: Kill dotnet processes with SIGTERM first (graceful), then SIGKILL if needed
+            // Using sh -c wrapper ensures the command executes even if the process doesn't exist
+            var serverKillCmd = $"exec {serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            var clientKillCmd = $"exec {clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            
+            try { _dockerExecutor.ExecDockerCommand(serverKillCmd, 10000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientKillCmd, 10000); } catch { }
 
-            try
-            {
-                _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -f dotnet", 5000);
-            }
-            catch { }
+            // Step 3: Kill sleep processes that keep input pipes open
+            // These are created by StartApplicationInContainer to keep the named pipe open
+            try { _dockerExecutor.ExecDockerCommand($"exec {serverContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand($"exec {clientContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
 
-            // Wait for port release
+            // Step 4: Remove ALL files from /apps folder and temp files
+            // This removes DLLs, logs, and any state from previous test case
+            var serverCleanFilesCmd = $"exec {serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
+            var clientCleanFilesCmd = $"exec {clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
+            
+            try { _dockerExecutor.ExecDockerCommand(serverCleanFilesCmd, 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientCleanFilesCmd, 5000); } catch { }
+            
+            Console.WriteLine("[Cleanup] Processes killed, files removed from containers");
+
+            // Step 5: Clear network captures for next test case
+            ClearCapturedPackets();
+            _knownClientPort = 0;  // Reset client port tracking
+
+            // Step 6: Wait for port release INSIDE the container
+            // The port binding happens inside the container, so we must check there
+            var checkPortCmd = $"exec {serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
+            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 15000); } catch { }
+
+            // Step 7: Also verify host port is available (since server port is exposed)
             var startTime = DateTime.UtcNow;
             while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
             {
@@ -1586,7 +1641,7 @@ namespace SolutionGrader.Cli.Services
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
-                    Console.WriteLine($"[Cleanup] Port {hostPort} is available.");
+                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available on host");
                     break;
                 }
                 catch
@@ -1594,22 +1649,36 @@ namespace SolutionGrader.Cli.Services
                     await Task.Delay(500);
                 }
             }
+
+            // Give a moment for everything to settle
+            await Task.Delay(500);
+            Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
         }
 
         /// <summary>
-        /// Cleanup containers after grading - removes containers and all attachments.
+        /// Cleanup containers after grading - kills all processes and removes containers.
+        /// This is the final cleanup after all test cases are done for a student.
         /// </summary>
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
         {
             Console.WriteLine("[Cleanup] Removing containers...");
 
-            // Remove all console attachments
+            // Remove all console attachments first
             _consoleManager.RemoveAllAttachments();
 
+            // Kill all processes in containers before removing them
+            // This prevents "container is still running" errors
+            try { _dockerExecutor.ExecDockerCommand($"exec {serverContainer} sh -c \"pkill -KILL -f dotnet 2>/dev/null; pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand($"exec {clientContainer} sh -c \"pkill -KILL -f dotnet 2>/dev/null; pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+
+            await Task.Delay(500);
+
+            // Remove containers
             try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
             try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
 
             await Task.Delay(200);
+            Console.WriteLine("[Cleanup] Containers removed");
         }
 
         /// <summary>
