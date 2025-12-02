@@ -1241,25 +1241,35 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
-            Console.WriteLine("[Cleanup] Stopping applications between test cases...");
+            OnProgress("Cleanup: Stopping applications between test cases...");
             
             // Step 1: Kill dotnet processes - use simple commands without complex shell syntax
             // On Windows, cmd.exe has issues with nested quotes, so we use simpler commands
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -TERM -f dotnet", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -TERM -f dotnet", 5000); } catch { }
+            OnProgress($"Cleanup: Sending SIGTERM to dotnet in {serverContainer}...");
+            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -TERM -f dotnet", 5000); OnProgress("Cleanup: SIGTERM sent to server"); } 
+            catch (Exception ex) { OnProgress($"Cleanup: SIGTERM to server failed: {ex.Message}"); }
+            
+            OnProgress($"Cleanup: Sending SIGTERM to dotnet in {clientContainer}...");
+            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -TERM -f dotnet", 5000); OnProgress("Cleanup: SIGTERM sent to client"); } 
+            catch (Exception ex) { OnProgress($"Cleanup: SIGTERM to client failed: {ex.Message}"); }
             
             // Wait for graceful shutdown
+            OnProgress("Cleanup: Waiting 1.5s for graceful shutdown...");
             await Task.Delay(1500);
             
             // Force kill if still running
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -KILL -f dotnet", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -KILL -f dotnet", 5000); } catch { }
+            OnProgress("Cleanup: Sending SIGKILL to any remaining dotnet processes...");
+            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -KILL -f dotnet", 5000); } 
+            catch (Exception ex) { OnProgress($"Cleanup: SIGKILL to server failed (may be already dead): {ex.Message}"); }
+            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -KILL -f dotnet", 5000); } 
+            catch (Exception ex) { OnProgress($"Cleanup: SIGKILL to client failed (may be already dead): {ex.Message}"); }
             
             // Step 2: Kill sleep processes that keep input pipes open
             try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000); } catch { }
             try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000); } catch { }
             
             // Step 3: Remove files from /apps folder and temp files
+            OnProgress("Cleanup: Removing files from containers...");
             try { _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000); } catch { }
             try { _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000); } catch { }
             try { _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000); } catch { }
@@ -1277,7 +1287,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager.ClearAllLogs();
             
             // Step 6: Wait for port release with timeout (5 seconds max, check every 200ms)
-            Console.WriteLine($"[Cleanup] Waiting for port {hostPort} to be released...");
+            OnProgress($"Cleanup: Waiting for port {hostPort} to be released...");
             var portCheckStart = DateTime.UtcNow;
             bool portReleased = false;
             
@@ -1289,7 +1299,7 @@ namespace SolutionGrader.Core.Services
                     listener.Start();
                     listener.Stop();
                     portReleased = true;
-                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available");
+                    OnProgress($"Cleanup: Port {hostPort} is now available");
                     break;
                 }
                 catch
@@ -1300,10 +1310,10 @@ namespace SolutionGrader.Core.Services
             
             if (!portReleased)
             {
-                Console.WriteLine($"[Cleanup] WARNING: Port {hostPort} still in use after 5s timeout - next test case may fail");
+                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 5s timeout - next test case may fail");
             }
             
-            Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
+            OnProgress("Cleanup: Complete, ready for next test case");
         }
         
         /// <summary>

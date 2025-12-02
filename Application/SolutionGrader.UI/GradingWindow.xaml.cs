@@ -371,11 +371,13 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
+                // Pass the cancellation token so pause can abort the current grading
                 var sessionState = new GradingSessionState();
                 await _gradingService.StartGradingAsync(
                     new System.Collections.Generic.List<StudentSolution> { student },
                     _configuration,
-                    sessionState);
+                    sessionState,
+                    ct);
                 
                 // Update final status
                 student.ProgressPercent = 100;
