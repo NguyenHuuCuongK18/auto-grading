@@ -108,6 +108,7 @@ namespace SolutionGrader.UI
                 }
                 
                 _cancellationTokenSource?.Cancel();
+                _cancellationTokenSource?.Dispose();
             }
             
             _elapsedTimer?.Stop();
