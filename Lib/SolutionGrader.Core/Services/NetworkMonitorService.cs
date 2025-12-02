@@ -793,7 +793,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // LAST RESORT: Use first available device
             if (devices.Count > 0)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Using first available device as last resort: {devices[0].Name}");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Using first available device as last resort: {devices[0].Name} ({devices[0].Description})");
                 Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This may not capture the correct traffic!");
                 return devices[0];
             }
