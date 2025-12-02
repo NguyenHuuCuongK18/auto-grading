@@ -711,20 +711,19 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 Console.WriteLine($"  - {d.Name}: {d.Description}");
             }
             
-            // First, look for Docker bridge interfaces (for container-to-container traffic)
-            // These are named like "br-xxxxx" or "docker0"
-            foreach (var dev in devices)
-            {
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                
-                if (name.StartsWith("br-") || name == "docker0")
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker bridge device: {dev.Name}");
-                    return dev;
-                }
-            }
+            // DEVICE SELECTION STRATEGY:
+            // 
+            // ON WINDOWS: Use NPcap loopback adapter
+            //   - Traffic goes through loopback with port mapping (-p 8000:8000)
+            //   - This is the primary grading environment
+            //
+            // ON LINUX WITH DOCKER: Use Docker bridge interfaces
+            //   - Custom Docker networks (br-xxxxx) take PRIORITY over docker0
+            //   - docker0 is the default bridge but custom networks use their own bridge
+            //   - Traffic between containers on custom networks goes through br-xxxxx
+            //   - The bridge interface name corresponds to the network ID
             
-            // Then, look for loopback device (for host-level traffic)
+            // PRIORITY 1 (Windows): NPcap loopback adapter
             foreach (var dev in devices)
             {
                 var description = dev.Description?.ToLowerInvariant() ?? "";
@@ -736,22 +735,51 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     description.Contains("npcap loopback") ||
                     name.Contains("\\device\\npf_loopback"))
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found loopback device: {dev.Name} ({dev.Description})");
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Windows loopback device: {dev.Name} ({dev.Description})");
                     return dev;
                 }
             }
             
-            // On Linux, look for 'lo' interface
+            // PRIORITY 2 (Linux): Custom Docker bridge networks (br-xxxxx)
+            // These are created for custom Docker networks like "auto-grading-network"
+            // MUST check these BEFORE docker0 because custom networks use their own bridge
             foreach (var dev in devices)
             {
-                if (dev.Name == "lo" || dev.Name?.Contains("lo") == true)
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                
+                if (name.StartsWith("br-"))
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found loopback device: {dev.Name}");
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker custom bridge device: {dev.Name}");
                     return dev;
                 }
             }
             
-            // Try veth (virtual ethernet) interfaces that connect to Docker containers
+            // PRIORITY 3 (Linux): Default Docker bridge (docker0)
+            // Only used if no custom bridge network is found
+            foreach (var dev in devices)
+            {
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                
+                if (name == "docker0")
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker default bridge device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // PRIORITY 4 (Linux): Linux loopback device
+            // Fallback for non-Docker Linux testing
+            foreach (var dev in devices)
+            {
+                if (dev.Name == "lo")
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Linux loopback device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // PRIORITY 5: veth (virtual ethernet) interfaces
+            // These connect to Docker containers
             foreach (var dev in devices)
             {
                 var name = dev.Name?.ToLowerInvariant() ?? "";
@@ -762,10 +790,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 }
             }
             
-            // If no suitable device found, try to use first available device as fallback
+            // LAST RESORT: Use first available device
             if (devices.Count > 0)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Using first available device as fallback: {devices[0].Name}");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Using first available device as last resort: {devices[0].Name}");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This may not capture the correct traffic!");
                 return devices[0];
             }
             
