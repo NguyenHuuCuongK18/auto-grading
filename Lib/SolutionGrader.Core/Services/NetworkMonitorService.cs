@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using System.Linq;
 using PacketDotNet;
 using SharpPcap;
-using SharpPcap.LibPcap;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 
@@ -95,27 +94,27 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             try
             {
                 // Open each device and apply BPF filter
+                // Using consistent approach with SharpPcap's standard Open method with read timeout
+                // This matches the working MiddlewareSniffPort implementation
                 foreach (var dev in _devices)
                 {
                     try
                     {
-                        if (dev is LibPcapLiveDevice libPcapDevice)
-                        {
-                            libPcapDevice.Open(DeviceModes.Promiscuous, 100);
-                        }
-                        else
-                        {
-                            dev.Open(DeviceModes.Promiscuous);
-                        }
+                        // Use standard Open with DeviceModes.Promiscuous and 1000ms read timeout
+                        // This approach works reliably on Windows with NPcap
+                        dev.Open(DeviceModes.Promiscuous, 1000);
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Successfully opened device: {dev.Name}");
 
                         // Prefer TCP filter; fall back to generic port filter if needed
                         try
                         {
                             dev.Filter = $"tcp port {MonitorPort}";
+                            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Applied filter: tcp port {MonitorPort}");
                         }
                         catch
                         {
                             dev.Filter = $"port {MonitorPort}";
+                            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Applied fallback filter: port {MonitorPort}");
                         }
                     }
                     catch (Exception openEx)
@@ -763,32 +762,67 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     }
                 }
             }
-            else
+            else if (OperatingSystem.IsMacOS())
             {
-                // Prefer Npcap Loopback and any loopback-named device
+                // macOS uses lo0 for loopback
                 foreach (var dev in devices)
                 {
-                    var desc = dev.Description ?? string.Empty;
-                    var name = dev.Name ?? string.Empty;
-                    if (desc.Contains("loopback", StringComparison.OrdinalIgnoreCase) || name.Contains("loopback", StringComparison.OrdinalIgnoreCase))
+                    var name = dev.Name?.ToLowerInvariant() ?? string.Empty;
+                    // lo0 is the primary loopback interface on macOS
+                    // en0, en1, etc. are ethernet/wireless adapters
+                    // bridge* are Docker bridge interfaces
+                    if (name == "lo0" || name.StartsWith("en") || name.StartsWith("bridge"))
                     {
                         selected.Add(dev);
                     }
                 }
-                // Add Hyper-V / vEthernet / WSL
+            }
+            else
+            {
+                // Windows: NPcap Loopback adapter and Docker virtual adapters
+                // Priority 1: NPcap Loopback adapter (best for localhost traffic)
+                // The NPcap Loopback adapter name typically contains "NPF_Loopback" or has "Npcap Loopback" in description
                 foreach (var dev in devices)
                 {
                     var desc = dev.Description ?? string.Empty;
-                    if (desc.Contains("hyper-v", StringComparison.OrdinalIgnoreCase) || desc.Contains("vethernet", StringComparison.OrdinalIgnoreCase) || desc.Contains("wsl", StringComparison.OrdinalIgnoreCase))
+                    var name = dev.Name ?? string.Empty;
+                    // NPcap Loopback adapter detection - includes various naming conventions
+                    if (desc.Contains("loopback", StringComparison.OrdinalIgnoreCase) || 
+                        name.Contains("loopback", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("NPF_Loopback", StringComparison.OrdinalIgnoreCase) ||
+                        desc.Contains("npcap", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!selected.Contains(dev)) selected.Add(dev);
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found NPcap Loopback: {name} - {desc}");
+                        selected.Add(dev);
                     }
                 }
-                // Add physical network adapters as fallback
+                
+                // Priority 2: Hyper-V / vEthernet / WSL / Docker virtual adapters
                 foreach (var dev in devices)
                 {
                     var desc = dev.Description ?? string.Empty;
-                    if ((desc.Contains("ethernet", StringComparison.OrdinalIgnoreCase) || desc.Contains("wi-fi", StringComparison.OrdinalIgnoreCase) || desc.Contains("wireless", StringComparison.OrdinalIgnoreCase)) && !selected.Contains(dev))
+                    var name = dev.Name ?? string.Empty;
+                    if ((desc.Contains("hyper-v", StringComparison.OrdinalIgnoreCase) || 
+                         desc.Contains("vethernet", StringComparison.OrdinalIgnoreCase) || 
+                         desc.Contains("vswitch", StringComparison.OrdinalIgnoreCase) ||
+                         desc.Contains("wsl", StringComparison.OrdinalIgnoreCase) ||
+                         desc.Contains("docker", StringComparison.OrdinalIgnoreCase) ||
+                         name.Contains("docker", StringComparison.OrdinalIgnoreCase)) && 
+                        !selected.Contains(dev))
+                    {
+                        Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found virtual adapter: {name} - {desc}");
+                        selected.Add(dev);
+                    }
+                }
+                
+                // Priority 3: Physical network adapters as fallback
+                foreach (var dev in devices)
+                {
+                    var desc = dev.Description ?? string.Empty;
+                    if ((desc.Contains("ethernet", StringComparison.OrdinalIgnoreCase) || 
+                         desc.Contains("wi-fi", StringComparison.OrdinalIgnoreCase) || 
+                         desc.Contains("wireless", StringComparison.OrdinalIgnoreCase)) && 
+                        !selected.Contains(dev))
                     {
                         selected.Add(dev);
                     }
@@ -799,6 +833,14 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             if (selected.Count == 0)
             {
                 Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: No preferred devices matched; falling back to ALL devices");
+                if (OperatingSystem.IsWindows())
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WINDOWS TROUBLESHOOTING:");
+                    Console.WriteLine($"  1. Ensure NPcap is installed (download from https://npcap.com/)");
+                    Console.WriteLine($"  2. During NPcap installation, enable 'Support loopback traffic' option");
+                    Console.WriteLine($"  3. If using Docker Desktop, ensure it's running in Windows containers mode");
+                    Console.WriteLine($"  4. Run the application as Administrator for full network access");
+                }
                 selected.AddRange(devices);
             }
         }
@@ -806,10 +848,28 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error finding capture device: {ex.Message}");
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Full exception: {ex}");
-            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This usually means:");
-            Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
-            Console.WriteLine($"  2. On Windows: NPcap is not installed");
-            Console.WriteLine($"  3. Insufficient permissions to access network interfaces");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} TROUBLESHOOTING:");
+            if (OperatingSystem.IsLinux())
+            {
+                Console.WriteLine($"  - Ensure libpcap is installed: sudo apt-get install libpcap-dev");
+                Console.WriteLine($"  - Run with sudo for network capture permissions");
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                Console.WriteLine($"  - Download and install NPcap from https://npcap.com/");
+                Console.WriteLine($"  - Enable 'Support loopback traffic' during NPcap installation");
+                Console.WriteLine($"  - Run as Administrator for full network access");
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Console.WriteLine($"  - Ensure libpcap is available (built-in on macOS)");
+                Console.WriteLine($"  - Run with sudo for network capture permissions");
+            }
+            else
+            {
+                Console.WriteLine($"  - Ensure packet capture library is installed");
+                Console.WriteLine($"  - Run with appropriate permissions");
+            }
         }
 
         // De-duplicate by device name
