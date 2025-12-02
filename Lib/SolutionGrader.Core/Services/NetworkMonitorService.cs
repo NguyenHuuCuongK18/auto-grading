@@ -357,9 +357,14 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 payload = Encoding.UTF8.GetString(tcpPacket.PayloadData);
             }
             
-            // Create captured packet record
+            // Parse stage from string to int for storage
+            int stageNum = 0;
+            int.TryParse(_currentStage, out stageNum);
+            
+            // Create captured packet record with stage stored at capture time
             var capturedPacket = new CapturedNetworkPacket
             {
+                Stage = stageNum,
                 Timestamp = rawPacket.Timeval.Date,
                 Flags = flags,
                 State = state,

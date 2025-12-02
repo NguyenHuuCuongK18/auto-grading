@@ -46,11 +46,13 @@ namespace SolutionGrader.Core.Services
     /// </summary>
     public sealed class DockerGradingService
     {
-        // Timing constants
-        private const int StartupDelayMs = 3000;
-        private const int InputProcessingDelayMs = 5000;
+        // Timing constants - optimized for faster execution
+        // These are fallback values; prefer using config.TestCaseTimeoutSeconds
+        private const int StartupDelayMs = 1500;  // Reduced from 3000 - wait for process to start
+        private const int InputProcessingDelayMs = 2000;  // Reduced from 5000 - wait for input to be processed
         private const int OutputRetryMaxAttempts = 5;
-        private const int OutputRetryDelayMs = 1000;
+        private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
+        private const int DefaultTestCaseTimeoutSeconds = 15;  // 15 seconds per test case default
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
@@ -276,10 +278,35 @@ namespace SolutionGrader.Core.Services
                     
                     OnProgress($"Executing test case: {testCase.Name}...");
                     
-                    var tcResult = await ExecuteTestCaseAsync(
-                        testCase, testKitConfig, config, 
-                        actualServerDllPath, actualClientDllPath,
-                        serverContainer, clientContainer, ct);
+                    // Create a per-test-case timeout using the configured timeout
+                    var testCaseTimeout = config.TestCaseTimeoutSeconds > 0 
+                        ? config.TestCaseTimeoutSeconds 
+                        : DefaultTestCaseTimeoutSeconds;
+                    
+                    using var testCaseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    testCaseCts.CancelAfter(TimeSpan.FromSeconds(testCaseTimeout));
+                    
+                    TestCaseResult tcResult;
+                    try
+                    {
+                        tcResult = await ExecuteTestCaseAsync(
+                            testCase, testKitConfig, config, 
+                            actualServerDllPath, actualClientDllPath,
+                            serverContainer, clientContainer, testCaseCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Test case timed out (not overall cancellation)
+                        OnProgress($"Test case {testCase.Name} timed out after {testCaseTimeout}s");
+                        tcResult = new TestCaseResult
+                        {
+                            TestCaseName = testCase.Name,
+                            MaxMark = testCase.MaxMark,
+                            EarnedMark = 0,
+                            Passed = false,
+                            ErrorMessage = $"Test case timed out after {testCaseTimeout} seconds"
+                        };
+                    }
                     
                     result.TestCaseResults.Add(tcResult);
                     
@@ -631,7 +658,10 @@ namespace SolutionGrader.Core.Services
             try
             {
                 // Clear network captures for this test case
+                // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
+                // only traffic from this test case is captured
                 _networkMonitor?.ClearCaptures();
+                _runContext.ClearNetworkCaptures();
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
                 // Read Detail.xlsx
@@ -729,7 +759,8 @@ namespace SolutionGrader.Core.Services
             {
                 packets.Add(new CapturedPacketInfo
                 {
-                    Stage = _runContext.CurrentStage ?? 0,
+                    // Use the stage stored at capture time, not the current stage
+                    Stage = packet.Stage,
                     Timestamp = packet.Timestamp,
                     Flags = packet.Flags,
                     State = packet.State,
@@ -1238,6 +1269,8 @@ namespace SolutionGrader.Core.Services
         /// CRITICAL: This cleanup must be thorough to prevent "Address already in use" errors.
         /// The files will be re-copied before the next test case starts.
         /// This approach is much faster than disposing/rebuilding containers.
+        /// 
+        /// OPTIMIZATION: Reduced delays from 1.5s to 500ms for faster cleanup.
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
@@ -1248,9 +1281,9 @@ namespace SolutionGrader.Core.Services
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown
-            OnProgress("Cleanup: Waiting 1.5s for graceful shutdown...");
-            await Task.Delay(1500);
+            // Wait for graceful shutdown - reduced from 1.5s to 500ms
+            OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
+            await Task.Delay(500);
             
             // Force kill any remaining dotnet processes
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
@@ -1258,15 +1291,15 @@ namespace SolutionGrader.Core.Services
             await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 3000);
             
             // Step 3: Remove files from /apps folder and temp files
             OnProgress("Cleanup: Removing files from containers...");
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             
             // Step 4: Clear network captures for next test case
             // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
@@ -1277,12 +1310,12 @@ namespace SolutionGrader.Core.Services
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 6: Wait for port release with timeout (5 seconds max, check every 200ms)
+            // Step 6: Wait for port release with timeout (3 seconds max, check every 100ms)
             OnProgress($"Cleanup: Waiting for port {hostPort} to be released...");
             var portCheckStart = DateTime.UtcNow;
             bool portReleased = false;
             
-            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 5)
+            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 3)
             {
                 try
                 {
@@ -1295,13 +1328,13 @@ namespace SolutionGrader.Core.Services
                 }
                 catch
                 {
-                    await Task.Delay(200);
+                    await Task.Delay(100);  // Reduced from 200ms
                 }
             }
             
             if (!portReleased)
             {
-                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 5s timeout - next test case may fail");
+                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 3s timeout - next test case may fail");
             }
             
             OnProgress("Cleanup: Complete, ready for next test case");
@@ -1712,7 +1745,17 @@ namespace SolutionGrader.Core.Services
         public string? DatabaseUsername { get; set; } = "sa";
         public string? DatabasePassword { get; set; }
         
+        /// <summary>
+        /// Total grading timeout in seconds (overall timeout for all test cases).
+        /// Default: 60 seconds.
+        /// </summary>
         public int GradingTimeoutSeconds { get; set; } = 60;
+        
+        /// <summary>
+        /// Per-test-case timeout in seconds. If a test case takes longer than this,
+        /// it is stopped and marked as failed. Default: 15 seconds.
+        /// </summary>
+        public int TestCaseTimeoutSeconds { get; set; } = 15;
     }
     
     /// <summary>

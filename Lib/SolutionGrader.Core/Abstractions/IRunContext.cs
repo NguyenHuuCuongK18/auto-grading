@@ -6,6 +6,8 @@
     /// </summary>
     public class CapturedNetworkPacket
     {
+        /// <summary>The stage number when this packet was captured</summary>
+        public int Stage { get; set; }
         /// <summary>Packet capture timestamp</summary>
         public DateTime Timestamp { get; set; }
         /// <summary>TCP flags (e.g., "SYN", "SYN, ACK", "ACK", "PSH, ACK", "FIN, ACK")</summary>

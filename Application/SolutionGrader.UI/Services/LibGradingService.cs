@@ -234,10 +234,14 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                // Create timestamped results folder
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var timestampedResultRoot = Path.Combine(resultRoot, string.Format(FileKeywords.Pattern_GradeResult, timestamp));
-                var studentResultPath = Path.Combine(timestampedResultRoot, studentCode);
+                // Use result root directly without adding another timestamp folder
+                // The calling code (GradingOrchestrationService) already provides a proper path
+                // Previous structure: {resultRoot}/GradeResult_{timestamp}/{studentCode}
+                // New simplified structure: {resultRoot} (calling code provides the full path)
+                var studentResultPath = resultRoot;
+                
+                // Ensure the directory exists
+                Directory.CreateDirectory(studentResultPath);
 
                 // Use default config if not provided
                 var config = dockerConfig ?? new DockerGradingConfig();

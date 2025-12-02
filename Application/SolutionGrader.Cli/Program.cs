@@ -93,6 +93,7 @@ public class Program
             CodeContainerHostPort = int.TryParse(map.GetValueOrDefault("host-port"), out var hp) ? hp : 8000,
             DockerNetwork = map.GetValueOrDefault("network", "auto-grading-network"),
             GradingTimeoutSeconds = int.TryParse(map.GetValueOrDefault("timeout"), out var t) ? t : 60,
+            TestCaseTimeoutSeconds = int.TryParse(map.GetValueOrDefault("tc-timeout"), out var tct) ? tct : 15,
             
             // Database settings
             DatabaseContainerName = map.GetValueOrDefault("db-container", "auto-grading-sqlserver"),
@@ -433,6 +434,7 @@ Docker Grading (syncs with SolutionGrader.UI):
                                  [--has-server <true|false>] [--has-client <true|false>]
                                  [--internal-port <port>] [--host-port <port>]
                                  [--network <networkName>] [--timeout <seconds>]
+                                 [--tc-timeout <seconds>]
 
   Required:
     --submit     Path to Submit folder (e.g., ./Submit)
@@ -449,7 +451,8 @@ Docker Grading (syncs with SolutionGrader.UI):
     --internal-port Container internal port (default: from Environment.xlsx or 8000)
     --host-port    Container host port (default: from Environment.xlsx or 8000)
     --network      Docker network name (default: auto-grading-network)
-    --timeout      Grading timeout in seconds (default: 60)
+    --timeout      Overall grading timeout in seconds (default: 60)
+    --tc-timeout   Per-test-case timeout in seconds (default: 15)
 
 Local Grading (Windows only):
   SolutionGrader.Cli executesuite --suite <suiteFolder> --out <resultRoot>
