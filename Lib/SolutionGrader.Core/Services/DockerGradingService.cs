@@ -19,19 +19,27 @@ namespace SolutionGrader.Core.Services
     /// <summary>
     /// Unified Docker-based grading service that can be used by both UI and CLI.
     /// 
+    /// CRITICAL EXECUTION ORDER:
+    /// 1. NetworkMonitor starts FIRST (before any containers)
+    /// 2. Docker containers are created and started
+    /// 3. Student files are copied to containers
+    /// 4. Test cases are executed
+    /// 5. NetworkMonitor stops LAST (after cleanup)
+    /// 
     /// This service manages the complete Docker grading workflow:
-    /// 1. Setup Docker containers (server/client) with TTY support for reliable output
-    /// 2. Copy student files to containers
-    /// 3. Generate appsettings.json with proper configuration
-    /// 4. Execute test cases from Detail.xlsx
-    /// 5. Capture outputs using application log files (bypasses docker logs buffering)
-    /// 6. Run NetworkMonitor on the HOST to sniff exposed server port
-    /// 7. Compare outputs against expected values
-    /// 8. Write results in Excel format
+    /// - Setup Docker containers (server/client) with TTY support for reliable output
+    /// - Copy student files to containers
+    /// - Generate appsettings.json with proper configuration
+    /// - Execute test cases from Detail.xlsx
+    /// - Capture outputs using application log files (bypasses docker logs buffering)
+    /// - Run NetworkMonitor on the HOST to sniff exposed server port
+    /// - Compare outputs against expected values
+    /// - Write results in Excel format
     /// 
     /// Key design decisions:
+    /// - NetworkMonitor ALWAYS runs first to capture full network traffic
     /// - Server container port is EXPOSED to host (e.g., -p 8000:8000)
-    /// - NetworkMonitor runs on HOST and sniffs localhost:8000
+    /// - NetworkMonitor runs on HOST and sniffs localhost:8000 (requires sudo/admin)
     /// - Client connects to server via Docker network (by container name)
     /// - Application output is captured via log files, not docker logs (avoids buffering)
     /// - TTY flag (-t) ensures immediate console output flushing
@@ -64,14 +72,21 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Grades a single student's submission in Docker containers.
         /// 
-        /// This method:
-        /// 1. Sets up server and client containers with TTY support
-        /// 2. Copies student DLLs to containers
-        /// 3. Generates appsettings.json for both server and client
-        /// 4. Starts NetworkMonitor on HOST to sniff exposed server port
-        /// 5. Executes test cases from Detail.xlsx
-        /// 6. Captures and compares outputs
-        /// 7. Returns grading results
+        /// EXECUTION ORDER (critical for network capture):
+        /// 1. Load test kit configuration
+        /// 2. START NetworkMonitor FIRST (captures traffic from the very beginning)
+        /// 3. Set up Docker containers (server and client) with TTY support
+        /// 4. Copy student DLLs to containers
+        /// 5. Generate appsettings.json for both server and client
+        /// 6. Execute test cases from Detail.xlsx
+        /// 7. Capture and compare outputs
+        /// 8. Stop NetworkMonitor and cleanup containers
+        /// 
+        /// NetworkMonitor MUST start before containers to capture:
+        /// - Docker health checks (filtered out later)
+        /// - Full TCP handshake (SYN, SYN-ACK, ACK)
+        /// - All data transfers (PSH-ACK)
+        /// - Connection teardown (FIN-ACK)
         /// </summary>
         /// <param name="config">Docker grading configuration</param>
         /// <param name="testKitPath">Path to test kit folder containing Header.xlsx, Environment.xlsx, test cases</param>
@@ -103,6 +118,20 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
+                // CRITICAL: Start network monitor FIRST before ANY containers or processes
+                // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
+                // It MUST start before containers to capture the full network traffic including:
+                // - Initial TCP handshake (SYN, SYN-ACK, ACK)
+                // - All data transfers
+                // - Connection teardown (FIN-ACK)
+                if (_networkMonitor != null)
+                {
+                    _networkMonitor.MonitorPort = config.CodeContainerHostPort;
+                    _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                    await _networkMonitor.StartAsync(ct);
+                    OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
+                }
+                
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(serverDllPath, clientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
@@ -111,17 +140,6 @@ namespace SolutionGrader.Core.Services
                 
                 // Generate appsettings.json in containers
                 GenerateAppsettingsInContainers(serverDllPath, clientDllPath, config, testKitConfig, serverContainer, clientContainer);
-                
-                // Start network monitor on HOST to sniff exposed server port
-                // IMPORTANT: NetworkMonitor runs on HOST, not in container!
-                // It sniffs localhost:{hostPort} which is mapped to container:{internalPort}
-                if (_networkMonitor != null)
-                {
-                    _networkMonitor.MonitorPort = config.CodeContainerHostPort;
-                    _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                    await _networkMonitor.StartAsync(ct);
-                    OnProgress($"Network monitor started on host port {config.CodeContainerHostPort}");
-                }
                 
                 // Execute test cases
                 foreach (var testCase in testKitConfig.TestCases)
