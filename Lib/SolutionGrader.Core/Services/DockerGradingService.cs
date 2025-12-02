@@ -1221,21 +1221,22 @@ namespace SolutionGrader.Core.Services
             Console.WriteLine("[Cleanup] Stopping applications between test cases...");
             
             // Step 1: Kill dotnet processes with SIGTERM first (graceful), then SIGKILL if needed
-            var serverKillCmd = $"exec {serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
-            var clientKillCmd = $"exec {clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            // NOTE: ExecDockerCommand adds "docker exec " prefix, so we pass container + command only
+            var serverKillCmd = $"{serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            var clientKillCmd = $"{clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
             
             try { _dockerExecutor.ExecDockerCommand(serverKillCmd, 10000); } catch { }
             try { _dockerExecutor.ExecDockerCommand(clientKillCmd, 10000); } catch { }
             
             // Step 2: Kill sleep processes that keep input pipes open
             // These are created by StartApplicationInContainer to keep the named pipe open
-            try { _dockerExecutor.ExecDockerCommand($"exec {serverContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"exec {clientContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
             
             // Step 3: Remove ALL files from /apps folder and temp files (DLLs, logs, pipes)
             // This effectively resets the container state without disposing it
-            var serverCleanFilesCmd = $"exec {serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
-            var clientCleanFilesCmd = $"exec {clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
+            var serverCleanFilesCmd = $"{serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
+            var clientCleanFilesCmd = $"{clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
             
             try { _dockerExecutor.ExecDockerCommand(serverCleanFilesCmd, 5000); } catch { }
             try { _dockerExecutor.ExecDockerCommand(clientCleanFilesCmd, 5000); } catch { }
@@ -1253,7 +1254,8 @@ namespace SolutionGrader.Core.Services
             
             // Step 6: Wait for port release INSIDE the container (not just host)
             // The port binding is inside the container, so we check there
-            var checkPortCmd = $"exec {serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
+            // NOTE: ExecDockerCommand adds "docker exec " prefix, so we pass container + command only
+            var checkPortCmd = $"{serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
             try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 15000); } catch { }
             
             // Step 7: Also verify host port is available (since server port is exposed)
