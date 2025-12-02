@@ -307,12 +307,19 @@ namespace EnvironmentBuilder.DockerCommand
                 foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
                     envVars += $"-e {kv.Key}={kv.Value} ";
 
+                // Only add port mapping if HostPort > 0
+                // Client containers typically don't need port mapping since they initiate connections
+                // to the server within the Docker network (using container name as hostname)
+                string portMapping = dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0
+                    ? $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} "
+                    : "";
+
                 string command = $@"docker run -d " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
-                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{portMapping}" +
                                  $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
             }
@@ -349,12 +356,17 @@ namespace EnvironmentBuilder.DockerCommand
 
                 // Add -t flag for TTY allocation - this resolves output buffering issues
                 // when using docker attach to read console output
+                // Only add port mapping if HostPort > 0 (client containers don't need port mapping)
+                string portMapping = dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0
+                    ? $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} "
+                    : "";
+                    
                 string command = $@"docker run -d -t " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
-                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{portMapping}" +
                                  $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
                 Console.WriteLine($"[Docker] Container {dockerBase.ContainerName} started with TTY support");

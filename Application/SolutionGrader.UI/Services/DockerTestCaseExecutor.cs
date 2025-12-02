@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
 using Domain.Entities.Main;
 using Domain.Entities.Constants;
+using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Services;
 using Environment = Domain.Entities.Main.Environment;
 
 namespace SolutionGrader.UI.Services
@@ -20,14 +22,34 @@ namespace SolutionGrader.UI.Services
     /// - Reading test case actions from Detail.xlsx
     /// - Executing actions in sequence (StartServer, StartClient, Input, etc.)
     /// - Capturing outputs from containers
+    /// - Capturing network traffic via NetworkMonitorService
     /// - Comparing outputs against expected values
     /// - Calculating points based on comparison results
+    /// 
+    /// NETWORK MONITORING:
+    /// The network monitor (SharpPcap-based) captures all TCP traffic on the configured port.
+    /// Traffic is captured per-stage:
+    /// - When StartServer/StartClient/Input action occurs, stage increments
+    /// - All network traffic after an action belongs to that stage
+    /// - The captured packets are written to the Network sheet in GradeDetail.xlsx
     /// </summary>
     public class DockerTestCaseExecutor
     {
         private readonly ILoggingService _logger;
         private readonly TestKitConfigService _testKitConfigService;
         private readonly DockerGradingService _dockerGrading;
+        
+        /// <summary>
+        /// Network monitor for capturing TCP traffic during grading.
+        /// Uses SharpPcap to sniff packets on the loopback interface.
+        /// REQUIRES: libpcap (Linux) or npcap (Windows) to be installed.
+        /// </summary>
+        private INetworkMonitorService? _networkMonitor;
+        
+        /// <summary>
+        /// Run context for storing captured network packets per stage.
+        /// </summary>
+        private IRunContext? _runContext;
 
         public DockerTestCaseExecutor(
             ILoggingService logger, 
@@ -37,6 +59,23 @@ namespace SolutionGrader.UI.Services
             _logger = logger;
             _testKitConfigService = testKitConfigService;
             _dockerGrading = dockerGrading;
+            
+            // Initialize network monitoring components
+            // RunContext stores captured network packets per stage
+            // NetworkMonitorService captures TCP traffic on the configured port
+            try
+            {
+                _runContext = new RunContext();
+                _networkMonitor = new NetworkMonitorService(_runContext);
+                _logger.LogInfo("Network monitor initialized successfully (requires libpcap/npcap)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Network monitor initialization failed: {ex.Message}");
+                _logger.LogWarning("Network capture will be skipped - install libpcap (Linux) or npcap (Windows)");
+                _networkMonitor = null;
+                _runContext = null;
+            }
         }
 
         /// <summary>
@@ -226,10 +265,66 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"Loaded {expectedNetworkFlows.Count} expected network flow entries from Detail.xlsx");
                 }
 
-                // Execute actions and capture outputs
-                var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(environment, actions, ct);
-                result.ClientOutputs = clientOutputs;
-                result.ServerOutputs = serverOutputs;
+                // =====================================================
+                // START NETWORK MONITOR BEFORE EXECUTING ACTIONS
+                // =====================================================
+                // Network monitor must start BEFORE client/server processes
+                // so we capture the full TCP handshake (SYN, SYN-ACK, ACK)
+                // 
+                // The monitor captures ALL traffic on the server's port and
+                // associates packets with stages based on SetCurrentContext calls.
+                // =====================================================
+                if (_networkMonitor != null && _runContext != null)
+                {
+                    // Get the server port from environment config
+                    var serverPortStr = environment.Configs.GetValueOrDefault(
+                        EnvironmentConfiguration.CodeContainerInternalPort, "8000");
+                    if (int.TryParse(serverPortStr, out var serverPort))
+                    {
+                        _networkMonitor.MonitorPort = serverPort;
+                        _networkMonitor.ProtocolType = protocol ?? "TCP";
+                        _networkMonitor.ClearCaptures();
+                        
+                        _logger.LogInfo($"[NetworkMonitor] Starting network capture on port {serverPort} ({protocol} protocol)...");
+                        await _networkMonitor.StartAsync(ct);
+                        _logger.LogInfo("[NetworkMonitor] Network capture started - will capture all TCP traffic");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[NetworkMonitor] Could not parse server port '{serverPortStr}' - network capture skipped");
+                    }
+                }
+                else if (_networkMonitor == null)
+                {
+                    _logger.LogDebug("[NetworkMonitor] Network monitor not available - network capture will be skipped");
+                }
+
+                // Declare variables outside try block so they're accessible after
+                Dictionary<int, string> clientOutputs = new Dictionary<int, string>();
+                Dictionary<int, string> serverOutputs = new Dictionary<int, string>();
+                
+                try
+                {
+                    // Execute actions and capture outputs
+                    // This is wrapped in try/finally to ensure network monitor is stopped
+                    var (capturedClientOutputs, capturedServerOutputs) = await ExecuteActionsAsync(environment, actions, ct);
+                    clientOutputs = capturedClientOutputs;
+                    serverOutputs = capturedServerOutputs;
+                    result.ClientOutputs = clientOutputs;
+                    result.ServerOutputs = serverOutputs;
+                }
+                finally
+                {
+                    // =====================================================
+                    // STOP NETWORK MONITOR AFTER EXECUTING ACTIONS
+                    // =====================================================
+                    if (_networkMonitor != null && _networkMonitor.IsCapturing)
+                    {
+                        _logger.LogInfo("[NetworkMonitor] Stopping network capture...");
+                        await _networkMonitor.StopAsync(ct);
+                        _logger.LogInfo("[NetworkMonitor] Network capture stopped");
+                    }
+                }
 
                 // Compare outputs and calculate points
                 var (earnedPoints, passed) = CalculatePoints(expectedOutputs, clientOutputs, serverOutputs, maxMark, testCaseName);
@@ -241,6 +336,13 @@ namespace SolutionGrader.UI.Services
             catch (Exception ex)
             {
                 _logger.LogError($"Test case execution failed: {ex.Message}");
+                
+                // Ensure network monitor is stopped on exception
+                if (_networkMonitor != null && _networkMonitor.IsCapturing)
+                {
+                    try { await _networkMonitor.StopAsync(ct); } catch { }
+                }
+                
                 return result;
             }
         }
@@ -293,6 +395,10 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Executes all actions for a test case and captures outputs.
         /// Actions are executed in stage order: StartServer, StartClient, Input, Close*
+        /// 
+        /// NETWORK MONITORING:
+        /// Before each action, the network monitor context is updated with the current stage.
+        /// This associates captured network packets with the correct stage for comparison.
         /// </summary>
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
             Environment environment,
@@ -308,6 +414,9 @@ namespace SolutionGrader.UI.Services
             // docker logs returns ALL output from container start, so we need to track what's already been seen
             string previousClientOutput = "";
             string previousServerOutput = "";
+            
+            // Get test case name for network context (use first action's question code if available)
+            string questionCode = "TC1"; // Default value
 
             _logger.LogInfo($"Executing {actions.Count} actions in Docker containers...");
 
@@ -316,6 +425,17 @@ namespace SolutionGrader.UI.Services
             {
                 ct.ThrowIfCancellationRequested();
                 var actionUpper = action.ToUpperInvariant();
+                
+                // =================================================
+                // UPDATE NETWORK MONITOR CONTEXT FOR CURRENT STAGE
+                // =================================================
+                // All network packets captured after this point belong to this stage
+                // The stage-based capture allows proper comparison against expected Network sheet data
+                if (_networkMonitor != null)
+                {
+                    _networkMonitor.SetCurrentContext(questionCode, stage.ToString());
+                    _logger.LogDebug($"[NetworkMonitor] Set context to stage {stage}");
+                }
                 
                 _logger.LogInfo($"[Stage {stage}] Action: {actionUpper}" + 
                     (string.IsNullOrEmpty(input) ? "" : $", Input: '{input}'"));

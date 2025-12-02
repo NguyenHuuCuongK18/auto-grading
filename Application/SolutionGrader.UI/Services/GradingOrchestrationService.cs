@@ -54,11 +54,6 @@ namespace SolutionGrader.UI.Services
         private const string NoPortRequired = "-1";
         
         /// <summary>
-        /// Port offset for client container to avoid conflicts with server container
-        /// </summary>
-        private const int ClientPortOffset = 1;
-        
-        /// <summary>
         /// Default timeout for database readiness check in milliseconds.
         /// Reduced from 5000ms to 2000ms for faster startup.
         /// </summary>
@@ -658,18 +653,19 @@ namespace SolutionGrader.UI.Services
                 {
                     _logger.LogInfo($"Setting up Client container: {clientContainer}");
                     
-                    // Client container uses same code image but different port mapping
-                    // Client typically doesn't need to expose a port since it initiates connections
-                    // Using ClientPortOffset to avoid port conflicts with server container
-                    var clientPort = int.TryParse(hostPort, out var hp) ? hp + ClientPortOffset : 5001;
-                    
+                    // Client container does NOT need port mapping since it initiates connections
+                    // to the server via the Docker network (using server container name as hostname)
+                    // This is consistent with the reference implementation in EnvironmentSetupService.cs
+                    // which intentionally skips port mapping for the GivenConsole (client) container.
+                    // 
+                    // Setting HostPort and ContainerPort to 0 tells RunContainer to skip port mapping.
                     var clientDockerBase = new Domain.Entities.Docker.DockerSupporter.Entity.DockerBase
                     {
                         ImageName = codeImageName,
                         ContainerName = clientContainer,
                         DockerNetwork = network,
-                        ContainerPort = int.TryParse(internalPort, out var cip) ? cip : 5000,
-                        HostPort = clientPort,
+                        ContainerPort = 0, // No port mapping - client connects to server within Docker network
+                        HostPort = 0,      // No host port exposure needed
                         EnvironmentVariables = new Dictionary<string, string>
                         {
                             { "DOTNET_RUNNING_IN_CONTAINER", "true" }
@@ -677,7 +673,7 @@ namespace SolutionGrader.UI.Services
                     };
                     
                     _dockerExecutor.RunContainer(clientDockerBase);
-                    _logger.LogInfo($"Client container '{clientContainer}' started on port {clientPort}");
+                    _logger.LogInfo($"Client container '{clientContainer}' started (no port mapping - connects to server via Docker network)");
                 }
 
                 await Task.Delay(500, ct); // Brief wait for all containers to be ready
