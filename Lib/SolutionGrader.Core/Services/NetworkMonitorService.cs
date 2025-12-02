@@ -104,9 +104,14 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error starting capture: {ex.Message}");
+                var errorMsg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: Failed to start network capture: {ex.Message}. " +
+                              "Network monitoring is MANDATORY for grading. " +
+                              "On Linux, ensure libpcap is installed and run with sudo. On Windows, ensure NPcap is installed.";
+                Console.WriteLine(errorMsg);
                 _device?.Close();
                 _device = null;
+                // Network monitoring is mandatory - throw exception to fail grading
+                throw new InvalidOperationException(errorMsg, ex);
             }
         }
         
@@ -688,27 +693,37 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             var devices = CaptureDeviceList.Instance;
             
+            // Check if we have any devices - if not, likely a permission issue
+            if (devices == null || devices.Count == 0)
+            {
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: No capture devices found!");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This usually means:");
+                Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
+                Console.WriteLine($"  2. On Windows: NPcap is not installed");
+                Console.WriteLine($"  3. On Docker: The container needs --cap-add=NET_RAW capability");
+                return null;
+            }
+            
             // Debug: List all available devices
-            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices:");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices ({devices.Count} found):");
             foreach (var d in devices)
             {
                 Console.WriteLine($"  - {d.Name}: {d.Description}");
             }
             
-            // First, look for Docker bridge interfaces (for container-to-container traffic)
-            // These are named like "br-xxxxx" or "docker0"
-            foreach (var dev in devices)
-            {
-                var name = dev.Name?.ToLowerInvariant() ?? "";
-                
-                if (name.StartsWith("br-") || name == "docker0")
-                {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker bridge device: {dev.Name}");
-                    return dev;
-                }
-            }
+            // DEVICE SELECTION STRATEGY:
+            // 
+            // ON WINDOWS: Use NPcap loopback adapter
+            //   - Traffic goes through loopback with port mapping (-p 8000:8000)
+            //   - This is the primary grading environment
+            //
+            // ON LINUX WITH DOCKER: Use Docker bridge interfaces
+            //   - Custom Docker networks (br-xxxxx) take PRIORITY over docker0
+            //   - docker0 is the default bridge but custom networks use their own bridge
+            //   - Traffic between containers on custom networks goes through br-xxxxx
+            //   - The bridge interface name corresponds to the network ID
             
-            // Then, look for loopback device (for host-level traffic)
+            // PRIORITY 1 (Windows): NPcap loopback adapter
             foreach (var dev in devices)
             {
                 var description = dev.Description?.ToLowerInvariant() ?? "";
@@ -720,22 +735,51 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                     description.Contains("npcap loopback") ||
                     name.Contains("\\device\\npf_loopback"))
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found loopback device: {dev.Name} ({dev.Description})");
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Windows loopback device: {dev.Name} ({dev.Description})");
                     return dev;
                 }
             }
             
-            // On Linux, look for 'lo' interface
+            // PRIORITY 2 (Linux): Custom Docker bridge networks (br-xxxxx)
+            // These are created for custom Docker networks like "auto-grading-network"
+            // MUST check these BEFORE docker0 because custom networks use their own bridge
             foreach (var dev in devices)
             {
-                if (dev.Name == "lo" || dev.Name?.Contains("lo") == true)
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                
+                if (name.StartsWith("br-"))
                 {
-                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found loopback device: {dev.Name}");
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker custom bridge device: {dev.Name}");
                     return dev;
                 }
             }
             
-            // Try veth (virtual ethernet) interfaces that connect to Docker containers
+            // PRIORITY 3 (Linux): Default Docker bridge (docker0)
+            // Only used if no custom bridge network is found
+            foreach (var dev in devices)
+            {
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                
+                if (name == "docker0")
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker default bridge device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // PRIORITY 4 (Linux): Linux loopback device
+            // Fallback for non-Docker Linux testing
+            foreach (var dev in devices)
+            {
+                if (dev.Name == "lo")
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Linux loopback device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // PRIORITY 5: veth (virtual ethernet) interfaces
+            // These connect to Docker containers
             foreach (var dev in devices)
             {
                 var name = dev.Name?.ToLowerInvariant() ?? "";
@@ -746,10 +790,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 }
             }
             
-            // If no suitable device found, try to use first available device as fallback
+            // LAST RESORT: Use first available device
             if (devices.Count > 0)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Using first available device as fallback: {devices[0].Name}");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Using first available device as last resort: {devices[0].Name} ({devices[0].Description})");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This may not capture the correct traffic!");
                 return devices[0];
             }
             
@@ -758,6 +803,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         catch (Exception ex)
         {
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error finding capture device: {ex.Message}");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Full exception: {ex}");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This usually means:");
+            Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
+            Console.WriteLine($"  2. On Windows: NPcap is not installed");
+            Console.WriteLine($"  3. Insufficient permissions to access network interfaces");
             return null;
         }
     }

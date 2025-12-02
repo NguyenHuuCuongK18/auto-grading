@@ -1627,7 +1627,8 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Contains TCP packet captures in the EXACT SampleLogging format
+            // Contains TCP packet captures in the EXACT testkit Detail.xlsx format for easy debugging
+            // Format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
             var netWs = wb.Worksheets.Add("Network");
             SetNetworkSheetHeaders(netWs);
             int netRow = 2;
@@ -1638,28 +1639,21 @@ namespace SolutionGrader.Core.Services
                 netWs.Cell(netRow, 3).Value = "TCP";  // Info
                 netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
                 netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
-                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags (expected)
-                netWs.Cell(netRow, 7).Value = packet.State;  // State (expected)
-                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data (expected)
-                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole (expected)
-                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole (expected)
-                netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
-                netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
-                netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
-                netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
-                netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
-                netWs.Cell(netRow, 16).Value = "PASS";  // NetworkResult (captured = pass)
+                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
+                netWs.Cell(netRow, 7).Value = packet.State;  // State
+                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data
+                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole
+                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole
                 netRow++;
             }
             
-            // If no captures but we have expected network flows, log them as FAIL
+            // If no captures but we have expected network flows, log them as empty rows for debugging
             if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
             {
                 foreach (var comp in result.NetworkComparisons)
                 {
                     netWs.Cell(netRow, 1).Value = comp.Stage;
                     netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
-                    netWs.Cell(netRow, 16).Value = "FAIL";  // NetworkResult
                     netRow++;
                 }
             }
@@ -1718,9 +1712,10 @@ namespace SolutionGrader.Core.Services
         
         private static void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
+            // Match the EXACT testkit Detail.xlsx Network sheet format for easy debugging
+            // Testkit format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
             var headers = new[] { "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
-                "SourceRole", "DestinationRole", "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", 
-                "ActualData", "NetworkResult" };
+                "SourceRole", "DestinationRole" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;

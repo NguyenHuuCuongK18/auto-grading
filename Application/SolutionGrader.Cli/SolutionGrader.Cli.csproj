@@ -40,5 +40,7 @@
     <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
     <!-- Core grading services from Lib folder - now cross-platform -->
     <ProjectReference Include="..\..\Lib\SolutionGrader.Core\SolutionGrader.Core.csproj" />
+    <!-- FileMaster for zip extraction when solution folder is missing -->
+    <ProjectReference Include="..\..\Lib\FileMaster\FileMaster.csproj" />
   </ItemGroup>
 </Project>

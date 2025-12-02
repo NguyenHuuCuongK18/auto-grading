@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
+using FileMaster.FileEngine;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Services;
 
@@ -238,12 +239,40 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // Find solution folder
+                    // Find solution folder, or try to extract if missing
                     var solutionPath = Path.Combine(studentDir, "1", "solution");
                     if (!Directory.Exists(solutionPath))
                     {
-                        Console.WriteLine($"[WARNING] No solution folder for {studentCode}");
-                        continue;
+                        // Try to find and extract zip file (matching UI behavior)
+                        var questionFolder = Path.Combine(studentDir, "1");
+                        if (Directory.Exists(questionFolder))
+                        {
+                            var zipFiles = Directory.GetFiles(questionFolder, "*.zip");
+                            if (zipFiles.Length > 0)
+                            {
+                                try
+                                {
+                                    // Use FileMaster for consistent extraction with UI
+                                    FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
+                                    Console.WriteLine($"[CLI] Extracted solution from zip for {studentCode}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[ERROR] Failed to extract zip for {studentCode}: {ex.Message}");
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[WARNING] No question folder for {studentCode}");
+                            continue;
+                        }
                     }
 
                     // Find server and client DLLs

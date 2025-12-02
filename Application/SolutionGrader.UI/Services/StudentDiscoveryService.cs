@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using FileMaster.FileEngine;
 using SolutionGrader.UI.Models;
 
 namespace SolutionGrader.UI.Services
@@ -90,13 +91,13 @@ namespace SolutionGrader.UI.Services
                 
                 if (!Directory.Exists(solutionPath))
                 {
-                    // Try to extract zip file
+                    // Try to extract zip file using FileMaster (consistent with CLI)
                     var zipFiles = Directory.GetFiles(questionFolderPath, "*.zip");
                     if (zipFiles.Length > 0)
                     {
                         try
                         {
-                            System.IO.Compression.ZipFile.ExtractToDirectory(zipFiles[0], solutionPath);
+                            FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
                             _logger.LogInfo($"Extracted solution from zip for student {studentCode}");
                         }
                         catch (Exception ex)
