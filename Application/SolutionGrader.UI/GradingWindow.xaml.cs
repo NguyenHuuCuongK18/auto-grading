@@ -301,6 +301,14 @@ namespace SolutionGrader.UI
                 _isRunning = false;
                 _elapsedTimer?.Stop();
                 UpdateButtonStates();
+                
+                // Dispose all Docker containers (including database) when grading session ends
+                // Only dispose if not paused (paused sessions may resume)
+                if (!_isPaused)
+                {
+                    _gradingService.DisposeAllContainers(_configuration);
+                }
+                
                 _logger.LogInfo("Grading session completed");
             }
         }
@@ -363,11 +371,13 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
+                // Pass the cancellation token so pause can abort the current grading
                 var sessionState = new GradingSessionState();
                 await _gradingService.StartGradingAsync(
                     new System.Collections.Generic.List<StudentSolution> { student },
                     _configuration,
-                    sessionState);
+                    sessionState,
+                    ct);
                 
                 // Update final status
                 student.ProgressPercent = 100;
@@ -375,6 +385,15 @@ namespace SolutionGrader.UI
                 UpdateStudentInUI(student);
                 
                 _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}/{student.MaxMark}");
+            }
+            catch (OperationCanceledException)
+            {
+                // Grading was paused/cancelled - set status to Paused so it can be resumed
+                student.Status = GradingStatus.Paused;
+                student.StatusMessage = "Grading paused - will resume when unpaused";
+                student.EndTime = null; // Clear end time since not completed
+                _logger.LogInfo($"Grading paused for {student.StudentCode}");
+                UpdateStudentInUI(student);
             }
             catch (Exception ex)
             {
@@ -395,18 +414,23 @@ namespace SolutionGrader.UI
             if (_isRunning && !_isPaused)
             {
                 _isPaused = true;
-                _logger.LogInfo("Grading paused");
+                // Cancel the current grading operation to abort the student being graded
+                _cancellationTokenSource?.Cancel();
+                _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
                 UpdateButtonStates();
             }
         }
 
-        private void Resume_Click(object sender, RoutedEventArgs e)
+        private async void Resume_Click(object sender, RoutedEventArgs e)
         {
             if (_isPaused)
             {
                 _isPaused = false;
                 _logger.LogInfo("Grading resumed");
                 UpdateButtonStates();
+                
+                // Restart grading from paused students
+                await StartGradingAsync(false);
             }
         }
 

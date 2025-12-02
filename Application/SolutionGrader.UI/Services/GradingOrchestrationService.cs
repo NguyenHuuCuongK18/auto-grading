@@ -60,13 +60,19 @@ namespace SolutionGrader.UI.Services
         /// Starts the grading process for the specified students.
         /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
+        /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
-            GradingSessionState sessionState)
+            GradingSessionState sessionState,
+            CancellationToken ct = default)
         {
-            _cancellationTokenSource = new CancellationTokenSource();
-            var ct = _cancellationTokenSource.Token;
+            // Use provided cancellation token, or create a new one if not provided
+            if (ct == default)
+            {
+                _cancellationTokenSource = new CancellationTokenSource();
+                ct = _cancellationTokenSource.Token;
+            }
 
             // Initialize result writer for saving StudentsSolution.xlsx
             var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
@@ -506,6 +512,24 @@ namespace SolutionGrader.UI.Services
             student.EndTime = null;
             student.StatusMessage = "State disposed";
             student.ProgressPercent = 0;
+        }
+        
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="config">Grading configuration containing Docker settings</param>
+        public void DisposeAllContainers(GradingConfiguration config)
+        {
+            _logger.LogInfo("Disposing all Docker containers...");
+            
+            var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+            {
+                DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                DockerNetwork = config.DockerNetwork ?? "auto-grading-network"
+            };
+            
+            _libGrading.DisposeAllContainers(dockerConfig);
         }
     }
 }
