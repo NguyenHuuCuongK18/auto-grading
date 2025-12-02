@@ -301,6 +301,14 @@ namespace SolutionGrader.UI
                 _isRunning = false;
                 _elapsedTimer?.Stop();
                 UpdateButtonStates();
+                
+                // Dispose all Docker containers (including database) when grading session ends
+                // Only dispose if not paused (paused sessions may resume)
+                if (!_isPaused)
+                {
+                    _gradingService.DisposeAllContainers(_configuration);
+                }
+                
                 _logger.LogInfo("Grading session completed");
             }
         }

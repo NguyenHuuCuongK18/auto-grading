@@ -86,6 +86,29 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
+        public void DisposeAllContainers(DockerGradingConfig config)
+        {
+            Console.WriteLine("[Docker] Disposing all containers...");
+            
+            var databaseContainer = config.DatabaseContainerName;
+            var serverContainer = $"server-{databaseContainer}";
+            var clientContainer = $"client-{databaseContainer}";
+            
+            // Remove code containers
+            try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+            try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
+            
+            // Remove database container
+            try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
+            
+            Console.WriteLine("[Docker] All containers disposed");
+        }
+        
+        /// <summary>
         /// Grades a single student's submission in Docker containers.
         /// 
         /// EXECUTION ORDER (critical for network capture):

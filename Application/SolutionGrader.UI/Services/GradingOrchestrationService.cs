@@ -507,5 +507,23 @@ namespace SolutionGrader.UI.Services
             student.StatusMessage = "State disposed";
             student.ProgressPercent = 0;
         }
+        
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="config">Grading configuration containing Docker settings</param>
+        public void DisposeAllContainers(GradingConfiguration config)
+        {
+            _logger.LogInfo("Disposing all Docker containers...");
+            
+            var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+            {
+                DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                DockerNetwork = config.DockerNetwork ?? "auto-grading-network"
+            };
+            
+            _libGrading.DisposeAllContainers(dockerConfig);
+        }
     }
 }
