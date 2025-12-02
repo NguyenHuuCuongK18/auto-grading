@@ -399,6 +399,18 @@ namespace EnvironmentBuilder.DockerCommand
                 RemoveAttachment(containerName);
             }
         }
+        
+        /// <summary>
+        /// Clear all log buffers for all attachments without removing them.
+        /// Used between test cases to reset output capture.
+        /// </summary>
+        public void ClearAllLogs()
+        {
+            foreach (var attachment in _attachments.Values)
+            {
+                attachment.ClearBuffers();
+            }
+        }
 
         public void Dispose()
         {

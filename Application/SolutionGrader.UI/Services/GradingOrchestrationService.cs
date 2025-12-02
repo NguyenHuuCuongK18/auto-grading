@@ -139,16 +139,20 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Grades a single student by delegating to LibGradingService.
+        /// Grades a single student by delegating to LibGradingService's Docker grading.
         /// 
-        /// This method DOES NOT implement its own Docker/grading logic.
-        /// All grading is done by Lib/SolutionGrader.Core services:
-        /// - SuiteRunner: Main grading orchestration
-        /// - TestCaseOrchestrator: Step-by-step test execution
-        /// - NetworkMonitorService: Network traffic capture
-        /// - ExecutableManager: Process management
-        /// - Executor: Step execution and comparison
-        /// - ExcelDetailLogService: Result logging
+        /// IMPORTANT: This method uses DOCKER-BASED GRADING via DockerGradingService:
+        /// 1. Sets up Docker containers (server and client) with TTY support
+        /// 2. Copies student DLLs to containers
+        /// 3. Generates appsettings.json with proper networking config
+        /// 4. NetworkMonitor runs on HOST and sniffs the exposed server port
+        /// 5. Test execution happens INSIDE containers
+        /// 6. Output captured via application log files (bypasses docker logs buffering)
+        /// 
+        /// The architecture:
+        /// - Server container: port EXPOSED to host (e.g., -p 8000:8000) for NetworkMonitor
+        /// - Client container: connects to server via Docker network (container name as hostname)
+        /// - NetworkMonitor: runs on HOST, sniffs localhost:{exposed_port}
         /// </summary>
         private async Task GradeStudentAsync(
             StudentSolution student, 
@@ -165,7 +169,7 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                _logger.LogInfo($"Starting grading for student: {student.StudentCode} (Paper {student.PaperNo})");
+                _logger.LogInfo($"Starting DOCKER grading for student: {student.StudentCode} (Paper {student.PaperNo})");
 
                 // Step 1: Find test kit for this paper
                 student.ProgressPercent = 10;
@@ -182,63 +186,94 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"Using test kit: {testKitPath}");
 
-                // Step 2: Build paths for LibGradingService
+                // Step 2: Build paths for Docker grading
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                // The suite path is the test kit folder (contains Header.xlsx, Environment.xlsx, test cases)
-                var suitePath = testKitPath;
-                
                 // Result folder for this student: {resultPath}/{paperNo}/student/{studentCode}
                 var studentResultPath = Path.Combine(resultPath, student.PaperNo, "student", student.StudentCode);
                 
-                // Get student's executable paths (client and/or server)
-                var clientExePath = GetStudentExecutablePath(student, config, "Client");
-                var serverExePath = GetStudentExecutablePath(student, config, "Server");
+                // Get student's DLL paths (client and/or server)
+                var clientDllPath = GetStudentExecutablePath(student, config, "Client");
+                var serverDllPath = GetStudentExecutablePath(student, config, "Server");
 
-                _logger.LogDebug($"Client exe path: {clientExePath ?? "(none)"}");
-                _logger.LogDebug($"Server exe path: {serverExePath ?? "(none)"}");
+                _logger.LogDebug($"Client DLL path: {clientDllPath ?? "(none)"}");
+                _logger.LogDebug($"Server DLL path: {serverDllPath ?? "(none)"}");
 
-                // Step 3: Execute grading via LibGradingService
-                // This delegates to Lib/SolutionGrader.Core's SuiteRunner which handles:
-                // - Docker container setup via EnvironmentManagerInvoker
+                // Step 3: Execute DOCKER grading via LibGradingService
+                // This delegates to Lib/SolutionGrader.Core's DockerGradingService which handles:
+                // - Docker container setup with TTY support (-t flag)
+                // - Server port EXPOSED to host for NetworkMonitor sniffing
                 // - File copying to containers
-                // - Network monitoring via NetworkMonitorService
-                // - Test execution via TestCaseOrchestrator
-                // - Output comparison via DataComparisonService
-                // - Result logging via ExcelDetailLogService
+                // - Network monitoring via NetworkMonitorService (runs on HOST)
+                // - Test execution INSIDE containers
+                // - Output captured via application log files
+                // - Result logging to Excel files
                 student.ProgressPercent = 30;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                _logger.LogInfo("Delegating to LibGradingService (Lib/SolutionGrader.Core)...");
+                _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                var exitCode = await _libGrading.ExecuteSuiteAsync(
-                    suitePath,
+                // Build Docker configuration from UI config
+                // The examiner sets HasClient/HasServer to indicate what the student should provide:
+                // - HasClient=true, HasServer=true  → student provides both
+                // - HasClient=true, HasServer=false → student provides client, use golden server
+                // - HasClient=false, HasServer=true → student provides server, use golden client
+                var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+                {
+                    // Examiner's component requirements
+                    HasClient = config.HasClient,
+                    HasServer = config.HasServer,
+                    ClientProjectName = config.ClientProjectName,
+                    ServerProjectName = config.ServerProjectName,
+                    
+                    // Container settings
+                    CodeContainerInternalPort = config.CodeContainerInternalPort,
+                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
+                    
+                    // Database container settings
+                    DatabaseImageName = config.DatabaseImageName ?? "mcr.microsoft.com/mssql/server:2019-latest",
+                    DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                    DatabaseContainerInternalPort = config.DatabaseContainerInternalPort,
+                    DatabaseContainerHostPort = config.DatabaseContainerHostPort,
+                    DatabaseUsername = config.DatabaseUsername ?? "sa",
+                    DatabasePassword = config.DatabasePassword,
+                    
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                };
+                
+                _logger.LogInfo($"Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
+                _logger.LogInfo($"Project names: Client={config.ClientProjectName}, Server={config.ServerProjectName}");
+                
+                var result = await _libGrading.ExecuteDockerGradingAsync(
+                    testKitPath,
                     studentResultPath,
-                    clientExePath,
-                    serverExePath,
-                    useInnerEnv: true,
+                    serverDllPath,
+                    clientDllPath,
+                    student.StudentCode,
+                    dockerConfig,
                     ct);
 
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                // Step 4: Interpret results
-                if (exitCode == 1)
+                // Step 4: Interpret results from DockerGradingResult
+                if (result.Passed || result.TotalMark > 0)
                 {
                     student.Status = GradingStatus.Success;
-                    student.StatusMessage = "Grading completed successfully";
-                    student.Mark = ReadMarkFromResults(studentResultPath);
+                    student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
+                    student.Mark = result.TotalMark;
                 }
                 else
                 {
                     student.Status = GradingStatus.Failed;
-                    student.StatusMessage = $"Grading failed (exit code: {exitCode})";
+                    student.StatusMessage = result.ErrorMessage ?? $"Docker grading failed: 0/{result.MaxMark:F2}";
                     student.Mark = 0;
                 }
 
                 student.ProgressPercent = 100;
-                _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}, Status: {student.Status}");
+                _logger.LogInfo($"Docker grading completed for {student.StudentCode}. Mark: {student.Mark:F2}, Status: {student.Status}");
             }
             catch (OperationCanceledException)
             {
