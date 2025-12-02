@@ -8,10 +8,8 @@ using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
 using Domain.Entities.Docker.DockerSupporter.Entity;
-using PacketDotNet;
-using SharpPcap;
-using SharpPcap.LibPcap;
 using SolutionGrader.Core.Abstractions;
+using SolutionGrader.Core.Helpers;
 using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
@@ -36,11 +34,22 @@ namespace SolutionGrader.Core.Services
     /// - Compare outputs against expected values
     /// - Write results in Excel format
     /// 
+    /// NETWORK MONITORING ARCHITECTURE:
+    /// For the NetworkMonitor (running on the host) to capture traffic, the client must
+    /// connect to the server through the host's exposed port, NOT directly via Docker network.
+    /// 
+    /// Traffic Flow (CORRECT - enables network monitoring):
+    ///   Client Container -> host.docker.internal:{hostPort} -> Host Loopback -> Server Container:{containerPort}
+    /// 
+    /// Traffic Flow (WRONG - bypasses network monitoring):
+    ///   Client Container -> Docker Network (container name) -> Server Container
+    /// 
     /// Key design decisions:
     /// - NetworkMonitor ALWAYS runs first to capture full network traffic
     /// - Server container port is EXPOSED to host (e.g., -p 8000:8000)
+    /// - Client connects via host.docker.internal to route through exposed port
+    /// - Client container uses --add-host=host.docker.internal:host-gateway for Linux support
     /// - NetworkMonitor runs on HOST and sniffs localhost:8000 (requires sudo/admin)
-    /// - Client connects to server via Docker network (by container name)
     /// - Application output is captured via log files, not docker logs (avoids buffering)
     /// - TTY flag (-t) ensures immediate console output flushing
     /// </summary>
@@ -52,7 +61,6 @@ namespace SolutionGrader.Core.Services
         private const int InputProcessingDelayMs = 2000;  // Reduced from 5000 - wait for input to be processed
         private const int OutputRetryMaxAttempts = 5;
         private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
-        private const int DefaultTestCaseTimeoutSeconds = 15;  // 15 seconds per test case default
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
@@ -431,7 +439,10 @@ namespace SolutionGrader.Core.Services
             }
             
             // 3. Create client container with TTY support (NO port mapping needed)
-            // Client connects to server via Docker network using container name
+            // Client connects to server via host.docker.internal to route traffic through the exposed port.
+            // This is CRITICAL for network monitoring - traffic must pass through the host's exposed port
+            // so the NetworkMonitor (running on the host) can capture it.
+            // The --add-host flag ensures host.docker.internal works on Linux (Docker 20.10+)
             if (!string.IsNullOrEmpty(clientDllPath))
             {
                 var clientBase = new DockerBase
@@ -445,10 +456,13 @@ namespace SolutionGrader.Core.Services
                     {
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
-                    }
+                    },
+                    // Add host.docker.internal mapping to allow client to reach the host
+                    // This enables network traffic to flow through the exposed port for capture
+                    AdditionalFlags = AppsettingKeywords.DOCKER_ADD_HOST_FLAG
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                Console.WriteLine($"[Docker] Client container {clientContainer} created (no port exposed)");
+                Console.WriteLine($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
             }
             
             await Task.Delay(500);
@@ -559,16 +573,17 @@ namespace SolutionGrader.Core.Services
             string serverContainer,
             string clientContainer)
         {
-            // Connection string for database
-            var connectionString = BuildConnectionString(config, testKitConfig);
+            var connectionString = ConnectionStringHelper.BuildForDocker(
+                config.DatabaseContainerHostPort,
+                testKitConfig.DatabaseName,
+                config.DatabaseUsername,
+                config.DatabasePassword ?? DefaultDatabasePassword);
             
-            // Server listens on 0.0.0.0 to accept connections from any interface
-            var serverIpAddress = "0.0.0.0";
-            // Client connects to server container by Docker DNS name
-            var clientIpAddress = serverContainer;
-            var port = config.CodeContainerInternalPort.ToString();
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
+            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
+            var serverPort = config.CodeContainerInternalPort.ToString();
+            var clientPort = config.CodeContainerHostPort.ToString();
             
-            // Generate server appsettings.json
             if (!string.IsNullOrEmpty(serverDllPath))
             {
                 var serverDir = Path.GetDirectoryName(serverDllPath);
@@ -576,13 +591,10 @@ namespace SolutionGrader.Core.Services
                 {
                     var folderName = Path.GetFileName(serverDir);
                     var containerPath = $"/apps/{folderName}/appsettings.json";
-                    
                     var serverConfig = $@"{{
-  ""ConnectionStrings"": {{
-    ""MyCnn"": ""{connectionString}""
-  }},
+  ""ConnectionStrings"": {{ ""MyCnn"": ""{connectionString}"" }},
   ""IpAddress"": ""{serverIpAddress}"",
-  ""Port"": ""{port}""
+  ""Port"": ""{serverPort}""
 }}";
                     
                     string? tempFile = null;
@@ -591,7 +603,7 @@ namespace SolutionGrader.Core.Services
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={port}");
+                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort}");
                     }
                     catch (Exception ex)
                     {
@@ -605,7 +617,6 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // Generate client appsettings.json
             if (!string.IsNullOrEmpty(clientDllPath))
             {
                 var clientDir = Path.GetDirectoryName(clientDllPath);
@@ -613,10 +624,9 @@ namespace SolutionGrader.Core.Services
                 {
                     var folderName = Path.GetFileName(clientDir);
                     var containerPath = $"/apps/{folderName}/appsettings.json";
-                    
                     var clientConfig = $@"{{
   ""IpAddress"": ""{clientIpAddress}"",
-  ""Port"": ""{port}""
+  ""Port"": ""{clientPort}""
 }}";
                     
                     string? tempFile = null;
@@ -625,7 +635,7 @@ namespace SolutionGrader.Core.Services
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={port}");
+                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort}");
                     }
                     catch (Exception ex)
                     {
@@ -638,16 +648,6 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
-        }
-        
-        private string BuildConnectionString(DockerGradingConfig config, TestKitConfig testKitConfig)
-        {
-            var server = $"localhost,{config.DatabaseContainerHostPort}";
-            var database = testKitConfig.DatabaseName;
-            var username = config.DatabaseUsername ?? "sa";
-            var password = config.DatabasePassword ?? DefaultDatabasePassword;
-            
-            return $"server={server};database={database};uid={username};pwd={password};TrustServerCertificate=true";
         }
         
         #endregion
