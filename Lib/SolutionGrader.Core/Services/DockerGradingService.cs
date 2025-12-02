@@ -700,8 +700,8 @@ namespace SolutionGrader.Core.Services
             if (_networkMonitor == null)
                 return packets;
             
-            // Get all captured packets from the monitor
-            var capturedPackets = _runContext.GetCapturedNetworkPackets("", "");
+            // Get ALL captured packets from the RunContext (across all stages)
+            var capturedPackets = _runContext.GetAllCapturedNetworkPackets();
             foreach (var packet in capturedPackets)
             {
                 packets.Add(new CapturedPacketInfo

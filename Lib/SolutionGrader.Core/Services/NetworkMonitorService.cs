@@ -676,7 +676,27 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             var devices = CaptureDeviceList.Instance;
             
-            // First, look for loopback device
+            // Debug: List all available devices
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices:");
+            foreach (var d in devices)
+            {
+                Console.WriteLine($"  - {d.Name}: {d.Description}");
+            }
+            
+            // First, look for Docker bridge interfaces (for container-to-container traffic)
+            // These are named like "br-xxxxx" or "docker0"
+            foreach (var dev in devices)
+            {
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                
+                if (name.StartsWith("br-") || name == "docker0")
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found Docker bridge device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // Then, look for loopback device (for host-level traffic)
             foreach (var dev in devices)
             {
                 var description = dev.Description?.ToLowerInvariant() ?? "";
@@ -703,7 +723,18 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 }
             }
             
-            // If no loopback found, try to use first available device as fallback
+            // Try veth (virtual ethernet) interfaces that connect to Docker containers
+            foreach (var dev in devices)
+            {
+                var name = dev.Name?.ToLowerInvariant() ?? "";
+                if (name.StartsWith("veth"))
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Found veth device: {dev.Name}");
+                    return dev;
+                }
+            }
+            
+            // If no suitable device found, try to use first available device as fallback
             if (devices.Count > 0)
             {
                 Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Using first available device as fallback: {devices[0].Name}");
