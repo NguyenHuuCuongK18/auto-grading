@@ -28,13 +28,53 @@ namespace EnvironmentBuilder.DockerCommand
             try
             {
                 command = "docker exec " + command;
-                _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                var success = _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                if (!success)
+                {
+                    // Command failed but didn't throw - this might be expected (e.g., pkill when no process exists)
+                    // Don't throw, just return silently
+                }
             }
             catch (Exception ex)
             {
                 // log
                 // throw
                 throw new Exception($"Error while executing command. Details: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Executes a docker exec command and returns whether it succeeded.
+        /// Unlike ExecDockerCommand, this returns a boolean indicating success.
+        /// </summary>
+        public bool TryExecDockerCommand(string command, int timeoutInMilliseconds = 30000)
+        {
+            try
+            {
+                command = "docker exec " + command;
+                return _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Executes a docker exec command and returns the output.
+        /// Used for commands like 'ps aux' where we need to parse the output.
+        /// </summary>
+        public (bool success, string output) ExecDockerCommandWithOutput(string command, int timeoutInMilliseconds = 30000)
+        {
+            try
+            {
+                command = "docker exec " + command;
+                var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, timeoutInMilliseconds);
+                return (result.ExitCode == 0, string.Join("\n", result.Output));
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
             }
         }
         #endregion

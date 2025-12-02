@@ -86,6 +86,29 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
+        public void DisposeAllContainers(DockerGradingConfig config)
+        {
+            Console.WriteLine("[Docker] Disposing all containers...");
+            
+            var databaseContainer = config.DatabaseContainerName;
+            var serverContainer = $"server-{databaseContainer}";
+            var clientContainer = $"client-{databaseContainer}";
+            
+            // Remove code containers
+            try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
+            try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
+            
+            // Remove database container
+            try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
+            
+            Console.WriteLine("[Docker] All containers disposed");
+        }
+        
+        /// <summary>
         /// Grades a single student's submission in Docker containers.
         /// 
         /// EXECUTION ORDER (critical for network capture):
@@ -1218,62 +1241,183 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
-            Console.WriteLine("[Cleanup] Stopping applications between test cases...");
+            OnProgress("Cleanup: Stopping applications between test cases...");
             
-            // Step 1: Kill dotnet processes with SIGTERM first (graceful), then SIGKILL if needed
-            var serverKillCmd = $"exec {serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
-            var clientKillCmd = $"exec {clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            // Step 1: Kill dotnet processes using PID-based approach (more reliable than pkill)
+            // First, get the list of processes and find dotnet PIDs
+            await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
+            await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            try { _dockerExecutor.ExecDockerCommand(serverKillCmd, 10000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand(clientKillCmd, 10000); } catch { }
+            // Wait for graceful shutdown
+            OnProgress("Cleanup: Waiting 1.5s for graceful shutdown...");
+            await Task.Delay(1500);
+            
+            // Force kill any remaining dotnet processes
+            OnProgress("Cleanup: Force killing any remaining dotnet processes...");
+            await ForceKillDotnetProcessesInContainerAsync(serverContainer, "Server");
+            await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            // These are created by StartApplicationInContainer to keep the named pipe open
-            try { _dockerExecutor.ExecDockerCommand($"exec {serverContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"exec {clientContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 5000);
             
-            // Step 3: Remove ALL files from /apps folder and temp files (DLLs, logs, pipes)
-            // This effectively resets the container state without disposing it
-            var serverCleanFilesCmd = $"exec {serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
-            var clientCleanFilesCmd = $"exec {clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
-            
-            try { _dockerExecutor.ExecDockerCommand(serverCleanFilesCmd, 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand(clientCleanFilesCmd, 5000); } catch { }
-            
-            Console.WriteLine("[Cleanup] Processes killed, files removed from containers");
+            // Step 3: Remove files from /apps folder and temp files
+            OnProgress("Cleanup: Removing files from containers...");
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 5000);
             
             // Step 4: Clear network captures for next test case
+            // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
+            // previous test case's network packets from appearing in next test case
             _networkMonitor?.ClearCaptures();
+            _runContext.ClearNetworkCaptures();
             
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 6: Wait for port release INSIDE the container (not just host)
-            // The port binding is inside the container, so we check there
-            var checkPortCmd = $"exec {serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
-            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 15000); } catch { }
+            // Step 6: Wait for port release with timeout (5 seconds max, check every 200ms)
+            OnProgress($"Cleanup: Waiting for port {hostPort} to be released...");
+            var portCheckStart = DateTime.UtcNow;
+            bool portReleased = false;
             
-            // Step 7: Also verify host port is available (since server port is exposed)
-            var startTime = DateTime.UtcNow;
-            while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
+            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 5)
             {
                 try
                 {
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
-                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available on host");
+                    portReleased = true;
+                    OnProgress($"Cleanup: Port {hostPort} is now available");
                     break;
                 }
                 catch
                 {
-                    await Task.Delay(500);
+                    await Task.Delay(200);
                 }
             }
             
-            // Give a moment for everything to settle
-            await Task.Delay(500);
-            Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
+            if (!portReleased)
+            {
+                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 5s timeout - next test case may fail");
+            }
+            
+            OnProgress("Cleanup: Complete, ready for next test case");
+        }
+        
+        /// <summary>
+        /// Kills dotnet processes in a container using PID-based approach.
+        /// This is more reliable than pkill on Windows.
+        /// Steps: 1) Run 'ps aux' to list processes, 2) Parse output to find dotnet PIDs, 3) Kill by PID
+        /// </summary>
+        private async Task KillDotnetProcessesInContainerAsync(string container, string containerType)
+        {
+            OnProgress($"Cleanup: Finding dotnet processes in {containerType} container...");
+            
+            // Get list of processes using 'ps aux'
+            var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput($"{container} ps aux", 5000);
+            
+            if (!success || string.IsNullOrEmpty(output))
+            {
+                OnProgress($"Cleanup: {containerType} - Could not list processes (ps aux failed), trying pkill fallback...");
+                _dockerExecutor.TryExecDockerCommand($"{container} pkill -TERM -f dotnet", 5000);
+                return;
+            }
+            
+            // Parse output to find dotnet process PIDs (skip PID 1 which is the main container process)
+            var pids = ParseDotnetPidsFromPsOutput(output);
+            
+            if (pids.Count == 0)
+            {
+                OnProgress($"Cleanup: {containerType} - No dotnet processes found");
+                return;
+            }
+            
+            OnProgress($"Cleanup: {containerType} - Found {pids.Count} dotnet process(es): PIDs [{string.Join(", ", pids)}]");
+            
+            // Kill each process by PID using SIGTERM (graceful)
+            foreach (var pid in pids)
+            {
+                var killResult = _dockerExecutor.TryExecDockerCommand($"{container} kill {pid}", 5000);
+                OnProgress($"Cleanup: {containerType} - kill {pid}: {(killResult ? "sent" : "failed")}");
+            }
+            
+            await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Force kills any remaining dotnet processes in a container using SIGKILL (-9).
+        /// </summary>
+        private async Task ForceKillDotnetProcessesInContainerAsync(string container, string containerType)
+        {
+            // Get list of processes using 'ps aux'
+            var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput($"{container} ps aux", 5000);
+            
+            if (!success || string.IsNullOrEmpty(output))
+            {
+                // Fall back to pkill
+                _dockerExecutor.TryExecDockerCommand($"{container} pkill -9 -f dotnet", 5000);
+                return;
+            }
+            
+            // Parse output to find dotnet process PIDs
+            var pids = ParseDotnetPidsFromPsOutput(output);
+            
+            if (pids.Count == 0)
+            {
+                OnProgress($"Cleanup: {containerType} - No remaining dotnet processes");
+                return;
+            }
+            
+            OnProgress($"Cleanup: {containerType} - Force killing {pids.Count} remaining process(es): PIDs [{string.Join(", ", pids)}]");
+            
+            // Force kill each process by PID using SIGKILL (-9)
+            foreach (var pid in pids)
+            {
+                _dockerExecutor.TryExecDockerCommand($"{container} kill -9 {pid}", 5000);
+            }
+            
+            await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Parses the output of 'ps aux' to find PIDs of dotnet processes.
+        /// Example ps aux output:
+        /// USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+        /// root         1  0.0  0.0   2520  1224 ?        Ss   13:27   0:00 tail -f /dev/null
+        /// root        19  4.3  0.2 273635552 36016 ?     Ssl  13:27   0:00 dotnet /apps/test/Project11.dll
+        /// </summary>
+        private List<int> ParseDotnetPidsFromPsOutput(string psOutput)
+        {
+            var pids = new List<int>();
+            var lines = psOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            foreach (var line in lines)
+            {
+                // Skip header line
+                if (line.Contains("PID") && line.Contains("COMMAND"))
+                    continue;
+                
+                // Check if this line contains 'dotnet'
+                if (!line.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                
+                // Parse PID from the line (format: USER PID %CPU %MEM ...)
+                // PID is typically the second column
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && int.TryParse(parts[1], out int pid))
+                {
+                    // Skip PID 1 (main container process - killing it would stop the container)
+                    if (pid != 1)
+                    {
+                        pids.Add(pid);
+                    }
+                }
+            }
+            
+            return pids;
         }
         
         /// <summary>

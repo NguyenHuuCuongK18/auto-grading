@@ -279,5 +279,29 @@ namespace SolutionGrader.UI.Services
                 return new DockerGradingResult { StudentCode = studentCode, ErrorMessage = ex.Message };
             }
         }
+        
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="dockerConfig">Docker grading configuration</param>
+        public void DisposeAllContainers(DockerGradingConfig? dockerConfig = null)
+        {
+            try
+            {
+                var config = dockerConfig ?? new DockerGradingConfig();
+                
+                // Create a temporary DockerGradingService to call DisposeAllContainers
+                IRunContext runctx = new RunContext();
+                var dockerGrading = new DockerGradingService(null, runctx);
+                dockerGrading.DisposeAllContainers(config);
+                
+                _uiLogger.LogInfo("[LibGradingService] All Docker containers disposed");
+            }
+            catch (Exception ex)
+            {
+                _uiLogger.LogError($"[LibGradingService] Failed to dispose containers: {ex.Message}");
+            }
+        }
     }
 }
