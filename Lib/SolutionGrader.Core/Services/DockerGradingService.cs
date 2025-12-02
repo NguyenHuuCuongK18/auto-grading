@@ -1415,8 +1415,9 @@ namespace SolutionGrader.Core.Services
             
             if (!success || string.IsNullOrEmpty(output))
             {
-                OnProgress($"Cleanup: {containerType} - Could not list processes (ps aux failed), trying pkill fallback...");
-                _dockerExecutor.TryExecDockerCommand($"{container} pkill -TERM -f dotnet", 5000);
+                OnProgress($"Cleanup: {containerType} - Could not list processes (ps aux failed), using safe kill fallback...");
+                // Use safe kill method that excludes PID 1 to avoid killing the container
+                _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(container), 5000);
                 return;
             }
             
@@ -1451,8 +1452,8 @@ namespace SolutionGrader.Core.Services
             
             if (!success || string.IsNullOrEmpty(output))
             {
-                // Fall back to pkill
-                _dockerExecutor.TryExecDockerCommand($"{container} pkill -9 -f dotnet", 5000);
+                // Use safe kill method that excludes PID 1 to avoid killing the container
+                _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(container), 5000);
                 return;
             }
             
