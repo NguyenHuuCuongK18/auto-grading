@@ -20,6 +20,12 @@ namespace Domain.Entities.Docker
             public string EnvironmentVariable { get; set; } 
             public Dictionary<string, string> EnvironmentVariables { get; set; }
             public string CaptureFilePath { get; set; }
+            
+            /// <summary>
+            /// Additional Docker flags to be added to the run command.
+            /// Example: "--add-host=host.docker.internal:host-gateway" to enable host.docker.internal on Linux.
+            /// </summary>
+            public string AdditionalFlags { get; set; }
         }
     }
 

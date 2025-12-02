@@ -36,11 +36,22 @@ namespace SolutionGrader.Core.Services
     /// - Compare outputs against expected values
     /// - Write results in Excel format
     /// 
+    /// NETWORK MONITORING ARCHITECTURE:
+    /// For the NetworkMonitor (running on the host) to capture traffic, the client must
+    /// connect to the server through the host's exposed port, NOT directly via Docker network.
+    /// 
+    /// Traffic Flow (CORRECT - enables network monitoring):
+    ///   Client Container -> host.docker.internal:{hostPort} -> Host Loopback -> Server Container:{containerPort}
+    /// 
+    /// Traffic Flow (WRONG - bypasses network monitoring):
+    ///   Client Container -> Docker Network (container name) -> Server Container
+    /// 
     /// Key design decisions:
     /// - NetworkMonitor ALWAYS runs first to capture full network traffic
     /// - Server container port is EXPOSED to host (e.g., -p 8000:8000)
+    /// - Client connects via host.docker.internal to route through exposed port
+    /// - Client container uses --add-host=host.docker.internal:host-gateway for Linux support
     /// - NetworkMonitor runs on HOST and sniffs localhost:8000 (requires sudo/admin)
-    /// - Client connects to server via Docker network (by container name)
     /// - Application output is captured via log files, not docker logs (avoids buffering)
     /// - TTY flag (-t) ensures immediate console output flushing
     /// </summary>
@@ -431,7 +442,10 @@ namespace SolutionGrader.Core.Services
             }
             
             // 3. Create client container with TTY support (NO port mapping needed)
-            // Client connects to server via Docker network using container name
+            // Client connects to server via host.docker.internal to route traffic through the exposed port.
+            // This is CRITICAL for network monitoring - traffic must pass through the host's exposed port
+            // so the NetworkMonitor (running on the host) can capture it.
+            // The --add-host flag ensures host.docker.internal works on Linux (Docker 20.10+)
             if (!string.IsNullOrEmpty(clientDllPath))
             {
                 var clientBase = new DockerBase
@@ -445,10 +459,13 @@ namespace SolutionGrader.Core.Services
                     {
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
-                    }
+                    },
+                    // Add host.docker.internal mapping to allow client to reach the host
+                    // This enables network traffic to flow through the exposed port for capture
+                    AdditionalFlags = "--add-host=host.docker.internal:host-gateway"
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                Console.WriteLine($"[Docker] Client container {clientContainer} created (no port exposed)");
+                Console.WriteLine($"[Docker] Client container {clientContainer} created with host.docker.internal support (no port exposed)");
             }
             
             await Task.Delay(500);
@@ -564,9 +581,18 @@ namespace SolutionGrader.Core.Services
             
             // Server listens on 0.0.0.0 to accept connections from any interface
             var serverIpAddress = "0.0.0.0";
-            // Client connects to server container by Docker DNS name
-            var clientIpAddress = serverContainer;
-            var port = config.CodeContainerInternalPort.ToString();
+            
+            // CRITICAL: Client connects to server through host.docker.internal (the Docker host)
+            // This routes traffic through the HOST's exposed port, allowing the NetworkMonitor
+            // (running on the host) to capture all TCP traffic including handshakes and data.
+            // 
+            // Traffic flow: Client Container -> host.docker.internal:{hostPort} -> Host -> Server Container:{containerPort}
+            // 
+            // If client connected directly via Docker network (using serverContainer name),
+            // traffic would bypass the host entirely and NetworkMonitor wouldn't capture anything.
+            var clientIpAddress = "host.docker.internal";
+            var serverPort = config.CodeContainerInternalPort.ToString();
+            var clientPort = config.CodeContainerHostPort.ToString();  // Client uses HOST port to route through loopback
             
             // Generate server appsettings.json
             if (!string.IsNullOrEmpty(serverDllPath))
@@ -582,7 +608,7 @@ namespace SolutionGrader.Core.Services
     ""MyCnn"": ""{connectionString}""
   }},
   ""IpAddress"": ""{serverIpAddress}"",
-  ""Port"": ""{port}""
+  ""Port"": ""{serverPort}""
 }}";
                     
                     string? tempFile = null;
@@ -591,7 +617,7 @@ namespace SolutionGrader.Core.Services
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={port}");
+                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort}");
                     }
                     catch (Exception ex)
                     {
@@ -616,7 +642,7 @@ namespace SolutionGrader.Core.Services
                     
                     var clientConfig = $@"{{
   ""IpAddress"": ""{clientIpAddress}"",
-  ""Port"": ""{port}""
+  ""Port"": ""{clientPort}""
 }}";
                     
                     string? tempFile = null;
@@ -625,7 +651,7 @@ namespace SolutionGrader.Core.Services
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={port}");
+                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress} (via host), Port={clientPort} (host port for network capture)");
                     }
                     catch (Exception ex)
                     {

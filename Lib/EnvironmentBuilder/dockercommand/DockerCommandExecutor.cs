@@ -375,6 +375,7 @@ namespace EnvironmentBuilder.DockerCommand
         /// <summary>
         /// Run a container with TTY support (-t flag) for reliable console output capture.
         /// This is required when using docker attach to read output without buffering issues.
+        /// Also supports additional Docker flags via DockerBase.AdditionalFlags property.
         /// </summary>
         /// <param name="dockerBase">Container configuration</param>
         /// <param name="timeoutInMilliseconds">Timeout for the operation</param>
@@ -400,6 +401,11 @@ namespace EnvironmentBuilder.DockerCommand
                 string portMapping = dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0
                     ? $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} "
                     : "";
+                
+                // Include additional flags if provided (e.g., --add-host for host.docker.internal)
+                string additionalFlags = !string.IsNullOrEmpty(dockerBase.AdditionalFlags)
+                    ? $"{dockerBase.AdditionalFlags} "
+                    : "";
                     
                 string command = $@"docker run -d -t " +
                                  "--privileged " +
@@ -407,6 +413,7 @@ namespace EnvironmentBuilder.DockerCommand
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
                                  $"{portMapping}" +
+                                 $"{additionalFlags}" +
                                  $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
                 Console.WriteLine($"[Docker] Container {dockerBase.ContainerName} started with TTY support");
