@@ -220,9 +220,15 @@ namespace SolutionGrader.UI.Services
                     CodeContainerInternalPort = config.CodeContainerInternalPort,
                     CodeContainerHostPort = config.CodeContainerHostPort,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
+                    
+                    // Database container settings
+                    DatabaseImageName = config.DatabaseImageName ?? "mcr.microsoft.com/mssql/server:2019-latest",
+                    DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                    DatabaseContainerInternalPort = config.DatabaseContainerInternalPort,
                     DatabaseContainerHostPort = config.DatabaseContainerHostPort,
                     DatabaseUsername = config.DatabaseUsername ?? "sa",
                     DatabasePassword = config.DatabasePassword,
+                    
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds
                 };
                 

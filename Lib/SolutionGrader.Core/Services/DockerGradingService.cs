@@ -120,6 +120,28 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
+                // Resolve server/client DLL paths
+                // If student doesn't provide server, use the given/golden server from test kit
+                // If student doesn't provide client, use the given/golden client from test kit
+                var actualServerDllPath = serverDllPath;
+                var actualClientDllPath = clientDllPath;
+                
+                if (string.IsNullOrEmpty(actualServerDllPath) && !string.IsNullOrEmpty(testKitConfig.GivenServerPath))
+                {
+                    actualServerDllPath = testKitConfig.GivenServerPath;
+                    OnProgress($"Using given/golden server from test kit: {Path.GetFileName(actualServerDllPath)}");
+                }
+                
+                if (string.IsNullOrEmpty(actualClientDllPath) && !string.IsNullOrEmpty(testKitConfig.GivenClientPath))
+                {
+                    actualClientDllPath = testKitConfig.GivenClientPath;
+                    OnProgress($"Using given/golden client from test kit: {Path.GetFileName(actualClientDllPath)}");
+                }
+                
+                // Log resolved paths
+                OnProgress($"Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(none)")}");
+                OnProgress($"Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(none)")}");
+                
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
                 // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
                 // It MUST start before containers to capture the full network traffic including:
@@ -135,13 +157,13 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
-                await SetupContainersAsync(serverDllPath, clientDllPath, config, testKitConfig, serverContainer, clientContainer);
+                await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
-                // Copy student files to containers
-                await CopyFilesToContainersAsync(serverDllPath, clientDllPath, serverContainer, clientContainer);
+                // Copy files to containers (use actual resolved paths)
+                await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
                 
                 // Generate appsettings.json in containers
-                GenerateAppsettingsInContainers(serverDllPath, clientDllPath, config, testKitConfig, serverContainer, clientContainer);
+                GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
                 // Execute test cases
                 foreach (var testCase in testKitConfig.TestCases)
@@ -152,7 +174,7 @@ namespace SolutionGrader.Core.Services
                     
                     var tcResult = await ExecuteTestCaseAsync(
                         testCase, testKitConfig, config, 
-                        serverDllPath, clientDllPath,
+                        actualServerDllPath, actualClientDllPath,
                         serverContainer, clientContainer, ct);
                     
                     result.TestCaseResults.Add(tcResult);
@@ -202,6 +224,15 @@ namespace SolutionGrader.Core.Services
         
         #region Container Setup
         
+        /// <summary>
+        /// Sets up all required Docker containers for grading:
+        /// 1. MSSQL Database Container - provides database backend for student applications
+        /// 2. Server Container - runs the student's server application
+        /// 3. Client Container - runs the student's client application
+        /// 
+        /// All containers are connected to the same Docker network for inter-container communication.
+        /// The server container port is EXPOSED to the host for NetworkMonitor packet capture.
+        /// </summary>
         private async Task SetupContainersAsync(
             string? serverDllPath,
             string? clientDllPath,
@@ -210,7 +241,9 @@ namespace SolutionGrader.Core.Services
             string serverContainer,
             string clientContainer)
         {
-            // Remove existing containers
+            var databaseContainer = config.DatabaseContainerName;
+            
+            // Remove existing code containers (keep database running between students for efficiency)
             try
             {
                 if (_dockerExecutor.IsContainerExist(serverContainer))
@@ -229,7 +262,11 @@ namespace SolutionGrader.Core.Services
             }
             catch { }
             
-            // Create server container with TTY support and PORT EXPOSED to host
+            // 1. Setup MSSQL Database Container (if not already running)
+            // This container is shared between students for efficiency
+            await SetupDatabaseContainerAsync(config);
+            
+            // 2. Create server container with TTY support and PORT EXPOSED to host
             // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
             if (!string.IsNullOrEmpty(serverDllPath))
             {
@@ -250,7 +287,7 @@ namespace SolutionGrader.Core.Services
                 Console.WriteLine($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
             }
             
-            // Create client container with TTY support (NO port mapping needed)
+            // 3. Create client container with TTY support (NO port mapping needed)
             // Client connects to server via Docker network using container name
             if (!string.IsNullOrEmpty(clientDllPath))
             {
@@ -272,6 +309,56 @@ namespace SolutionGrader.Core.Services
             }
             
             await Task.Delay(500);
+        }
+        
+        /// <summary>
+        /// Sets up the MSSQL database container if not already running.
+        /// The database container is shared between students for efficiency.
+        /// </summary>
+        private async Task SetupDatabaseContainerAsync(DockerGradingConfig config)
+        {
+            var databaseContainer = config.DatabaseContainerName;
+            
+            // Check if database container is already running
+            if (_dockerExecutor.IsContainerRunning(databaseContainer))
+            {
+                Console.WriteLine($"[Docker] Database container {databaseContainer} is already running");
+                return;
+            }
+            
+            // Check if container exists but stopped
+            if (_dockerExecutor.IsContainerExist(databaseContainer))
+            {
+                Console.WriteLine($"[Docker] Starting existing database container {databaseContainer}...");
+                _dockerExecutor.StartExistedContainer(databaseContainer);
+                await Task.Delay(5000); // Wait for database to start
+                return;
+            }
+            
+            // Create new MSSQL database container
+            Console.WriteLine($"[Docker] Creating new MSSQL database container {databaseContainer}...");
+            
+            var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
+            var databaseBase = new DockerBase
+            {
+                ImageName = config.DatabaseImageName,
+                ContainerName = databaseContainer,
+                DockerNetwork = config.DockerNetwork,
+                ContainerPort = config.DatabaseContainerInternalPort,
+                HostPort = config.DatabaseContainerHostPort,
+                EnvironmentVariables = new Dictionary<string, string>
+                {
+                    { "ACCEPT_EULA", "Y" },
+                    { "MSSQL_SA_PASSWORD", databasePassword }
+                }
+            };
+            
+            _dockerExecutor.RunContainer(databaseBase, 3000);
+            Console.WriteLine($"[Docker] Database container {databaseContainer} created with port {config.DatabaseContainerHostPort}:{config.DatabaseContainerInternalPort} exposed");
+            
+            // Wait for MSSQL to fully start (typically takes 10-15 seconds)
+            Console.WriteLine("[Docker] Waiting for MSSQL to start...");
+            await Task.Delay(15000);
         }
         
         private async Task CopyFilesToContainersAsync(
@@ -808,6 +895,46 @@ namespace SolutionGrader.Core.Services
                 .OrderBy(tc => tc.Name)
                 .ToList();
             
+            // Discover given/golden server and client from Meta folder
+            // These are used when student only provides one component (e.g., client only)
+            var metaPath = Path.Combine(testKitPath, "Meta");
+            if (Directory.Exists(metaPath))
+            {
+                // Look for given server in Meta/Given/Server
+                var givenServerPath = Path.Combine(metaPath, "Given", "Server");
+                if (Directory.Exists(givenServerPath))
+                {
+                    // Find Project11.dll or any main DLL in the server folder
+                    var serverDll = Directory.GetFiles(givenServerPath, "Project11.dll", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                        ?? Directory.GetFiles(givenServerPath, "*.dll", SearchOption.TopDirectoryOnly)
+                            .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") && !Path.GetFileName(f).StartsWith("System."))
+                            .FirstOrDefault();
+                    
+                    if (serverDll != null)
+                    {
+                        tkConfig.GivenServerPath = serverDll;
+                        Console.WriteLine($"[TestKit] Found given server: {Path.GetFileName(serverDll)}");
+                    }
+                }
+                
+                // Look for given client in Meta/Given/Client
+                var givenClientPath = Path.Combine(metaPath, "Given", "Client");
+                if (Directory.Exists(givenClientPath))
+                {
+                    // Find Project12.dll or any main DLL in the client folder
+                    var clientDll = Directory.GetFiles(givenClientPath, "Project12.dll", SearchOption.TopDirectoryOnly).FirstOrDefault()
+                        ?? Directory.GetFiles(givenClientPath, "*.dll", SearchOption.TopDirectoryOnly)
+                            .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") && !Path.GetFileName(f).StartsWith("System."))
+                            .FirstOrDefault();
+                    
+                    if (clientDll != null)
+                    {
+                        tkConfig.GivenClientPath = clientDll;
+                        Console.WriteLine($"[TestKit] Found given client: {Path.GetFileName(clientDll)}");
+                    }
+                }
+            }
+            
             // Apply config overrides
             if (config.CodeContainerInternalPort > 0)
                 tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
@@ -1066,9 +1193,15 @@ namespace SolutionGrader.Core.Services
         public int CodeContainerInternalPort { get; set; } = 8000;
         public int CodeContainerHostPort { get; set; } = 8000;
         public string DockerNetwork { get; set; } = "auto-grading-network";
+        
+        // Database container settings
+        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
+        public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
+        public int DatabaseContainerInternalPort { get; set; } = 1433;
         public int DatabaseContainerHostPort { get; set; } = 1434;
         public string? DatabaseUsername { get; set; } = "sa";
         public string? DatabasePassword { get; set; }
+        
         public int GradingTimeoutSeconds { get; set; } = 60;
     }
     
@@ -1084,6 +1217,19 @@ namespace SolutionGrader.Core.Services
         public string DatabaseName { get; set; } = "Library";
         public string DatabasePassword { get; set; } = "";
         public string Protocol { get; set; } = "TCP";
+        
+        /// <summary>
+        /// Path to the given/golden server DLL from Meta/Given/Server folder.
+        /// This is used when the student only provides a client (Project12).
+        /// </summary>
+        public string? GivenServerPath { get; set; }
+        
+        /// <summary>
+        /// Path to the given/golden client DLL from Meta/Given/Client folder.
+        /// This is used when the student only provides a server (Project11).
+        /// </summary>
+        public string? GivenClientPath { get; set; }
+        
         public Dictionary<string, double> TestCaseMarks { get; set; } = new();
         public List<TestCaseInfo> TestCases { get; set; } = new();
         public double TotalMaxMark => TestCases.Sum(tc => tc.MaxMark);
