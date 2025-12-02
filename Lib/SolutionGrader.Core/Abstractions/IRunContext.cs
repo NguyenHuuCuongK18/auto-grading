@@ -74,5 +74,11 @@
         /// Returns an empty list if no packets were captured.
         /// </summary>
         IReadOnlyList<CapturedNetworkPacket> GetCapturedNetworkPackets(string questionCode, string stage);
+        
+        /// <summary>
+        /// Gets ALL captured network packets across all stages.
+        /// Used when you need to retrieve all packets regardless of context.
+        /// </summary>
+        IReadOnlyList<CapturedNetworkPacket> GetAllCapturedNetworkPackets();
     }
 }

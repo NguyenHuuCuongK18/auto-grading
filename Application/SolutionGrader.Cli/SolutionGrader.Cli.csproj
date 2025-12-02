@@ -38,11 +38,7 @@
     <ProjectReference Include="..\EnvironmentManagerHelper\DotNetEnvironmentManagerHelper\DotNetEnvironmentManagerHelper.csproj" />
     <!-- Network monitoring for packet capture (cross-platform via libpcap) -->
     <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
-  </ItemGroup>
-  
-  <!-- Windows-only references (executesuite, executepaper commands) -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
-    <!-- Core grading services from Lib folder - Windows only due to native dependencies -->
+    <!-- Core grading services from Lib folder - now cross-platform -->
     <ProjectReference Include="..\..\Lib\SolutionGrader.Core\SolutionGrader.Core.csproj" />
   </ItemGroup>
 </Project>
