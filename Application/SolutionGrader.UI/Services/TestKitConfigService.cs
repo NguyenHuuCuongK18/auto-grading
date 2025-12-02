@@ -53,6 +53,13 @@ namespace SolutionGrader.UI.Services
             public string EnvironmentType { get; set; } = "dotnet";
             public string RuntimesFolder { get; set; } = "";
             
+            // Given (reference) executables from Meta/Given folder
+            // When a student provides only client or only server, the other is taken from here
+            // Client: Path to reference client (from Environment.xlsx "Client" field)
+            // Server: Path to reference server (from Environment.xlsx "Server" field)
+            public string GivenClientPath { get; set; } = "";
+            public string GivenServerPath { get; set; } = "";
+            
             // Test case marks from Header.xlsx
             public Dictionary<string, double> TestCaseMarks { get; set; } = new Dictionary<string, double>();
             
@@ -194,7 +201,26 @@ namespace SolutionGrader.UI.Services
                 if (configDict.TryGetValue("Runtimes_Folder", out var runtimes))
                     config.RuntimesFolder = runtimes;
 
+                // Given (reference) executable paths
+                // These are used when a student provides only client or only server
+                // The other component is taken from the testkit's Meta/Given folder
+                if (configDict.TryGetValue("Client", out var givenClient))
+                {
+                    config.GivenClientPath = givenClient;
+                    _logger.LogDebug($"Given Client path: {givenClient}");
+                }
+                
+                if (configDict.TryGetValue("Server", out var givenServer))
+                {
+                    config.GivenServerPath = givenServer;
+                    _logger.LogDebug($"Given Server path: {givenServer}");
+                }
+
                 _logger.LogInfo($"Loaded environment config: Internal Port={config.CodeContainerInternalPort}, Host Port={config.CodeContainerHostPort}, DB={config.DatabaseContainerName}");
+                if (!string.IsNullOrEmpty(config.GivenServerPath) || !string.IsNullOrEmpty(config.GivenClientPath))
+                {
+                    _logger.LogInfo($"Given executables: Client={config.GivenClientPath}, Server={config.GivenServerPath}");
+                }
             }
             catch (Exception ex)
             {
