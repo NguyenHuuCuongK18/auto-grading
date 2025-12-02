@@ -4,12 +4,12 @@ using System.Linq;
 using System.Collections.Generic;
 using SolutionGrader.Cli.Services;
 using ClosedXML.Excel;
-
-#if WINDOWS
 using SolutionGrader.Core.Abstractions;
-using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Services;
 using SolutionGrader.Core.Keywords;
+
+#if WINDOWS
+using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Services;
 #endif
 
@@ -17,15 +17,15 @@ using SolutionGrader.Services;
 /// CLI entry point for solution grading.
 /// Supports both local (Windows) and Docker-based (cross-platform) grading modes.
 /// 
-/// This CLI syncs with SolutionGrader.UI, sharing the same configuration model:
-/// - GradingConfiguration: Paths, project names, Docker settings
-/// - Test kit structure: Header.xlsx, Environment.xlsx, Detail.xlsx
-/// - Output format: SampleLogging structure with Excel files
+/// This CLI syncs with SolutionGrader.UI, sharing the SAME DockerGradingService from
+/// Lib/SolutionGrader.Core. This ensures identical grading behavior between CLI and UI.
 /// 
 /// Key modes:
 /// 1. ExecuteSuite: Local grading using direct process execution (Windows only)
 /// 2. ExecutePaper: Local grading for multiple students (Windows only)
 /// 3. DockerGrade: Docker-based grading using containers (cross-platform)
+///    - Uses SHARED DockerGradingService from SolutionGrader.Core
+///    - Student discovery and orchestration via CliDockerGradingOrchestrator
 /// 4. List: List students in submit folder (cross-platform)
 /// 5. Validate: Validate test kit structure (cross-platform)
 /// </summary>
@@ -60,8 +60,11 @@ public class Program
 
     /// <summary>
     /// Docker-based grading for multiple students.
-    /// This is the cross-platform grading mode that uses Docker containers.
-    /// Arguments sync with SolutionGrader.UI's GradingConfiguration.
+    /// This uses the SHARED DockerGradingService from SolutionGrader.Core to ensure
+    /// identical behavior between CLI and UI grading.
+    /// 
+    /// The orchestration (student discovery, iteration) is done by CliDockerGradingOrchestrator,
+    /// but the actual grading per student uses the shared DockerGradingService.
     /// </summary>
     private static async System.Threading.Tasks.Task<int> DockerGrade(Dictionary<string, string> map)
     {

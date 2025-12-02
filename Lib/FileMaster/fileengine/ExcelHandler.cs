@@ -1,4 +1,5 @@
 ﻿using FileMaster.Interfaces;
+using FileMaster.Models;
 using OfficeOpenXml.Style;
 using OfficeOpenXml;
 using System;
@@ -7,8 +8,6 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Text;
-using FileMaster.Models;
-using System.Drawing;
 
 namespace FileMaster.FileEngine
 {
@@ -109,14 +108,14 @@ namespace FileMaster.FileEngine
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Font.Bold = false;
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.PatternType = ExcelFillStyle.Solid;
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Color.SetColor(Color.Black);
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.White);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Color.SetColor(0, 0, 0, 0); // Black
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.BackgroundColor.SetColor(255, 255, 255, 255); // White
             _package.Workbook.Worksheets[sheetName].Cells[row, column].AutoFitColumns();
         }
 
@@ -161,15 +160,17 @@ namespace FileMaster.FileEngine
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Value = value;
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Font.Bold = cellStyle.FontBold;
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Top.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Right.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Bottom.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Style = ExcelBorderStyle.Thin;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Color.SetColor(Color.Black);
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Border.Left.Color.SetColor(0, 0, 0, 0); // Black
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.PatternType = cellStyle.PatterntType;
-            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.BackgroundColor.SetColor(cellStyle.BackgroundColor);
+            // Use EPPlus color from CellStyle
+            _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.Fill.BackgroundColor.SetColor(
+                cellStyle.BackgroundColorA, cellStyle.BackgroundColorR, cellStyle.BackgroundColorG, cellStyle.BackgroundColorB);
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.WrapText = cellStyle.WrapText;
             _package.Workbook.Worksheets[sheetName].Cells[row, column].Style.VerticalAlignment = ExcelVerticalAlignment.Top;
             _package.Workbook.Worksheets[sheetName].Cells.AutoFitColumns();
