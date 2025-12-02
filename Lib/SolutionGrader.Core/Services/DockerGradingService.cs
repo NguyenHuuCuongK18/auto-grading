@@ -979,14 +979,27 @@ namespace SolutionGrader.Core.Services
                 bool matched = capturedPackets.Any(p =>
                     (string.IsNullOrEmpty(exp.Flags) || p.Flags.Contains(exp.Flags.Split(',')[0].Trim())) &&
                     (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
-                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
+                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole) &&
+                    (string.IsNullOrEmpty(exp.HttpMethod) || (p.HttpMethod ?? "").Equals(exp.HttpMethod, StringComparison.OrdinalIgnoreCase)));
+                
+                // Build expected/actual strings including HttpMethod if present
+                var expectedStr = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}";
+                var actualStr = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)";
+                
+                if (!string.IsNullOrEmpty(exp.HttpMethod))
+                {
+                    expectedStr += $", Method={exp.HttpMethod}";
+                    actualStr = capturedPackets.Any() 
+                        ? string.Join("; ", capturedPackets.Select(p => $"{p.Flags} {p.HttpMethod ?? ""}".Trim())) 
+                        : "(no captures)";
+                }
                 
                 results.Add(new ComparisonResult
                 {
                     Source = "Network",
                     Stage = exp.Stage,
-                    Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                    Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
+                    Expected = expectedStr,
+                    Actual = actualStr,
                     Passed = matched
                 });
             }
@@ -1203,12 +1216,33 @@ namespace SolutionGrader.Core.Services
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
+                // Detect format by checking header row
+                // TCP format: SourceRole at col 9, DestinationRole at col 10
+                // HTTP format: Method at col 10, SourceRole at col 15, DestinationRole at col 16
+                var headerRow = ws.Row(1);
+                var col10Header = headerRow.Cell(10).GetValue<string>()?.Trim() ?? "";
+                bool isHttpFormat = col10Header.Equals("Method", StringComparison.OrdinalIgnoreCase);
+                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
                     var flags = row.Cell(6).GetValue<string>();
-                    var sourceRole = row.Cell(9).GetValue<string>();
-                    var destRole = row.Cell(10).GetValue<string>();
+                    
+                    string? sourceRole, destRole, httpMethod = null;
+                    
+                    if (isHttpFormat)
+                    {
+                        // HTTP format: Method at col 10, SourceRole at col 15, DestinationRole at col 16
+                        httpMethod = row.Cell(10).GetValue<string>();
+                        sourceRole = row.Cell(15).GetValue<string>();
+                        destRole = row.Cell(16).GetValue<string>();
+                    }
+                    else
+                    {
+                        // TCP format: SourceRole at col 9, DestinationRole at col 10
+                        sourceRole = row.Cell(9).GetValue<string>();
+                        destRole = row.Cell(10).GetValue<string>();
+                    }
                     
                     if (int.TryParse(stageStr, out var stage))
                     {
@@ -1217,7 +1251,8 @@ namespace SolutionGrader.Core.Services
                             Stage = stage,
                             Flags = flags,
                             SourceRole = sourceRole,
-                            DestinationRole = destRole
+                            DestinationRole = destRole,
+                            HttpMethod = httpMethod
                         });
                     }
                 }
@@ -1840,6 +1875,8 @@ namespace SolutionGrader.Core.Services
         public string? Flags { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
+        /// <summary>HTTP Method (GET, POST, PUT, DELETE) - only used for HTTP protocol grading</summary>
+        public string? HttpMethod { get; set; }
     }
     
     /// <summary>
