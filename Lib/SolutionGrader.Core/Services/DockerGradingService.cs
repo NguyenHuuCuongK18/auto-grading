@@ -8,9 +8,6 @@ using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
 using Domain.Entities.Docker.DockerSupporter.Entity;
-using PacketDotNet;
-using SharpPcap;
-using SharpPcap.LibPcap;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 
@@ -63,7 +60,6 @@ namespace SolutionGrader.Core.Services
         private const int InputProcessingDelayMs = 2000;  // Reduced from 5000 - wait for input to be processed
         private const int OutputRetryMaxAttempts = 5;
         private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
-        private const int DefaultTestCaseTimeoutSeconds = 15;  // 15 seconds per test case default
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
@@ -462,10 +458,10 @@ namespace SolutionGrader.Core.Services
                     },
                     // Add host.docker.internal mapping to allow client to reach the host
                     // This enables network traffic to flow through the exposed port for capture
-                    AdditionalFlags = "--add-host=host.docker.internal:host-gateway"
+                    AdditionalFlags = AppsettingKeywords.DOCKER_ADD_HOST_FLAG
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                Console.WriteLine($"[Docker] Client container {clientContainer} created with host.docker.internal support (no port exposed)");
+                Console.WriteLine($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
             }
             
             await Task.Delay(500);
@@ -580,7 +576,7 @@ namespace SolutionGrader.Core.Services
             var connectionString = BuildConnectionString(config, testKitConfig);
             
             // Server listens on 0.0.0.0 to accept connections from any interface
-            var serverIpAddress = "0.0.0.0";
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
             
             // CRITICAL: Client connects to server through host.docker.internal (the Docker host)
             // This routes traffic through the HOST's exposed port, allowing the NetworkMonitor
@@ -590,7 +586,7 @@ namespace SolutionGrader.Core.Services
             // 
             // If client connected directly via Docker network (using serverContainer name),
             // traffic would bypass the host entirely and NetworkMonitor wouldn't capture anything.
-            var clientIpAddress = "host.docker.internal";
+            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
             var serverPort = config.CodeContainerInternalPort.ToString();
             var clientPort = config.CodeContainerHostPort.ToString();  // Client uses HOST port to route through loopback
             

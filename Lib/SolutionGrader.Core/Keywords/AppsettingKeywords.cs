@@ -57,6 +57,21 @@ public static class AppsettingKeywords
     public const string HTTP_LOCALHOST = "http://localhost";
     public const string TCP_LOCALHOST = "127.0.0.1";
     
+    // Docker network constants - used for routing traffic through host for network monitoring
+    /// <summary>
+    /// IP address that accepts connections from any interface (server binding address in Docker containers)
+    /// </summary>
+    public const string DOCKER_SERVER_BIND_ADDRESS = "0.0.0.0";
+    /// <summary>
+    /// Docker host DNS name - allows containers to access the host machine.
+    /// Client uses this to route traffic through host's exposed port for network monitoring.
+    /// </summary>
+    public const string DOCKER_HOST_INTERNAL = "host.docker.internal";
+    /// <summary>
+    /// Docker run flag to enable host.docker.internal on Linux (Docker 20.10+)
+    /// </summary>
+    public const string DOCKER_ADD_HOST_FLAG = "--add-host=host.docker.internal:host-gateway";
+    
     // Docker constants
     public const string DOCKER_COMMAND = "docker";
     public const string DOCKER_CONTAINER_NAME = "sqlserver-test";

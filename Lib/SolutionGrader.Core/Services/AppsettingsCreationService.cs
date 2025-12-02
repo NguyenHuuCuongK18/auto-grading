@@ -1,7 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Domain.Models;
@@ -93,46 +92,6 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
         return type.Equals(AppsettingKeywords.PROTOCOL_TCP, StringComparison.OrdinalIgnoreCase) 
             ? AppsettingKeywords.TCP_LOCALHOST 
             : AppsettingKeywords.HTTP_LOCALHOST;
-    }
-
-    private static int FindAvailablePort()
-    {
-        // Use ephemeral port range (49152-65535) which is safer for dynamic allocation
-        const int maxAttempts = 100;
-
-        for (int attempt = 0; attempt < maxAttempts; attempt++)
-        {
-            // Generate random port in ephemeral range
-            // Use Random.Shared for better randomization across rapid calls
-            int port = Random.Shared.Next(49152, 65536);
-
-            if (IsPortAvailable(port))
-            {
-                return port;
-            }
-        }
-
-        // Fallback: let the OS assign a port
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int assignedPort = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return assignedPort;
-    }
-
-    private static bool IsPortAvailable(int port)
-    {
-        try
-        {
-            using var listener = new TcpListener(IPAddress.Loopback, port);
-            listener.Start();
-            listener.Stop();
-            return true;
-        }
-        catch (SocketException)
-        {
-            return false;
-        }
     }
 
     private static object CreateServerAppsettings(string ipAddress, int port, DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
