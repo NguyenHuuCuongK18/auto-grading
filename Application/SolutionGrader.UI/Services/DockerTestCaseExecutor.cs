@@ -35,6 +35,12 @@ namespace SolutionGrader.UI.Services
     /// </summary>
     public class DockerTestCaseExecutor
     {
+        /// <summary>
+        /// Default question code used for network monitoring context when actual code is unknown.
+        /// This is used as a fallback identifier for packet association.
+        /// </summary>
+        private const string DefaultQuestionCode = "TC1";
+        
         private readonly ILoggingService _logger;
         private readonly TestKitConfigService _testKitConfigService;
         private readonly DockerGradingService _dockerGrading;
@@ -338,9 +344,17 @@ namespace SolutionGrader.UI.Services
                 _logger.LogError($"Test case execution failed: {ex.Message}");
                 
                 // Ensure network monitor is stopped on exception
+                // StopAsync exceptions are intentionally ignored here because:
+                // 1. The primary exception (ex) is the one we need to handle
+                // 2. The network monitor may already be stopped or in an invalid state
+                // 3. Failing to stop the monitor shouldn't prevent proper exception propagation
                 if (_networkMonitor != null && _networkMonitor.IsCapturing)
                 {
-                    try { await _networkMonitor.StopAsync(ct); } catch { }
+                    try { await _networkMonitor.StopAsync(ct); } 
+                    catch (Exception stopEx) 
+                    {
+                        _logger.LogDebug($"[NetworkMonitor] Failed to stop during exception handling: {stopEx.Message}");
+                    }
                 }
                 
                 return result;
@@ -415,8 +429,8 @@ namespace SolutionGrader.UI.Services
             string previousClientOutput = "";
             string previousServerOutput = "";
             
-            // Get test case name for network context (use first action's question code if available)
-            string questionCode = "TC1"; // Default value
+            // Question code for network context (used to associate captured packets with test case)
+            string questionCode = DefaultQuestionCode;
 
             _logger.LogInfo($"Executing {actions.Count} actions in Docker containers...");
 
