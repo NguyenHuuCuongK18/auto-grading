@@ -906,12 +906,14 @@ namespace SolutionGrader.Core.Services
                         break;
                         
                     case "CLOSECLIENT":
-                        try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -f dotnet", 5000); } catch { }
+                        // Use safe kill method that excludes PID 1 to avoid killing the container
+                        try { _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 5000); } catch { }
                         clientBaseline = 0;
                         break;
                         
                     case "CLOSESERVER":
-                        try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -f dotnet", 5000); } catch { }
+                        // Use safe kill method that excludes PID 1 to avoid killing the container
+                        try { _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 5000); } catch { }
                         serverBaseline = 0;
                         break;
                 }

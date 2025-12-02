@@ -749,24 +749,37 @@ namespace EnvironmentBuilder.DockerCommand
         private void StartApplicationInContainer(string containerName, string appName, string appPath)
         {
             string inputPipe = $"/tmp/{appName}_input_pipe";
+            string pidFile = $"/tmp/{appName}.pid";
 
             // IMPORTANT: Clean up any existing processes and pipes BEFORE starting
             // This prevents "Address already in use" errors when restarting applications
             Console.WriteLine($"[{appName}] Cleaning up any existing processes and pipes...");
             
-            // Kill any existing dotnet processes in the container (ignore errors)
+            // Kill any existing application process using stored PID file (safer than pkill)
+            // This avoids killing PID 1 which would terminate the container
             try
             {
-                string killCommand = $"{containerName} pkill -9 dotnet";
-                ExecDockerCommand(killCommand, 5000);
+                // Read the PID from the pid file and kill that specific process
+                string killByPidCommand = $"{containerName} sh -c \"if [ -f {pidFile} ]; then kill -9 $(cat {pidFile}) 2>/dev/null || true; fi\"";
+                ExecDockerCommand(killByPidCommand, 5000);
+            }
+            catch { /* Ignore - no PID file or process */ }
+            
+            // Fallback: Kill dotnet processes by finding PIDs (excluding PID 1)
+            // This is safer than 'pkill -9 dotnet' which could kill the container's main process
+            try
+            {
+                // Find dotnet PIDs (excluding PID 1) and kill them
+                string safeDotnetKillCommand = $"{containerName} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
+                ExecDockerCommand(safeDotnetKillCommand, 5000);
             }
             catch { /* Ignore - no processes to kill */ }
             
-            // Kill any existing sleep processes keeping pipes open (ignore errors)
+            // Kill any existing sleep processes keeping pipes open (excluding PID 1)
             try
             {
-                string killSleepCommand = $"{containerName} pkill -9 sleep";
-                ExecDockerCommand(killSleepCommand, 5000);
+                string safeSleepKillCommand = $"{containerName} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
+                ExecDockerCommand(safeSleepKillCommand, 5000);
             }
             catch { /* Ignore - no processes to kill */ }
             
@@ -787,8 +800,16 @@ namespace EnvironmentBuilder.DockerCommand
             }
             catch { /* Ignore */ }
             
+            // Remove existing PID file (ignore errors)
+            try
+            {
+                string removePidCommand = $"{containerName} rm -f {pidFile}";
+                ExecDockerCommand(removePidCommand, 5000);
+            }
+            catch { /* Ignore */ }
+            
             // Wait for port to be released after killing processes
-            Thread.Sleep(1000);
+            Thread.Sleep(500);
 
             string createInputFileCommand = $"{containerName} mkfifo \"{inputPipe}\"";
             ExecDockerCommand(createInputFileCommand, 60000);
@@ -798,7 +819,8 @@ namespace EnvironmentBuilder.DockerCommand
 
             // Modified: Write output to BOTH /proc/1/fd/1 (docker logs) AND a log file
             // The log file provides reliable output capture even when docker logs has buffering issues
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -oL -eL dotnet {appPath} 2>&1 < {inputPipe} | tee {logFile} > /proc/1/fd/1\"";
+            // Also save the PID to a file for safe cleanup later
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -oL -eL dotnet {appPath} 2>&1 < {inputPipe} | tee {logFile} > /proc/1/fd/1 & echo $! > {pidFile}\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 
