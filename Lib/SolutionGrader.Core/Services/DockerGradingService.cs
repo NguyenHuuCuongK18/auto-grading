@@ -72,6 +72,20 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Resets the database container for a new student.
+        /// This should be called before grading each student to ensure:
+        /// - Correct database is loaded (if switching papers)
+        /// - Database state is identical for all students
+        /// 
+        /// Call this BEFORE calling GradeStudentAsync for each student.
+        /// </summary>
+        /// <param name="config">Docker grading configuration with database settings</param>
+        public async Task ResetDatabaseForNewStudentAsync(DockerGradingConfig config)
+        {
+            await ResetDatabaseContainerAsync(config);
+        }
+        
+        /// <summary>
         /// Grades a single student's submission in Docker containers.
         /// 
         /// EXECUTION ORDER (critical for network capture):
@@ -216,9 +230,26 @@ namespace SolutionGrader.Core.Services
                 GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
                 // Execute test cases
+                bool isFirstTestCase = true;
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
+                    
+                    // For subsequent test cases, cleanup and re-copy files
+                    // This approach is faster than disposing/rebuilding containers
+                    if (!isFirstTestCase)
+                    {
+                        // Cleanup between test cases (kills processes, removes files)
+                        await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
+                        
+                        // Re-copy files for next test case
+                        OnProgress($"Re-copying files for test case {testCase.Name}...");
+                        await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
+                        
+                        // Re-generate appsettings.json
+                        GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
+                    }
+                    isFirstTestCase = false;
                     
                     OnProgress($"Executing test case: {testCase.Name}...");
                     
@@ -233,9 +264,6 @@ namespace SolutionGrader.Core.Services
                     var tcResultPath = Path.Combine(studentResultPath, testCase.Name);
                     Directory.CreateDirectory(tcResultPath);
                     await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult);
-                    
-                    // Cleanup between test cases
-                    await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
@@ -1155,32 +1183,49 @@ namespace SolutionGrader.Core.Services
         #region Cleanup
         
         /// <summary>
-        /// Cleans up between test cases by:
+        /// Cleans up between test cases (same student) by:
         /// 1. Killing any running dotnet processes in containers
-        /// 2. Clearing application log files (to reset console output)
+        /// 2. REMOVING files from /apps folder (this also removes logs)
         /// 3. Clearing network captures
-        /// 4. Waiting for port release
+        /// 4. Waiting for port release (inside container, not host)
         /// 
-        /// This ensures logs don't carry over between test cases and ports are available.
+        /// The files will be re-copied before the next test case starts.
+        /// This approach is much faster than disposing/rebuilding containers.
         /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
             Console.WriteLine("[Cleanup] Stopping applications between test cases...");
             
-            // Kill dotnet processes in containers using the PID file approach (like env-setup)
-            var serverCleanupCmd = $"exec {serverContainer} sh -c \"pkill -f dotnet 2>/dev/null; rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
-            var clientCleanupCmd = $"exec {clientContainer} sh -c \"pkill -f dotnet 2>/dev/null; rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
+            // Step 1: Kill dotnet processes and wait for them to exit
+            // Use SIGTERM first (graceful), then SIGKILL if needed
+            var serverKillCmd = $"exec {serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            var clientKillCmd = $"exec {clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
             
-            try { _dockerExecutor.ExecDockerCommand(serverCleanupCmd, 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand(clientCleanupCmd, 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(serverKillCmd, 10000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientKillCmd, 10000); } catch { }
             
-            // Clear network captures for next test case
+            // Step 2: Remove ALL files from /apps folder (this removes the DLLs and logs)
+            // This effectively resets the container state without disposing it
+            var serverCleanFilesCmd = $"exec {serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
+            var clientCleanFilesCmd = $"exec {clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
+            
+            try { _dockerExecutor.ExecDockerCommand(serverCleanFilesCmd, 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientCleanFilesCmd, 5000); } catch { }
+            
+            Console.WriteLine("[Cleanup] Files removed from containers");
+            
+            // Step 3: Clear network captures for next test case
             _networkMonitor?.ClearCaptures();
             
-            // Clear console manager logs
+            // Step 4: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Wait for port release (with timeout)
+            // Step 5: Wait for port release INSIDE the container (not just host)
+            // The port binding is inside the container, so we check there
+            var checkPortCmd = $"exec {serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
+            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 15000); } catch { }
+            
+            // Also check host port availability (since server port is exposed)
             var startTime = DateTime.UtcNow;
             while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
             {
@@ -1189,7 +1234,7 @@ namespace SolutionGrader.Core.Services
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
-                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available");
+                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available on host");
                     break;
                 }
                 catch
@@ -1199,8 +1244,31 @@ namespace SolutionGrader.Core.Services
             }
             
             // Give a moment for everything to settle
-            await Task.Delay(1000);
+            await Task.Delay(500);
             Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
+        }
+        
+        /// <summary>
+        /// Disposes and rebuilds the DATABASE container between students.
+        /// This ensures:
+        /// - Correct DB is loaded if we switch papers
+        /// - Database is absolutely the same for all students
+        /// </summary>
+        private async Task ResetDatabaseContainerAsync(DockerGradingConfig config)
+        {
+            var databaseContainer = config.DatabaseContainerName;
+            Console.WriteLine($"[Database] Resetting database container {databaseContainer} for new student...");
+            
+            // Stop and remove existing database container
+            try { _dockerExecutor.StopContainer(databaseContainer, 10000); } catch { }
+            try { _dockerExecutor.RemoveContainer(databaseContainer, 10000); } catch { }
+            
+            await Task.Delay(2000);
+            
+            // Recreate the database container
+            await SetupDatabaseContainerAsync(config);
+            
+            Console.WriteLine($"[Database] Database container reset complete");
         }
         
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
