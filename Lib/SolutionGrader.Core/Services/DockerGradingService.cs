@@ -1154,13 +1154,33 @@ namespace SolutionGrader.Core.Services
         
         #region Cleanup
         
+        /// <summary>
+        /// Cleans up between test cases by:
+        /// 1. Killing any running dotnet processes in containers
+        /// 2. Clearing application log files (to reset console output)
+        /// 3. Clearing network captures
+        /// 4. Waiting for port release
+        /// 
+        /// This ensures logs don't carry over between test cases and ports are available.
+        /// </summary>
         private async Task CleanupBetweenTestCasesAsync(string serverContainer, string clientContainer, int hostPort)
         {
-            // Kill dotnet processes in containers
-            try { _dockerExecutor.ExecDockerCommand($"{serverContainer} pkill -f dotnet", 5000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand($"{clientContainer} pkill -f dotnet", 5000); } catch { }
+            Console.WriteLine("[Cleanup] Stopping applications between test cases...");
             
-            // Wait for port release
+            // Kill dotnet processes in containers using the PID file approach (like env-setup)
+            var serverCleanupCmd = $"exec {serverContainer} sh -c \"pkill -f dotnet 2>/dev/null; rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
+            var clientCleanupCmd = $"exec {clientContainer} sh -c \"pkill -f dotnet 2>/dev/null; rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log 2>/dev/null; exit 0\"";
+            
+            try { _dockerExecutor.ExecDockerCommand(serverCleanupCmd, 5000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientCleanupCmd, 5000); } catch { }
+            
+            // Clear network captures for next test case
+            _networkMonitor?.ClearCaptures();
+            
+            // Clear console manager logs
+            _consoleManager.ClearAllLogs();
+            
+            // Wait for port release (with timeout)
             var startTime = DateTime.UtcNow;
             while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
             {
@@ -1169,6 +1189,7 @@ namespace SolutionGrader.Core.Services
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
+                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available");
                     break;
                 }
                 catch
@@ -1176,6 +1197,10 @@ namespace SolutionGrader.Core.Services
                     await Task.Delay(500);
                 }
             }
+            
+            // Give a moment for everything to settle
+            await Task.Delay(1000);
+            Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
         }
         
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
