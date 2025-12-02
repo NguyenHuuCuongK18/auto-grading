@@ -1243,7 +1243,10 @@ namespace SolutionGrader.Core.Services
             Console.WriteLine("[Cleanup] Processes killed, files removed from containers");
             
             // Step 4: Clear network captures for next test case
+            // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
+            // previous test case's network packets from appearing in next test case
             _networkMonitor?.ClearCaptures();
+            _runContext.ClearNetworkCaptures();
             
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
