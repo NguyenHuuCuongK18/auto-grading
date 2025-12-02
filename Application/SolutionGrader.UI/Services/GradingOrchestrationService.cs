@@ -262,43 +262,91 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Gets the path to a student's executable (client or server).
+        /// 
+        /// This method uses the DLL paths that were discovered during student discovery
+        /// by StudentDiscoveryService.FindDllPath(), which performs a recursive search
+        /// through the solution folder. The student.ClientDllPath and student.ServerDllPath
+        /// properties contain the full paths to the DLLs.
+        /// 
+        /// If the pre-discovered paths are not available, falls back to a recursive search.
         /// </summary>
         private string? GetStudentExecutablePath(StudentSolution student, GradingConfiguration config, string type)
         {
             if (string.IsNullOrEmpty(student.SolutionPath))
                 return null;
 
-            string projectName;
             bool hasProject;
+            string? preDiscoveredPath;
+            string projectName;
             
             if (type.Equals("Client", StringComparison.OrdinalIgnoreCase))
             {
-                projectName = config.ClientProjectName;
                 hasProject = config.HasClient;
+                preDiscoveredPath = student.ClientDllPath;
+                projectName = config.ClientProjectName;
             }
             else
             {
-                projectName = config.ServerProjectName;
                 hasProject = config.HasServer;
+                preDiscoveredPath = student.ServerDllPath;
+                projectName = config.ServerProjectName;
             }
 
-            if (!hasProject || string.IsNullOrEmpty(projectName))
+            if (!hasProject)
                 return null;
 
-            // Look for the DLL in the student's solution folder
-            var dllPath = Path.Combine(student.SolutionPath, $"{projectName}.dll");
-            if (File.Exists(dllPath))
-                return dllPath;
-
-            // Try alternate names
-            var altNames = new[] { "Q11.dll", "Q12.dll", "Project11.dll", "Project12.dll" };
-            foreach (var name in altNames)
+            // Use the pre-discovered DLL path from StudentDiscoveryService if available
+            // This path was found using recursive search during student discovery
+            if (!string.IsNullOrEmpty(preDiscoveredPath) && File.Exists(preDiscoveredPath))
             {
-                var path = Path.Combine(student.SolutionPath, name);
-                if (File.Exists(path))
-                    return path;
+                _logger.LogDebug($"Using pre-discovered {type} DLL: {preDiscoveredPath}");
+                return preDiscoveredPath;
             }
 
+            // Fallback: Search recursively for the DLL (same logic as StudentDiscoveryService)
+            // This handles cases where the DLL might not have been found during initial discovery
+            if (!string.IsNullOrEmpty(projectName) && Directory.Exists(student.SolutionPath))
+            {
+                try
+                {
+                    // Search for the DLL recursively, excluding runtime folders
+                    var dllFiles = Directory.GetFiles(student.SolutionPath, $"{projectName}.dll", SearchOption.AllDirectories)
+                        .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                        .ToArray();
+
+                    if (dllFiles.Length > 0)
+                    {
+                        var result = dllFiles[0];
+                        _logger.LogDebug($"Found {type} DLL via recursive search: {result}");
+                        return result;
+                    }
+
+                    // Try alternate names (Q11, Q12) for compatibility
+                    var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                        ? new[] { "Q12.dll", "Project12.dll" }
+                        : new[] { "Q11.dll", "Project11.dll" };
+
+                    foreach (var altName in altNames)
+                    {
+                        dllFiles = Directory.GetFiles(student.SolutionPath, altName, SearchOption.AllDirectories)
+                            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                            .ToArray();
+
+                        if (dllFiles.Length > 0)
+                        {
+                            var result = dllFiles[0];
+                            _logger.LogDebug($"Found {type} DLL via fallback search ({altName}): {result}");
+                            return result;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error searching for {type} DLL: {ex.Message}");
+                }
+            }
+
+            _logger.LogWarning($"No {type} DLL found for student {student.StudentCode}");
             return null;
         }
 
