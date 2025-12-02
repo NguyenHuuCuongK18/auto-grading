@@ -49,6 +49,8 @@ namespace SolutionGrader.Core.Services
         // Timing constants
         private const int StartupDelayMs = 3000;
         private const int InputProcessingDelayMs = 5000;
+        private const int OutputRetryMaxAttempts = 5;
+        private const int OutputRetryDelayMs = 1000;
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
@@ -552,7 +554,7 @@ namespace SolutionGrader.Core.Services
                                 // Get output from application log with retries
                                 string newOutput = "";
                                 int retryCount = 0;
-                                while (string.IsNullOrEmpty(newOutput) && retryCount < 5)
+                                while (string.IsNullOrEmpty(newOutput) && retryCount < OutputRetryMaxAttempts)
                                 {
                                     var output = _dockerExecutor.GetApplicationLog(clientContainer, clientContainer) ?? "";
                                     newOutput = output.Length > clientBaseline ? output.Substring(clientBaseline) : output;
@@ -560,7 +562,7 @@ namespace SolutionGrader.Core.Services
                                         clientBaseline = output.Length;
                                     else
                                     {
-                                        await Task.Delay(1000);
+                                        await Task.Delay(OutputRetryDelayMs);
                                         retryCount++;
                                     }
                                 }
@@ -619,6 +621,19 @@ namespace SolutionGrader.Core.Services
         
         #region Output Comparison
         
+        /// <summary>
+        /// Compares actual outputs against expected outputs using ALL-OR-NOTHING grading policy.
+        /// 
+        /// GRADING POLICY: ALL-OR-NOTHING
+        /// - If ALL comparisons pass, student earns FULL marks for the test case
+        /// - If ANY comparison fails, student earns ZERO marks for the test case
+        /// - This policy ensures students implement complete functionality, not partial solutions
+        /// </summary>
+        /// <param name="expected">Expected outputs by stage</param>
+        /// <param name="clientOutputs">Actual client outputs by stage</param>
+        /// <param name="serverOutputs">Actual server outputs by stage</param>
+        /// <param name="maxMark">Maximum marks for this test case</param>
+        /// <returns>Earned mark, pass status, and comparison details</returns>
         private (double earnedMark, bool passed, List<ComparisonResult> comparisons) CompareOutputs(
             Dictionary<int, (string? ClientConsole, string? ServerConsole)> expected,
             Dictionary<int, string> clientOutputs,
