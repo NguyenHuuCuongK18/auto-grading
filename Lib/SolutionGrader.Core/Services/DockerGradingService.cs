@@ -1300,39 +1300,102 @@ namespace SolutionGrader.Core.Services
             // Step 6: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 7: Wait for port release INSIDE the container (not just host)
-            // The port binding is inside the container, so we check there
-            // Note: timeout counter decrements every 0.5 seconds, so use 60 for ~30 second timeout
-            var checkPortCmd = $"exec {serverContainer} sh -c \"" +
-                "timeout=60; " +
-                "while [ $timeout -gt 0 ] && (netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'); do " +
-                "sleep 0.5; " +
-                "timeout=$((timeout - 1)); " +
-                "done; " +
-                "exit 0\"";
-            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 35000); } catch { }
+            // Step 7: Wait for port release INSIDE the container with quick polling
+            // Check every 200ms for up to 5 seconds max - if port doesn't release, abort test case
+            Console.WriteLine($"[Cleanup] Checking port {hostPort} release in container...");
+            bool portReleasedInContainer = false;
+            var containerPortCheckStart = DateTime.UtcNow;
+            while ((DateTime.UtcNow - containerPortCheckStart).TotalMilliseconds < 5000)
+            {
+                var checkPortCmd = $"exec {serverContainer} sh -c \"" +
+                    "(netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}') && echo 'IN_USE' || echo 'FREE'\"";
+                try
+                {
+                    // Run command and capture output
+                    var result = RunDockerCommandWithOutput(checkPortCmd, 2000);
+                    if (result != null && result.Contains("FREE"))
+                    {
+                        portReleasedInContainer = true;
+                        Console.WriteLine($"[Cleanup] Port {hostPort} released in container after {(DateTime.UtcNow - containerPortCheckStart).TotalMilliseconds:F0}ms");
+                        break;
+                    }
+                }
+                catch { }
+                
+                await Task.Delay(200);
+            }
+            
+            if (!portReleasedInContainer)
+            {
+                Console.WriteLine($"[Cleanup] WARNING: Port {hostPort} not released in container after 5s timeout");
+            }
             
             // Step 8: Also verify host port is available (since server port is exposed)
-            var startTime = DateTime.UtcNow;
-            while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
+            // Quick check with 5s max timeout, polling every 200ms
+            bool portReleasedOnHost = false;
+            var hostPortCheckStart = DateTime.UtcNow;
+            while ((DateTime.UtcNow - hostPortCheckStart).TotalMilliseconds < 5000)
             {
                 try
                 {
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
-                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available on host");
+                    portReleasedOnHost = true;
+                    Console.WriteLine($"[Cleanup] Port {hostPort} released on host after {(DateTime.UtcNow - hostPortCheckStart).TotalMilliseconds:F0}ms");
                     break;
                 }
                 catch
                 {
-                    await Task.Delay(500);
+                    await Task.Delay(200);
                 }
             }
             
-            // Give a moment for everything to settle
-            await Task.Delay(500);
+            if (!portReleasedOnHost)
+            {
+                Console.WriteLine($"[Cleanup] WARNING: Port {hostPort} not released on host after 5s timeout");
+            }
+            
+            // If both port checks failed, the next test case will likely fail
+            if (!portReleasedInContainer || !portReleasedOnHost)
+            {
+                Console.WriteLine("[Cleanup] WARNING: Port cleanup incomplete - next test case may fail due to unsuccessful reset");
+            }
+            
             Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
+        }
+        
+        /// <summary>
+        /// Runs a docker command and returns the stdout output.
+        /// Returns null if the command fails or times out.
+        /// </summary>
+        private string? RunDockerCommandWithOutput(string command, int timeoutMs)
+        {
+            try
+            {
+                var process = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "docker",
+                        Arguments = command.StartsWith("exec ") ? command : $"exec {command}",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                
+                process.Start();
+                var output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(timeoutMs);
+                
+                return output?.Trim();
+            }
+            catch
+            {
+                return null;
+            }
         }
         
         /// <summary>
