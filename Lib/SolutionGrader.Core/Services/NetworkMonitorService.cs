@@ -104,9 +104,14 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error starting capture: {ex.Message}");
+                var errorMsg = $"{NetworkKeywords.LOG_PREFIX_MONITOR} CRITICAL: Failed to start network capture: {ex.Message}. " +
+                              "Network monitoring is MANDATORY for grading. " +
+                              "On Linux, ensure libpcap is installed and run with sudo. On Windows, ensure NPcap is installed.";
+                Console.WriteLine(errorMsg);
                 _device?.Close();
                 _device = null;
+                // Network monitoring is mandatory - throw exception to fail grading
+                throw new InvalidOperationException(errorMsg, ex);
             }
         }
         
@@ -688,8 +693,19 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         {
             var devices = CaptureDeviceList.Instance;
             
+            // Check if we have any devices - if not, likely a permission issue
+            if (devices == null || devices.Count == 0)
+            {
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: No capture devices found!");
+                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This usually means:");
+                Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
+                Console.WriteLine($"  2. On Windows: NPcap is not installed");
+                Console.WriteLine($"  3. On Docker: The container needs --cap-add=NET_RAW capability");
+                return null;
+            }
+            
             // Debug: List all available devices
-            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices:");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Available capture devices ({devices.Count} found):");
             foreach (var d in devices)
             {
                 Console.WriteLine($"  - {d.Name}: {d.Description}");
@@ -758,6 +774,11 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         catch (Exception ex)
         {
             Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Error finding capture device: {ex.Message}");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Full exception: {ex}");
+            Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} This usually means:");
+            Console.WriteLine($"  1. On Linux: libpcap is not installed or you need to run with sudo");
+            Console.WriteLine($"  2. On Windows: NPcap is not installed");
+            Console.WriteLine($"  3. Insufficient permissions to access network interfaces");
             return null;
         }
     }
