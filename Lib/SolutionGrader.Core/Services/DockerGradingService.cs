@@ -1302,14 +1302,15 @@ namespace SolutionGrader.Core.Services
             
             // Step 7: Wait for port release INSIDE the container (not just host)
             // The port binding is inside the container, so we check there
+            // Note: timeout counter decrements every 0.5 seconds, so use 60 for ~30 second timeout
             var checkPortCmd = $"exec {serverContainer} sh -c \"" +
-                "timeout=30; " +
+                "timeout=60; " +
                 "while [ $timeout -gt 0 ] && (netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'); do " +
                 "sleep 0.5; " +
                 "timeout=$((timeout - 1)); " +
                 "done; " +
                 "exit 0\"";
-            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 20000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 35000); } catch { }
             
             // Step 8: Also verify host port is available (since server port is exposed)
             var startTime = DateTime.UtcNow;
@@ -1461,22 +1462,21 @@ namespace SolutionGrader.Core.Services
             if (isHttpProtocol)
             {
                 // HTTP format with HTTP-specific columns
+                // Each expected column has a corresponding actual column (except Time)
                 SetNetworkSheetHeadersHttp(netWs);
                 int netRow = 2;
                 foreach (var packet in result.NetworkCaptures)
                 {
-                    // Determine Info column based on packet content
-                    string info = "HTTP";
-                    if (!string.IsNullOrEmpty(packet.HttpMethod))
-                        info = "HTTP";
-                    else if (!string.IsNullOrEmpty(packet.HttpStatus))
-                        info = "HTTP";
+                    // Use consistent localhost format (127.0.0.1) for all protocols
+                    var sourceAddr = $"127.0.0.1:{packet.SourcePort}";
+                    var destAddr = $"127.0.0.1:{packet.DestinationPort}";
                     
+                    // Expected columns (cols 1-16)
                     netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
-                    netWs.Cell(netRow, 3).Value = info;  // Info
-                    netWs.Cell(netRow, 4).Value = $"::1:{packet.SourcePort}";  // Source (IPv6 localhost format for HTTP)
-                    netWs.Cell(netRow, 5).Value = $"::1:{packet.DestinationPort}";  // Destination
+                    netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time (no actual column)
+                    netWs.Cell(netRow, 3).Value = "HTTP";  // Info
+                    netWs.Cell(netRow, 4).Value = sourceAddr;  // Source
+                    netWs.Cell(netRow, 5).Value = destAddr;  // Destination
                     netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
                     netWs.Cell(netRow, 7).Value = packet.State;  // State
                     netWs.Cell(netRow, 8).Value = packet.HttpUri ?? "";  // URI
@@ -1488,12 +1488,23 @@ namespace SolutionGrader.Core.Services
                     netWs.Cell(netRow, 14).Value = packet.HttpBody ?? "";  // HttpBody
                     netWs.Cell(netRow, 15).Value = packet.SourceRole;  // SourceRole
                     netWs.Cell(netRow, 16).Value = packet.DestinationRole;  // DestinationRole
-                    netWs.Cell(netRow, 17).Value = packet.Flags;  // ActualFlags
-                    netWs.Cell(netRow, 18).Value = packet.State;  // ActualState
-                    netWs.Cell(netRow, 19).Value = packet.SourceRole;  // ActualSourceRole
-                    netWs.Cell(netRow, 20).Value = packet.DestinationRole;  // ActualDestRole
-                    netWs.Cell(netRow, 21).Value = packet.Data ?? "";  // ActualData
-                    netWs.Cell(netRow, 22).Value = "PASS";  // NetworkResult
+                    
+                    // Actual columns (cols 17-31) - one per expected column except Time
+                    netWs.Cell(netRow, 17).Value = "HTTP";  // ActualInfo
+                    netWs.Cell(netRow, 18).Value = sourceAddr;  // ActualSource
+                    netWs.Cell(netRow, 19).Value = destAddr;  // ActualDestination
+                    netWs.Cell(netRow, 20).Value = packet.Flags;  // ActualFlags
+                    netWs.Cell(netRow, 21).Value = packet.State;  // ActualState
+                    netWs.Cell(netRow, 22).Value = packet.HttpUri ?? "";  // ActualURI
+                    netWs.Cell(netRow, 23).Value = packet.HttpHost ?? "";  // ActualHost
+                    netWs.Cell(netRow, 24).Value = packet.HttpMethod ?? "";  // ActualMethod
+                    netWs.Cell(netRow, 25).Value = packet.HttpStatus ?? "";  // ActualStatus
+                    netWs.Cell(netRow, 26).Value = packet.HttpVersion ?? "";  // ActualHttpVersion
+                    netWs.Cell(netRow, 27).Value = packet.HttpHeaders ?? "";  // ActualHttpHeaders
+                    netWs.Cell(netRow, 28).Value = packet.HttpBody ?? "";  // ActualHttpBody
+                    netWs.Cell(netRow, 29).Value = packet.SourceRole;  // ActualSourceRole
+                    netWs.Cell(netRow, 30).Value = packet.DestinationRole;  // ActualDestRole
+                    netWs.Cell(netRow, 31).Value = "PASS";  // NetworkResult
                     netRow++;
                 }
                 
@@ -1504,7 +1515,7 @@ namespace SolutionGrader.Core.Services
                     {
                         netWs.Cell(netRow, 1).Value = comp.Stage;
                         netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
-                        netWs.Cell(netRow, 22).Value = "FAIL";  // NetworkResult
+                        netWs.Cell(netRow, 31).Value = "FAIL";  // NetworkResult
                         netRow++;
                     }
                 }
@@ -1618,15 +1629,21 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Sets Network sheet headers for HTTP protocol format.
-        /// Columns: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
+        /// Each expected column has a corresponding actual column (except Time which is timestamp-only).
+        /// Format: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole,
+        ///         ActualInfo, ActualSource, ActualDestination, ActualFlags, ActualState, ActualURI, ActualHost, ActualMethod, ActualStatus, ActualHttpVersion, ActualHttpHeaders, ActualHttpBody, ActualSourceRole, ActualDestRole, NetworkResult
         /// </summary>
         private static void SetNetworkSheetHeadersHttp(IXLWorksheet ws)
         {
             var headers = new[] { 
+                // Expected columns
                 "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", 
                 "URI", "Host", "Method", "Status", "HttpVersion", "HttpHeaders", "HttpBody",
-                "SourceRole", "DestinationRole", 
-                "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData", "NetworkResult" 
+                "SourceRole", "DestinationRole",
+                // Actual columns (1 per expected column except Time)
+                "ActualInfo", "ActualSource", "ActualDestination", "ActualFlags", "ActualState", 
+                "ActualURI", "ActualHost", "ActualMethod", "ActualStatus", "ActualHttpVersion", "ActualHttpHeaders", "ActualHttpBody",
+                "ActualSourceRole", "ActualDestRole", "NetworkResult" 
             };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
