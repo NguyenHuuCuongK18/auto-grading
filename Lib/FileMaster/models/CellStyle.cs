@@ -59,6 +59,16 @@ namespace FileMaster.Models
             BackgroundColorG = g;
             BackgroundColorB = b;
         }
+        
+        /// <summary>
+        /// Set font color using RGB values
+        /// </summary>
+        public void SetFontColor(byte r, byte g, byte b)
+        {
+            FontColorR = r;
+            FontColorG = g;
+            FontColorB = b;
+        }
 
         public static Action<CellStyle> GetStatusStyle(int status = 5)
         {
