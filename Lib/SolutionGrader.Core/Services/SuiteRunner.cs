@@ -382,6 +382,11 @@ namespace SolutionGrader.Core.Services
                 }
 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} {string.Format(LoggingKeywords.MSG_TESTCASE_COMPLETED, q.Name)}\n");
+                
+                // Step 7: Wait for port to be released before next test case
+                // This prevents "Address already in use" errors when the socket is in TIME_WAIT state
+                // after the previous test case's server process terminates.
+                await WaitForPortReleaseAsync(PortKeywords.DEFAULT_GRADER_PORT, ct);
             }
 
             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_SUITE} All test cases completed successfully");
@@ -406,6 +411,67 @@ namespace SolutionGrader.Core.Services
                 configs.Remove(key);
             }
             configs.Add(key, value);
+        }
+
+        /// <summary>
+        /// Waits for a TCP port to be released (no longer in use).
+        /// This is crucial between test cases to prevent "Address already in use" errors
+        /// when the socket is still in TIME_WAIT state after the previous server terminates.
+        /// 
+        /// The method polls the port availability with exponential backoff until either:
+        /// - The port becomes available (returns true)
+        /// - Maximum wait time is exceeded (returns false)
+        /// - Cancellation is requested
+        /// </summary>
+        /// <param name="port">The TCP port to wait for</param>
+        /// <param name="ct">Cancellation token</param>
+        /// <param name="maxWaitSeconds">Maximum time to wait in seconds (default: 10)</param>
+        /// <returns>True if port is available, false if timeout exceeded</returns>
+        private static async Task<bool> WaitForPortReleaseAsync(int port, CancellationToken ct, int maxWaitSeconds = 10)
+        {
+            var startTime = DateTime.UtcNow;
+            int delayMs = 100; // Start with 100ms delay, increase exponentially
+            const int maxDelayMs = 1000; // Cap at 1 second
+            
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Waiting for port {port} to be released...");
+            
+            while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds && !ct.IsCancellationRequested)
+            {
+                if (IsPortAvailable(port))
+                {
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Port {port} is now available");
+                    return true;
+                }
+                
+                await Task.Delay(delayMs, ct);
+                
+                // Exponential backoff
+                delayMs = Math.Min(delayMs * 2, maxDelayMs);
+            }
+            
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: Port {port} may still be in use after {maxWaitSeconds} seconds wait");
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a TCP port is available (not in use by any process).
+        /// Attempts to bind to the port; if successful, the port is available.
+        /// </summary>
+        /// <param name="port">The TCP port to check</param>
+        /// <returns>True if port is available, false if in use</returns>
+        private static bool IsPortAvailable(int port)
+        {
+            try
+            {
+                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+                listener.Start();
+                listener.Stop();
+                return true;
+            }
+            catch (System.Net.Sockets.SocketException)
+            {
+                return false;
+            }
         }
     }
 }

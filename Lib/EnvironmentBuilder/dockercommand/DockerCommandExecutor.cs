@@ -28,13 +28,53 @@ namespace EnvironmentBuilder.DockerCommand
             try
             {
                 command = "docker exec " + command;
-                _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                var success = _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                if (!success)
+                {
+                    // Command failed but didn't throw - this might be expected (e.g., pkill when no process exists)
+                    // Don't throw, just return silently
+                }
             }
             catch (Exception ex)
             {
                 // log
                 // throw
                 throw new Exception($"Error while executing command. Details: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Executes a docker exec command and returns whether it succeeded.
+        /// Unlike ExecDockerCommand, this returns a boolean indicating success.
+        /// </summary>
+        public bool TryExecDockerCommand(string command, int timeoutInMilliseconds = 30000)
+        {
+            try
+            {
+                command = "docker exec " + command;
+                return _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Executes a docker exec command and returns the output.
+        /// Used for commands like 'ps aux' where we need to parse the output.
+        /// </summary>
+        public (bool success, string output) ExecDockerCommandWithOutput(string command, int timeoutInMilliseconds = 30000)
+        {
+            try
+            {
+                command = "docker exec " + command;
+                var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, timeoutInMilliseconds);
+                return (result.ExitCode == 0, string.Join("\n", result.Output));
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
             }
         }
         #endregion
@@ -307,12 +347,19 @@ namespace EnvironmentBuilder.DockerCommand
                 foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
                     envVars += $"-e {kv.Key}={kv.Value} ";
 
+                // Only add port mapping if HostPort > 0
+                // Client containers typically don't need port mapping since they initiate connections
+                // to the server within the Docker network (using container name as hostname)
+                string portMapping = dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0
+                    ? $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} "
+                    : "";
+
                 string command = $@"docker run -d " +
                                  "--privileged " +
                                  $"--name {dockerBase.ContainerName} " +
                                  $"--network {dockerBase.DockerNetwork} " +
                                  $"{envVars} " +
-                                 $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} " +
+                                 $"{portMapping}" +
                                  $"{dockerBase.ImageName}";
                 _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
             }
@@ -322,6 +369,58 @@ namespace EnvironmentBuilder.DockerCommand
 
                 // throw
                 throw new Exception($"Error while try to run container {dockerBase.ContainerName}. Details: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Run a container with TTY support (-t flag) for reliable console output capture.
+        /// This is required when using docker attach to read output without buffering issues.
+        /// Also supports additional Docker flags via DockerBase.AdditionalFlags property.
+        /// </summary>
+        /// <param name="dockerBase">Container configuration</param>
+        /// <param name="timeoutInMilliseconds">Timeout for the operation</param>
+        public void RunContainerWithTty(DockerBase dockerBase, int timeoutInMilliseconds = 120000)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(dockerBase.DockerNetwork))
+                    CreateNetwork(dockerBase.DockerNetwork, timeoutInMilliseconds);
+
+                if (IsContainerExist(dockerBase.ContainerName))
+                {
+                    RemoveContainer(dockerBase.ContainerName, timeoutInMilliseconds);
+                }
+
+                string envVars = "";
+                foreach (KeyValuePair<string, string> kv in dockerBase.EnvironmentVariables)
+                    envVars += $"-e {kv.Key}={kv.Value} ";
+
+                // Add -t flag for TTY allocation - this resolves output buffering issues
+                // when using docker attach to read console output
+                // Only add port mapping if HostPort > 0 (client containers don't need port mapping)
+                string portMapping = dockerBase.HostPort > 0 && dockerBase.ContainerPort > 0
+                    ? $"-p {dockerBase.HostPort}:{dockerBase.ContainerPort} "
+                    : "";
+                
+                // Include additional flags if provided (e.g., --add-host for host.docker.internal)
+                string additionalFlags = !string.IsNullOrEmpty(dockerBase.AdditionalFlags)
+                    ? $"{dockerBase.AdditionalFlags} "
+                    : "";
+                    
+                string command = $@"docker run -d -t " +
+                                 "--privileged " +
+                                 $"--name {dockerBase.ContainerName} " +
+                                 $"--network {dockerBase.DockerNetwork} " +
+                                 $"{envVars} " +
+                                 $"{portMapping}" +
+                                 $"{additionalFlags}" +
+                                 $"{dockerBase.ImageName}";
+                _commandExecutor.RunCommand(command, null, null, timeoutInMilliseconds);
+                Console.WriteLine($"[Docker] Container {dockerBase.ContainerName} started with TTY support");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error while try to run container {dockerBase.ContainerName} with TTY. Details: {ex.Message}");
             }
         }
 
@@ -657,6 +756,67 @@ namespace EnvironmentBuilder.DockerCommand
         private void StartApplicationInContainer(string containerName, string appName, string appPath)
         {
             string inputPipe = $"/tmp/{appName}_input_pipe";
+            string pidFile = $"/tmp/{appName}.pid";
+
+            // IMPORTANT: Clean up any existing processes and pipes BEFORE starting
+            // This prevents "Address already in use" errors when restarting applications
+            Console.WriteLine($"[{appName}] Cleaning up any existing processes and pipes...");
+            
+            // Kill any existing application process using stored PID file (safer than pkill)
+            // This avoids killing PID 1 which would terminate the container
+            try
+            {
+                // Read the PID from the pid file and kill that specific process
+                string killByPidCommand = $"{containerName} sh -c \"if [ -f {pidFile} ]; then kill -9 $(cat {pidFile}) 2>/dev/null || true; fi\"";
+                ExecDockerCommand(killByPidCommand, 5000);
+            }
+            catch { /* Ignore - no PID file or process */ }
+            
+            // Fallback: Kill dotnet processes by finding PIDs (excluding PID 1)
+            // This is safer than 'pkill -9 dotnet' which could kill the container's main process
+            try
+            {
+                // Find dotnet PIDs (excluding PID 1) and kill them
+                string safeDotnetKillCommand = $"{containerName} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
+                ExecDockerCommand(safeDotnetKillCommand, 5000);
+            }
+            catch { /* Ignore - no processes to kill */ }
+            
+            // Kill any existing sleep processes keeping pipes open (excluding PID 1)
+            try
+            {
+                string safeSleepKillCommand = $"{containerName} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
+                ExecDockerCommand(safeSleepKillCommand, 5000);
+            }
+            catch { /* Ignore - no processes to kill */ }
+            
+            // Remove existing pipe if it exists (ignore errors)
+            try
+            {
+                string removePipeCommand = $"{containerName} rm -f {inputPipe}";
+                ExecDockerCommand(removePipeCommand, 5000);
+            }
+            catch { /* Ignore - pipe may not exist */ }
+            
+            // Remove existing log file (ignore errors)
+            string logFile = $"/tmp/{appName}_output.log";
+            try
+            {
+                string removeLogCommand = $"{containerName} rm -f {logFile}";
+                ExecDockerCommand(removeLogCommand, 5000);
+            }
+            catch { /* Ignore */ }
+            
+            // Remove existing PID file (ignore errors)
+            try
+            {
+                string removePidCommand = $"{containerName} rm -f {pidFile}";
+                ExecDockerCommand(removePidCommand, 5000);
+            }
+            catch { /* Ignore */ }
+            
+            // Wait for port to be released after killing processes
+            Thread.Sleep(500);
 
             string createInputFileCommand = $"{containerName} mkfifo \"{inputPipe}\"";
             ExecDockerCommand(createInputFileCommand, 60000);
@@ -664,11 +824,35 @@ namespace EnvironmentBuilder.DockerCommand
             string startDoorstopCommand = $"-d {containerName} sh -c \"sleep 10000 > {inputPipe}\"";
             ExecDockerCommand(startDoorstopCommand, 60000);
 
-            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -o0 -e0 dotnet {appPath} > /proc/1/fd/1 2>&1 < {inputPipe}\"";
+            // Modified: Write output to BOTH /proc/1/fd/1 (docker logs) AND a log file
+            // The log file provides reliable output capture even when docker logs has buffering issues
+            // Also save the PID to a file for safe cleanup later
+            string command = $"-d -i -e DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1 {containerName} sh -c \"stdbuf -oL -eL dotnet {appPath} 2>&1 < {inputPipe} | tee {logFile} > /proc/1/fd/1 & echo $! > {pidFile}\"";
             Console.WriteLine($"[{appName}] Starting application...");
             ExecDockerCommand(command, 60000);
 
             Console.WriteLine($"[{appName}] Application started. Monitor with: docker logs -f {containerName}");
+        }
+
+        /// <summary>
+        /// Get the application output log from the container.
+        /// This reads from the log file created by StartApplicationInContainer.
+        /// </summary>
+        /// <param name="containerName">Container name</param>
+        /// <param name="appName">Application name</param>
+        /// <returns>The application output</returns>
+        public string GetApplicationLog(string containerName, string appName)
+        {
+            try
+            {
+                string logFile = $"/tmp/{appName}_output.log";
+                string command = $"docker exec {containerName} cat {logFile}";
+                return RunCommand(command);
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private bool IsProcessRunning(string containerName, string processName)
@@ -684,15 +868,36 @@ namespace EnvironmentBuilder.DockerCommand
             return !string.IsNullOrWhiteSpace(output);
         }
 
+        /// <summary>
+        /// Runs a shell command and returns the output.
+        /// Cross-platform: uses cmd.exe on Windows, /bin/bash on Linux/macOS.
+        /// </summary>
         private string RunCommand(string cmd)
         {
-            var psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+            ProcessStartInfo psi;
+            
+            if (OperatingSystem.IsWindows())
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                psi = new ProcessStartInfo("cmd.exe", "/c " + cmd)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
+            else
+            {
+                // On Linux/macOS, use bash or sh
+                var shell = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+                psi = new ProcessStartInfo(shell, $"-c \"{cmd.Replace("\"", "\\\"")}\"")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
 
             using Process proc = Process.Start(psi);
             string output = proc.StandardOutput.ReadToEnd();

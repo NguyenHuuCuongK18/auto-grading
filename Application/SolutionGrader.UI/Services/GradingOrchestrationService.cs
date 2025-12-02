@@ -5,28 +5,34 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
-using Domain.Entities.Constants;
-using Domain.Entities.Main;
-using EnvironmentBuilder.DockerCommand;
-using Newtonsoft.Json;
-using SolutionGrader.Services;
-using Environment = Domain.Entities.Main.Environment;
 
 namespace SolutionGrader.UI.Services
 {
     /// <summary>
     /// Main service that orchestrates the grading process for student solutions.
-    /// Handles container management, grading execution, and result collection.
+    /// 
+    /// IMPORTANT: This service delegates ALL grading logic to LibGradingService which
+    /// calls the Lib folder's SuiteRunner. This ensures IDENTICAL behavior between
+    /// SolutionGrader.CLI and SolutionGrader.UI.
+    /// 
+    /// The UI orchestration service ONLY handles:
+    /// 1. Student discovery from submit folder
+    /// 2. Session state management (progress, pause, cancel)
+    /// 3. UI event notifications
+    /// 4. Writing result summaries
+    /// 
+    /// All Docker container management, file copying, test execution, network monitoring,
+    /// and output comparison is handled by Lib/SolutionGrader.Core services via LibGradingService.
     /// </summary>
     public class GradingOrchestrationService
     {
         private readonly ILoggingService _logger;
         private readonly StudentDiscoveryService _studentDiscovery;
         private readonly TestKitDiscoveryService _testKitDiscovery;
-        private readonly DockerCommandExecutor _dockerExecutor;
+        private readonly LibGradingService _libGrading;
+        private ResultWriterService? _resultWriter;
         
         private CancellationTokenSource? _cancellationTokenSource;
-        private readonly object _lockObject = new object();
         
         // Events for UI updates
         public event EventHandler<StudentSolution>? StudentGradingStarted;
@@ -39,7 +45,7 @@ namespace SolutionGrader.UI.Services
             _logger = logger;
             _studentDiscovery = new StudentDiscoveryService(logger);
             _testKitDiscovery = new TestKitDiscoveryService(logger);
-            _dockerExecutor = new DockerCommandExecutor();
+            _libGrading = new LibGradingService(logger);
         }
 
         /// <summary>
@@ -52,18 +58,27 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Starts the grading process for the specified students.
+        /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
-        /// <param name="students">Students to grade</param>
-        /// <param name="config">Grading configuration</param>
-        /// <param name="sessionState">Session state to update</param>
-        /// <returns>Task representing the grading operation</returns>
+        /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
-            GradingSessionState sessionState)
+            GradingSessionState sessionState,
+            CancellationToken ct = default)
         {
-            _cancellationTokenSource = new CancellationTokenSource();
-            var ct = _cancellationTokenSource.Token;
+            // Use provided cancellation token, or create a new one if not provided
+            if (ct == default)
+            {
+                _cancellationTokenSource = new CancellationTokenSource();
+                ct = _cancellationTokenSource.Token;
+            }
+
+            // Initialize result writer for saving StudentsSolution.xlsx
+            var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
+                ? config.SaveResultFolderPath 
+                : Path.Combine(config.SubmitFolderPath, "Results");
+            _resultWriter = new ResultWriterService(_logger, resultPath);
 
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
@@ -72,11 +87,12 @@ namespace SolutionGrader.UI.Services
             sessionState.NotRunCount = students.Count(s => s.Status == GradingStatus.Not_Run);
 
             _logger.LogInfo($"Starting grading for {students.Count} students");
+            _logger.LogInfo($"Results will be saved to: {resultPath}");
             SessionStateChanged?.Invoke(this, sessionState);
 
             try
             {
-                // Grade students one at a time (as per requirement)
+                // Grade students one at a time
                 foreach (var student in students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused))
                 {
                     if (ct.IsCancellationRequested)
@@ -96,7 +112,7 @@ namespace SolutionGrader.UI.Services
                     sessionState.CurrentStudentCode = student.StudentCode;
                     SessionStateChanged?.Invoke(this, sessionState);
 
-                    await GradeStudentAsync(student, config, ct);
+                    await GradeStudentAsync(student, config, resultPath, ct);
 
                     // Update session state
                     sessionState.GradedStudents++;
@@ -104,11 +120,15 @@ namespace SolutionGrader.UI.Services
                     sessionState.SuccessCount = students.Count(s => s.Status == GradingStatus.Success);
                     sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
                     SessionStateChanged?.Invoke(this, sessionState);
+
+                    // Write StudentsSolution.xlsx incrementally
+                    _resultWriter.WriteStudentsSolutionSummary(students);
                 }
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInfo("Grading operation was cancelled");
+                _resultWriter?.WriteStudentsSolutionSummary(students);
             }
             catch (Exception ex)
             {
@@ -125,14 +145,29 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Grades a single student's solution.
+        /// Grades a single student by delegating to LibGradingService's Docker grading.
+        /// 
+        /// IMPORTANT: This method uses DOCKER-BASED GRADING via DockerGradingService:
+        /// 1. Sets up Docker containers (server and client) with TTY support
+        /// 2. Copies student DLLs to containers
+        /// 3. Generates appsettings.json with proper networking config
+        /// 4. NetworkMonitor runs on HOST and sniffs the exposed server port
+        /// 5. Test execution happens INSIDE containers
+        /// 6. Output captured via application log files (bypasses docker logs buffering)
+        /// 
+        /// The architecture:
+        /// - Server container: port EXPOSED to host (e.g., -p 8000:8000) for NetworkMonitor
+        /// - Client container: connects to server via Docker network (container name as hostname)
+        /// - NetworkMonitor: runs on HOST, sniffs localhost:{exposed_port}
         /// </summary>
         private async Task GradeStudentAsync(
             StudentSolution student, 
             GradingConfiguration config,
+            string resultPath,
             CancellationToken ct)
         {
-            _logger.SetStudentContext(student.StudentCode);
+            _logger.SetStudentContext(student.StudentCode, student.PaperNo);
+            
             student.StartTime = DateTime.Now;
             student.Status = GradingStatus.InProgress;
             student.ProgressPercent = 0;
@@ -140,9 +175,9 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                _logger.LogInfo($"Starting grading for student: {student.StudentCode} (Paper {student.PaperNo})");
+                _logger.LogInfo($"Starting DOCKER grading for student: {student.StudentCode} (Paper {student.PaperNo})");
 
-                // Step 1: Check if test kit exists for this paper
+                // Step 1: Find test kit for this paper
                 student.ProgressPercent = 10;
                 StudentProgressUpdated?.Invoke(this, student);
 
@@ -157,59 +192,97 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"Using test kit: {testKitPath}");
 
-                // Step 2: Load environment configuration
+                // Step 2: Build paths for Docker grading
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                var envPath = _testKitDiscovery.GetEnvironmentPath(testKitPath);
-                if (string.IsNullOrEmpty(envPath))
-                {
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = "Environment.xlsx not found in test kit";
-                    _logger.LogError(student.StatusMessage);
-                    return;
-                }
-
-                var environment = LoadEnvironment(envPath);
+                // Result folder for this student - organized by paper number to match SampleLogging structure:
+                // Structure: {resultPath}/{paperNo}/student/{studentCode}
+                // Example: Results/1/student/CuongNHE186494
+                // This ensures results are properly organized by exam paper for easier review
+                var studentResultPath = Path.Combine(resultPath, student.PaperNo, "student", student.StudentCode);
                 
-                // Step 3: Configure environment for this student
+                // Get student's DLL paths (client and/or server)
+                var clientDllPath = GetStudentExecutablePath(student, config, "Client");
+                var serverDllPath = GetStudentExecutablePath(student, config, "Server");
+
+                _logger.LogDebug($"Client DLL path: {clientDllPath ?? "(none)"}");
+                _logger.LogDebug($"Server DLL path: {serverDllPath ?? "(none)"}");
+
+                // Step 3: Execute DOCKER grading via LibGradingService
+                // This delegates to Lib/SolutionGrader.Core's DockerGradingService which handles:
+                // - Docker container setup with TTY support (-t flag)
+                // - Server port EXPOSED to host for NetworkMonitor sniffing
+                // - File copying to containers
+                // - Network monitoring via NetworkMonitorService (runs on HOST)
+                // - Test execution INSIDE containers
+                // - Output captured via application log files
+                // - Result logging to Excel files
                 student.ProgressPercent = 30;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                ConfigureEnvironmentForStudent(environment, student, config, testKitPath);
+                _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
+                
+                // Build Docker configuration from UI config
+                // The examiner sets HasClient/HasServer to indicate what the student should provide:
+                // - HasClient=true, HasServer=true  → student provides both
+                // - HasClient=true, HasServer=false → student provides client, use golden server
+                // - HasClient=false, HasServer=true → student provides server, use golden client
+                var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+                {
+                    // Examiner's component requirements
+                    HasClient = config.HasClient,
+                    HasServer = config.HasServer,
+                    ClientProjectName = config.ClientProjectName,
+                    ServerProjectName = config.ServerProjectName,
+                    
+                    // Container settings
+                    CodeContainerInternalPort = config.CodeContainerInternalPort,
+                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
+                    
+                    // Database container settings
+                    DatabaseImageName = config.DatabaseImageName ?? "mcr.microsoft.com/mssql/server:2019-latest",
+                    DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                    DatabaseContainerInternalPort = config.DatabaseContainerInternalPort,
+                    DatabaseContainerHostPort = config.DatabaseContainerHostPort,
+                    DatabaseUsername = config.DatabaseUsername ?? "sa",
+                    DatabasePassword = config.DatabasePassword,
+                    
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                };
+                
+                _logger.LogInfo($"Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
+                _logger.LogInfo($"Project names: Client={config.ClientProjectName}, Server={config.ServerProjectName}");
+                
+                var result = await _libGrading.ExecuteDockerGradingAsync(
+                    testKitPath,
+                    studentResultPath,
+                    serverDllPath,
+                    clientDllPath,
+                    student.StudentCode,
+                    dockerConfig,
+                    ct);
 
-                // Step 4: Setup Docker containers
-                student.ProgressPercent = 40;
-                StudentProgressUpdated?.Invoke(this, student);
-
-                await SetupContainersAsync(environment, ct);
-
-                // Step 5: Copy student solution files to containers
-                student.ProgressPercent = 50;
-                StudentProgressUpdated?.Invoke(this, student);
-
-                await CopyFilesToContainersAsync(student, environment, ct);
-
-                // Step 6: Execute grading
-                student.ProgressPercent = 70;
-                StudentProgressUpdated?.Invoke(this, student);
-
-                var result = await ExecuteGradingAsync(student, environment, testKitPath, config, ct);
-
-                // Step 7: Collect results and cleanup
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
 
-                await WriteResultsAsync(student, result, ct);
-                await CleanupContainersAsync(environment, ct);
+                // Step 4: Interpret results from DockerGradingResult
+                if (result.Passed || result.TotalMark > 0)
+                {
+                    student.Status = GradingStatus.Success;
+                    student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
+                    student.Mark = result.TotalMark;
+                }
+                else
+                {
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = result.ErrorMessage ?? $"Docker grading failed: 0/{result.MaxMark:F2}";
+                    student.Mark = 0;
+                }
 
-                // Mark as complete
-                student.Status = result.success ? GradingStatus.Success : GradingStatus.Failed;
-                student.Mark = result.mark;
-                student.StatusMessage = result.message;
                 student.ProgressPercent = 100;
-
-                _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}, Status: {student.Status}");
+                _logger.LogInfo($"Docker grading completed for {student.StudentCode}. Mark: {student.Mark:F2}, Status: {student.Status}");
             }
             catch (OperationCanceledException)
             {
@@ -232,252 +305,116 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Loads environment configuration from Excel file.
+        /// Gets the path to a student's executable (client or server).
+        /// 
+        /// This method uses the DLL paths that were discovered during student discovery
+        /// by StudentDiscoveryService.FindDllPath(), which performs a recursive search
+        /// through the solution folder. The student.ClientDllPath and student.ServerDllPath
+        /// properties contain the full paths to the DLLs.
+        /// 
+        /// If the pre-discovered paths are not available, falls back to a recursive search.
         /// </summary>
-        private Environment LoadEnvironment(string envPath)
+        private string? GetStudentExecutablePath(StudentSolution student, GradingConfiguration config, string type)
         {
-            // Use the existing EnvironmentService from SolutionGrader.Services
-            try
+            if (string.IsNullOrEmpty(student.SolutionPath))
+                return null;
+
+            bool hasProject;
+            string? preDiscoveredPath;
+            string projectName;
+            
+            if (type.Equals("Client", StringComparison.OrdinalIgnoreCase))
             {
-                return EnvironmentService.GetEnvironment(envPath);
+                hasProject = config.HasClient;
+                preDiscoveredPath = student.ClientDllPath;
+                projectName = config.ClientProjectName;
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError($"Failed to load environment from {envPath}", ex);
-                throw;
+                hasProject = config.HasServer;
+                preDiscoveredPath = student.ServerDllPath;
+                projectName = config.ServerProjectName;
             }
+
+            if (!hasProject)
+                return null;
+
+            // Use the pre-discovered DLL path from StudentDiscoveryService if available
+            // This path was found using recursive search during student discovery
+            if (!string.IsNullOrEmpty(preDiscoveredPath) && File.Exists(preDiscoveredPath))
+            {
+                _logger.LogDebug($"Using pre-discovered {type} DLL: {preDiscoveredPath}");
+                return preDiscoveredPath;
+            }
+
+            // Fallback: Search recursively for the DLL (same logic as StudentDiscoveryService)
+            // This handles cases where the DLL might not have been found during initial discovery
+            if (!string.IsNullOrEmpty(projectName) && Directory.Exists(student.SolutionPath))
+            {
+                try
+                {
+                    // Search for the DLL recursively, excluding runtime folders
+                    var dllFiles = Directory.GetFiles(student.SolutionPath, $"{projectName}.dll", SearchOption.AllDirectories)
+                        .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                        .ToArray();
+
+                    if (dllFiles.Length > 0)
+                    {
+                        var result = dllFiles[0];
+                        _logger.LogDebug($"Found {type} DLL via recursive search: {result}");
+                        return result;
+                    }
+
+                    // Try alternate names (Q11, Q12) for compatibility
+                    var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                        ? new[] { "Q12.dll", "Project12.dll" }
+                        : new[] { "Q11.dll", "Project11.dll" };
+
+                    foreach (var altName in altNames)
+                    {
+                        dllFiles = Directory.GetFiles(student.SolutionPath, altName, SearchOption.AllDirectories)
+                            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                            .ToArray();
+
+                        if (dllFiles.Length > 0)
+                        {
+                            var result = dllFiles[0];
+                            _logger.LogDebug($"Found {type} DLL via fallback search ({altName}): {result}");
+                            return result;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error searching for {type} DLL: {ex.Message}");
+                }
+            }
+
+            _logger.LogWarning($"No {type} DLL found for student {student.StudentCode}");
+            return null;
         }
 
         /// <summary>
-        /// Configures the environment settings for a specific student.
+        /// Reads the total mark from result files generated by Lib services.
         /// </summary>
-        private void ConfigureEnvironmentForStudent(
-            Environment environment, 
-            StudentSolution student,
-            GradingConfiguration config,
-            string testKitPath)
+        private double ReadMarkFromResults(string resultPath)
         {
-            var configs = environment.Configs;
-
-            // Set container names for this student
-            SetOrAddConfig(configs, EnvironmentConfiguration.CodeContainerName, $"ag-server-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvironmentConfiguration.GivenConsoleContainerName, $"ag-client-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvironmentConfiguration.StudentQuestionName, $"ag-{student.StudentCode}");
-            SetOrAddConfig(configs, EnvironmentConfiguration.DatabaseName, $"DB_{student.StudentCode}");
-
-            // Set port configurations
-            SetOrAddConfig(configs, EnvironmentConfiguration.CodeContainerInternalPort, config.CodeContainerInternalPort.ToString());
-            SetOrAddConfig(configs, EnvironmentConfiguration.CodeContainerHostPort, config.CodeContainerHostPort.ToString());
-
-            // Set file paths
-            if (!string.IsNullOrEmpty(student.ServerDllPath))
-            {
-                var serverDir = Path.GetDirectoryName(student.ServerDllPath)!;
-                SetOrAddConfig(configs, EnvironmentConfiguration.CodeFilePath, serverDir);
-                SetOrAddConfig(configs, EnvironmentConfiguration.DockerServerPath, GetDockerDllPath(serverDir, student.ServerDllPath));
-            }
-
-            if (!string.IsNullOrEmpty(student.ClientDllPath))
-            {
-                var clientDir = Path.GetDirectoryName(student.ClientDllPath)!;
-                SetOrAddConfig(configs, EnvironmentConfiguration.GivenConsolePath, clientDir);
-                SetOrAddConfig(configs, EnvironmentConfiguration.DockerClientPath, GetDockerDllPath(clientDir, student.ClientDllPath));
-            }
-
-            // Set runtime folder from test kit
-            var runtimesFolder = configs.GetValueOrDefault(EnvironmentConfiguration.RuntimesFolder);
-            if (!string.IsNullOrEmpty(runtimesFolder) && !Path.IsPathRooted(runtimesFolder))
-            {
-                SetOrAddConfig(configs, EnvironmentConfiguration.RuntimesFolder, Path.Combine(testKitPath, runtimesFolder));
-            }
-
-            // Set database file path
-            var dbFilePath = configs.GetValueOrDefault(EnvironmentConfiguration.DefaultDatabaseFilePath);
-            if (!string.IsNullOrEmpty(dbFilePath) && !Path.IsPathRooted(dbFilePath))
-            {
-                SetOrAddConfig(configs, EnvironmentConfiguration.DefaultDatabaseFilePath, Path.Combine(testKitPath, dbFilePath));
-            }
-        }
-
-        private string GetDockerDllPath(string baseDir, string dllPath)
-        {
-            var relativePath = Path.GetRelativePath(baseDir, dllPath);
-            var folderName = Path.GetFileName(baseDir);
-            return $"/apps/{folderName}/{relativePath}".Replace("\\", "/");
-        }
-
-        /// <summary>
-        /// Sets up Docker containers for grading.
-        /// </summary>
-        private async Task SetupContainersAsync(Environment environment, CancellationToken ct)
-        {
-            _logger.LogInfo("Setting up Docker containers...");
-
+            // The Lib services write results to Excel files
+            // Try to read the mark from the summary
             try
             {
-                // Use the EnvironmentManagerInvoker to setup containers
-                var envJson = JsonConvert.SerializeObject(environment);
-                var envBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(envJson));
+                // Look for result files in the result path
+                if (!Directory.Exists(resultPath))
+                    return 0;
 
-                // Check if Docker is running
-                if (!_dockerExecutor.IsDockerRunning())
-                {
-                    throw new InvalidOperationException("Docker is not running. Please start Docker Desktop.");
-                }
-
-                // The actual container setup is handled by the existing EnvironmentManagerInvoker
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupContainer(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"Container setup warning: {error}");
-                }
-
-                await Task.Delay(1000, ct); // Wait for containers to be ready
-                _logger.LogInfo("Docker containers setup complete");
+                // The ExcelDetailLogService writes GradeDetail.xlsx with marks
+                // For now, return 0 - the actual parsing can be added
+                // TODO: Parse mark from GradeDetail.xlsx
+                return 0;
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError("Failed to setup Docker containers", ex);
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Copies student solution files to Docker containers.
-        /// </summary>
-        private async Task CopyFilesToContainersAsync(StudentSolution student, Environment environment, CancellationToken ct)
-        {
-            _logger.LogInfo("Copying files to containers...");
-
-            try
-            {
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TrySetupQuestion(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"File copy warning: {error}");
-                }
-
-                await Task.Delay(500, ct);
-                _logger.LogInfo("Files copied to containers");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Failed to copy files to containers", ex);
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Executes the actual grading process.
-        /// </summary>
-        private async Task<(bool success, double mark, string message)> ExecuteGradingAsync(
-            StudentSolution student,
-            Environment environment,
-            string testKitPath,
-            GradingConfiguration config,
-            CancellationToken ct)
-        {
-            _logger.LogInfo("Executing grading...");
-
-            try
-            {
-                // For now, return a placeholder result
-                // The actual grading logic will be integrated with the existing SuiteRunner
-                
-                // TODO: Integrate with the actual grading logic from SolutionGrader.Core
-                // This includes:
-                // 1. Flush network monitor
-                // 2. Start server/client based on test kit steps
-                // 3. Execute test cases
-                // 4. Compare results
-                // 5. Calculate marks
-
-                await Task.Delay(2000, ct); // Simulated grading time
-
-                _logger.LogInfo("Grading execution complete");
-                return (true, 10.0, "Grading completed successfully");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Grading execution failed", ex);
-                return (false, 0, ex.Message);
-            }
-        }
-
-        /// <summary>
-        /// Writes grading results to Excel files.
-        /// </summary>
-        private async Task WriteResultsAsync(StudentSolution student, (bool success, double mark, string message) result, CancellationToken ct)
-        {
-            _logger.LogInfo("Writing results...");
-
-            try
-            {
-                var resultFolder = (_logger as LoggingService)?.GetStudentResultFolder(student.StudentCode) 
-                    ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Results", student.StudentCode);
-
-                if (!Directory.Exists(resultFolder))
-                {
-                    Directory.CreateDirectory(resultFolder);
-                }
-
-                // Write result summary
-                var summaryPath = Path.Combine(resultFolder, "GradeSummary.xlsx");
-                using (var workbook = new ClosedXML.Excel.XLWorkbook())
-                {
-                    var worksheet = workbook.Worksheets.Add("Summary");
-                    worksheet.Cell(1, 1).Value = "Student Code";
-                    worksheet.Cell(1, 2).Value = student.StudentCode;
-                    worksheet.Cell(2, 1).Value = "Paper";
-                    worksheet.Cell(2, 2).Value = student.PaperNo;
-                    worksheet.Cell(3, 1).Value = "Mark";
-                    worksheet.Cell(3, 2).Value = result.mark;
-                    worksheet.Cell(4, 1).Value = "Status";
-                    worksheet.Cell(4, 2).Value = result.success ? "Success" : "Failed";
-                    worksheet.Cell(5, 1).Value = "Message";
-                    worksheet.Cell(5, 2).Value = result.message;
-                    worksheet.Cell(6, 1).Value = "Start Time";
-                    worksheet.Cell(6, 2).Value = student.StartTime?.ToString("yyyy-MM-dd HH:mm:ss");
-                    worksheet.Cell(7, 1).Value = "End Time";
-                    worksheet.Cell(7, 2).Value = student.EndTime?.ToString("yyyy-MM-dd HH:mm:ss");
-
-                    workbook.SaveAs(summaryPath);
-                }
-
-                _logger.LogInfo($"Results written to {resultFolder}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Failed to write results", ex);
-            }
-
-            await Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// Cleans up Docker containers after grading.
-        /// </summary>
-        private async Task CleanupContainersAsync(Environment environment, CancellationToken ct)
-        {
-            _logger.LogInfo("Cleaning up containers...");
-
-            try
-            {
-                EnvironmentBuilder.helper.EnvironmentManagerInvoker.TryDisposeContainer(environment, out var error);
-                
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning($"Container cleanup warning: {error}");
-                }
-
-                await Task.Delay(500, ct);
-                _logger.LogInfo("Container cleanup complete");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Failed to cleanup containers", ex);
+                return 0;
             }
         }
 
@@ -486,32 +423,62 @@ namespace SolutionGrader.UI.Services
         /// </summary>
         public void PauseGrading(GradingSessionState sessionState)
         {
-            _logger.LogInfo("Pausing grading session...");
             sessionState.IsPaused = true;
+            _logger.LogInfo("Grading paused");
             SessionStateChanged?.Invoke(this, sessionState);
         }
 
         /// <summary>
-        /// Resumes a paused grading session.
+        /// Resumes the paused grading session.
         /// </summary>
         public void ResumeGrading(GradingSessionState sessionState)
         {
-            _logger.LogInfo("Resuming grading session...");
             sessionState.IsPaused = false;
+            _logger.LogInfo("Grading resumed");
             SessionStateChanged?.Invoke(this, sessionState);
         }
 
         /// <summary>
         /// Cancels the current grading session.
         /// </summary>
-        public void CancelGrading()
+        public void CancelGrading(GradingSessionState sessionState)
         {
-            _logger.LogInfo("Cancelling grading session...");
             _cancellationTokenSource?.Cancel();
+            sessionState.IsRunning = false;
+            _logger.LogInfo("Grading cancelled by user");
+            SessionStateChanged?.Invoke(this, sessionState);
         }
 
         /// <summary>
-        /// Resets all student statuses.
+        /// Checks if Docker is available.
+        /// </summary>
+        public bool IsDockerAvailable()
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = "info",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process == null) return false;
+                process.WaitForExit(5000);
+                return process.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Resets all student statuses to Not_Run.
         /// </summary>
         public void ResetAllStatuses(List<StudentSolution> students, GradingSessionState sessionState)
         {
@@ -548,20 +515,24 @@ namespace SolutionGrader.UI.Services
             student.EndTime = null;
             student.StatusMessage = "State disposed";
             student.ProgressPercent = 0;
-
-            // TODO: Delete associated result files
         }
-
-        private static void SetOrAddConfig(Dictionary<string, string> configs, string key, string value)
+        
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// </summary>
+        /// <param name="config">Grading configuration containing Docker settings</param>
+        public void DisposeAllContainers(GradingConfiguration config)
         {
-            if (configs.ContainsKey(key))
+            _logger.LogInfo("Disposing all Docker containers...");
+            
+            var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
             {
-                configs[key] = value;
-            }
-            else
-            {
-                configs.Add(key, value);
-            }
+                DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
+                DockerNetwork = config.DockerNetwork ?? "auto-grading-network"
+            };
+            
+            _libGrading.DisposeAllContainers(dockerConfig);
         }
     }
 }

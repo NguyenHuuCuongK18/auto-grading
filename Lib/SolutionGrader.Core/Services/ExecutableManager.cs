@@ -34,12 +34,28 @@ namespace SolutionGrader.Core.Services
             _clientPath = clientPath;
             _serverPath = serverPath;
             _client = null; _server = null;
-            _clientOutputBuffer.Clear();
-            _serverOutputBuffer.Clear();
+            ClearConsoleBuffers();
             _clientStartQuestionCode = null;
             _clientStartStageLabel = null;
             _serverStartQuestionCode = null;
             _serverStartStageLabel = null;
+        }
+        
+        /// <summary>
+        /// Clears all console output buffers. Call this between test cases to ensure 
+        /// each test case starts with a fresh console state.
+        /// </summary>
+        public void ClearConsoleBuffers()
+        {
+            lock (_clientOutputBuffer)
+            {
+                _clientOutputBuffer.Clear();
+            }
+            lock (_serverOutputBuffer)
+            {
+                _serverOutputBuffer.Clear();
+            }
+            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_PROCESS} Console buffers cleared");
         }
 
         public void StartServer()
@@ -118,10 +134,20 @@ namespace SolutionGrader.Core.Services
 
             try
             {
-                // Update the client stage label to current stage before sending input
-                // This ensures that the response output is attributed to the current stage (where input was sent)
-                // rather than the stage where the client was started
-                _clientStartStageLabel = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? _clientStartStageLabel);
+                // Update BOTH client and server stage labels to the current stage before sending input.
+                // This ensures that:
+                // 1. Client response output is attributed to the current stage (where input was sent)
+                // 2. Server output triggered by this input is also attributed to the current stage
+                // 
+                // Example: At stage 3, user sends "1 + 2". The client connects to server, which prints
+                // "Client connected", then processes and responds "3", then prints "Client disconnected".
+                // ALL of this server activity should be attributed to stage 3, not stage 2 where server started.
+                var currentStage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString());
+                if (currentStage != null)
+                {
+                    _clientStartStageLabel = currentStage;
+                    _serverStartStageLabel = currentStage;
+                }
                 
                 // Handle empty or null input by sending just a newline (blank Enter)
                 // This allows test cases to send empty input when the value cell is blank
@@ -357,7 +383,14 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                using var sw = new StreamWriter(Path.Combine(AppContext.BaseDirectory, logName), append: true, Encoding.UTF8);
+                // Write logs to the grading session folder instead of AppContext.BaseDirectory
+                // This keeps all logs organized in one place for each grading session
+                var logDir = !string.IsNullOrEmpty(_run.ResultRoot) && Directory.Exists(_run.ResultRoot)
+                    ? _run.ResultRoot
+                    : AppContext.BaseDirectory;
+                var logPath = Path.Combine(logDir, logName);
+                
+                using var sw = new StreamWriter(logPath, append: true, Encoding.UTF8);
                 sw.AutoFlush = true;
 
                 async Task readAsync(StreamReader reader)
@@ -475,30 +508,34 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // For stage attribution, we use the current global stage at the time output is captured.
-                // Stages are global and sequential (1, 2, 3, 4, ...). Any output captured during a stage
-                // is attributed to that stage, regardless of whether it's from client, server, or network.
+                // IMPORTANT: For stage attribution, we use the CAPTURED stage at process start time,
+                // NOT the current global stage. This is because the pump runs asynchronously and may
+                // process output AFTER the main thread has moved to a different stage.
                 //
-                // To ensure accuracy, we capture the stage IMMEDIATELY when the output line is complete,
-                // before any async delays or stage transitions can occur.
+                // Example: Client starts at stage 1, prints "Enter operation...". By the time the pump
+                // processes this line, the main thread might be at stage 2 (StartServer). Using the
+                // current stage would incorrectly attribute the output to stage 2.
+                //
+                // The captured stage (_clientStartStageLabel / _serverStartStageLabel) is set at
+                // the moment StartClient() / StartServer() is called, which is the correct stage
+                // for initial output. For subsequent output after user input, SendClientInput()
+                // updates _clientStartStageLabel to the current stage before sending input.
                 string? question;
                 string? stage;
                 
-                // Capture current stage immediately to minimize timing issues
-                var currentStage = _run.CurrentStageLabel ?? (_run.CurrentStage?.ToString());
-                var currentQuestion = _run.CurrentQuestionCode;
-                
                 if (string.Equals(scope, FileKeywords.Folder_Servers, StringComparison.OrdinalIgnoreCase))
                 {
-                    // Use current stage for server output, fallback to server start stage if current is not set
-                    question = currentQuestion ?? _serverStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = currentStage ?? _serverStartStageLabel ?? "0";
+                    // Use captured server start stage - this is the stage when server was started
+                    // or last updated via server-related action
+                    question = _serverStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _serverStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
                 }
                 else
                 {
-                    // Use current stage for client output, fallback to client start stage if current is not set
-                    question = currentQuestion ?? _clientStartQuestionCode ?? FileKeywords.Value_UnknownQuestion;
-                    stage = currentStage ?? _clientStartStageLabel ?? "0";
+                    // Use captured client start stage - this is the stage when client was started
+                    // or last updated via SendClientInput()
+                    question = _clientStartQuestionCode ?? _run.CurrentQuestionCode ?? FileKeywords.Value_UnknownQuestion;
+                    stage = _clientStartStageLabel ?? (_run.CurrentStageLabel ?? (_run.CurrentStage?.ToString() ?? "0"));
                 }
                 
                 var payload = line + Environment.NewLine;

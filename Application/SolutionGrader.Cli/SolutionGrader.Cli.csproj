@@ -1,17 +1,46 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- 
+      Multi-target framework: 
+      - net8.0: Cross-platform Docker grading (dockergrade, list, validate commands)
+      - net8.0-windows: Windows-only local grading (executesuite, executepaper commands)
+      
+      The dockergrade command works on any platform with Docker installed.
+      The executesuite/executepaper commands require Windows for native pcap support.
+    -->
+    <TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  
+  <!-- Windows-specific properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+  
   <ItemGroup>
+    <!-- Network packet capture libraries (cross-platform via libpcap on Linux/macOS) -->
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
+    <!-- Excel file handling using ClosedXML (OpenPyXL-like for .NET) -->
+    <!-- Using version 0.105.0 to match SolutionGrader.Core and avoid DocumentFormat.OpenXml version conflicts -->
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
   </ItemGroup>
+  
+  <!-- Cross-platform references (both targets) -->
   <ItemGroup>
+    <!-- Docker command execution support -->
+    <ProjectReference Include="..\..\Lib\EnvironmentBuilder\EnvironmentBuilder.csproj" />
+    <!-- Domain entities for environment configuration -->
+    <ProjectReference Include="..\..\Lib\Domain\Domain.csproj" />
+    <!-- Environment setup helper for Docker container management -->
+    <ProjectReference Include="..\EnvironmentManagerHelper\DotNetEnvironmentManagerHelper\DotNetEnvironmentManagerHelper.csproj" />
+    <!-- Network monitoring for packet capture (cross-platform via libpcap) -->
+    <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
+    <!-- Core grading services from Lib folder - now cross-platform -->
     <ProjectReference Include="..\..\Lib\SolutionGrader.Core\SolutionGrader.Core.csproj" />
+    <!-- FileMaster for zip extraction when solution folder is missing -->
+    <ProjectReference Include="..\..\Lib\FileMaster\FileMaster.csproj" />
   </ItemGroup>
 </Project>

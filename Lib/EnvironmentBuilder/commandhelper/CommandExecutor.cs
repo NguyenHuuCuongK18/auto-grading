@@ -359,13 +359,34 @@ namespace EnvironmentBuilder.CommandSupporter
             string workingDirectory,
             Dictionary<string, string> environmentVariables)
         {
-            var processInfo = new ProcessStartInfo("cmd.exe", $"/c {command}")
+            // Cross-platform shell command execution:
+            // - Windows uses cmd.exe /c
+            // - Linux/macOS uses /bin/bash -c or /bin/sh -c
+            ProcessStartInfo processInfo;
+            
+            if (OperatingSystem.IsWindows())
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                processInfo = new ProcessStartInfo("cmd.exe", $"/c {command}")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
+            else
+            {
+                // On Linux/macOS, use bash or sh
+                // Prefer bash if available, fall back to sh
+                var shell = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+                processInfo = new ProcessStartInfo(shell, $"-c \"{command.Replace("\"", "\\\"")}\"")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+            }
 
             if (!string.IsNullOrEmpty(workingDirectory))
             {

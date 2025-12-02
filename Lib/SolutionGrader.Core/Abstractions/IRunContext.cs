@@ -6,6 +6,8 @@
     /// </summary>
     public class CapturedNetworkPacket
     {
+        /// <summary>The stage number when this packet was captured</summary>
+        public int Stage { get; set; }
         /// <summary>Packet capture timestamp</summary>
         public DateTime Timestamp { get; set; }
         /// <summary>TCP flags (e.g., "SYN", "SYN, ACK", "ACK", "PSH, ACK", "FIN, ACK")</summary>
@@ -74,5 +76,11 @@
         /// Returns an empty list if no packets were captured.
         /// </summary>
         IReadOnlyList<CapturedNetworkPacket> GetCapturedNetworkPackets(string questionCode, string stage);
+        
+        /// <summary>
+        /// Gets ALL captured network packets across all stages.
+        /// Used when you need to retrieve all packets regardless of context.
+        /// </summary>
+        IReadOnlyList<CapturedNetworkPacket> GetAllCapturedNetworkPackets();
     }
 }

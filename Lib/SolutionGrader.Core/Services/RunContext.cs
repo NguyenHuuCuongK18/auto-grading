@@ -183,6 +183,23 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Gets ALL captured network packets across all stages.
+        /// Used when you need to retrieve all packets regardless of context.
+        /// </summary>
+        public IReadOnlyList<CapturedNetworkPacket> GetAllCapturedNetworkPackets()
+        {
+            var allPackets = new List<CapturedNetworkPacket>();
+            foreach (var kvp in _capturedPackets)
+            {
+                lock (kvp.Value)
+                {
+                    allPackets.AddRange(kvp.Value);
+                }
+            }
+            return allPackets.AsReadOnly();
+        }
+        
+        /// <summary>
         /// Static empty array for returning when no packets are captured.
         /// Avoids creating new empty arrays on each call.
         /// </summary>

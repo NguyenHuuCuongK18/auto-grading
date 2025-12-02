@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using FileMaster.FileEngine;
 using SolutionGrader.UI.Models;
 
 namespace SolutionGrader.UI.Services
@@ -90,13 +91,13 @@ namespace SolutionGrader.UI.Services
                 
                 if (!Directory.Exists(solutionPath))
                 {
-                    // Try to extract zip file
+                    // Try to extract zip file using FileMaster (consistent with CLI)
                     var zipFiles = Directory.GetFiles(questionFolderPath, "*.zip");
                     if (zipFiles.Length > 0)
                     {
                         try
                         {
-                            System.IO.Compression.ZipFile.ExtractToDirectory(zipFiles[0], solutionPath);
+                            FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
                             _logger.LogInfo($"Extracted solution from zip for student {studentCode}");
                         }
                         catch (Exception ex)
@@ -150,6 +151,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Searches for a DLL file with the given project name recursively within the solution folder.
+        /// Search is case-insensitive to handle project name variations.
         /// </summary>
         /// <param name="solutionPath">Root path to search from</param>
         /// <param name="projectName">Project name (without .dll extension)</param>
@@ -160,23 +162,53 @@ namespace SolutionGrader.UI.Services
                 return null;
 
             string dllFileName = $"{projectName}.dll";
+            _logger.LogDebug($"Searching for DLL: {dllFileName} in {solutionPath}");
 
-            // Search recursively for the DLL file
+            // Search recursively for the DLL file - case insensitive
             try
             {
+                // First try exact match
                 var dllFiles = Directory.GetFiles(solutionPath, dllFileName, SearchOption.AllDirectories);
+                
+                // If not found, try case-insensitive search
+                if (dllFiles.Length == 0)
+                {
+                    _logger.LogDebug($"Exact match not found, trying case-insensitive search...");
+                    // Get all DLL files and filter case-insensitively
+                    var allDlls = Directory.GetFiles(solutionPath, "*.dll", SearchOption.AllDirectories);
+                    dllFiles = allDlls.Where(f => 
+                        Path.GetFileName(f).Equals(dllFileName, StringComparison.OrdinalIgnoreCase) ||
+                        Path.GetFileName(f).Equals($"{projectName.Replace(" ", "")}.dll", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                }
                 
                 if (dllFiles.Length > 0)
                 {
                     // Prefer the first one found (typically in a publish/output folder)
                     // Also prefer paths that contain common output folder names
-                    var preferredPaths = dllFiles
+                    // Exclude system DLLs
+                    var filteredDlls = dllFiles
+                        .Where(p => !Path.GetFileName(p).StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase))
+                        .Where(p => !Path.GetFileName(p).StartsWith("System.", StringComparison.OrdinalIgnoreCase))
+                        .Where(p => !p.Contains("runtimes", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+
+                    if (filteredDlls.Length == 0)
+                        filteredDlls = dllFiles; // Use original if all filtered out
+
+                    var preferredPaths = filteredDlls
                         .OrderByDescending(p => p.Contains("publish", StringComparison.OrdinalIgnoreCase))
                         .ThenByDescending(p => p.Contains("Release", StringComparison.OrdinalIgnoreCase))
                         .ThenByDescending(p => p.Contains("Debug", StringComparison.OrdinalIgnoreCase))
                         .ThenBy(p => p.Length); // Prefer shorter paths (less nested)
 
-                    return preferredPaths.First();
+                    var result = preferredPaths.First();
+                    _logger.LogDebug($"Found DLL: {result}");
+                    return result;
+                }
+                else
+                {
+                    _logger.LogDebug($"No DLL files matching '{dllFileName}' found in {solutionPath}");
                 }
             }
             catch (Exception ex)

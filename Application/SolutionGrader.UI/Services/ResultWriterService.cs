@@ -11,13 +11,16 @@ namespace SolutionGrader.UI.Services
     /// Service for writing grading results to Excel files.
     /// Creates student-specific result files and overall summary spreadsheets.
     /// 
-    /// Output structure follows the SampleLogging format:
+    /// Output structure follows the SampleLogging format with paper-based organization:
     /// - StudentsSolution.xlsx: Overall summary of all students
-    /// - Results/{StudentCode}/
-    ///   - OverallSummary.xlsx: Student-level summary
+    /// - {PaperNo}/StudentsSolution.xlsx: Per-paper summary
+    /// - {PaperNo}/student/{StudentCode}/
+    ///   - OverallSummary.xlsx: Student-level summary 
     ///   - {TestCase}/
     ///     - GradeDetail.xlsx: Detailed test case results
     ///     - {TestCase}_Result.xlsx: Raw test data
+    /// 
+    /// Note: Results are organized by paper number (1/, 2/, etc.) for better navigation.
     /// </summary>
     public class ResultWriterService
     {
@@ -38,29 +41,51 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes the overall student solution summary spreadsheet.
-        /// Similar to SampleLogging/StudentsSolution.xlsx format.
+        /// Creates both a global summary and per-paper summaries.
+        /// Format matches SampleLogging/StudentsSolution.xlsx exactly:
+        /// No, StudentCode, ExamPaper, Status, FinalResult, StartDate, EndDate
         /// </summary>
         public void WriteStudentsSolutionSummary(List<StudentSolution> students)
         {
+            // Write global summary
             var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-            
+            WriteStudentsSolutionSummaryToFile(filePath, students);
+
+            // Write per-paper summaries
+            var paperGroups = students.GroupBy(s => s.PaperNo);
+            foreach (var group in paperGroups)
+            {
+                var paperDir = Path.Combine(_baseResultPath, group.Key);
+                if (!Directory.Exists(paperDir))
+                {
+                    Directory.CreateDirectory(paperDir);
+                }
+
+                var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
+                WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
+            }
+        }
+
+        /// <summary>
+        /// Writes the students solution summary to a specific file path.
+        /// </summary>
+        private void WriteStudentsSolutionSummaryToFile(string filePath, List<StudentSolution> students)
+        {
             _logger.LogInfo($"Writing students summary to {filePath}");
 
             try
             {
                 using var workbook = new XLWorkbook();
-                var worksheet = workbook.Worksheets.Add("Students");
+                var worksheet = workbook.Worksheets.Add("Sheet1");
 
-                // Header row
+                // Header row - matching SampleLogging format exactly
                 worksheet.Cell(1, 1).Value = "No";
-                worksheet.Cell(1, 2).Value = "Student Code";
-                worksheet.Cell(1, 3).Value = "Paper No";
+                worksheet.Cell(1, 2).Value = "StudentCode";
+                worksheet.Cell(1, 3).Value = "ExamPaper";
                 worksheet.Cell(1, 4).Value = "Status";
-                worksheet.Cell(1, 5).Value = "Mark";
-                worksheet.Cell(1, 6).Value = "Start Time";
-                worksheet.Cell(1, 7).Value = "End Time";
-                worksheet.Cell(1, 8).Value = "Duration";
-                worksheet.Cell(1, 9).Value = "Message";
+                worksheet.Cell(1, 5).Value = "FinalResult";
+                worksheet.Cell(1, 6).Value = "StartDate";
+                worksheet.Cell(1, 7).Value = "EndDate";
 
                 // Style header
                 var headerRow = worksheet.Row(1);
@@ -69,34 +94,34 @@ namespace SolutionGrader.UI.Services
 
                 // Data rows
                 int row = 2;
-                foreach (var student in students.OrderBy(s => s.PaperNo).ThenBy(s => s.StudentCode))
+                int no = 1;
+                foreach (var student in students.OrderBy(s => int.TryParse(s.PaperNo, out var n) ? n : 0).ThenBy(s => s.StudentCode))
                 {
-                    worksheet.Cell(row, 1).Value = row - 1;
+                    worksheet.Cell(row, 1).Value = no.ToString();
                     worksheet.Cell(row, 2).Value = student.StudentCode;
                     worksheet.Cell(row, 3).Value = student.PaperNo;
                     worksheet.Cell(row, 4).Value = student.StatusDisplay;
-                    worksheet.Cell(row, 5).Value = student.Mark;
-                    worksheet.Cell(row, 6).Value = student.StartTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-                    worksheet.Cell(row, 7).Value = student.EndTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-                    worksheet.Cell(row, 8).Value = student.Duration;
-                    worksheet.Cell(row, 9).Value = student.StatusMessage ?? "";
+                    worksheet.Cell(row, 5).Value = student.Mark.ToString("0.##");
+                    worksheet.Cell(row, 6).Value = student.StartTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
+                    worksheet.Cell(row, 7).Value = student.EndTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
 
                     // Color code rows based on status
-                    var rowStyle = worksheet.Row(row);
+                    var rowRange = worksheet.Range(row, 1, row, 7);
                     switch (student.Status)
                     {
                         case GradingStatus.Success:
-                            rowStyle.Style.Fill.BackgroundColor = XLColor.LightGreen;
+                            rowRange.Style.Fill.BackgroundColor = XLColor.LightGreen;
                             break;
                         case GradingStatus.Failed:
-                            rowStyle.Style.Fill.BackgroundColor = XLColor.LightPink;
+                            rowRange.Style.Fill.BackgroundColor = XLColor.LightPink;
                             break;
                         case GradingStatus.InProgress:
-                            rowStyle.Style.Fill.BackgroundColor = XLColor.LightYellow;
+                            rowRange.Style.Fill.BackgroundColor = XLColor.LightYellow;
                             break;
                     }
 
                     row++;
+                    no++;
                 }
 
                 // Auto-fit columns
@@ -113,72 +138,49 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes a student-specific result summary.
-        /// Creates Results/{StudentCode}/OverallSummary.xlsx
+        /// Creates {PaperNo}/student/{StudentCode}/OverallSummary.xlsx
+        /// Format matches SampleLogging/student/student-code-here/OverallSummary.xlsx
         /// </summary>
         public void WriteStudentSummary(StudentSolution student, List<TestCaseResult> testCases)
         {
-            var studentDir = Path.Combine(_baseResultPath, student.StudentCode);
-            if (!Directory.Exists(studentDir))
-            {
-                Directory.CreateDirectory(studentDir);
-            }
+            var studentDir = GetStudentResultFolder(student.StudentCode, student.PaperNo);
 
             var filePath = Path.Combine(studentDir, "OverallSummary.xlsx");
             
-            _logger.LogInfo($"Writing student summary for {student.StudentCode}");
+            _logger.LogInfo($"Writing student summary for {student.StudentCode} (Paper {student.PaperNo})");
 
             try
             {
                 using var workbook = new XLWorkbook();
                 
-                // Summary worksheet
+                // Summary worksheet - matching SampleLogging format
                 var summarySheet = workbook.Worksheets.Add("Summary");
-                summarySheet.Cell(1, 1).Value = "Student Code";
-                summarySheet.Cell(1, 2).Value = student.StudentCode;
-                summarySheet.Cell(2, 1).Value = "Paper No";
-                summarySheet.Cell(2, 2).Value = student.PaperNo;
-                summarySheet.Cell(3, 1).Value = "Total Mark";
-                summarySheet.Cell(3, 2).Value = student.Mark;
-                summarySheet.Cell(4, 1).Value = "Status";
-                summarySheet.Cell(4, 2).Value = student.StatusDisplay;
-                summarySheet.Cell(5, 1).Value = "Start Time";
-                summarySheet.Cell(5, 2).Value = student.StartTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-                summarySheet.Cell(6, 1).Value = "End Time";
-                summarySheet.Cell(6, 2).Value = student.EndTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-                summarySheet.Cell(7, 1).Value = "Duration";
-                summarySheet.Cell(7, 2).Value = student.Duration;
+                summarySheet.Cell(1, 1).Value = "TestCase";
+                summarySheet.Cell(1, 2).Value = "Passed";
+                summarySheet.Cell(1, 3).Value = "PointsAwarded";
+                summarySheet.Cell(1, 4).Value = "PointsPossible";
+                summarySheet.Cell(1, 5).Value = "ErrorNotes";
 
-                summarySheet.Column(1).Style.Font.Bold = true;
-                summarySheet.Columns().AdjustToContents();
-
-                // Test cases worksheet
-                var testCaseSheet = workbook.Worksheets.Add("Test Cases");
-                testCaseSheet.Cell(1, 1).Value = "Test Case";
-                testCaseSheet.Cell(1, 2).Value = "Status";
-                testCaseSheet.Cell(1, 3).Value = "Mark";
-                testCaseSheet.Cell(1, 4).Value = "Max Mark";
-                testCaseSheet.Cell(1, 5).Value = "Message";
-
-                var headerRow = testCaseSheet.Row(1);
+                var headerRow = summarySheet.Row(1);
                 headerRow.Style.Font.Bold = true;
                 headerRow.Style.Fill.BackgroundColor = XLColor.LightBlue;
 
                 int row = 2;
                 foreach (var tc in testCases)
                 {
-                    testCaseSheet.Cell(row, 1).Value = tc.TestCaseName;
-                    testCaseSheet.Cell(row, 2).Value = tc.Passed ? "Pass" : "Fail";
-                    testCaseSheet.Cell(row, 3).Value = tc.EarnedMark;
-                    testCaseSheet.Cell(row, 4).Value = tc.MaxMark;
-                    testCaseSheet.Cell(row, 5).Value = tc.Message ?? "";
+                    summarySheet.Cell(row, 1).Value = tc.TestCaseName;
+                    summarySheet.Cell(row, 2).Value = tc.Passed ? "PASS" : "FAIL";
+                    summarySheet.Cell(row, 3).Value = tc.EarnedMark;
+                    summarySheet.Cell(row, 4).Value = tc.MaxMark;
+                    summarySheet.Cell(row, 5).Value = tc.Message ?? "";
 
-                    var rowStyle = testCaseSheet.Row(row);
-                    rowStyle.Style.Fill.BackgroundColor = tc.Passed ? XLColor.LightGreen : XLColor.LightPink;
+                    var rowRange = summarySheet.Range(row, 1, row, 5);
+                    rowRange.Style.Fill.BackgroundColor = tc.Passed ? XLColor.LightGreen : XLColor.LightPink;
 
                     row++;
                 }
 
-                testCaseSheet.Columns().AdjustToContents();
+                summarySheet.Columns().AdjustToContents();
 
                 workbook.SaveAs(filePath);
                 _logger.LogInfo($"Student summary written for {student.StudentCode}");
@@ -191,11 +193,11 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes detailed test case results for a student.
-        /// Creates Results/{StudentCode}/{TestCase}/GradeDetail.xlsx
+        /// Creates {PaperNo}/student/{StudentCode}/{TestCase}/GradeDetail.xlsx
         /// </summary>
         public void WriteTestCaseDetail(StudentSolution student, string testCaseName, List<StepResult> steps)
         {
-            var testCaseDir = Path.Combine(_baseResultPath, student.StudentCode, testCaseName);
+            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode, student.PaperNo), testCaseName);
             if (!Directory.Exists(testCaseDir))
             {
                 Directory.CreateDirectory(testCaseDir);
@@ -211,12 +213,12 @@ namespace SolutionGrader.UI.Services
                 var worksheet = workbook.Worksheets.Add("Detail");
 
                 // Header row
-                worksheet.Cell(1, 1).Value = "Step ID";
-                worksheet.Cell(1, 2).Value = "Action";
-                worksheet.Cell(1, 3).Value = "Stage";
+                worksheet.Cell(1, 1).Value = "StepId";
+                worksheet.Cell(1, 2).Value = "Stage";
+                worksheet.Cell(1, 3).Value = "Action";
                 worksheet.Cell(1, 4).Value = "Result";
                 worksheet.Cell(1, 5).Value = "Message";
-                worksheet.Cell(1, 6).Value = "Duration (ms)";
+                worksheet.Cell(1, 6).Value = "DurationMs";
 
                 var headerRow = worksheet.Row(1);
                 headerRow.Style.Font.Bold = true;
@@ -226,14 +228,14 @@ namespace SolutionGrader.UI.Services
                 foreach (var step in steps)
                 {
                     worksheet.Cell(row, 1).Value = step.StepId;
-                    worksheet.Cell(row, 2).Value = step.Action;
-                    worksheet.Cell(row, 3).Value = step.Stage;
-                    worksheet.Cell(row, 4).Value = step.Passed ? "Pass" : "Fail";
+                    worksheet.Cell(row, 2).Value = step.Stage;
+                    worksheet.Cell(row, 3).Value = step.Action;
+                    worksheet.Cell(row, 4).Value = step.Passed ? "PASS" : "FAIL";
                     worksheet.Cell(row, 5).Value = step.Message ?? "";
                     worksheet.Cell(row, 6).Value = step.DurationMs;
 
-                    var rowStyle = worksheet.Row(row);
-                    rowStyle.Style.Fill.BackgroundColor = step.Passed ? XLColor.LightGreen : XLColor.LightPink;
+                    var rowRange = worksheet.Range(row, 1, row, 6);
+                    rowRange.Style.Fill.BackgroundColor = step.Passed ? XLColor.LightGreen : XLColor.LightPink;
 
                     row++;
                 }
@@ -248,16 +250,126 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Gets the student result folder path.
+        /// Writes raw test result data for a test case.
+        /// Creates {PaperNo}/student/{StudentCode}/{TestCase}/{TestCase}_Result.xlsx
         /// </summary>
-        public string GetStudentResultFolder(string studentCode)
+        public void WriteTestCaseResult(StudentSolution student, string testCaseName, List<StepResult> steps)
         {
-            var path = Path.Combine(_baseResultPath, studentCode);
+            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode, student.PaperNo), testCaseName);
+            if (!Directory.Exists(testCaseDir))
+            {
+                Directory.CreateDirectory(testCaseDir);
+            }
+
+            var filePath = Path.Combine(testCaseDir, $"{testCaseName}_Result.xlsx");
+            
+            _logger.LogDebug($"Writing test case result for {student.StudentCode}/{testCaseName}");
+
+            try
+            {
+                using var workbook = new XLWorkbook();
+                var worksheet = workbook.Worksheets.Add("Result");
+
+                // Header row - matching SampleLogging format
+                worksheet.Cell(1, 1).Value = "StepId";
+                worksheet.Cell(1, 2).Value = "Stage";
+                worksheet.Cell(1, 3).Value = "Action";
+                worksheet.Cell(1, 4).Value = "Passed";
+                worksheet.Cell(1, 5).Value = "Message";
+                worksheet.Cell(1, 6).Value = "DurationMs";
+
+                var headerRow = worksheet.Row(1);
+                headerRow.Style.Font.Bold = true;
+                headerRow.Style.Fill.BackgroundColor = XLColor.LightBlue;
+
+                int row = 2;
+                foreach (var step in steps)
+                {
+                    worksheet.Cell(row, 1).Value = step.StepId;
+                    worksheet.Cell(row, 2).Value = step.Stage;
+                    worksheet.Cell(row, 3).Value = step.Action;
+                    worksheet.Cell(row, 4).Value = step.Passed;
+                    worksheet.Cell(row, 5).Value = step.Message ?? "";
+                    worksheet.Cell(row, 6).Value = step.DurationMs;
+
+                    row++;
+                }
+
+                worksheet.Columns().AdjustToContents();
+                workbook.SaveAs(filePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to write test case result: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets the student result folder path organized by paper number.
+        /// Format: {PaperNo}/student/{StudentCode}
+        /// Creates the folder if it doesn't exist.
+        /// </summary>
+        /// <param name="studentCode">Student code identifier</param>
+        /// <param name="paperNo">Paper number for organization (optional)</param>
+        public string GetStudentResultFolder(string studentCode, string? paperNo = null)
+        {
+            string path;
+            if (!string.IsNullOrEmpty(paperNo))
+            {
+                // Organize by paper number: e.g., "1/student/cuongnhhe186494"
+                path = Path.Combine(_baseResultPath, paperNo, "student", studentCode);
+            }
+            else
+            {
+                // Fallback to non-paper-organized structure
+                path = Path.Combine(_baseResultPath, "student", studentCode);
+            }
+
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);
             }
             return path;
+        }
+
+        /// <summary>
+        /// Deletes all result files for a student (used when resetting).
+        /// Searches in all paper folders.
+        /// </summary>
+        public void DeleteStudentResults(string studentCode, string? paperNo = null)
+        {
+            // Try paper-organized path if paperNo provided
+            if (!string.IsNullOrEmpty(paperNo))
+            {
+                var paperPath = Path.Combine(_baseResultPath, paperNo, "student", studentCode);
+                if (Directory.Exists(paperPath))
+                {
+                    try
+                    {
+                        Directory.Delete(paperPath, true);
+                        _logger.LogInfo($"Deleted result folder for {studentCode} (Paper {paperNo})");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to delete result folder for {studentCode}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Also try legacy non-paper-organized path
+            var legacyPath = Path.Combine(_baseResultPath, "student", studentCode);
+            if (Directory.Exists(legacyPath))
+            {
+                try
+                {
+                    Directory.Delete(legacyPath, true);
+                    _logger.LogInfo($"Deleted legacy result folder for {studentCode}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Failed to delete legacy result folder for {studentCode}: {ex.Message}");
+                }
+            }
         }
     }
 

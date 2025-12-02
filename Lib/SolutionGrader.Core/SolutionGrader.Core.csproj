@@ -1,11 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Multi-target to support both cross-platform and Windows-specific builds -->
+    <TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>b0bfe8b8-32c6-46a8-b6f5-b5763b68d328</UserSecretsId>
+    <!-- 
+      CS0618: Suppress obsolete member warnings - these are intentionally used for 
+      backward compatibility with older test kit formats (e.g., OC_, OS_ prefixes).
+    -->
+    <NoWarn>CS0618</NoWarn>
+  </PropertyGroup>
+  
+  <!-- Windows-specific properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+  
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
