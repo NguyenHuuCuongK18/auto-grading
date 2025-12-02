@@ -260,10 +260,10 @@ namespace SolutionGrader.Core.Services
                     
                     result.TestCaseResults.Add(tcResult);
                     
-                    // Write test case results (pass protocol to determine Network sheet format)
+                    // Write test case results
                     var tcResultPath = Path.Combine(studentResultPath, testCase.Name);
                     Directory.CreateDirectory(tcResultPath);
-                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult, testKitConfig.Protocol);
+                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
@@ -607,10 +607,8 @@ namespace SolutionGrader.Core.Services
             
             try
             {
-                // CRITICAL: Clear BOTH network monitor AND run context captures for this test case
-                // This ensures no network packets from previous test cases leak into this one
+                // Clear network captures for this test case
                 _networkMonitor?.ClearCaptures();
-                _runContext.ClearNetworkCaptures();
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
                 // Read Detail.xlsx
@@ -654,15 +652,7 @@ namespace SolutionGrader.Core.Services
                     DestinationRole = p.DestinationRole,
                     Data = p.Data,
                     SourcePort = p.SourcePort,
-                    DestinationPort = p.DestinationPort,
-                    // HTTP-specific fields
-                    HttpUri = p.HttpUri,
-                    HttpHost = p.HttpHost,
-                    HttpMethod = p.HttpMethod,
-                    HttpStatus = p.HttpStatus,
-                    HttpVersion = p.HttpVersion,
-                    HttpHeaders = p.HttpHeaders,
-                    HttpBody = p.HttpBody
+                    DestinationPort = p.DestinationPort
                 }).ToList();
                 
                 // CRITICAL: Validate network monitoring is working
@@ -724,15 +714,7 @@ namespace SolutionGrader.Core.Services
                     DestinationRole = packet.DestinationRole,
                     Data = packet.Data,
                     SourcePort = packet.SourcePort,
-                    DestinationPort = packet.DestinationPort,
-                    // HTTP-specific fields
-                    HttpUri = packet.HttpUri,
-                    HttpHost = packet.HttpHost,
-                    HttpMethod = packet.HttpMethod,
-                    HttpStatus = packet.HttpStatus,
-                    HttpVersion = packet.HttpVersion,
-                    HttpHeaders = packet.HttpHeaders,
-                    HttpBody = packet.HttpBody
+                    DestinationPort = packet.DestinationPort
                 });
             }
             
@@ -750,14 +732,6 @@ namespace SolutionGrader.Core.Services
             public string? Data { get; set; }
             public int SourcePort { get; set; }
             public int DestinationPort { get; set; }
-            // HTTP-specific fields
-            public string? HttpUri { get; set; }
-            public string? HttpHost { get; set; }
-            public string? HttpMethod { get; set; }
-            public string? HttpStatus { get; set; }
-            public string? HttpVersion { get; set; }
-            public string? HttpHeaders { get; set; }
-            public string? HttpBody { get; set; }
         }
         
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
@@ -979,27 +953,14 @@ namespace SolutionGrader.Core.Services
                 bool matched = capturedPackets.Any(p =>
                     (string.IsNullOrEmpty(exp.Flags) || p.Flags.Contains(exp.Flags.Split(',')[0].Trim())) &&
                     (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
-                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole) &&
-                    (string.IsNullOrEmpty(exp.HttpMethod) || (p.HttpMethod ?? "").Equals(exp.HttpMethod, StringComparison.OrdinalIgnoreCase)));
-                
-                // Build expected/actual strings including HttpMethod if present
-                var expectedStr = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}";
-                var actualStr = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)";
-                
-                if (!string.IsNullOrEmpty(exp.HttpMethod))
-                {
-                    expectedStr += $", Method={exp.HttpMethod}";
-                    actualStr = capturedPackets.Any() 
-                        ? string.Join("; ", capturedPackets.Select(p => $"{p.Flags} {p.HttpMethod ?? ""}".Trim())) 
-                        : "(no captures)";
-                }
+                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
                 
                 results.Add(new ComparisonResult
                 {
                     Source = "Network",
                     Stage = exp.Stage,
-                    Expected = expectedStr,
-                    Actual = actualStr,
+                    Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
+                    Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
                     Passed = matched
                 });
             }
@@ -1216,33 +1177,12 @@ namespace SolutionGrader.Core.Services
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
-                // Detect format by checking header row
-                // TCP format: SourceRole at col 9, DestinationRole at col 10
-                // HTTP format: Method at col 10, SourceRole at col 15, DestinationRole at col 16
-                var headerRow = ws.Row(1);
-                var col10Header = headerRow.Cell(10).GetValue<string>()?.Trim() ?? "";
-                bool isHttpFormat = col10Header.Equals("Method", StringComparison.OrdinalIgnoreCase);
-                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
                     var flags = row.Cell(6).GetValue<string>();
-                    
-                    string? sourceRole, destRole, httpMethod = null;
-                    
-                    if (isHttpFormat)
-                    {
-                        // HTTP format: Method at col 10, SourceRole at col 15, DestinationRole at col 16
-                        httpMethod = row.Cell(10).GetValue<string>();
-                        sourceRole = row.Cell(15).GetValue<string>();
-                        destRole = row.Cell(16).GetValue<string>();
-                    }
-                    else
-                    {
-                        // TCP format: SourceRole at col 9, DestinationRole at col 10
-                        sourceRole = row.Cell(9).GetValue<string>();
-                        destRole = row.Cell(10).GetValue<string>();
-                    }
+                    var sourceRole = row.Cell(9).GetValue<string>();
+                    var destRole = row.Cell(10).GetValue<string>();
                     
                     if (int.TryParse(stageStr, out var stage))
                     {
@@ -1251,8 +1191,7 @@ namespace SolutionGrader.Core.Services
                             Stage = stage,
                             Flags = flags,
                             SourceRole = sourceRole,
-                            DestinationRole = destRole,
-                            HttpMethod = httpMethod
+                            DestinationRole = destRole
                         });
                     }
                 }
@@ -1268,16 +1207,12 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Cleans up between test cases (same student) by:
         /// 1. Killing any running dotnet processes in containers (SIGTERM then SIGKILL)
-        /// 2. Killing ALL child processes (tee, sh, sleep) that may keep ports/pipes open
+        /// 2. Killing sleep processes that keep input pipes open
         /// 3. REMOVING files from /apps folder (this also removes logs)
-        /// 4. Clearing network captures from BOTH NetworkMonitor AND RunContext
+        /// 4. Clearing network captures
         /// 5. Waiting for port release (inside container AND host)
         /// 
-        /// CRITICAL: This cleanup must be thorough to prevent:
-        /// - "Address already in use" errors when restarting applications
-        /// - Console output from previous test case bleeding into next test case
-        /// - Network packets from previous test case appearing in next test case's results
-        /// 
+        /// CRITICAL: This cleanup must be thorough to prevent "Address already in use" errors.
         /// The files will be re-copied before the next test case starts.
         /// This approach is much faster than disposing/rebuilding containers.
         /// </summary>
@@ -1285,39 +1220,19 @@ namespace SolutionGrader.Core.Services
         {
             Console.WriteLine("[Cleanup] Stopping applications between test cases...");
             
-            // Step 1: Kill ALL processes associated with dotnet application
-            // This includes: dotnet, tee, sh, stdbuf - they form a pipeline for console output
-            // Using killall in addition to pkill for more thorough cleanup
-            var serverKillAllCmd = $"exec {serverContainer} sh -c \"" +
-                "pkill -TERM -f dotnet 2>/dev/null; " +
-                "pkill -TERM -f 'tee /tmp' 2>/dev/null; " +
-                "sleep 1; " +
-                "pkill -KILL -f dotnet 2>/dev/null; " +
-                "pkill -KILL -f 'tee /tmp' 2>/dev/null; " +
-                "pkill -KILL -f 'sh -c.*stdbuf' 2>/dev/null; " +
-                "exit 0\"";
-            var clientKillAllCmd = $"exec {clientContainer} sh -c \"" +
-                "pkill -TERM -f dotnet 2>/dev/null; " +
-                "pkill -TERM -f 'tee /tmp' 2>/dev/null; " +
-                "sleep 1; " +
-                "pkill -KILL -f dotnet 2>/dev/null; " +
-                "pkill -KILL -f 'tee /tmp' 2>/dev/null; " +
-                "pkill -KILL -f 'sh -c.*stdbuf' 2>/dev/null; " +
-                "exit 0\"";
+            // Step 1: Kill dotnet processes with SIGTERM first (graceful), then SIGKILL if needed
+            var serverKillCmd = $"exec {serverContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
+            var clientKillCmd = $"exec {clientContainer} sh -c \"pkill -TERM -f dotnet 2>/dev/null; sleep 1; pkill -KILL -f dotnet 2>/dev/null; exit 0\"";
             
-            try { _dockerExecutor.ExecDockerCommand(serverKillAllCmd, 15000); } catch { }
-            try { _dockerExecutor.ExecDockerCommand(clientKillAllCmd, 15000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(serverKillCmd, 10000); } catch { }
+            try { _dockerExecutor.ExecDockerCommand(clientKillCmd, 10000); } catch { }
             
             // Step 2: Kill sleep processes that keep input pipes open
             // These are created by StartApplicationInContainer to keep the named pipe open
             try { _dockerExecutor.ExecDockerCommand($"exec {serverContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
             try { _dockerExecutor.ExecDockerCommand($"exec {clientContainer} sh -c \"pkill -KILL sleep 2>/dev/null; exit 0\"", 5000); } catch { }
             
-            // Step 3: Wait a moment for processes to fully terminate before removing files
-            // This prevents race conditions where files are recreated by dying processes
-            await Task.Delay(500);
-            
-            // Step 4: Remove ALL files from /apps folder and temp files (DLLs, logs, pipes)
+            // Step 3: Remove ALL files from /apps folder and temp files (DLLs, logs, pipes)
             // This effectively resets the container state without disposing it
             var serverCleanFilesCmd = $"exec {serverContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
             var clientCleanFilesCmd = $"exec {clientContainer} sh -c \"rm -rf /apps/* /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe 2>/dev/null; exit 0\"";
@@ -1327,110 +1242,38 @@ namespace SolutionGrader.Core.Services
             
             Console.WriteLine("[Cleanup] Processes killed, files removed from containers");
             
-            // Step 5: Clear network captures from BOTH NetworkMonitor AND RunContext
-            // CRITICAL: Both must be cleared to prevent previous test case data from appearing
+            // Step 4: Clear network captures for next test case
             _networkMonitor?.ClearCaptures();
-            _runContext.ClearNetworkCaptures();
             
-            // Step 6: Clear console manager logs
+            // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 7: Wait for port release INSIDE the container with quick polling
-            // Check every 200ms for up to 5 seconds max - if port doesn't release, abort test case
-            Console.WriteLine($"[Cleanup] Checking port {hostPort} release in container...");
-            bool portReleasedInContainer = false;
-            var containerPortCheckStart = DateTime.UtcNow;
-            while ((DateTime.UtcNow - containerPortCheckStart).TotalMilliseconds < 5000)
-            {
-                var checkPortCmd = $"exec {serverContainer} sh -c \"" +
-                    "(netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}') && echo 'IN_USE' || echo 'FREE'\"";
-                try
-                {
-                    // Run command and capture output
-                    var result = RunDockerCommandWithOutput(checkPortCmd, 2000);
-                    if (result != null && result.Contains("FREE"))
-                    {
-                        portReleasedInContainer = true;
-                        Console.WriteLine($"[Cleanup] Port {hostPort} released in container after {(DateTime.UtcNow - containerPortCheckStart).TotalMilliseconds:F0}ms");
-                        break;
-                    }
-                }
-                catch { }
-                
-                await Task.Delay(200);
-            }
+            // Step 6: Wait for port release INSIDE the container (not just host)
+            // The port binding is inside the container, so we check there
+            var checkPortCmd = $"exec {serverContainer} sh -c \"while netstat -tuln 2>/dev/null | grep -q ':{hostPort}' || ss -tuln 2>/dev/null | grep -q ':{hostPort}'; do sleep 0.5; done; exit 0\"";
+            try { _dockerExecutor.ExecDockerCommand(checkPortCmd, 15000); } catch { }
             
-            if (!portReleasedInContainer)
-            {
-                Console.WriteLine($"[Cleanup] WARNING: Port {hostPort} not released in container after 5s timeout");
-            }
-            
-            // Step 8: Also verify host port is available (since server port is exposed)
-            // Quick check with 5s max timeout, polling every 200ms
-            bool portReleasedOnHost = false;
-            var hostPortCheckStart = DateTime.UtcNow;
-            while ((DateTime.UtcNow - hostPortCheckStart).TotalMilliseconds < 5000)
+            // Step 7: Also verify host port is available (since server port is exposed)
+            var startTime = DateTime.UtcNow;
+            while ((DateTime.UtcNow - startTime).TotalSeconds < 10)
             {
                 try
                 {
                     using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
                     listener.Start();
                     listener.Stop();
-                    portReleasedOnHost = true;
-                    Console.WriteLine($"[Cleanup] Port {hostPort} released on host after {(DateTime.UtcNow - hostPortCheckStart).TotalMilliseconds:F0}ms");
+                    Console.WriteLine($"[Cleanup] Port {hostPort} is now available on host");
                     break;
                 }
                 catch
                 {
-                    await Task.Delay(200);
+                    await Task.Delay(500);
                 }
             }
             
-            if (!portReleasedOnHost)
-            {
-                Console.WriteLine($"[Cleanup] WARNING: Port {hostPort} not released on host after 5s timeout");
-            }
-            
-            // If both port checks failed, the next test case will likely fail
-            if (!portReleasedInContainer || !portReleasedOnHost)
-            {
-                Console.WriteLine("[Cleanup] WARNING: Port cleanup incomplete - next test case may fail due to unsuccessful reset");
-            }
-            
+            // Give a moment for everything to settle
+            await Task.Delay(500);
             Console.WriteLine("[Cleanup] Cleanup complete, ready for next test case");
-        }
-        
-        /// <summary>
-        /// Runs a docker command and returns the stdout output.
-        /// Returns null if the command fails or times out.
-        /// </summary>
-        private string? RunDockerCommandWithOutput(string command, int timeoutMs)
-        {
-            try
-            {
-                var process = new System.Diagnostics.Process
-                {
-                    StartInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "docker",
-                        Arguments = command.StartsWith("exec ") ? command : $"exec {command}",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
-                };
-                
-                process.Start();
-                var output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(timeoutMs);
-                
-                return output?.Trim();
-            }
-            catch
-            {
-                return null;
-            }
         }
         
         /// <summary>
@@ -1473,22 +1316,13 @@ namespace SolutionGrader.Core.Services
         /// - User sheet: Stage, Input, Action, DataType, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt
         /// - Client sheet: Stage, Console, Input, DataType, Action, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt, ClientStdout
         /// - Server sheet: Stage, Console, Input, DataType, Action, Result, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, Message, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt, ServerStdout
-        /// - Network sheet: Format depends on protocol parameter:
-        ///   - TCP: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
-        ///   - HTTP: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
+        /// - Network sheet: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
         /// - Database sheet: (empty)
         /// </summary>
-        /// <param name="tcResultPath">Path to save test case results</param>
-        /// <param name="tcName">Test case name</param>
-        /// <param name="result">Test case result data</param>
-        /// <param name="protocol">Protocol type (TCP or HTTP) - determines Network sheet format</param>
-        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result, string protocol = "TCP")
+        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result)
         {
             var detailPath = Path.Combine(tcResultPath, "GradeDetail.xlsx");
             using var wb = new XLWorkbook();
-            
-            // Determine if this is HTTP protocol
-            bool isHttpProtocol = protocol.Equals("HTTP", StringComparison.OrdinalIgnoreCase);
             
             // === User Sheet ===
             // Contains the action steps (StartClient, StartServer, Input, etc.)
@@ -1554,106 +1388,40 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Format depends on protocol: TCP or HTTP
+            // Contains TCP packet captures in the EXACT SampleLogging format
             var netWs = wb.Worksheets.Add("Network");
-            
-            if (isHttpProtocol)
+            SetNetworkSheetHeaders(netWs);
+            int netRow = 2;
+            foreach (var packet in result.NetworkCaptures)
             {
-                // HTTP format with HTTP-specific columns
-                // Each expected column has a corresponding actual column (except Time)
-                SetNetworkSheetHeadersHttp(netWs);
-                int netRow = 2;
-                foreach (var packet in result.NetworkCaptures)
-                {
-                    // Use consistent localhost format (127.0.0.1) for all protocols
-                    var sourceAddr = $"127.0.0.1:{packet.SourcePort}";
-                    var destAddr = $"127.0.0.1:{packet.DestinationPort}";
-                    
-                    // Expected columns (cols 1-16)
-                    netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time (no actual column)
-                    netWs.Cell(netRow, 3).Value = "HTTP";  // Info
-                    netWs.Cell(netRow, 4).Value = sourceAddr;  // Source
-                    netWs.Cell(netRow, 5).Value = destAddr;  // Destination
-                    netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
-                    netWs.Cell(netRow, 7).Value = packet.State;  // State
-                    netWs.Cell(netRow, 8).Value = packet.HttpUri ?? "";  // URI
-                    netWs.Cell(netRow, 9).Value = packet.HttpHost ?? "";  // Host
-                    netWs.Cell(netRow, 10).Value = packet.HttpMethod ?? "";  // Method
-                    netWs.Cell(netRow, 11).Value = packet.HttpStatus ?? "";  // Status
-                    netWs.Cell(netRow, 12).Value = packet.HttpVersion ?? "";  // HttpVersion
-                    netWs.Cell(netRow, 13).Value = packet.HttpHeaders ?? "";  // HttpHeaders
-                    netWs.Cell(netRow, 14).Value = packet.HttpBody ?? "";  // HttpBody
-                    netWs.Cell(netRow, 15).Value = packet.SourceRole;  // SourceRole
-                    netWs.Cell(netRow, 16).Value = packet.DestinationRole;  // DestinationRole
-                    
-                    // Actual columns (cols 17-31) - one per expected column except Time
-                    netWs.Cell(netRow, 17).Value = "HTTP";  // ActualInfo
-                    netWs.Cell(netRow, 18).Value = sourceAddr;  // ActualSource
-                    netWs.Cell(netRow, 19).Value = destAddr;  // ActualDestination
-                    netWs.Cell(netRow, 20).Value = packet.Flags;  // ActualFlags
-                    netWs.Cell(netRow, 21).Value = packet.State;  // ActualState
-                    netWs.Cell(netRow, 22).Value = packet.HttpUri ?? "";  // ActualURI
-                    netWs.Cell(netRow, 23).Value = packet.HttpHost ?? "";  // ActualHost
-                    netWs.Cell(netRow, 24).Value = packet.HttpMethod ?? "";  // ActualMethod
-                    netWs.Cell(netRow, 25).Value = packet.HttpStatus ?? "";  // ActualStatus
-                    netWs.Cell(netRow, 26).Value = packet.HttpVersion ?? "";  // ActualHttpVersion
-                    netWs.Cell(netRow, 27).Value = packet.HttpHeaders ?? "";  // ActualHttpHeaders
-                    netWs.Cell(netRow, 28).Value = packet.HttpBody ?? "";  // ActualHttpBody
-                    netWs.Cell(netRow, 29).Value = packet.SourceRole;  // ActualSourceRole
-                    netWs.Cell(netRow, 30).Value = packet.DestinationRole;  // ActualDestRole
-                    netWs.Cell(netRow, 31).Value = "PASS";  // NetworkResult
-                    netRow++;
-                }
-                
-                // If no captures but we have expected network flows, log them as FAIL
-                if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
-                {
-                    foreach (var comp in result.NetworkComparisons)
-                    {
-                        netWs.Cell(netRow, 1).Value = comp.Stage;
-                        netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
-                        netWs.Cell(netRow, 31).Value = "FAIL";  // NetworkResult
-                        netRow++;
-                    }
-                }
+                netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
+                netWs.Cell(netRow, 3).Value = "TCP";  // Info
+                netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
+                netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
+                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags (expected)
+                netWs.Cell(netRow, 7).Value = packet.State;  // State (expected)
+                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data (expected)
+                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole (expected)
+                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole (expected)
+                netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                netWs.Cell(netRow, 16).Value = "PASS";  // NetworkResult (captured = pass)
+                netRow++;
             }
-            else
+            
+            // If no captures but we have expected network flows, log them as FAIL
+            if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
             {
-                // TCP format
-                SetNetworkSheetHeadersTcp(netWs);
-                int netRow = 2;
-                foreach (var packet in result.NetworkCaptures)
+                foreach (var comp in result.NetworkComparisons)
                 {
-                    netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
-                    netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                    netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
-                    netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
-                    netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
-                    netWs.Cell(netRow, 7).Value = packet.State;  // State
-                    netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data
-                    netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole
-                    netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole
-                    netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
-                    netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
-                    netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
-                    netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
-                    netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
-                    netWs.Cell(netRow, 16).Value = "PASS";  // NetworkResult
+                    netWs.Cell(netRow, 1).Value = comp.Stage;
+                    netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
+                    netWs.Cell(netRow, 16).Value = "FAIL";  // NetworkResult
                     netRow++;
-                }
-                
-                // If no captures but we have expected network flows, log them as FAIL
-                if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
-                {
-                    foreach (var comp in result.NetworkComparisons)
-                    {
-                        netWs.Cell(netRow, 1).Value = comp.Stage;
-                        netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
-                        netWs.Cell(netRow, 16).Value = "FAIL";  // NetworkResult
-                        netRow++;
-                    }
                 }
             }
             netWs.Columns().AdjustToContents();
@@ -1709,40 +1477,11 @@ namespace SolutionGrader.Core.Services
             ws.Row(1).Style.Font.Bold = true;
         }
         
-        /// <summary>
-        /// Sets Network sheet headers for TCP protocol format.
-        /// Columns: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
-        /// </summary>
-        private static void SetNetworkSheetHeadersTcp(IXLWorksheet ws)
+        private static void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { 
-                "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
+            var headers = new[] { "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
                 "SourceRole", "DestinationRole", "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", 
-                "ActualData", "NetworkResult" 
-            };
-            for (int i = 0; i < headers.Length; i++)
-                ws.Cell(1, i + 1).Value = headers[i];
-            ws.Row(1).Style.Font.Bold = true;
-        }
-        
-        /// <summary>
-        /// Sets Network sheet headers for HTTP protocol format.
-        /// Each expected column has a corresponding actual column (except Time which is timestamp-only).
-        /// Format: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole,
-        ///         ActualInfo, ActualSource, ActualDestination, ActualFlags, ActualState, ActualURI, ActualHost, ActualMethod, ActualStatus, ActualHttpVersion, ActualHttpHeaders, ActualHttpBody, ActualSourceRole, ActualDestRole, NetworkResult
-        /// </summary>
-        private static void SetNetworkSheetHeadersHttp(IXLWorksheet ws)
-        {
-            var headers = new[] { 
-                // Expected columns
-                "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", 
-                "URI", "Host", "Method", "Status", "HttpVersion", "HttpHeaders", "HttpBody",
-                "SourceRole", "DestinationRole",
-                // Actual columns (1 per expected column except Time)
-                "ActualInfo", "ActualSource", "ActualDestination", "ActualFlags", "ActualState", 
-                "ActualURI", "ActualHost", "ActualMethod", "ActualStatus", "ActualHttpVersion", "ActualHttpHeaders", "ActualHttpBody",
-                "ActualSourceRole", "ActualDestRole", "NetworkResult" 
-            };
+                "ActualData", "NetworkResult" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
@@ -1875,8 +1614,6 @@ namespace SolutionGrader.Core.Services
         public string? Flags { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
-        /// <summary>HTTP Method (GET, POST, PUT, DELETE) - only used for HTTP protocol grading</summary>
-        public string? HttpMethod { get; set; }
     }
     
     /// <summary>
@@ -1948,9 +1685,7 @@ namespace SolutionGrader.Core.Services
     }
     
     /// <summary>
-    /// Network capture record for Network sheet - supports both TCP and HTTP protocols.
-    /// TCP format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
-    /// HTTP format: Stage, Time, Info, Source, Destination, Flags, State, URI, Host, Method, Status, HttpVersion, HttpHeaders, HttpBody, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
+    /// Network capture record for Network sheet - matches SampleLogging format exactly.
     /// </summary>
     public class NetworkCaptureRecord
     {
@@ -1963,15 +1698,6 @@ namespace SolutionGrader.Core.Services
         public string? Data { get; set; }
         public int SourcePort { get; set; }
         public int DestinationPort { get; set; }
-        
-        // HTTP-specific fields (populated when protocol is HTTP)
-        public string? HttpUri { get; set; }
-        public string? HttpHost { get; set; }
-        public string? HttpMethod { get; set; }
-        public string? HttpStatus { get; set; }
-        public string? HttpVersion { get; set; }
-        public string? HttpHeaders { get; set; }
-        public string? HttpBody { get; set; }
     }
     
     /// <summary>

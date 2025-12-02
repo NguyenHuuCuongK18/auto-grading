@@ -1,9 +1,8 @@
 ﻿namespace SolutionGrader.Core.Abstractions
 {
     /// <summary>
-    /// Represents a captured network packet with TCP/HTTP flow information.
-    /// Used for grading TCP handshake, connection lifecycle, and HTTP protocol.
-    /// Supports both TCP and HTTP protocols - HTTP fields are populated when protocol is HTTP.
+    /// Represents a captured network packet with TCP flow information.
+    /// Used for grading TCP handshake and connection lifecycle.
     /// </summary>
     public class CapturedNetworkPacket
     {
@@ -17,28 +16,12 @@
         public string SourceRole { get; set; } = "";
         /// <summary>Destination role (Client or Server)</summary>
         public string DestinationRole { get; set; } = "";
-        /// <summary>Payload data (for PSH packets) - raw TCP data or HTTP body</summary>
+        /// <summary>Payload data (for PSH packets)</summary>
         public string? Data { get; set; }
         /// <summary>Source port</summary>
         public int SourcePort { get; set; }
         /// <summary>Destination port</summary>
         public int DestinationPort { get; set; }
-        
-        // HTTP-specific fields (populated when protocol is HTTP and payload contains HTTP data)
-        /// <summary>HTTP request URI path (e.g., "/api/books/1")</summary>
-        public string? HttpUri { get; set; }
-        /// <summary>HTTP Host header value</summary>
-        public string? HttpHost { get; set; }
-        /// <summary>HTTP method (GET, POST, PUT, DELETE)</summary>
-        public string? HttpMethod { get; set; }
-        /// <summary>HTTP response status (e.g., "200 OK", "404 Not Found")</summary>
-        public string? HttpStatus { get; set; }
-        /// <summary>HTTP version (e.g., "HTTP/1.1")</summary>
-        public string? HttpVersion { get; set; }
-        /// <summary>HTTP headers (semicolon-separated)</summary>
-        public string? HttpHeaders { get; set; }
-        /// <summary>HTTP body content</summary>
-        public string? HttpBody { get; set; }
     }
     
     public interface IRunContext

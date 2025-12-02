@@ -255,9 +255,6 @@ namespace SolutionGrader.UI.Services
 
                 _uiLogger.LogInfo($"[LibGradingService] Results will be saved to: {studentResultPath}");
 
-                // Reset database for this student (ensures clean state) - SAME AS CLI
-                await dockerGrading.ResetDatabaseForNewStudentAsync(config);
-
                 // Execute grading using shared DockerGradingService
                 var result = await dockerGrading.GradeStudentAsync(
                     config,

@@ -370,19 +370,6 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 DestinationPort = dstPort
             };
             
-            // Parse HTTP data if protocol is HTTP and there's payload data
-            if (ProtocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(payload))
-            {
-                var httpData = ParseHttpData(payload);
-                capturedPacket.HttpUri = httpData.Uri;
-                capturedPacket.HttpHost = httpData.Host;
-                capturedPacket.HttpMethod = httpData.Method;
-                capturedPacket.HttpStatus = httpData.Status;
-                capturedPacket.HttpVersion = httpData.HttpVersion;
-                capturedPacket.HttpHeaders = httpData.Headers;
-                capturedPacket.HttpBody = httpData.Body;
-            }
-            
             // Store the captured packet for grading
             _run.AddCapturedNetworkPacket(_currentQuestionCode, _currentStage, capturedPacket);
             
