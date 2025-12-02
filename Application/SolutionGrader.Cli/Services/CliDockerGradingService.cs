@@ -362,7 +362,7 @@ namespace SolutionGrader.Cli.Services
             }
             catch (Exception ex)
             {
-                // Silently ignore packet parsing errors
+                // Log packet parsing errors but continue capture
                 Console.WriteLine($"[NetworkMonitor] Packet parse error: {ex.Message}");
             }
         }
@@ -1717,7 +1717,7 @@ namespace SolutionGrader.Cli.Services
                     netWs.Cell(row, 5).Value = $"{capture.DestinationAddress}:{capture.DestinationPort}";
                     netWs.Cell(row, 6).Value = capture.Flags;
                     netWs.Cell(row, 7).Value = capture.State;
-                    netWs.Cell(row, 8).Value = capture.Data?.Length > 100 ? capture.Data.Substring(0, 100) + "..." : capture.Data;
+                    netWs.Cell(row, 8).Value = capture.Data;
                     netWs.Cell(row, 9).Value = capture.SourceRole;
                     netWs.Cell(row, 10).Value = capture.DestinationRole;
                     netWs.Cell(row, 11).Value = capture.PayloadLength;
