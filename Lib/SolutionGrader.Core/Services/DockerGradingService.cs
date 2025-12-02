@@ -276,12 +276,9 @@ namespace SolutionGrader.Core.Services
                     }
                     isFirstTestCase = false;
                     
-                    OnProgress($"Executing test case: {testCase.Name}...");
-                    
-                    // Create a per-test-case timeout using the configured timeout
-                    var testCaseTimeout = config.TestCaseTimeoutSeconds > 0 
-                        ? config.TestCaseTimeoutSeconds 
-                        : DefaultTestCaseTimeoutSeconds;
+                    // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
+                    var testCaseTimeout = testCase.TimeoutSeconds;
+                    OnProgress($"Executing test case: {testCase.Name} (timeout: {testCaseTimeout}s)...");
                     
                     using var testCaseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     testCaseCts.CancelAfter(TimeSpan.FromSeconds(testCaseTimeout));
@@ -1103,7 +1100,7 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // Discover test cases
+            // Discover test cases and read per-test-case timeout from Header.xlsx
             tkConfig.TestCases = Directory.GetDirectories(testKitPath)
                 .Where(d => !Path.GetFileName(d).Equals("Meta", StringComparison.OrdinalIgnoreCase))
                 .Where(d => File.Exists(Path.Combine(d, "Detail.xlsx")))
@@ -1111,7 +1108,8 @@ namespace SolutionGrader.Core.Services
                 {
                     Name = Path.GetFileName(d),
                     Path = d,
-                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0
+                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
+                    TimeoutSeconds = ReadTestCaseTimeout(d, config.TestCaseTimeoutSeconds)
                 })
                 .OrderBy(tc => tc.Name)
                 .ToList();
@@ -1163,6 +1161,49 @@ namespace SolutionGrader.Core.Services
                 tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
             
             return tkConfig;
+        }
+        
+        /// <summary>
+        /// Reads the per-test-case timeout from the test case's Header.xlsx file.
+        /// Looks for the Testcase_Property sheet and finds the Timeout(Seconds) row.
+        /// Falls back to the default timeout if not found or on error.
+        /// </summary>
+        /// <param name="testCasePath">Path to the test case folder</param>
+        /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
+        /// <returns>Timeout in seconds</returns>
+        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
+        {
+            var headerPath = Path.Combine(testCasePath, "Header.xlsx");
+            if (!File.Exists(headerPath))
+                return defaultTimeout;
+            
+            try
+            {
+                using var wb = new XLWorkbook(headerPath);
+                if (wb.TryGetWorksheet("Testcase_Property", out var ws))
+                {
+                    foreach (var row in ws.RowsUsed())
+                    {
+                        var key = row.Cell(1).GetValue<string>()?.Trim();
+                        if (key?.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) == true ||
+                            key?.Equals("Timeout", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            var valueStr = row.Cell(2).GetValue<string>()?.Trim();
+                            if (int.TryParse(valueStr, out var timeout) && timeout > 0)
+                            {
+                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
+                                return timeout;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TestKit] Warning: Could not read timeout from {headerPath}: {ex.Message}");
+            }
+            
+            return defaultTimeout;
         }
         
         private List<(int Stage, string Input, string Action)> ReadActions(string detailPath)
@@ -1793,6 +1834,11 @@ namespace SolutionGrader.Core.Services
         public string Name { get; set; } = "";
         public string Path { get; set; } = "";
         public double MaxMark { get; set; }
+        /// <summary>
+        /// Per-test-case timeout in seconds, read from Header.xlsx Testcase_Property sheet.
+        /// Defaults to 15 seconds if not specified in the test kit.
+        /// </summary>
+        public int TimeoutSeconds { get; set; } = 15;
     }
     
     internal class ExpectedNetworkFlow
