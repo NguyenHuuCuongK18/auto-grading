@@ -36,6 +36,8 @@
     <ProjectReference Include="..\..\Lib\Domain\Domain.csproj" />
     <!-- Environment setup helper for Docker container management -->
     <ProjectReference Include="..\EnvironmentManagerHelper\DotNetEnvironmentManagerHelper\DotNetEnvironmentManagerHelper.csproj" />
+    <!-- Network monitoring for packet capture (cross-platform via libpcap) -->
+    <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
   </ItemGroup>
   
   <!-- Windows-only references (executesuite, executepaper commands) -->

@@ -2,10 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
+using PacketDotNet;
+using SharpPcap;
+using SharpPcap.LibPcap;
 
 namespace SolutionGrader.Cli.Services
 {
@@ -34,12 +38,336 @@ namespace SolutionGrader.Cli.Services
         
         private readonly DockerCommandExecutor _dockerExecutor;
         private readonly DockerConsoleManager _consoleManager;
+        
+        // Network capture for monitoring TCP traffic
+        private ICaptureDevice? _captureDevice;
+        private readonly List<CapturedPacket> _capturedPackets = new();
+        private readonly object _packetsLock = new();
+        private bool _isCapturing;
+        private int _monitorPort;
+        private int _serverPort;
+        private int _knownClientPort;
+        private int _currentStage;
 
         public CliDockerGradingService()
         {
             _dockerExecutor = new DockerCommandExecutor();
             _consoleManager = new DockerConsoleManager();
         }
+
+        #region Network Capture Methods
+
+        /// <summary>
+        /// Starts network packet capture on the specified port.
+        /// Must be called BEFORE starting any containers/processes.
+        /// Captures both TCP and HTTP traffic.
+        /// </summary>
+        private void StartNetworkCapture(int port)
+        {
+            _monitorPort = port;
+            _serverPort = port;
+            _knownClientPort = 0;
+            _currentStage = 0;
+            
+            lock (_packetsLock)
+            {
+                _capturedPackets.Clear();
+            }
+
+            Console.WriteLine($"[NetworkMonitor] Starting network capture on port {port}...");
+
+            try
+            {
+                // Find loopback device for capturing local traffic
+                _captureDevice = FindLoopbackDevice();
+                if (_captureDevice == null)
+                {
+                    Console.WriteLine("[NetworkMonitor] No suitable capture device found - network capture will be skipped");
+                    return;
+                }
+
+                // Open device for capture
+                if (_captureDevice is LibPcapLiveDevice libPcapDevice)
+                {
+                    libPcapDevice.Open(DeviceModes.Promiscuous, 100);
+                }
+                else
+                {
+                    _captureDevice.Open(DeviceModes.Promiscuous);
+                }
+
+                // Set filter for the monitored port
+                _captureDevice.Filter = $"port {port}";
+
+                // Subscribe to packet arrival event
+                _captureDevice.OnPacketArrival += OnPacketArrival;
+
+                // Start capture
+                _captureDevice.StartCapture();
+                _isCapturing = true;
+
+                Console.WriteLine($"[NetworkMonitor] Capture started on device: {_captureDevice.Description}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NetworkMonitor] Error starting capture: {ex.Message}");
+                _captureDevice?.Close();
+                _captureDevice = null;
+            }
+        }
+
+        /// <summary>
+        /// Stops network packet capture.
+        /// </summary>
+        private void StopNetworkCapture()
+        {
+            if (_captureDevice != null && _isCapturing)
+            {
+                try
+                {
+                    _captureDevice.StopCapture();
+                    _captureDevice.OnPacketArrival -= OnPacketArrival;
+                    _captureDevice.Close();
+                    _isCapturing = false;
+                    
+                    int packetCount;
+                    lock (_packetsLock)
+                    {
+                        packetCount = _capturedPackets.Count;
+                    }
+                    Console.WriteLine($"[NetworkMonitor] Capture stopped. Total packets captured: {packetCount}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NetworkMonitor] Error stopping capture: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Updates the current stage for packet association.
+        /// </summary>
+        private void SetNetworkCaptureStage(int stage)
+        {
+            _currentStage = stage;
+        }
+
+        /// <summary>
+        /// Gets all captured packets for a specific stage.
+        /// </summary>
+        private List<CapturedPacket> GetCapturedPackets(int? stage = null)
+        {
+            lock (_packetsLock)
+            {
+                if (stage.HasValue)
+                {
+                    return _capturedPackets.Where(p => p.Stage == stage.Value).ToList();
+                }
+                return _capturedPackets.ToList();
+            }
+        }
+
+        /// <summary>
+        /// Clears all captured packets.
+        /// </summary>
+        private void ClearCapturedPackets()
+        {
+            lock (_packetsLock)
+            {
+                _capturedPackets.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Finds a suitable loopback capture device.
+        /// </summary>
+        private ICaptureDevice? FindLoopbackDevice()
+        {
+            try
+            {
+                var devices = CaptureDeviceList.Instance;
+                
+                // Try to find loopback device
+                foreach (var device in devices)
+                {
+                    var name = device.Name?.ToLowerInvariant() ?? "";
+                    var desc = device.Description?.ToLowerInvariant() ?? "";
+                    
+                    // Check for loopback indicators
+                    if (name.Contains("loopback") || name.Contains("lo") ||
+                        desc.Contains("loopback") || desc.Contains("adapter for loopback") ||
+                        name.Contains("npcap") || name.Contains("any"))
+                    {
+                        Console.WriteLine($"[NetworkMonitor] Found loopback device: {device.Description}");
+                        return device;
+                    }
+                }
+
+                // Fallback to first available device
+                if (devices.Count > 0)
+                {
+                    Console.WriteLine($"[NetworkMonitor] Using first available device: {devices[0].Description}");
+                    return devices[0];
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NetworkMonitor] Error finding capture device: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Handles packet arrival events from the capture device.
+        /// Parses TCP and HTTP information from the packet.
+        /// </summary>
+        private void OnPacketArrival(object sender, PacketCapture e)
+        {
+            try
+            {
+                var rawPacket = e.GetPacket();
+                var packet = Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
+                
+                var ipPacket = packet.Extract<IPPacket>();
+                var tcpPacket = packet.Extract<TcpPacket>();
+
+                if (tcpPacket == null) return;
+
+                var srcPort = tcpPacket.SourcePort;
+                var dstPort = tcpPacket.DestinationPort;
+
+                // Determine roles based on ports
+                string srcRole, dstRole;
+                if (srcPort == _serverPort)
+                {
+                    srcRole = "Server";
+                    dstRole = "Client";
+                    if (_knownClientPort == 0 && dstPort != _serverPort)
+                    {
+                        _knownClientPort = dstPort;
+                    }
+                }
+                else if (dstPort == _serverPort)
+                {
+                    srcRole = "Client";
+                    dstRole = "Server";
+                    if (_knownClientPort == 0 && srcPort != _serverPort)
+                    {
+                        _knownClientPort = srcPort;
+                    }
+                }
+                else
+                {
+                    // Not related to our monitored port
+                    return;
+                }
+
+                // Filter out packets from unknown client ports (health checks, etc.)
+                if (_knownClientPort > 0)
+                {
+                    if (srcPort != _serverPort && srcPort != _knownClientPort &&
+                        dstPort != _serverPort && dstPort != _knownClientPort)
+                    {
+                        return;
+                    }
+                }
+
+                // Build flags string
+                var flags = new StringBuilder();
+                if (tcpPacket.Synchronize) flags.Append("SYN ");
+                if (tcpPacket.Acknowledgment) flags.Append("ACK ");
+                if (tcpPacket.Push) flags.Append("PSH ");
+                if (tcpPacket.Finished) flags.Append("FIN ");
+                if (tcpPacket.Reset) flags.Append("RST ");
+                var flagsStr = flags.ToString().Trim().Replace(" ", ", ");
+                if (string.IsNullOrEmpty(flagsStr)) flagsStr = "ACK";
+
+                // Determine connection state
+                string state = "";
+                if (tcpPacket.Synchronize && !tcpPacket.Acknowledgment) state = "Connection Request";
+                else if (tcpPacket.Synchronize && tcpPacket.Acknowledgment) state = "Connection Accepted";
+                else if (tcpPacket.Finished) state = "Connection Closing";
+                else if (tcpPacket.Reset) state = "Connection Reset";
+                else if (tcpPacket.Push) state = "Data Transfer";
+
+                // Extract payload data
+                string? payloadData = null;
+                string? httpMethod = null;
+                string? httpPath = null;
+                int? httpStatusCode = null;
+                int payloadLength = 0;
+
+                if (tcpPacket.PayloadData != null && tcpPacket.PayloadData.Length > 0)
+                {
+                    payloadLength = tcpPacket.PayloadData.Length;
+                    try
+                    {
+                        payloadData = Encoding.UTF8.GetString(tcpPacket.PayloadData);
+                        
+                        // Try to parse HTTP request/response
+                        if (payloadData.StartsWith("GET ") || payloadData.StartsWith("POST ") ||
+                            payloadData.StartsWith("PUT ") || payloadData.StartsWith("DELETE ") ||
+                            payloadData.StartsWith("HEAD ") || payloadData.StartsWith("OPTIONS "))
+                        {
+                            var firstLine = payloadData.Split('\n')[0].Trim();
+                            var parts = firstLine.Split(' ');
+                            if (parts.Length >= 2)
+                            {
+                                httpMethod = parts[0];
+                                httpPath = parts[1];
+                            }
+                        }
+                        else if (payloadData.StartsWith("HTTP/"))
+                        {
+                            var firstLine = payloadData.Split('\n')[0].Trim();
+                            var parts = firstLine.Split(' ');
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var status))
+                            {
+                                httpStatusCode = status;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Binary data, can't decode as UTF-8
+                        payloadData = $"[Binary data: {payloadLength} bytes]";
+                    }
+                }
+
+                var capturedPacket = new CapturedPacket
+                {
+                    Timestamp = rawPacket.Timeval.Date,
+                    Stage = _currentStage,
+                    Protocol = httpMethod != null || httpStatusCode != null ? "HTTP" : "TCP",
+                    SourceAddress = ipPacket?.SourceAddress?.ToString() ?? "",
+                    SourcePort = srcPort,
+                    DestinationAddress = ipPacket?.DestinationAddress?.ToString() ?? "",
+                    DestinationPort = dstPort,
+                    Flags = flagsStr,
+                    State = state,
+                    SourceRole = srcRole,
+                    DestinationRole = dstRole,
+                    Data = payloadData,
+                    PayloadLength = payloadLength,
+                    HttpMethod = httpMethod,
+                    HttpPath = httpPath,
+                    HttpStatusCode = httpStatusCode
+                };
+
+                lock (_packetsLock)
+                {
+                    _capturedPackets.Add(capturedPacket);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Silently ignore packet parsing errors
+                Console.WriteLine($"[NetworkMonitor] Packet parse error: {ex.Message}");
+            }
+        }
+
+        #endregion
 
         /// <summary>
         /// Execute Docker-based grading for students.
@@ -241,6 +569,10 @@ namespace SolutionGrader.Cli.Services
                 if (testKitConfig.CodeContainerHostPort > 0)
                     config.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
 
+                // Start network capture BEFORE setting up containers
+                // This captures all TCP/HTTP traffic on the exposed server port
+                StartNetworkCapture(config.CodeContainerHostPort);
+
                 // Setup containers
                 var serverContainer = $"ag-server-{student.StudentCode}";
                 var clientContainer = $"ag-client-{student.StudentCode}";
@@ -280,6 +612,9 @@ namespace SolutionGrader.Cli.Services
             }
             finally
             {
+                // Stop network capture
+                StopNetworkCapture();
+                
                 // Cleanup containers
                 await CleanupContainersAsync($"ag-server-{student.StudentCode}", $"ag-client-{student.StudentCode}");
             }
@@ -684,25 +1019,37 @@ namespace SolutionGrader.Cli.Services
 
             try
             {
+                // Clear captured packets for this test case
+                ClearCapturedPackets();
+                SetNetworkCaptureStage(0);
+
                 // Read Detail.xlsx
                 var detailPath = Path.Combine(testCase.Path, "Detail.xlsx");
                 var actions = ReadActions(detailPath);
                 var expectedOutputs = ReadExpectedOutputs(detailPath);
+                var expectedNetwork = ReadExpectedNetwork(detailPath);
 
-                Console.WriteLine($"[TestCase] Loaded {actions.Count} actions, {expectedOutputs.Count} expected outputs");
+                Console.WriteLine($"[TestCase] Loaded {actions.Count} actions, {expectedOutputs.Count} expected outputs, {expectedNetwork.Count} expected network flows");
 
                 // Execute actions and capture outputs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(
                     student, actions, config, testKitConfig, serverContainer, clientContainer);
 
-                // Compare outputs
+                // Get captured network packets for this test case
+                var networkCaptures = GetCapturedPackets();
+                Console.WriteLine($"[NetworkMonitor] Captured {networkCaptures.Count} packets for test case {testCase.Name}");
+
+                // Compare outputs (client, server, and network)
                 var (earnedMark, passed, comparisons) = CompareOutputs(expectedOutputs, clientOutputs, serverOutputs, testCase.MaxMark);
+                var networkComparisons = CompareNetworkOutputs(expectedNetwork, networkCaptures);
 
                 result.EarnedMark = earnedMark;
                 result.Passed = passed;
                 result.Actions = actions.Select(a => new ActionInfo { Stage = a.Stage, Input = a.Input, ActionType = a.Action }).ToList();
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
+                result.NetworkComparisons = networkComparisons;
+                result.NetworkCaptures = networkCaptures;
             }
             catch (Exception ex)
             {
@@ -796,6 +1143,85 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
+        /// Read expected network flows from Detail.xlsx Network sheet.
+        /// </summary>
+        private List<ExpectedNetworkFlow> ReadExpectedNetwork(string detailPath)
+        {
+            var networkFlows = new List<ExpectedNetworkFlow>();
+            try
+            {
+                using var workbook = new XLWorkbook(detailPath);
+                if (workbook.TryGetWorksheet("Network", out var networkWs))
+                {
+                    foreach (var row in networkWs.RowsUsed().Skip(1))
+                    {
+                        var stageStr = row.Cell(1).GetValue<string>();
+                        var flags = row.Cell(6).GetValue<string>();
+                        var state = row.Cell(7).GetValue<string>();
+                        var data = row.Cell(8).GetValue<string>();
+                        var sourceRole = row.Cell(9).GetValue<string>();
+                        var destRole = row.Cell(10).GetValue<string>();
+
+                        if (int.TryParse(stageStr, out var stage))
+                        {
+                            networkFlows.Add(new ExpectedNetworkFlow
+                            {
+                                Stage = stage,
+                                Flags = flags,
+                                State = state,
+                                Data = data,
+                                SourceRole = sourceRole,
+                                DestinationRole = destRole
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARNING] Error reading expected network from Detail.xlsx: {ex.Message}");
+            }
+            return networkFlows;
+        }
+
+        /// <summary>
+        /// Compare expected network flows with actual captured packets.
+        /// </summary>
+        private List<ComparisonInfo> CompareNetworkOutputs(List<ExpectedNetworkFlow> expected, List<CapturedPacket> captured)
+        {
+            var results = new List<ComparisonInfo>();
+            
+            foreach (var exp in expected)
+            {
+                // Find matching captures by stage
+                var stageCaptures = captured.Where(c => c.Stage == exp.Stage).ToList();
+
+                bool matched = stageCaptures.Any(c =>
+                    (string.IsNullOrEmpty(exp.Flags) || c.Flags?.Contains(exp.Flags.Replace(",", "").Replace(" ", "")) == true ||
+                     exp.Flags.Split(',').Select(f => f.Trim()).All(f => c.Flags?.Contains(f) == true)) &&
+                    (string.IsNullOrEmpty(exp.Data) || c.Data?.Contains(exp.Data) == true) &&
+                    (string.IsNullOrEmpty(exp.SourceRole) || c.SourceRole == exp.SourceRole) &&
+                    (string.IsNullOrEmpty(exp.DestinationRole) || c.DestinationRole == exp.DestinationRole));
+
+                var actualFlags = stageCaptures.Any() 
+                    ? string.Join("; ", stageCaptures.Select(c => c.Flags).Distinct())
+                    : "(no captures)";
+
+                results.Add(new ComparisonInfo
+                {
+                    Stage = exp.Stage,
+                    Source = "Network",
+                    Expected = $"Flags={exp.Flags}, Data={exp.Data}, From={exp.SourceRole}",
+                    Actual = actualFlags,
+                    Passed = matched,
+                    Message = matched ? "Network flow matched" : "Network flow not found"
+                });
+            }
+
+            return results;
+        }
+
+        /// <summary>
         /// Execute actions and capture outputs using docker attach for reliable console output.
         /// 
         /// This method uses docker attach instead of docker logs to solve the buffering issue.
@@ -824,6 +1250,9 @@ namespace SolutionGrader.Cli.Services
             {
                 foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
                 {
+                    // Update network capture stage so captured packets are associated with this stage
+                    SetNetworkCaptureStage(stage);
+                    
                     Console.WriteLine($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
 
                     switch (action.ToUpperInvariant())
@@ -1259,12 +1688,64 @@ namespace SolutionGrader.Cli.Services
                 // Database sheet (placeholder)
                 workbook.Worksheets.Add("Database");
 
-                // Network sheet (placeholder)
+                // Network sheet - write captured network packets
                 var netWs = workbook.Worksheets.Add("Network");
                 netWs.Cell(1, 1).Value = "Stage";
+                netWs.Cell(1, 2).Value = "Timestamp";
+                netWs.Cell(1, 3).Value = "Protocol";
+                netWs.Cell(1, 4).Value = "Source";
+                netWs.Cell(1, 5).Value = "Destination";
                 netWs.Cell(1, 6).Value = "Flags";
+                netWs.Cell(1, 7).Value = "State";
+                netWs.Cell(1, 8).Value = "Data";
+                netWs.Cell(1, 9).Value = "SourceRole";
+                netWs.Cell(1, 10).Value = "DestRole";
+                netWs.Cell(1, 11).Value = "PayloadLen";
+                netWs.Cell(1, 12).Value = "HttpMethod";
+                netWs.Cell(1, 13).Value = "HttpPath";
+                netWs.Cell(1, 14).Value = "HttpStatus";
                 netWs.Cell(1, 16).Value = "NetworkResult";
                 netWs.Row(1).Style.Font.Bold = true;
+
+                row = 2;
+                foreach (var capture in tcResult.NetworkCaptures)
+                {
+                    netWs.Cell(row, 1).Value = capture.Stage;
+                    netWs.Cell(row, 2).Value = capture.Timestamp.ToString("HH:mm:ss.fff");
+                    netWs.Cell(row, 3).Value = capture.Protocol;
+                    netWs.Cell(row, 4).Value = $"{capture.SourceAddress}:{capture.SourcePort}";
+                    netWs.Cell(row, 5).Value = $"{capture.DestinationAddress}:{capture.DestinationPort}";
+                    netWs.Cell(row, 6).Value = capture.Flags;
+                    netWs.Cell(row, 7).Value = capture.State;
+                    netWs.Cell(row, 8).Value = capture.Data?.Length > 100 ? capture.Data.Substring(0, 100) + "..." : capture.Data;
+                    netWs.Cell(row, 9).Value = capture.SourceRole;
+                    netWs.Cell(row, 10).Value = capture.DestinationRole;
+                    netWs.Cell(row, 11).Value = capture.PayloadLength;
+                    netWs.Cell(row, 12).Value = capture.HttpMethod ?? "";
+                    netWs.Cell(row, 13).Value = capture.HttpPath ?? "";
+                    netWs.Cell(row, 14).Value = capture.HttpStatusCode?.ToString() ?? "";
+                    
+                    // Check if this capture stage matches expected
+                    var matchingComparison = tcResult.NetworkComparisons
+                        .FirstOrDefault(c => c.Stage == capture.Stage);
+                    netWs.Cell(row, 16).Value = matchingComparison?.Passed == true ? "PASS" : "CAPTURED";
+                    row++;
+                }
+
+                // If no captures, add comparison results
+                if (tcResult.NetworkCaptures.Count == 0)
+                {
+                    foreach (var comp in tcResult.NetworkComparisons)
+                    {
+                        netWs.Cell(row, 1).Value = comp.Stage;
+                        netWs.Cell(row, 6).Value = comp.Expected;
+                        netWs.Cell(row, 16).Value = comp.Passed ? "PASS" : "FAIL";
+                        netWs.Cell(row, 17).Value = comp.Message;
+                        row++;
+                    }
+                }
+
+                netWs.Columns().AdjustToContents();
 
                 workbook.SaveAs(detailPath);
             }
@@ -1431,6 +1912,8 @@ namespace SolutionGrader.Cli.Services
             public List<ActionInfo> Actions { get; set; } = new();
             public List<ComparisonInfo> ClientComparisons { get; set; } = new();
             public List<ComparisonInfo> ServerComparisons { get; set; } = new();
+            public List<ComparisonInfo> NetworkComparisons { get; set; } = new();
+            public List<CapturedPacket> NetworkCaptures { get; set; } = new();
         }
 
         private class ActionInfo
@@ -1450,6 +1933,42 @@ namespace SolutionGrader.Cli.Services
             public double PointsAwarded { get; set; }
             public double PointsPossible { get; set; }
             public string? Message { get; set; }
+        }
+
+        /// <summary>
+        /// Represents a captured network packet with TCP/HTTP information.
+        /// </summary>
+        private class CapturedPacket
+        {
+            public DateTime Timestamp { get; set; }
+            public int Stage { get; set; }
+            public string Protocol { get; set; } = "TCP";
+            public string SourceAddress { get; set; } = "";
+            public int SourcePort { get; set; }
+            public string DestinationAddress { get; set; } = "";
+            public int DestinationPort { get; set; }
+            public string Flags { get; set; } = "";
+            public string State { get; set; } = "";
+            public string SourceRole { get; set; } = "";
+            public string DestinationRole { get; set; } = "";
+            public string? Data { get; set; }
+            public int PayloadLength { get; set; }
+            public string? HttpMethod { get; set; }
+            public string? HttpPath { get; set; }
+            public int? HttpStatusCode { get; set; }
+        }
+
+        /// <summary>
+        /// Expected network flow from testkit Detail.xlsx Network sheet.
+        /// </summary>
+        private class ExpectedNetworkFlow
+        {
+            public int Stage { get; set; }
+            public string? Flags { get; set; }
+            public string? State { get; set; }
+            public string? Data { get; set; }
+            public string? SourceRole { get; set; }
+            public string? DestinationRole { get; set; }
         }
 
         #endregion
