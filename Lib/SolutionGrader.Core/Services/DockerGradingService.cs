@@ -120,27 +120,77 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
-                // Resolve server/client DLL paths
-                // If student doesn't provide server, use the given/golden server from test kit
-                // If student doesn't provide client, use the given/golden client from test kit
-                var actualServerDllPath = serverDllPath;
-                var actualClientDllPath = clientDllPath;
+                // Resolve server/client DLL paths based on examiner configuration:
+                // - HasServer=true means student MUST provide server, search student's solution
+                // - HasServer=false means use golden server from Meta/Given/Server
+                // - HasClient=true means student MUST provide client, search student's solution
+                // - HasClient=false means use golden client from Meta/Given/Client
+                //
+                // The serverDllPath and clientDllPath parameters contain what was found in student's solution.
+                // If examiner didn't expect that component, we use the golden version instead.
                 
-                if (string.IsNullOrEmpty(actualServerDllPath) && !string.IsNullOrEmpty(testKitConfig.GivenServerPath))
+                string? actualServerDllPath = null;
+                string? actualClientDllPath = null;
+                
+                // Server resolution
+                if (config.HasServer)
                 {
+                    // Examiner expects student to provide server
+                    actualServerDllPath = serverDllPath;
+                    if (string.IsNullOrEmpty(actualServerDllPath))
+                    {
+                        OnProgress($"WARNING: Student should provide server ({config.ServerProjectName}) but none found!");
+                    }
+                    else
+                    {
+                        OnProgress($"Using student's server: {Path.GetFileName(actualServerDllPath)}");
+                    }
+                }
+                else
+                {
+                    // Examiner doesn't expect student to provide server, use golden server from test kit
                     actualServerDllPath = testKitConfig.GivenServerPath;
-                    OnProgress($"Using given/golden server from test kit: {Path.GetFileName(actualServerDllPath)}");
+                    if (!string.IsNullOrEmpty(actualServerDllPath))
+                    {
+                        OnProgress($"Using golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                    }
+                    else
+                    {
+                        OnProgress("WARNING: No golden server found in Meta/Given/Server!");
+                    }
                 }
                 
-                if (string.IsNullOrEmpty(actualClientDllPath) && !string.IsNullOrEmpty(testKitConfig.GivenClientPath))
+                // Client resolution
+                if (config.HasClient)
                 {
+                    // Examiner expects student to provide client
+                    actualClientDllPath = clientDllPath;
+                    if (string.IsNullOrEmpty(actualClientDllPath))
+                    {
+                        OnProgress($"WARNING: Student should provide client ({config.ClientProjectName}) but none found!");
+                    }
+                    else
+                    {
+                        OnProgress($"Using student's client: {Path.GetFileName(actualClientDllPath)}");
+                    }
+                }
+                else
+                {
+                    // Examiner doesn't expect student to provide client, use golden client from test kit
                     actualClientDllPath = testKitConfig.GivenClientPath;
-                    OnProgress($"Using given/golden client from test kit: {Path.GetFileName(actualClientDllPath)}");
+                    if (!string.IsNullOrEmpty(actualClientDllPath))
+                    {
+                        OnProgress($"Using golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
+                    }
+                    else
+                    {
+                        OnProgress("WARNING: No golden client found in Meta/Given/Client!");
+                    }
                 }
                 
-                // Log resolved paths
-                OnProgress($"Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(none)")}");
-                OnProgress($"Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(none)")}");
+                // Log final resolved paths
+                OnProgress($"Final Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
+                OnProgress($"Final Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
                 // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
@@ -1190,6 +1240,30 @@ namespace SolutionGrader.Core.Services
     /// </summary>
     public class DockerGradingConfig
     {
+        /// <summary>
+        /// Whether the examiner expects the student to provide a CLIENT component.
+        /// If true, the grader will search for the client DLL in student's solution.
+        /// If false and a client is needed, use the golden client from Meta/Given/Client.
+        /// </summary>
+        public bool HasClient { get; set; } = true;
+        
+        /// <summary>
+        /// Whether the examiner expects the student to provide a SERVER component.
+        /// If true, the grader will search for the server DLL in student's solution.
+        /// If false and a server is needed, use the golden server from Meta/Given/Server.
+        /// </summary>
+        public bool HasServer { get; set; } = true;
+        
+        /// <summary>
+        /// Project name for the client DLL (e.g., "Project12" searches for "Project12.dll")
+        /// </summary>
+        public string ClientProjectName { get; set; } = "Project12";
+        
+        /// <summary>
+        /// Project name for the server DLL (e.g., "Project11" searches for "Project11.dll")
+        /// </summary>
+        public string ServerProjectName { get; set; } = "Project11";
+        
         public int CodeContainerInternalPort { get; set; } = 8000;
         public int CodeContainerHostPort { get; set; } = 8000;
         public string DockerNetwork { get; set; } = "auto-grading-network";

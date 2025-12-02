@@ -215,8 +215,19 @@ namespace SolutionGrader.UI.Services
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
                 // Build Docker configuration from UI config
+                // The examiner sets HasClient/HasServer to indicate what the student should provide:
+                // - HasClient=true, HasServer=true  → student provides both
+                // - HasClient=true, HasServer=false → student provides client, use golden server
+                // - HasClient=false, HasServer=true → student provides server, use golden client
                 var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
                 {
+                    // Examiner's component requirements
+                    HasClient = config.HasClient,
+                    HasServer = config.HasServer,
+                    ClientProjectName = config.ClientProjectName,
+                    ServerProjectName = config.ServerProjectName,
+                    
+                    // Container settings
                     CodeContainerInternalPort = config.CodeContainerInternalPort,
                     CodeContainerHostPort = config.CodeContainerHostPort,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
@@ -231,6 +242,9 @@ namespace SolutionGrader.UI.Services
                     
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds
                 };
+                
+                _logger.LogInfo($"Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
+                _logger.LogInfo($"Project names: Client={config.ClientProjectName}, Server={config.ServerProjectName}");
                 
                 var result = await _libGrading.ExecuteDockerGradingAsync(
                     testKitPath,
