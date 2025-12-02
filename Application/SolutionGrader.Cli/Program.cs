@@ -100,7 +100,9 @@ public class Program
             DatabaseContainerInternalPort = int.TryParse(map.GetValueOrDefault("db-internal-port"), out var dbip) ? dbip : 1433,
             DatabaseContainerHostPort = int.TryParse(map.GetValueOrDefault("db-host-port"), out var dbhp) ? dbhp : 1434,
             DatabaseUsername = map.GetValueOrDefault("db-user", "sa"),
-            DatabasePassword = map.GetValueOrDefault("db-password", Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") ?? "")
+            DatabasePassword = map.GetValueOrDefault("db-password") 
+                ?? Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") 
+                ?? throw new ArgumentException("Database password is required. Provide --db-password or set AUTOGRADING_DB_PASSWORD environment variable.")
         };
 
         // Optional: filter by paper or student
