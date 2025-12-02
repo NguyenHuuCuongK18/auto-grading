@@ -1,5 +1,6 @@
 using System.Net;
 using System.Runtime.InteropServices;
+using Microsoft.Data.SqlClient;
 using SolutionGrader.Core.Domain.Models;
 
 namespace SolutionGrader.Core.Helpers;
@@ -40,25 +41,87 @@ public static class ConnectionStringHelper
         return FormatConnectionString(server, databaseName, user, pwd);
     }
 
-    private static string GetDefaultConnectionString()
+    /// <summary>
+    /// Builds a SqlConnectionStringBuilder for database reset operations with additional connection options.
+    /// Used by EnvironmentResetService.
+    /// </summary>
+    public static SqlConnectionStringBuilder BuildSqlConnectionStringBuilder(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
-        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        return FormatConnectionString(
-            isWindows ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER,
-            AppsettingKeywords.DEFAULT_DATABASE_NAME,
-            AppsettingKeywords.DEFAULT_USERNAME,
-            isWindows ? AppsettingKeywords.DEFAULT_PASSWORD : AppsettingKeywords.DOCKER_SA_PASSWORD);
+        var builder = new SqlConnectionStringBuilder();
+        
+        if (dbConfig == null && envConfig == null)
+        {
+            if (IsWindowsPlatform)
+            {
+                builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE;
+                builder.IntegratedSecurity = true;
+            }
+            else
+            {
+                builder.DataSource = AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER;
+                builder.UserID = AppsettingKeywords.DEFAULT_USERNAME;
+                builder.Password = AppsettingKeywords.DOCKER_SA_PASSWORD;
+                builder.TrustServerCertificate = true;
+            }
+            builder.InitialCatalog = AppsettingKeywords.DEFAULT_DATABASE_NAME;
+        }
+        else
+        {
+            builder.DataSource = ResolveServerAddress(dbConfig?.SqlServer, envConfig?.DatabaseHostPort);
+            builder.InitialCatalog = ResolveDatabaseName(dbConfig, envConfig);
+            builder.UserID = ResolveUsername(dbConfig, envConfig);
+            builder.Password = ResolvePassword(dbConfig, envConfig);
+            builder.TrustServerCertificate = true;
+        }
+        
+        // Standard options for database reset operations
+        builder.ConnectTimeout = 30;
+        builder.Pooling = false;
+        builder.PersistSecurityInfo = true;
+        
+        return builder;
     }
 
-    private static string ResolveServerAddress(string? configuredServer, int? dbPort)
+    /// <summary>
+    /// Builds a master database connection string from an existing connection builder.
+    /// Used for database management operations (CREATE/DROP DATABASE).
+    /// </summary>
+    public static string BuildMasterConnectionString(SqlConnectionStringBuilder builder)
+    {
+        return new SqlConnectionStringBuilder(builder.ConnectionString)
+        {
+            InitialCatalog = AppsettingKeywords.MASTER_DATABASE
+        }.ConnectionString;
+    }
+
+    /// <summary>
+    /// Determines if the current platform is Windows.
+    /// </summary>
+    public static bool IsWindowsPlatform => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+    private static string GetDefaultConnectionString()
+    {
+        return FormatConnectionString(
+            IsWindowsPlatform ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE : AppsettingKeywords.DEFAULT_SQL_SERVER_DOCKER,
+            AppsettingKeywords.DEFAULT_DATABASE_NAME,
+            AppsettingKeywords.DEFAULT_USERNAME,
+            IsWindowsPlatform ? AppsettingKeywords.DEFAULT_PASSWORD : AppsettingKeywords.DOCKER_SA_PASSWORD);
+    }
+
+    /// <summary>
+    /// Resolves the SQL Server address from configuration.
+    /// </summary>
+    /// <param name="configuredServer">The configured server name, or null to use defaults.</param>
+    /// <param name="hostPort">The database host port for non-Windows platforms.</param>
+    public static string ResolveServerAddress(string? configuredServer, int? hostPort)
     {
         var server = configuredServer;
         
         if (string.IsNullOrWhiteSpace(server))
         {
-            server = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            server = IsWindowsPlatform
                 ? AppsettingKeywords.DEFAULT_SQL_SERVER_INSTANCE
-                : $"localhost,{dbPort ?? 1433}";
+                : $"localhost,{hostPort ?? 1433}";
         }
 
         return RequiresLocalPrefix(server) 
@@ -68,10 +131,8 @@ public static class ConnectionStringHelper
 
     /// <summary>
     /// Determines if server name requires .\ prefix for SQL Server named instances.
-    /// Returns false for: localhost, IP addresses, already-prefixed instances,
-    /// (local) keyword, port specifications, and hostnames with dots.
     /// </summary>
-    private static bool RequiresLocalPrefix(string server)
+    public static bool RequiresLocalPrefix(string server)
     {
         if (server.StartsWith(AppsettingKeywords.SERVER_LOCAL_PREFIX)) return false;
         if (server.Contains("\\")) return false;
@@ -84,17 +145,26 @@ public static class ConnectionStringHelper
         return true;
     }
 
-    private static string ResolveDatabaseName(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
+    /// <summary>
+    /// Resolves database name from configuration with priority: envConfig > dbConfig > default.
+    /// </summary>
+    public static string ResolveDatabaseName(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
         return envConfig?.DatabaseName ?? dbConfig?.Database ?? AppsettingKeywords.DEFAULT_DATABASE_NAME;
     }
 
-    private static string ResolveUsername(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
+    /// <summary>
+    /// Resolves username from configuration with priority: envConfig > dbConfig > default.
+    /// </summary>
+    public static string ResolveUsername(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
         return envConfig?.DatabaseUsername ?? dbConfig?.Username ?? AppsettingKeywords.DEFAULT_USERNAME;
     }
 
-    private static string ResolvePassword(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
+    /// <summary>
+    /// Resolves password from configuration with platform-appropriate defaults.
+    /// </summary>
+    public static string ResolvePassword(DatabaseConfiguration? dbConfig, EnvironmentConfiguration? envConfig)
     {
         var password = envConfig?.DatabasePassword ?? dbConfig?.Password;
         
@@ -103,7 +173,7 @@ public static class ConnectionStringHelper
             return password;
         }
 
-        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        return IsWindowsPlatform
             ? AppsettingKeywords.DEFAULT_PASSWORD
             : AppsettingKeywords.DOCKER_SA_PASSWORD;
     }
