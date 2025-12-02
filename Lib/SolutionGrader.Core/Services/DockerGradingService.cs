@@ -74,6 +74,24 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Builds a safe shell command to kill dotnet processes in a container.
+        /// This command explicitly excludes PID 1 to avoid killing the container's main process.
+        /// </summary>
+        /// <param name="containerName">The Docker container name</param>
+        /// <returns>The safe kill command for docker exec</returns>
+        private static string BuildSafeDotnetKillCommand(string containerName)
+        {
+            // Find dotnet PIDs (excluding PID 1) and kill them
+            // - ps aux: list all processes
+            // - grep dotnet: filter for dotnet processes
+            // - grep -v grep: exclude the grep process itself
+            // - awk '{if ($2 != 1) print $2}': extract PIDs, excluding PID 1
+            // - xargs -r kill -9: kill the processes (-r means don't run if no input)
+            // - 2>/dev/null || true: suppress errors and always return success
+            return $"{containerName} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"";
+        }
+        
+        /// <summary>
         /// Resets the database container for a new student.
         /// This should be called before grading each student to ensure:
         /// - Correct database is loaded (if switching papers)
@@ -907,13 +925,13 @@ namespace SolutionGrader.Core.Services
                         
                     case "CLOSECLIENT":
                         // Use safe kill method that excludes PID 1 to avoid killing the container
-                        try { _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 5000); } catch { }
+                        try { _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(clientContainer), 5000); } catch { }
                         clientBaseline = 0;
                         break;
                         
                     case "CLOSESERVER":
                         // Use safe kill method that excludes PID 1 to avoid killing the container
-                        try { _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep dotnet | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 5000); } catch { }
+                        try { _dockerExecutor.TryExecDockerCommand(BuildSafeDotnetKillCommand(serverContainer), 5000); } catch { }
                         serverBaseline = 0;
                         break;
                 }

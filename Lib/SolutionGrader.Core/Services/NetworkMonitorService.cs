@@ -359,10 +359,12 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             
             // Parse stage from string to int for storage
             // If _currentStage is not a valid integer, default to 0 (initial stage before actions start)
-            int stageNum = 0;
-            if (!string.IsNullOrEmpty(_currentStage) && !int.TryParse(_currentStage, out stageNum))
+            if (!int.TryParse(_currentStage, out int stageNum))
             {
-                Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Warning: Could not parse stage '{_currentStage}' as integer, using 0");
+                if (!string.IsNullOrEmpty(_currentStage))
+                {
+                    Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} Warning: Could not parse stage '{_currentStage}' as integer, using 0");
+                }
                 stageNum = 0;
             }
             
