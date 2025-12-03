@@ -201,9 +201,6 @@
                                        Margin="0,0,10,0" 
                                        FontWeight="SemiBold"
                                        Foreground="#495057"/>
-                                       Margin="0,0,10,0" 
-                                       FontWeight="SemiBold"
-                                       Foreground="#495057"/>
                             
                             <Button x:Name="btnStartAll" 
                                     Content="▶ Start All" 
