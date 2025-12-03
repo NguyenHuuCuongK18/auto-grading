@@ -7,9 +7,9 @@ The `Grade_Content` feature provides flexible per-test-case control over which c
 ## Problem Statement
 
 Previously, the grading system made a paper-wide decision about whether students should provide a client and/or server. This was inflexible because:
-- Paper 1 might require students to code only the CLIENT
-- Paper 2 might require students to code only the SERVER  
-- Paper 3 might require students to code BOTH client and server
+- Paper 1 might require students to code only the client
+- Paper 2 might require students to code only the server  
+- Paper 3 might require students to code both client and server
 
 The system couldn't reliably determine what students should code for different papers.
 
@@ -33,15 +33,15 @@ Grade_Content       | Client/Server
 
 The `Grade_Content` field accepts three values:
 
-1. **`Client`** - Grade student's CLIENT implementation with GOLDEN SERVER
+1. **`Client`** - Grade student's client implementation with golden server
    - Uses: Student's client DLL + Golden server from `Meta/Given/Server`
    - Use case: Student only implements the client side
 
-2. **`Server`** - Grade student's SERVER implementation with GOLDEN CLIENT
+2. **`Server`** - Grade student's server implementation with golden client
    - Uses: Student's server DLL + Golden client from `Meta/Given/Client`
    - Use case: Student only implements the server side
 
-3. **`Client/Server`** - Grade BOTH student implementations (default)
+3. **`Client/Server`** - Grade both student implementations (default)
    - Uses: Student's client DLL + Student's server DLL
    - No golden components used
    - Use case: Student implements both client and server
@@ -155,7 +155,7 @@ The grading system provides detailed logging for `Grade_Content` behavior:
 ```
 [TestKit] TC1: Grade_Content = 'Client' (from Header.xlsx)
 [TestCase] TC1: Grade_Content = 'Client'
-[TestCase] Using student CLIENT + golden SERVER
+[TestCase] Using student client + golden server
   Client: Project12.dll
   Server: Project11.dll (golden)
 ```

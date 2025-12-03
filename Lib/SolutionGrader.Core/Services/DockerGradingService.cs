@@ -682,7 +682,7 @@ namespace SolutionGrader.Core.Services
                 string? actualServerDll = serverDllPath;
                 string? actualClientDll = clientDllPath;
                 
-                var gradeContent = testCase.GradeContent.Trim();
+                var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
                 Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
                 
                 // Validate Grade_Content value
@@ -1243,12 +1243,12 @@ namespace SolutionGrader.Core.Services
                     
                     foreach (var row in ws.RowsUsed())
                     {
-                        var key = row.Cell(1).GetValue<string>()?.Trim();
-                        var value = row.Cell(2).GetValue<string>()?.Trim();
+                        var key = row.Cell(1).GetValue<string>()?.Trim() ?? "";
+                        var value = row.Cell(2).GetValue<string>()?.Trim() ?? "";
                         
                         // Read Timeout
-                        if (key?.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) == true ||
-                            key?.Equals("Timeout", StringComparison.OrdinalIgnoreCase) == true)
+                        if (key.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) ||
+                            key.Equals("Timeout", StringComparison.OrdinalIgnoreCase))
                         {
                             if (int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                             {
@@ -1258,7 +1258,7 @@ namespace SolutionGrader.Core.Services
                         }
                         
                         // Read Grade_Content
-                        if (key?.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) == true)
+                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
                         {
                             if (!string.IsNullOrWhiteSpace(value))
                             {
