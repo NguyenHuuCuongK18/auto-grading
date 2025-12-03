@@ -685,6 +685,14 @@ namespace SolutionGrader.Core.Services
                 var gradeContent = testCase.GradeContent.Trim();
                 Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
                 
+                // Validate Grade_Content value
+                var validValues = new[] { "Client", "Server", "Client/Server" };
+                if (!validValues.Contains(gradeContent, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[TestCase] WARNING: Invalid Grade_Content value '{gradeContent}', defaulting to 'Client/Server'");
+                    gradeContent = "Client/Server";
+                }
+                
                 if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
                 {
                     // Grade student's CLIENT only - use golden SERVER
@@ -693,6 +701,16 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine($"[TestCase] Using student CLIENT + golden SERVER");
                     Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
                     Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student CLIENT but none was found. Grade_Content='Client'");
+                    }
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden SERVER but none was found in Meta/Given/Server. Grade_Content='Client'");
+                    }
                 }
                 else if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
                 {
@@ -702,6 +720,16 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine($"[TestCase] Using student SERVER + golden CLIENT");
                     Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
                     Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student SERVER but none was found. Grade_Content='Server'");
+                    }
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden CLIENT but none was found in Meta/Given/Client. Grade_Content='Server'");
+                    }
                 }
                 else // "Client/Server" or default
                 {
@@ -711,6 +739,9 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine($"[TestCase] Using student CLIENT + student SERVER (no golden)");
                     Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
                     Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Note: For Client/Server mode, we allow one to be missing if the test only uses one
+                    // The test will fail naturally if it tries to use a missing component
                 }
                 
                 // Clear network captures for this test case
