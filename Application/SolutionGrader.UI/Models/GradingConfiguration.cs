@@ -34,6 +34,11 @@ namespace SolutionGrader.UI.Models
         // Database password should be read from Environment.xlsx or environment variable
         // Do not hardcode passwords in production code
         private string _databasePassword = Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") ?? "";
+        
+        // Parallel grading settings
+        private int _maxParallelStudents = 1;
+        private int _startIndex = 0;
+        private int _endIndex = -1; // -1 means grade all students
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -145,6 +150,36 @@ namespace SolutionGrader.UI.Models
             set { _databasePassword = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// Maximum number of students to grade in parallel.
+        /// Default is 1 (sequential grading).
+        /// </summary>
+        public int MaxParallelStudents
+        {
+            get => _maxParallelStudents;
+            set { _maxParallelStudents = Math.Max(1, value); OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Start index for selective grading (0-based).
+        /// Allows restarting from a specific student in case of incidents.
+        /// </summary>
+        public int StartIndex
+        {
+            get => _startIndex;
+            set { _startIndex = Math.Max(0, value); OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// End index for selective grading (0-based, inclusive).
+        /// -1 means grade all students from StartIndex to the end.
+        /// </summary>
+        public int EndIndex
+        {
+            get => _endIndex;
+            set { _endIndex = value; OnPropertyChanged(); }
+        }
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -170,7 +205,10 @@ namespace SolutionGrader.UI.Models
                 DatabaseContainerInternalPort = this.DatabaseContainerInternalPort,
                 DatabaseContainerHostPort = this.DatabaseContainerHostPort,
                 DatabaseUsername = this.DatabaseUsername,
-                DatabasePassword = this.DatabasePassword
+                DatabasePassword = this.DatabasePassword,
+                MaxParallelStudents = this.MaxParallelStudents,
+                StartIndex = this.StartIndex,
+                EndIndex = this.EndIndex
             };
         }
     }

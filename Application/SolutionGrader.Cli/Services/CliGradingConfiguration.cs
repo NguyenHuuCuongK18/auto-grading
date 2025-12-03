@@ -109,5 +109,24 @@ namespace SolutionGrader.Cli.Services
         /// Database password
         /// </summary>
         public string DatabasePassword { get; set; } = "";
+
+        /// <summary>
+        /// Maximum number of students to grade in parallel.
+        /// Default is 1 (sequential grading).
+        /// Each student gets their own pair of containers with incrementing ports.
+        /// </summary>
+        public int MaxParallelStudents { get; set; } = 1;
+
+        /// <summary>
+        /// Start index for selective grading (0-based).
+        /// Allows restarting from a specific student in case of incidents.
+        /// </summary>
+        public int StartIndex { get; set; } = 0;
+
+        /// <summary>
+        /// End index for selective grading (0-based, inclusive).
+        /// -1 means grade all students from StartIndex to the end.
+        /// </summary>
+        public int EndIndex { get; set; } = -1;
     }
 }
