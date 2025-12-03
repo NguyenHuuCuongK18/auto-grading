@@ -1,6 +1,6 @@
 using NetworkMonitor.Abstractions;
 using NetworkMonitor.Keywords;
-using Common.Models;
+using NetworkMonitor.Models;
 using PacketDotNet;
 using System.Text;
 using System.Text.Json;
