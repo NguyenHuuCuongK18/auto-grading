@@ -1788,20 +1788,26 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // === SECTION 2: EXTRA Captured Packets (not in expected flows) ===
-            // Show packets that were captured but not expected - helps identify extra/unexpected traffic
+            // === SECTION 2: Additional Captured Packets (not validated by this test case) ===
+            // These packets were captured but not validated by the test case.
+            // This is NORMAL - test cases intentionally validate only specific aspects:
+            //   - TC1 may only validate sending
+            //   - TC2 may validate send + server confirm
+            //   - TC3 may validate all communication + console output
+            //   - TC4 may validate disconnect behavior
+            // Extra packets are shown for information but DO NOT cause test failure.
             foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
                 var remainingPackets = capturesByStage[stage];
                 if (remainingPackets.Count > 0)
                 {
-                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} EXTRA (unexpected) packets at stage {stage}");
+                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
                     
                     foreach (var packet in remainingPackets)
                     {
-                        // No expected flow for this packet - it's EXTRA/UNEXPECTED
+                        // No expected flow for this packet - shown for information only
                         netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                        netWs.Cell(netRow, 2).Value = "(EXTRA - not expected)";  // Time
+                        netWs.Cell(netRow, 2).Value = "(Not validated by this test case)";  // Time
                         // Leave expected columns 3-10 empty
                         for (int i = 3; i <= 10; i++) 
                             netWs.Cell(netRow, i).Value = "";
@@ -1812,8 +1818,8 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
-                        netWs.Cell(netRow, 16).Value = "EXTRA";  // This packet wasn't expected
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightYellow;
+                        netWs.Cell(netRow, 16).Value = "INFO";  // Informational - not validated
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGray;
                         
                         netRow++;
                     }
