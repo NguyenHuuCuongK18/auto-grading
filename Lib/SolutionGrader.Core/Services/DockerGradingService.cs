@@ -291,6 +291,23 @@ namespace SolutionGrader.Core.Services
                 // Copy files to containers (use actual resolved paths)
                 await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
                 
+                // CRITICAL: Also copy golden server/client files if ANY test case uses them (Grade_Content='Client' or 'Server')
+                // Check if any test case needs golden files
+                bool needsGoldenServer = testKitConfig.TestCases.Any(tc => tc.GradeContent?.Equals("Client", StringComparison.OrdinalIgnoreCase) == true);
+                bool needsGoldenClient = testKitConfig.TestCases.Any(tc => tc.GradeContent?.Equals("Server", StringComparison.OrdinalIgnoreCase) == true);
+                
+                if (needsGoldenServer && !string.IsNullOrEmpty(testKitConfig.GivenServerPath))
+                {
+                    Console.WriteLine("[Docker] Copying golden server files (needed by test cases with Grade_Content='Client')...");
+                    await CopyFilesToContainersAsync(testKitConfig.GivenServerPath, null, serverContainer, clientContainer);
+                }
+                
+                if (needsGoldenClient && !string.IsNullOrEmpty(testKitConfig.GivenClientPath))
+                {
+                    Console.WriteLine("[Docker] Copying golden client files (needed by test cases with Grade_Content='Server')...");
+                    await CopyFilesToContainersAsync(null, testKitConfig.GivenClientPath, serverContainer, clientContainer);
+                }
+                
                 // Generate appsettings.json in containers
                 GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
