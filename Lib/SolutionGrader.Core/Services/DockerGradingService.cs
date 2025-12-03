@@ -1137,6 +1137,22 @@ namespace SolutionGrader.Core.Services
             return expectedSet.IsSubsetOf(actualSet);
         }
         
+        /// <summary>
+        /// Normalize flags for exact comparison - sorts flags alphabetically and removes whitespace
+        /// </summary>
+        private string NormalizeFlags(string flags)
+        {
+            if (string.IsNullOrEmpty(flags)) return "";
+            
+            var flagList = flags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .OrderBy(f => f)
+                .ToList();
+            
+            return string.Join(", ", flagList);
+        }
+        
         #endregion
         
         #region Test Kit Loading
@@ -1792,9 +1808,11 @@ namespace SolutionGrader.Core.Services
                         : new List<CapturedNetworkPacket>();
                     
                     // Try to find a packet that matches the expected flags
+                    // Find matching packet by comparing flags
+                    // Flags must match exactly (case-insensitive, order-normalized)
                     var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
                         !string.IsNullOrEmpty(expectedFlow.Flags) && 
-                        p.Flags.Contains(expectedFlow.Flags.Split(',')[0].Trim()));
+                        NormalizeFlags(expectedFlow.Flags) == NormalizeFlags(p.Flags));
                     
                     if (matchingPacket != null)
                     {
@@ -1806,12 +1824,11 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
                         
                         // Check if it's an exact match or just partial
-                        // Use lenient flag comparison - check if all expected flags are present
-                        // regardless of order (Windows/Linux may report flags differently)
+                        // Flags must match exactly (but order doesn't matter - normalize both)
                         bool exactMatch = true;
                         
-                        // Compare flags leniently - flag order doesn't matter (they're bits)
-                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && !CompareTcpFlags(expectedFlow.Flags, matchingPacket.Flags))
+                        // Compare flags - exact match required (but order-normalized)
+                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && NormalizeFlags(expectedFlow.Flags) != NormalizeFlags(matchingPacket.Flags))
                             exactMatch = false;
                         
                         // Compare roles exactly
