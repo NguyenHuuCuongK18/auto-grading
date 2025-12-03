@@ -1680,36 +1680,126 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Contains TCP packet captures in the EXACT testkit Detail.xlsx format for easy debugging
-            // Format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
+            // Enhanced format: Show testkit expected network FIRST, then student actual network with pass/fail comparison
+            // This matches the Client/Server sheet format for consistency
             var netWs = wb.Worksheets.Add("Network");
             SetNetworkSheetHeaders(netWs);
             int netRow = 2;
-            foreach (var packet in result.NetworkCaptures)
-            {
-                netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
-                netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
-                netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
-                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
-                netWs.Cell(netRow, 7).Value = packet.State;  // State
-                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data
-                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole
-                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole
-                netRow++;
-            }
             
-            // If no captures but we have expected network flows, log them as empty rows for debugging
-            if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
+            // First, write the expected network flows from testkit (if any)
+            // Group by stage and show expected vs actual side by side
+            var stagesWithExpected = result.NetworkComparisons
+                .Select(c => c.Stage)
+                .Distinct()
+                .OrderBy(s => s)
+                .ToList();
+            
+            if (stagesWithExpected.Count > 0)
             {
-                foreach (var comp in result.NetworkComparisons)
+                foreach (var stage in stagesWithExpected)
                 {
-                    netWs.Cell(netRow, 1).Value = comp.Stage;
-                    netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
+                    var comp = result.NetworkComparisons.FirstOrDefault(c => c.Stage == stage);
+                    var actualPackets = result.NetworkCaptures.Where(p => p.Stage == stage).ToList();
+                    
+                    // Parse expected from the comparison result (format: "Flags=X, From=Y, To=Z")
+                    string expectedFlags = "", expectedSourceRole = "", expectedDestRole = "";
+                    if (comp != null && !string.IsNullOrEmpty(comp.Expected))
+                    {
+                        var parts = comp.Expected.Split(',');
+                        foreach (var part in parts)
+                        {
+                            var kv = part.Split('=');
+                            if (kv.Length == 2)
+                            {
+                                var key = kv[0].Trim();
+                                var val = kv[1].Trim();
+                                if (key == "Flags") expectedFlags = val;
+                                else if (key == "From") expectedSourceRole = val;
+                                else if (key == "To") expectedDestRole = val;
+                            }
+                        }
+                    }
+                    
+                    // Write expected network flow
+                    netWs.Cell(netRow, 1).Value = stage;  // Stage
+                    netWs.Cell(netRow, 2).Value = "";  // Expected_Time (not available in testkit)
+                    netWs.Cell(netRow, 3).Value = "TCP";  // Expected_Info
+                    netWs.Cell(netRow, 4).Value = "";  // Expected_Source
+                    netWs.Cell(netRow, 5).Value = "";  // Expected_Destination
+                    netWs.Cell(netRow, 6).Value = expectedFlags;  // Expected_Flags
+                    netWs.Cell(netRow, 7).Value = "";  // Expected_State
+                    netWs.Cell(netRow, 8).Value = "";  // Expected_Data
+                    netWs.Cell(netRow, 9).Value = expectedSourceRole;  // Expected_SourceRole
+                    netWs.Cell(netRow, 10).Value = expectedDestRole;  // Expected_DestinationRole
+                    
+                    // Write actual network flow(s) for this stage
+                    if (actualPackets.Count > 0)
+                    {
+                        // For simplicity, show the first matching packet
+                        var packet = actualPackets.First();
+                        netWs.Cell(netRow, 11).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Actual_Time
+                        netWs.Cell(netRow, 12).Value = "TCP";  // Actual_Info
+                        netWs.Cell(netRow, 13).Value = $"127.0.0.1:{packet.SourcePort}";  // Actual_Source
+                        netWs.Cell(netRow, 14).Value = $"127.0.0.1:{packet.DestinationPort}";  // Actual_Destination
+                        netWs.Cell(netRow, 15).Value = packet.Flags;  // Actual_Flags
+                        netWs.Cell(netRow, 16).Value = packet.State;  // Actual_State
+                        netWs.Cell(netRow, 17).Value = packet.Data ?? "";  // Actual_Data
+                        netWs.Cell(netRow, 18).Value = packet.SourceRole;  // Actual_SourceRole
+                        netWs.Cell(netRow, 19).Value = packet.DestinationRole;  // Actual_DestinationRole
+                    }
+                    else
+                    {
+                        // No actual packet captured
+                        netWs.Cell(netRow, 11).Value = "";
+                        netWs.Cell(netRow, 12).Value = "";
+                        netWs.Cell(netRow, 13).Value = "";
+                        netWs.Cell(netRow, 14).Value = "";
+                        netWs.Cell(netRow, 15).Value = "(no capture)";
+                        netWs.Cell(netRow, 16).Value = "";
+                        netWs.Cell(netRow, 17).Value = "";
+                        netWs.Cell(netRow, 18).Value = "";
+                        netWs.Cell(netRow, 19).Value = "";
+                    }
+                    
+                    // Result: PASS or FAIL
+                    netWs.Cell(netRow, 20).Value = comp?.Passed == true ? "PASS" : "FAIL";
+                    
+                    // Apply color coding
+                    if (comp?.Passed == true)
+                    {
+                        netWs.Cell(netRow, 20).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                    }
+                    else
+                    {
+                        netWs.Cell(netRow, 20).Style.Fill.BackgroundColor = XLColor.LightPink;
+                    }
+                    
                     netRow++;
                 }
             }
+            else if (result.NetworkCaptures.Count > 0)
+            {
+                // No expected network, but we have captures - show them anyway
+                foreach (var packet in result.NetworkCaptures.OrderBy(p => p.Stage).ThenBy(p => p.Timestamp))
+                {
+                    netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                    // Expected columns (empty)
+                    for (int i = 2; i <= 10; i++) netWs.Cell(netRow, i).Value = "";
+                    // Actual columns
+                    netWs.Cell(netRow, 11).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+                    netWs.Cell(netRow, 12).Value = "TCP";
+                    netWs.Cell(netRow, 13).Value = $"127.0.0.1:{packet.SourcePort}";
+                    netWs.Cell(netRow, 14).Value = $"127.0.0.1:{packet.DestinationPort}";
+                    netWs.Cell(netRow, 15).Value = packet.Flags;
+                    netWs.Cell(netRow, 16).Value = packet.State;
+                    netWs.Cell(netRow, 17).Value = packet.Data ?? "";
+                    netWs.Cell(netRow, 18).Value = packet.SourceRole;
+                    netWs.Cell(netRow, 19).Value = packet.DestinationRole;
+                    netWs.Cell(netRow, 20).Value = "N/A";  // No expected to compare
+                    netRow++;
+                }
+            }
+            
             netWs.Columns().AdjustToContents();
             
             wb.SaveAs(detailPath);
@@ -1765,10 +1855,17 @@ namespace SolutionGrader.Core.Services
         
         private static void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
-            // Match the EXACT testkit Detail.xlsx Network sheet format for easy debugging
-            // Testkit format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
-            var headers = new[] { "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
-                "SourceRole", "DestinationRole" };
+            // Enhanced network sheet format showing testkit expected network FIRST,
+            // then student actual network with pass/fail comparison.
+            // Similar to Client/Server sheet format for consistency.
+            var headers = new[] { 
+                "Stage",  // Test stage number
+                "Expected_Time", "Expected_Info", "Expected_Source", "Expected_Destination", 
+                "Expected_Flags", "Expected_State", "Expected_Data", "Expected_SourceRole", "Expected_DestinationRole",
+                "Actual_Time", "Actual_Info", "Actual_Source", "Actual_Destination",
+                "Actual_Flags", "Actual_State", "Actual_Data", "Actual_SourceRole", "Actual_DestinationRole",
+                "Result"  // PASS or FAIL for network flow matching
+            };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
