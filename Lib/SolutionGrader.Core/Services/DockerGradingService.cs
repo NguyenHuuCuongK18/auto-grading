@@ -1061,8 +1061,9 @@ namespace SolutionGrader.Core.Services
             {
                 var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
                 
+                // Use lenient flag comparison - check if all expected flags are present
                 bool matched = capturedPackets.Any(p =>
-                    (string.IsNullOrEmpty(exp.Flags) || p.Flags.Contains(exp.Flags.Split(',')[0].Trim())) &&
+                    (string.IsNullOrEmpty(exp.Flags) || CompareTcpFlags(exp.Flags, p.Flags)) &&
                     (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
                     (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
                 
@@ -1085,6 +1086,38 @@ namespace SolutionGrader.Core.Services
             var normExpected = expected.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             var normActual = (actual ?? "").Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             return normActual.Contains(normExpected);
+        }
+        
+        /// <summary>
+        /// Compares TCP flags in a lenient way - checks if all expected flags are present
+        /// regardless of order. TCP flags are bits (SYN, ACK, PSH, FIN, RST, URG) and their
+        /// order may differ between Windows/Linux or packet capture tools.
+        /// 
+        /// Examples:
+        /// - "PSH, ACK" matches "ACK, PSH" -> true
+        /// - "SYN" matches "SYN" -> true
+        /// - "ACK" matches "ACK, RST" -> true (actual has ACK plus extra RST)
+        /// - "SYN, ACK" matches "SYN" -> false (missing ACK)
+        /// </summary>
+        private bool CompareTcpFlags(string expectedFlags, string actualFlags)
+        {
+            if (string.IsNullOrEmpty(expectedFlags)) return true;
+            if (string.IsNullOrEmpty(actualFlags)) return false;
+            
+            // Split flags and normalize (trim whitespace, convert to uppercase)
+            var expectedSet = expectedFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            var actualSet = actualFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            // Check if all expected flags are present in actual flags
+            // (actual may have additional flags, which is acceptable)
+            return expectedSet.IsSubsetOf(actualSet);
         }
         
         #endregion
@@ -1756,9 +1789,15 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
                         
                         // Check if it's an exact match or just partial
+                        // Use lenient flag comparison - check if all expected flags are present
+                        // regardless of order (Windows/Linux may report flags differently)
                         bool exactMatch = true;
-                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && matchingPacket.Flags != expectedFlow.Flags)
+                        
+                        // Compare flags leniently - flag order doesn't matter (they're bits)
+                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && !CompareTcpFlags(expectedFlow.Flags, matchingPacket.Flags))
                             exactMatch = false;
+                        
+                        // Compare roles exactly
                         if (!string.IsNullOrEmpty(expectedFlow.SourceRole) && matchingPacket.SourceRole != expectedFlow.SourceRole)
                             exactMatch = false;
                         if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
