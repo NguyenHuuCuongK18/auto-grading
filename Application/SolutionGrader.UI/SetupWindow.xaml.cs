@@ -122,6 +122,34 @@ namespace SolutionGrader.UI
             // Update configuration with project names
             _configuration.ClientProjectName = txtClientProjectName.Text.Trim();
             _configuration.ServerProjectName = txtServerProjectName.Text.Trim();
+            
+            // Update configuration with parallel grading settings
+            if (int.TryParse(txtMaxParallelStudents.Text.Trim(), out int maxParallel))
+            {
+                _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
+            }
+            else
+            {
+                _configuration.MaxParallelStudents = 1;
+            }
+            
+            if (int.TryParse(txtStartIndex.Text.Trim(), out int startIndex))
+            {
+                _configuration.StartIndex = Math.Max(0, startIndex);
+            }
+            else
+            {
+                _configuration.StartIndex = 0;
+            }
+            
+            if (int.TryParse(txtEndIndex.Text.Trim(), out int endIndex))
+            {
+                _configuration.EndIndex = endIndex;
+            }
+            else
+            {
+                _configuration.EndIndex = -1;
+            }
 
             // Validate configuration
             if (!ValidateConfiguration())
@@ -203,6 +231,31 @@ namespace SolutionGrader.UI
             if (_configuration.HasServer && string.IsNullOrWhiteSpace(txtServerProjectName.Text))
             {
                 txtValidation.Text = "Please enter a Server Project Name.";
+                return false;
+            }
+            
+            // Validate parallel grading settings
+            if (!int.TryParse(txtMaxParallelStudents.Text.Trim(), out int maxParallel) || maxParallel < 1)
+            {
+                txtValidation.Text = "Parallel Students must be a positive integer (minimum 1).";
+                return false;
+            }
+            
+            if (!int.TryParse(txtStartIndex.Text.Trim(), out int startIndex) || startIndex < 0)
+            {
+                txtValidation.Text = "Start Index must be a non-negative integer (0 or greater).";
+                return false;
+            }
+            
+            if (!int.TryParse(txtEndIndex.Text.Trim(), out int endIndex) || (endIndex < -1))
+            {
+                txtValidation.Text = "End Index must be -1 (for all) or a non-negative integer.";
+                return false;
+            }
+            
+            if (endIndex != -1 && endIndex < startIndex)
+            {
+                txtValidation.Text = "End Index must be greater than or equal to Start Index.";
                 return false;
             }
 
