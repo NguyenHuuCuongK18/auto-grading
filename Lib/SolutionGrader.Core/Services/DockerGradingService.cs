@@ -350,7 +350,7 @@ namespace SolutionGrader.Core.Services
                     // Write test case results
                     var tcResultPath = Path.Combine(studentResultPath, testCase.Name);
                     Directory.CreateDirectory(tcResultPath);
-                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult);
+                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, testCase.Path, tcResult);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
@@ -1624,7 +1624,7 @@ namespace SolutionGrader.Core.Services
         /// - Network sheet: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
         /// - Database sheet: (empty)
         /// </summary>
-        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result)
+        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, string testCasePath, TestCaseResult result)
         {
             var detailPath = Path.Combine(tcResultPath, "GradeDetail.xlsx");
             using var wb = new XLWorkbook();
@@ -1708,7 +1708,6 @@ namespace SolutionGrader.Core.Services
             
             // Read expected network flows from testkit Detail.xlsx to get COMPLETE data
             // This ensures we show ALL expected flows, not just the ones used in comparison
-            var testCasePath = testCase.Path;
             var detailPath_forNetwork = Path.Combine(testCasePath, "Detail.xlsx");
             var expectedNetworkFlows = ReadExpectedNetwork(detailPath_forNetwork);
             
