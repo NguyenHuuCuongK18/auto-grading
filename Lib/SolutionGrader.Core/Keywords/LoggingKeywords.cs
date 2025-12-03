@@ -11,9 +11,6 @@ public static class LoggingKeywords
     public const string LOG_PREFIX_TESTCASE = "[TestCase]";
     public const string LOG_PREFIX_STEP = "[Step]";
     public const string LOG_PREFIX_ACTION = "[Action]";
-    public const string LOG_PREFIX_PROXY = "[Proxy]";
-    public const string LOG_PREFIX_HTTP_PROXY_ERR = "[HTTP Proxy ERR]";
-    public const string LOG_PREFIX_TCP_PROXY_ERR = "[TCP Proxy ERR]";
     public const string LOG_PREFIX_CLIENT_INPUT = "[ClientInput]";
     public const string LOG_PREFIX_DATABASE_CONFIG = "[DatabaseConfig]";
 
@@ -43,13 +40,6 @@ public static class LoggingKeywords
     public const string MSG_ACTION_CLIENT_OUTPUT = "ClientStart: Client output: {0}";
     public const string MSG_ACTION_CLIENT_FULL_LOG_AVAILABLE = "ClientStart: Full error output available in client.log";
     public const string MSG_ACTION_CLIENT_INPUT_SENDING = "ClientInput: Sending input to client: {0}";
-    public const string MSG_ACTION_TCP_RELAY_STARTING = "TcpRelay: Starting middleware proxy (protocol: {0})...";
-
-    // Proxy messages
-    public const string MSG_PROXY_HTTP_LISTENING = "HTTP proxy listening on http://localhost:{0}/ -> http://localhost:{1}/";
-    public const string MSG_PROXY_TCP_LISTENING = "TCP proxy listening on 127.0.0.1:{0} -> 127.0.0.1:{1}";
-    public const string MSG_PROXY_HTTP_ERROR = "{0}";
-    public const string MSG_PROXY_TCP_ERROR = "{0}";
 
     // Client input messages
     public const string MSG_CLIENT_INPUT_NOT_RUNNING = "Cannot send input - client not running";
