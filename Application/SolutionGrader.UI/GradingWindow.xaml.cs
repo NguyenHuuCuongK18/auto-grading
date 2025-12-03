@@ -499,27 +499,49 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
-                // Update configuration with test kit port settings and apply port offset for parallel grading
-                // Each parallel student gets incremented ports to avoid conflicts
+                // CRITICAL: Create a student-specific configuration copy with port offset
+                // Each parallel student needs their own configuration with unique ports to avoid conflicts
+                // This ensures each student's network monitor captures traffic on their specific port
                 // Internal and external ports MUST match for network monitoring with npcap/libpcap
-                _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort + portOffset;
-                _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort + portOffset;
-                _configuration.DatabaseImageName = testKitConfig.DatabaseImageName;
-                _configuration.DatabaseContainerName = testKitConfig.DatabaseContainerName;
-                _configuration.DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort;
-                _configuration.DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort;
-                _configuration.DatabaseUsername = testKitConfig.DatabaseUsername;
-                _configuration.DatabasePassword = testKitConfig.DatabasePassword;
+                var studentConfig = new GradingConfiguration
+                {
+                    SubmitFolderPath = _configuration.SubmitFolderPath,
+                    TestKitFolderPath = _configuration.TestKitFolderPath,
+                    SaveResultFolderPath = _configuration.SaveResultFolderPath,
+                    HasClient = _configuration.HasClient,
+                    HasServer = _configuration.HasServer,
+                    ClientProjectName = _configuration.ClientProjectName,
+                    ServerProjectName = _configuration.ServerProjectName,
+                    MaxParallelStudents = _configuration.MaxParallelStudents,
+                    GradingTimeoutSeconds = _configuration.GradingTimeoutSeconds,
+                    DockerNetwork = _configuration.DockerNetwork,
+                    StartIndex = _configuration.StartIndex,
+                    EndIndex = _configuration.EndIndex,
+                    
+                    // Apply port offset for parallel grading - each student gets unique ports
+                    CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort + portOffset,
+                    CodeContainerHostPort = testKitConfig.CodeContainerHostPort + portOffset,
+                    
+                    // Database settings from test kit
+                    DatabaseImageName = testKitConfig.DatabaseImageName,
+                    DatabaseContainerName = testKitConfig.DatabaseContainerName,
+                    DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort,
+                    DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort,
+                    DatabaseUsername = testKitConfig.DatabaseUsername,
+                    DatabasePassword = testKitConfig.DatabasePassword
+                };
                 
-                _logger.LogInfo($"Using ports - Internal: {_configuration.CodeContainerInternalPort}, Host: {_configuration.CodeContainerHostPort} (base + offset {portOffset})");
+                _logger.LogInfo($"Using ports - Internal: {studentConfig.CodeContainerInternalPort}, Host: {studentConfig.CodeContainerHostPort} (base + offset {portOffset})");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
+                _logger.LogInfo($"Network monitor will capture traffic on host port {studentConfig.CodeContainerHostPort}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
                 // Pass the cancellation token so pause can abort the current grading
+                // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
                 var sessionState = new GradingSessionState();
                 await _gradingService.StartGradingAsync(
                     new System.Collections.Generic.List<StudentSolution> { student },
-                    _configuration,
+                    studentConfig,
                     sessionState,
                     ct);
                 

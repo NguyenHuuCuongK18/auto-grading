@@ -268,12 +268,21 @@ namespace SolutionGrader.Core.Services
                 // - Initial TCP handshake (SYN, SYN-ACK, ACK)
                 // - All data transfers
                 // - Connection teardown (FIN-ACK)
+                // 
+                // PARALLEL GRADING: Each student gets their own NetworkMonitorService instance
+                // configured with their specific port (basePort + portOffset) to avoid conflicts
                 if (_networkMonitor != null)
                 {
                     _networkMonitor.MonitorPort = config.CodeContainerHostPort;
                     _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                    Console.WriteLine($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
                     await _networkMonitor.StartAsync(ct);
                     OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
+                    Console.WriteLine($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                }
+                else
+                {
+                    Console.WriteLine($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
@@ -368,7 +377,9 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
+                    Console.WriteLine($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
+                    Console.WriteLine($"[NetworkMonitor] Monitor stopped for student {studentCode}");
                 }
                 
                 // Cleanup containers
