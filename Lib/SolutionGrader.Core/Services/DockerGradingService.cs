@@ -268,12 +268,21 @@ namespace SolutionGrader.Core.Services
                 // - Initial TCP handshake (SYN, SYN-ACK, ACK)
                 // - All data transfers
                 // - Connection teardown (FIN-ACK)
+                // 
+                // PARALLEL GRADING: Each student gets their own NetworkMonitorService instance
+                // configured with their specific port (basePort + portOffset) to avoid conflicts
                 if (_networkMonitor != null)
                 {
                     _networkMonitor.MonitorPort = config.CodeContainerHostPort;
                     _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                    Console.WriteLine($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
                     await _networkMonitor.StartAsync(ct);
                     OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
+                    Console.WriteLine($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                }
+                else
+                {
+                    Console.WriteLine($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
@@ -368,7 +377,9 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
+                    Console.WriteLine($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
+                    Console.WriteLine($"[NetworkMonitor] Monitor stopped for student {studentCode}");
                 }
                 
                 // Cleanup containers
@@ -1720,58 +1731,50 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // Write expected network flow
+                    // Write expected network flow (matches TestKit Detail.xlsx format)
                     netWs.Cell(netRow, 1).Value = stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = "";  // Expected_Time (not available in testkit)
-                    netWs.Cell(netRow, 3).Value = "TCP";  // Expected_Info
-                    netWs.Cell(netRow, 4).Value = "";  // Expected_Source
-                    netWs.Cell(netRow, 5).Value = "";  // Expected_Destination
-                    netWs.Cell(netRow, 6).Value = expectedFlags;  // Expected_Flags
-                    netWs.Cell(netRow, 7).Value = "";  // Expected_State
-                    netWs.Cell(netRow, 8).Value = "";  // Expected_Data
-                    netWs.Cell(netRow, 9).Value = expectedSourceRole;  // Expected_SourceRole
-                    netWs.Cell(netRow, 10).Value = expectedDestRole;  // Expected_DestinationRole
+                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit)
+                    netWs.Cell(netRow, 3).Value = "TCP";  // Info
+                    netWs.Cell(netRow, 4).Value = "";  // Source
+                    netWs.Cell(netRow, 5).Value = "";  // Destination
+                    netWs.Cell(netRow, 6).Value = expectedFlags;  // Flags
+                    netWs.Cell(netRow, 7).Value = "";  // State
+                    netWs.Cell(netRow, 8).Value = "";  // Data
+                    netWs.Cell(netRow, 9).Value = expectedSourceRole;  // SourceRole
+                    netWs.Cell(netRow, 10).Value = expectedDestRole;  // DestinationRole
                     
-                    // Write actual network flow(s) for this stage
+                    // Write actual network flow - columns 11-15 (ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
                     if (actualPackets.Count > 0)
                     {
                         // For simplicity, show the first matching packet
                         var packet = actualPackets.First();
-                        netWs.Cell(netRow, 11).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Actual_Time
-                        netWs.Cell(netRow, 12).Value = "TCP";  // Actual_Info
-                        netWs.Cell(netRow, 13).Value = $"127.0.0.1:{packet.SourcePort}";  // Actual_Source
-                        netWs.Cell(netRow, 14).Value = $"127.0.0.1:{packet.DestinationPort}";  // Actual_Destination
-                        netWs.Cell(netRow, 15).Value = packet.Flags;  // Actual_Flags
-                        netWs.Cell(netRow, 16).Value = packet.State;  // Actual_State
-                        netWs.Cell(netRow, 17).Value = packet.Data ?? "";  // Actual_Data
-                        netWs.Cell(netRow, 18).Value = packet.SourceRole;  // Actual_SourceRole
-                        netWs.Cell(netRow, 19).Value = packet.DestinationRole;  // Actual_DestinationRole
+                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
                     }
                     else
                     {
                         // No actual packet captured
-                        netWs.Cell(netRow, 11).Value = "";
-                        netWs.Cell(netRow, 12).Value = "";
-                        netWs.Cell(netRow, 13).Value = "";
-                        netWs.Cell(netRow, 14).Value = "";
-                        netWs.Cell(netRow, 15).Value = "(no capture)";
-                        netWs.Cell(netRow, 16).Value = "";
-                        netWs.Cell(netRow, 17).Value = "";
-                        netWs.Cell(netRow, 18).Value = "";
-                        netWs.Cell(netRow, 19).Value = "";
+                        netWs.Cell(netRow, 11).Value = "(no capture)";  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = "";  // ActualState
+                        netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = "";  // ActualData
                     }
                     
-                    // Result: PASS or FAIL
-                    netWs.Cell(netRow, 20).Value = comp?.Passed == true ? "PASS" : "FAIL";
+                    // Result: PASS or FAIL (column 16)
+                    netWs.Cell(netRow, 16).Value = comp?.Passed == true ? "PASS" : "FAIL";
                     
-                    // Apply color coding
+                    // Apply color coding to Result column
                     if (comp?.Passed == true)
                     {
-                        netWs.Cell(netRow, 20).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGreen;
                     }
                     else
                     {
-                        netWs.Cell(netRow, 20).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightPink;
                     }
                     
                     netRow++;
@@ -1785,17 +1788,13 @@ namespace SolutionGrader.Core.Services
                     netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
                     // Expected columns (empty)
                     for (int i = 2; i <= 10; i++) netWs.Cell(netRow, i).Value = "";
-                    // Actual columns
-                    netWs.Cell(netRow, 11).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
-                    netWs.Cell(netRow, 12).Value = "TCP";
-                    netWs.Cell(netRow, 13).Value = $"127.0.0.1:{packet.SourcePort}";
-                    netWs.Cell(netRow, 14).Value = $"127.0.0.1:{packet.DestinationPort}";
-                    netWs.Cell(netRow, 15).Value = packet.Flags;
-                    netWs.Cell(netRow, 16).Value = packet.State;
-                    netWs.Cell(netRow, 17).Value = packet.Data ?? "";
-                    netWs.Cell(netRow, 18).Value = packet.SourceRole;
-                    netWs.Cell(netRow, 19).Value = packet.DestinationRole;
-                    netWs.Cell(netRow, 20).Value = "N/A";  // No expected to compare
+                    // Actual columns (11-15: ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
+                    netWs.Cell(netRow, 11).Value = packet.Flags;
+                    netWs.Cell(netRow, 12).Value = packet.State;
+                    netWs.Cell(netRow, 13).Value = packet.SourceRole;
+                    netWs.Cell(netRow, 14).Value = packet.DestinationRole;
+                    netWs.Cell(netRow, 15).Value = packet.Data ?? "";
+                    netWs.Cell(netRow, 16).Value = "N/A";  // No expected to compare (column 16: NetworkResult)
                     netRow++;
                 }
             }
@@ -1855,16 +1854,15 @@ namespace SolutionGrader.Core.Services
         
         private static void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
-            // Enhanced network sheet format showing testkit expected network FIRST,
-            // then student actual network with pass/fail comparison.
-            // Similar to Client/Server sheet format for consistency.
+            // Network sheet format matching ExcelDetailLogService naming convention (NO underscores).
+            // Format: Stage, expected columns (Time, Flags, etc.), then Actual* columns, then NetworkResult.
+            // This ensures consistency across both Docker and regular grading flows.
             var headers = new[] { 
                 "Stage",  // Test stage number
-                "Expected_Time", "Expected_Info", "Expected_Source", "Expected_Destination", 
-                "Expected_Flags", "Expected_State", "Expected_Data", "Expected_SourceRole", "Expected_DestinationRole",
-                "Actual_Time", "Actual_Info", "Actual_Source", "Actual_Destination",
-                "Actual_Flags", "Actual_State", "Actual_Data", "Actual_SourceRole", "Actual_DestinationRole",
-                "Result"  // PASS or FAIL for network flow matching
+                "Time", "Info", "Source", "Destination", 
+                "Flags", "State", "Data", "SourceRole", "DestinationRole",
+                "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData",
+                "NetworkResult"  // PASS or FAIL for network flow matching
             };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];

@@ -1169,6 +1169,26 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Tries to get a column index from the header dictionary, supporting multiple naming conventions.
+        /// This method checks for both the primary column name and alternative names (e.g., with underscores).
+        /// Returns the column index (1-based) if found, or 0 if not found.
+        /// </summary>
+        /// <param name="hdr">Header dictionary mapping column names to indices</param>
+        /// <param name="names">Column names to try (primary first, then alternates)</param>
+        /// <returns>Column index (1-based) if found, 0 if not found</returns>
+        private int TryGetColumnIndex(Dictionary<string, int> hdr, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (hdr.TryGetValue(name, out int colIndex))
+                {
+                    return colIndex;
+                }
+            }
+            return 0;
+        }
+        
+        /// <summary>
         /// Populates the Network sheet with actual captured data for side-by-side comparison.
         /// Each row in the Network sheet represents an expected packet from the test kit.
         /// This method adds actual captured data columns to enable easy verification of:
@@ -1176,6 +1196,10 @@ namespace SolutionGrader.Core.Services
         /// - Connection state descriptions
         /// - Source/Destination roles (Client/Server)
         /// - Payload data (for PSH packets)
+        /// 
+        /// Supports two naming conventions:
+        /// 1. New format: ActualFlags, ActualState, NetworkResult (no underscores)
+        /// 2. Legacy format: Actual_Flags, Actual_State, Result (with underscores)
         /// </summary>
         private void PopulateNetworkActualColumns(IXLWorksheet ws, Dictionary<string, int> hdr)
         {
@@ -1184,18 +1208,20 @@ namespace SolutionGrader.Core.Services
             var rng = ws.RangeUsed();
             if (rng == null) return;
             
-            // Get actual data column indices
-            hdr.TryGetValue(GradingKeywords.Col_ActualFlags, out int actualFlagsCol);
-            hdr.TryGetValue(GradingKeywords.Col_ActualState, out int actualStateCol);
-            hdr.TryGetValue(GradingKeywords.Col_ActualSourceRole, out int actualSrcRoleCol);
-            hdr.TryGetValue(GradingKeywords.Col_ActualDestRole, out int actualDstRoleCol);
-            hdr.TryGetValue(GradingKeywords.Col_ActualData, out int actualDataCol);
-            hdr.TryGetValue(GradingKeywords.Col_NetworkResult, out int resultCol);
+            // Get actual data column indices - support BOTH naming conventions:
+            // 1. "ActualFlags" (no underscore) - current/new format
+            // 2. "Actual_Flags" (with underscore) - legacy format
+            int actualFlagsCol = TryGetColumnIndex(hdr, "ActualFlags", "Actual_Flags");
+            int actualStateCol = TryGetColumnIndex(hdr, "ActualState", "Actual_State");
+            int actualSrcRoleCol = TryGetColumnIndex(hdr, "ActualSourceRole", "Actual_SourceRole");
+            int actualDstRoleCol = TryGetColumnIndex(hdr, "ActualDestRole", "Actual_DestinationRole");
+            int actualDataCol = TryGetColumnIndex(hdr, "ActualData", "Actual_Data");
+            int resultCol = TryGetColumnIndex(hdr, "NetworkResult", "Result");
             
-            // Get expected data column indices for comparison
-            hdr.TryGetValue(NetworkKeywords.Col_Flags, out int expFlagsCol);
-            hdr.TryGetValue(NetworkKeywords.Col_SourceRole, out int expSrcRoleCol);
-            hdr.TryGetValue(NetworkKeywords.Col_DestinationRole, out int expDstRoleCol);
+            // Get expected data column indices for comparison - also support both conventions
+            int expFlagsCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Flags, "Expected_Flags");
+            int expSrcRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_SourceRole, "Expected_SourceRole");
+            int expDstRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_DestinationRole, "Expected_DestinationRole");
             
             // Track per-stage packet indices for matching with captured data
             var stagePacketIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

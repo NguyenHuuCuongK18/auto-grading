@@ -67,51 +67,12 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="15"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="15"/>
+                    <RowDefinition Height="10"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 
-                <!-- Section 1: Batch Grading Configuration -->
+                <!-- Section 1: Student Selection -->
                 <Border Grid.Row="0" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="5" Padding="12">
-                    <StackPanel>
-                        <TextBlock Text="BATCH GRADING CONFIGURATION" 
-                                   FontWeight="Bold"
-                                   FontSize="12"
-                                   Foreground="#495057"
-                                   Margin="0,0,0,8"/>
-                        
-                        <StackPanel Orientation="Horizontal">
-                            <!-- Number of Solutions -->
-                            <TextBlock Text="Number of Solutions to Grade at a Time:" 
-                                       VerticalAlignment="Center" 
-                                       Margin="0,0,8,0"
-                                       FontWeight="SemiBold"/>
-                            <TextBox x:Name="txtMaxParallelStudents" 
-                                     Width="60" 
-                                     Height="28"
-                                     VerticalContentAlignment="Center"
-                                     TextAlignment="Center"
-                                     FontSize="14"
-                                     FontWeight="Bold"
-                                     ToolTip="Number of SELECTED student solutions to grade simultaneously in each batch.&#x0a;&#x0a;This controls how many of your SELECTED students will be graded at the same time.&#x0a;&#x0a;Example: If you SELECTED 5 students and set this to 2:&#x0a;  • First batch: Students 1 and 2 grade together&#x0a;  • Second batch: Students 3 and 4 grade together&#x0a;  • Third batch: Student 5 grades alone&#x0a;&#x0a;Default: 1 (sequential, one student at a time)"/>
-                            
-                            <TextBlock VerticalAlignment="Center" 
-                                       Margin="15,0,0,0"
-                                       FontStyle="Italic"
-                                       Foreground="#6C757D"
-                                       FontSize="11">
-                                <Run Text="This applies to the students you have"/>
-                                <Run Text=" SELECTED" FontWeight="Bold"/>
-                                <Run Text=" (via checkboxes, paper selection, or index range selection)."/>
-                            </TextBlock>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-                
-                <!-- Section 2: Student Selection -->
-                <Border Grid.Row="2" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="5" Padding="12">
                     <StackPanel>
                         <TextBlock Text="STUDENT SELECTION" 
                                    FontWeight="Bold"
@@ -205,8 +166,8 @@
                     </StackPanel>
                 </Border>
                 
-                <!-- Section 3: Grading Actions -->
-                <Border Grid.Row="4" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="5" Padding="12">
+                <!-- Section 2: Grading Actions with Batch Configuration -->
+                <Border Grid.Row="2" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="5" Padding="12">
                     <StackPanel>
                         <TextBlock Text="GRADING ACTIONS" 
                                    FontWeight="Bold"
@@ -215,6 +176,25 @@
                                    Margin="0,0,0,8"/>
                         
                         <StackPanel Orientation="Horizontal">
+                            <!-- Batch Configuration (moved here for better space efficiency) -->
+                            <TextBlock Text="Batch Size:" 
+                                       VerticalAlignment="Center" 
+                                       Margin="0,0,8,0" 
+                                       FontWeight="SemiBold"
+                                       Foreground="#495057"
+                                       ToolTip="Number of students to grade simultaneously"/>
+                            <TextBox x:Name="txtMaxParallelStudents" 
+                                     Width="50" 
+                                     Height="28"
+                                     VerticalContentAlignment="Center"
+                                     TextAlignment="Center"
+                                     FontSize="13"
+                                     FontWeight="Bold"
+                                     ToolTip="Number of SELECTED student solutions to grade simultaneously.&#x0a;&#x0a;Example: Set to 2 to grade 2 students at a time.&#x0a;Default: 1 (sequential, one student at a time)"/>
+                            
+                            <!-- Visual Separator -->
+                            <Border Width="2" Background="#DEE2E6" Margin="15,0"/>
+                            
                             <!-- Start Actions -->
                             <TextBlock Text="Start:" 
                                        VerticalAlignment="Center" 
