@@ -78,10 +78,12 @@ namespace SolutionGrader.UI
             // Display configuration info
             txtConfigInfo.Text = $"Submit: {_configuration.SubmitFolderPath} | TestKit: {_configuration.TestKitFolderPath} | Save: {_configuration.SaveResultFolderPath}";
             
-            // Initialize batch grading configuration controls with default values
+            // Initialize batch grading configuration control with default value
             txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
-            txtStartIndex.Text = _configuration.StartIndex.ToString();
-            txtEndIndex.Text = _configuration.EndIndex.ToString();
+            
+            // Initialize index selection controls with default values
+            txtSelectStartIndex.Text = "0";
+            txtSelectEndIndex.Text = "-1";
             
             // Load students
             LoadStudents();
@@ -94,7 +96,7 @@ namespace SolutionGrader.UI
             _elapsedTimer.Tick += ElapsedTimer_Tick;
             
             _logger.LogInfo("Grading window initialized");
-            _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}, StartIndex={_configuration.StartIndex}, EndIndex={_configuration.EndIndex}");
+            _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}");
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -209,6 +211,78 @@ namespace SolutionGrader.UI
         }
 
         /// <summary>
+        /// Apply index range selection to select students.
+        /// This is a quick way to select a range of students, similar to selecting by paper.
+        /// Useful when you have many students and need to select a specific range.
+        /// </summary>
+        private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
+        {
+            // Parse indices
+            if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 0)
+            {
+                System.Windows.MessageBox.Show("Start Index must be a non-negative integer (0 or greater).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            if (!int.TryParse(txtSelectEndIndex.Text.Trim(), out int endIndex) || endIndex < -1)
+            {
+                System.Windows.MessageBox.Show("End Index must be -1 (for all) or a non-negative integer.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            if (endIndex != -1 && endIndex < startIndex)
+            {
+                System.Windows.MessageBox.Show("End Index must be greater than or equal to Start Index.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            // First, unselect all students
+            foreach (var student in _students)
+            {
+                student.IsSelected = false;
+            }
+            
+            // Apply selection to the range
+            var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            foreach (var student in studentsInRange)
+            {
+                student.IsSelected = true;
+            }
+            
+            dgStudents.Items.Refresh();
+            
+            var endText = endIndex == -1 ? "end" : endIndex.ToString();
+            _logger.LogInfo($"Quick selected students from index {startIndex} to {endText} ({studentsInRange.Count} students selected)");
+        }
+
+        /// <summary>
+        /// Apply index range to get a subset of students.
+        /// This is used for SELECTION purposes only.
+        /// </summary>
+        /// <param name="students">List of students to filter</param>
+        /// <param name="startIndex">Start index (0-based, inclusive)</param>
+        /// <param name="endIndex">End index (0-based, inclusive, or -1 for all)</param>
+        /// <returns>Filtered list of students</returns>
+        private List<StudentSolution> ApplyIndexRange(List<StudentSolution> students, int startIndex, int endIndex)
+        {
+            if (startIndex < 0) startIndex = 0;
+            if (startIndex >= students.Count) return new List<StudentSolution>();
+            
+            if (endIndex == -1 || endIndex >= students.Count)
+            {
+                // Select from startIndex to end
+                return students.Skip(startIndex).ToList();
+            }
+            else
+            {
+                // Select from startIndex to endIndex (inclusive)
+                var count = endIndex - startIndex + 1;
+                if (count <= 0) return new List<StudentSolution>();
+                return students.Skip(startIndex).Take(count).ToList();
+            }
+        }
+
+        /// <summary>
         /// Select all visible students
         /// </summary>
         private void SelectAll_Click(object sender, RoutedEventArgs e)
@@ -234,34 +308,6 @@ namespace SolutionGrader.UI
             _logger.LogInfo("Unselected all students");
         }
 
-        /// <summary>
-        /// Apply index range filtering to the student list.
-        /// Allows grading from startIndex to endIndex (inclusive).
-        /// If endIndex is -1, grade from startIndex to the end.
-        /// </summary>
-        /// <param name="students">List of students to filter</param>
-        /// <param name="startIndex">Start index (0-based, inclusive)</param>
-        /// <param name="endIndex">End index (0-based, inclusive, or -1 for all)</param>
-        /// <returns>Filtered list of students</returns>
-        private List<StudentSolution> ApplyIndexRange(List<StudentSolution> students, int startIndex, int endIndex)
-        {
-            if (startIndex < 0) startIndex = 0;
-            if (startIndex >= students.Count) return new List<StudentSolution>();
-            
-            if (endIndex == -1 || endIndex >= students.Count)
-            {
-                // Grade from startIndex to end
-                return students.Skip(startIndex).ToList();
-            }
-            else
-            {
-                // Grade from startIndex to endIndex (inclusive)
-                var count = endIndex - startIndex + 1;
-                if (count <= 0) return new List<StudentSolution>();
-                return students.Skip(startIndex).Take(count).ToList();
-            }
-        }
-
         private async void StartAll_Click(object sender, RoutedEventArgs e)
         {
             await StartGradingAsync(false);
@@ -285,26 +331,15 @@ namespace SolutionGrader.UI
             {
                 _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
             }
-            if (int.TryParse(txtStartIndex.Text.Trim(), out int startIndex))
-            {
-                _configuration.StartIndex = Math.Max(0, startIndex);
-            }
-            if (int.TryParse(txtEndIndex.Text.Trim(), out int endIndex))
-            {
-                _configuration.EndIndex = endIndex;
-            }
             
-            // Get all students to grade (either selected or all with Not_Run/Paused status)
-            var allStudentsToGrade = selectedOnly
+            // Get students to grade based on selection
+            var studentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
             
-            // Apply index range filtering
-            var studentsToGrade = ApplyIndexRange(allStudentsToGrade, _configuration.StartIndex, _configuration.EndIndex);
-            
             if (studentsToGrade.Count == 0)
             {
-                System.Windows.MessageBox.Show("No students to grade in the specified range.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("No students to grade.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
@@ -315,7 +350,7 @@ namespace SolutionGrader.UI
             _elapsedTimer?.Start();
             
             UpdateButtonStates();
-            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} students (from index {_configuration.StartIndex} to {(_configuration.EndIndex == -1 ? "end" : _configuration.EndIndex.ToString())})");
+            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
             _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
             
             if (_configuration.MaxParallelStudents > 1)

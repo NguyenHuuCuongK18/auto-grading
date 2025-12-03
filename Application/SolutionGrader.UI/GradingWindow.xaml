@@ -95,44 +95,16 @@
                                      TextAlignment="Center"
                                      FontSize="14"
                                      FontWeight="Bold"
-                                     ToolTip="Number of student solutions to grade simultaneously in each batch.&#x0a;&#x0a;Example: If set to 2 and you have 5 students:&#x0a;  • First batch: Students 1 and 2 grade together&#x0a;  • Second batch: Students 3 and 4 grade together&#x0a;  • Third batch: Student 5 grades alone&#x0a;&#x0a;Default: 1 (sequential, one student at a time)"/>
-                            
-                            <!-- Visual Separator -->
-                            <Border Width="2" Background="#DEE2E6" Margin="20,0"/>
-                            
-                            <!-- Start Index -->
-                            <TextBlock Text="Start Index:" 
-                                       VerticalAlignment="Center" 
-                                       Margin="0,0,8,0"
-                                       FontWeight="SemiBold"/>
-                            <TextBox x:Name="txtStartIndex" 
-                                     Width="70" 
-                                     Height="28"
-                                     VerticalContentAlignment="Center"
-                                     TextAlignment="Center"
-                                     FontSize="14"
-                                     ToolTip="Select students starting from this index (0-based).&#x0a;&#x0a;This allows you to select a range of students, similar to selecting by paper.&#x0a;Useful for resuming grading after incidents or grading specific student ranges.&#x0a;&#x0a;Example: Start Index = 5 means start from the 6th student in the list."/>
-                            
-                            <!-- End Index -->
-                            <TextBlock Text="End Index:" 
-                                       VerticalAlignment="Center" 
-                                       Margin="15,0,8,0"
-                                       FontWeight="SemiBold"/>
-                            <TextBox x:Name="txtEndIndex" 
-                                     Width="70" 
-                                     Height="28"
-                                     VerticalContentAlignment="Center"
-                                     TextAlignment="Center"
-                                     FontSize="14"
-                                     ToolTip="Select students up to this index (0-based, inclusive).&#x0a;&#x0a;Use -1 to select all students from Start Index to the end.&#x0a;&#x0a;Combined with Start Index, this allows selecting specific student ranges.&#x0a;&#x0a;Example: Start Index = 0, End Index = 4 means grade students 0, 1, 2, 3, and 4 (first 5 students)."/>
+                                     ToolTip="Number of SELECTED student solutions to grade simultaneously in each batch.&#x0a;&#x0a;This controls how many of your SELECTED students will be graded at the same time.&#x0a;&#x0a;Example: If you SELECTED 5 students and set this to 2:&#x0a;  • First batch: Students 1 and 2 grade together&#x0a;  • Second batch: Students 3 and 4 grade together&#x0a;  • Third batch: Student 5 grades alone&#x0a;&#x0a;Default: 1 (sequential, one student at a time)"/>
                             
                             <TextBlock VerticalAlignment="Center" 
-                                       Margin="12,0,0,0"
+                                       Margin="15,0,0,0"
                                        FontStyle="Italic"
                                        Foreground="#6C757D"
                                        FontSize="11">
-                                <Run Text="Tip:"/>
-                                <Run Text=" Use Start/End Index to select student ranges, just like selecting by paper." FontWeight="SemiBold"/>
+                                <Run Text="This applies to the students you have"/>
+                                <Run Text=" SELECTED" FontWeight="Bold"/>
+                                <Run Text=" (via checkboxes, paper selection, or index range selection)."/>
                             </TextBlock>
                         </StackPanel>
                     </StackPanel>
@@ -148,6 +120,51 @@
                                    Margin="0,0,0,8"/>
                         
                         <StackPanel Orientation="Horizontal">
+                            <!-- Quick Select by Index Range -->
+                            <TextBlock Text="Quick Select by Index Range:" 
+                                       VerticalAlignment="Center" 
+                                       Margin="0,0,10,0" 
+                                       FontWeight="SemiBold"/>
+                            
+                            <TextBlock Text="From:" 
+                                       VerticalAlignment="Center" 
+                                       Margin="0,0,5,0"/>
+                            <TextBox x:Name="txtSelectStartIndex" 
+                                     Width="70" 
+                                     Height="28"
+                                     VerticalContentAlignment="Center"
+                                     TextAlignment="Center"
+                                     FontSize="13"
+                                     Text="0"
+                                     ToolTip="Start index for selection (0-based). This selects students starting from this position in the list."/>
+                            
+                            <TextBlock Text="To:" 
+                                       VerticalAlignment="Center" 
+                                       Margin="10,0,5,0"/>
+                            <TextBox x:Name="txtSelectEndIndex" 
+                                     Width="70" 
+                                     Height="28"
+                                     VerticalContentAlignment="Center"
+                                     TextAlignment="Center"
+                                     FontSize="13"
+                                     Text="-1"
+                                     ToolTip="End index for selection (0-based, -1 for end). This selects students up to this position."/>
+                            
+                            <Button x:Name="btnApplyIndexSelection" 
+                                    Content="✓ Apply Selection" 
+                                    Background="#007BFF" 
+                                    Foreground="White"
+                                    Padding="12,6"
+                                    Margin="10,0,0,0"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Cursor="Hand"
+                                    Click="ApplyIndexSelection_Click"
+                                    ToolTip="Select students in the specified index range.&#x0a;&#x0a;Example: If you graded 100 students and need to resume from student 101,&#x0a;set From=100 and To=-1, then click this button to select all remaining students."/>
+                            
+                            <!-- Visual Separator -->
+                            <Border Width="2" Background="#DEE2E6" Margin="15,0"/>
+                            
                             <!-- Paper Selection -->
                             <TextBlock Text="Quick Select by Paper:" 
                                        VerticalAlignment="Center" 
