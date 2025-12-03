@@ -1360,6 +1360,7 @@ namespace SolutionGrader.Core.Services
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
                     var flags = row.Cell(6).GetValue<string>();
+                    var state = row.Cell(7).GetValue<string>();
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
                     
@@ -1369,6 +1370,7 @@ namespace SolutionGrader.Core.Services
                         {
                             Stage = stage,
                             Flags = flags,
+                            State = state,
                             SourceRole = sourceRole,
                             DestinationRole = destRole
                         });
@@ -1691,112 +1693,141 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Enhanced format: Show testkit expected network FIRST, then student actual network with pass/fail comparison
-            // This matches the Client/Server sheet format for consistency
+            // IMPROVED FORMAT: Show ALL expected network flows and ALL actual captured packets
+            // This provides a comprehensive comparison that makes it easy to identify:
+            // - Missing packets (expected but not captured)
+            // - Extra packets (captured but not expected)
+            // - Mismatched packets (flags, roles differ from expected)
+            //
+            // The format shows expected flows on the left (columns 1-10) and actual captures 
+            // on the right (columns 11-15), with a Match column (16) showing comparison result.
+            // This allows reviewers to quickly scan for red (FAIL/MISSING) rows.
             var netWs = wb.Worksheets.Add("Network");
             SetNetworkSheetHeaders(netWs);
             int netRow = 2;
             
-            // First, write the expected network flows from testkit (if any)
-            // Group by stage and show expected vs actual side by side
-            var stagesWithExpected = result.NetworkComparisons
-                .Select(c => c.Stage)
-                .Distinct()
-                .OrderBy(s => s)
-                .ToList();
+            // Read expected network flows from testkit Detail.xlsx to get COMPLETE data
+            // This ensures we show ALL expected flows, not just the ones used in comparison
+            var testCasePath = testCase.Path;
+            var detailPath_forNetwork = Path.Combine(testCasePath, "Detail.xlsx");
+            var expectedNetworkFlows = ReadExpectedNetwork(detailPath_forNetwork);
             
-            if (stagesWithExpected.Count > 0)
+            // Group actual captures by stage for easier lookup
+            var capturesByStage = result.NetworkCaptures
+                .GroupBy(p => p.Stage)
+                .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
+            
+            // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
+            // Show ALL expected flows with their matching actual captures
+            if (expectedNetworkFlows.Count > 0)
             {
-                foreach (var stage in stagesWithExpected)
+                Console.WriteLine($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
+                
+                foreach (var expectedFlow in expectedNetworkFlows.OrderBy(f => f.Stage))
                 {
-                    var comp = result.NetworkComparisons.FirstOrDefault(c => c.Stage == stage);
-                    var actualPackets = result.NetworkCaptures.Where(p => p.Stage == stage).ToList();
-                    
-                    // Parse expected from the comparison result (format: "Flags=X, From=Y, To=Z")
-                    string expectedFlags = "", expectedSourceRole = "", expectedDestRole = "";
-                    if (comp != null && !string.IsNullOrEmpty(comp.Expected))
-                    {
-                        var parts = comp.Expected.Split(',');
-                        foreach (var part in parts)
-                        {
-                            var kv = part.Split('=');
-                            if (kv.Length == 2)
-                            {
-                                var key = kv[0].Trim();
-                                var val = kv[1].Trim();
-                                if (key == "Flags") expectedFlags = val;
-                                else if (key == "From") expectedSourceRole = val;
-                                else if (key == "To") expectedDestRole = val;
-                            }
-                        }
-                    }
-                    
-                    // Write expected network flow (matches TestKit Detail.xlsx format)
-                    netWs.Cell(netRow, 1).Value = stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit)
+                    // Write expected network flow (columns 1-10)
+                    netWs.Cell(netRow, 1).Value = expectedFlow.Stage;  // Stage
+                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit - not always available)
                     netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                    netWs.Cell(netRow, 4).Value = "";  // Source
-                    netWs.Cell(netRow, 5).Value = "";  // Destination
-                    netWs.Cell(netRow, 6).Value = expectedFlags;  // Flags
-                    netWs.Cell(netRow, 7).Value = "";  // State
+                    netWs.Cell(netRow, 4).Value = "";  // Source (IP from testkit if available)
+                    netWs.Cell(netRow, 5).Value = "";  // Destination (IP from testkit if available)
+                    netWs.Cell(netRow, 6).Value = expectedFlow.Flags ?? "";  // Flags
+                    netWs.Cell(netRow, 7).Value = expectedFlow.State ?? "";  // State
                     netWs.Cell(netRow, 8).Value = "";  // Data
-                    netWs.Cell(netRow, 9).Value = expectedSourceRole;  // SourceRole
-                    netWs.Cell(netRow, 10).Value = expectedDestRole;  // DestinationRole
+                    netWs.Cell(netRow, 9).Value = expectedFlow.SourceRole ?? "";  // SourceRole
+                    netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
                     
-                    // Write actual network flow - columns 11-15 (ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
-                    if (actualPackets.Count > 0)
+                    // Find matching actual packet(s) for this expected flow
+                    var actualPacketsForStage = capturesByStage.ContainsKey(expectedFlow.Stage) 
+                        ? capturesByStage[expectedFlow.Stage] 
+                        : new List<CapturedNetworkPacket>();
+                    
+                    // Try to find a packet that matches the expected flags
+                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
+                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
+                        p.Flags.Contains(expectedFlow.Flags.Split(',')[0].Trim()));
+                    
+                    if (matchingPacket != null)
                     {
-                        // For simplicity, show the first matching packet
-                        var packet = actualPackets.First();
-                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
-                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
-                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
-                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
-                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        // Found matching packet - write actual data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = matchingPacket.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = matchingPacket.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = matchingPacket.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = matchingPacket.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
+                        
+                        // Check if it's an exact match or just partial
+                        bool exactMatch = true;
+                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && matchingPacket.Flags != expectedFlow.Flags)
+                            exactMatch = false;
+                        if (!string.IsNullOrEmpty(expectedFlow.SourceRole) && matchingPacket.SourceRole != expectedFlow.SourceRole)
+                            exactMatch = false;
+                        if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
+                            exactMatch = false;
+                        
+                        netWs.Cell(netRow, 16).Value = exactMatch ? "PASS" : "PARTIAL";
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        
+                        // Remove from list so we can identify extra packets later
+                        actualPacketsForStage.Remove(matchingPacket);
                     }
                     else
                     {
-                        // No actual packet captured
-                        netWs.Cell(netRow, 11).Value = "(no capture)";  // ActualFlags
+                        // No matching packet found - expected flow is MISSING
+                        netWs.Cell(netRow, 11).Value = "(MISSING - not captured)";  // ActualFlags
                         netWs.Cell(netRow, 12).Value = "";  // ActualState
                         netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = "";  // ActualData
-                    }
-                    
-                    // Result: PASS or FAIL (column 16)
-                    netWs.Cell(netRow, 16).Value = comp?.Passed == true ? "PASS" : "FAIL";
-                    
-                    // Apply color coding to Result column
-                    if (comp?.Passed == true)
-                    {
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGreen;
-                    }
-                    else
-                    {
+                        netWs.Cell(netRow, 16).Value = "FAIL";
                         netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        
+                        Console.WriteLine($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
                     
                     netRow++;
                 }
             }
-            else if (result.NetworkCaptures.Count > 0)
+            
+            // === SECTION 2: EXTRA Captured Packets (not in expected flows) ===
+            // Show packets that were captured but not expected - helps identify extra/unexpected traffic
+            foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
-                // No expected network, but we have captures - show them anyway
-                foreach (var packet in result.NetworkCaptures.OrderBy(p => p.Stage).ThenBy(p => p.Timestamp))
+                var remainingPackets = capturesByStage[stage];
+                if (remainingPackets.Count > 0)
                 {
-                    netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                    // Expected columns (empty)
-                    for (int i = 2; i <= 10; i++) netWs.Cell(netRow, i).Value = "";
-                    // Actual columns (11-15: ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
-                    netWs.Cell(netRow, 11).Value = packet.Flags;
-                    netWs.Cell(netRow, 12).Value = packet.State;
-                    netWs.Cell(netRow, 13).Value = packet.SourceRole;
-                    netWs.Cell(netRow, 14).Value = packet.DestinationRole;
-                    netWs.Cell(netRow, 15).Value = packet.Data ?? "";
-                    netWs.Cell(netRow, 16).Value = "N/A";  // No expected to compare (column 16: NetworkResult)
-                    netRow++;
+                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} EXTRA (unexpected) packets at stage {stage}");
+                    
+                    foreach (var packet in remainingPackets)
+                    {
+                        // No expected flow for this packet - it's EXTRA/UNEXPECTED
+                        netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                        netWs.Cell(netRow, 2).Value = "(EXTRA - not expected)";  // Time
+                        // Leave expected columns 3-10 empty
+                        for (int i = 3; i <= 10; i++) 
+                            netWs.Cell(netRow, i).Value = "";
+                        
+                        // Write actual packet data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        netWs.Cell(netRow, 16).Value = "EXTRA";  // This packet wasn't expected
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightYellow;
+                        
+                        netRow++;
+                    }
                 }
+            }
+            
+            // === SECTION 3: No network data case ===
+            if (expectedNetworkFlows.Count == 0 && result.NetworkCaptures.Count == 0)
+            {
+                // No expected flows and no captures - add a note
+                netWs.Cell(netRow, 1).Value = "N/A";
+                netWs.Cell(netRow, 2).Value = "No network flows expected or captured for this test case";
+                netRow++;
             }
             
             netWs.Columns().AdjustToContents();
@@ -2020,6 +2051,7 @@ namespace SolutionGrader.Core.Services
     {
         public int Stage { get; set; }
         public string? Flags { get; set; }
+        public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
     }
