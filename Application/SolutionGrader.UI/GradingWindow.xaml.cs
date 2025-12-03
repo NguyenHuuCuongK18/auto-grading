@@ -78,7 +78,7 @@ namespace SolutionGrader.UI
             // Display configuration info
             txtConfigInfo.Text = $"Submit: {_configuration.SubmitFolderPath} | TestKit: {_configuration.TestKitFolderPath} | Save: {_configuration.SaveResultFolderPath}";
             
-            // Initialize parallel grading configuration controls
+            // Initialize batch grading configuration controls with default values
             txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
             txtStartIndex.Text = _configuration.StartIndex.ToString();
             txtEndIndex.Text = _configuration.EndIndex.ToString();
@@ -94,7 +94,7 @@ namespace SolutionGrader.UI
             _elapsedTimer.Tick += ElapsedTimer_Tick;
             
             _logger.LogInfo("Grading window initialized");
-            _logger.LogInfo($"Parallel grading configuration: MaxParallel={_configuration.MaxParallelStudents}, StartIndex={_configuration.StartIndex}, EndIndex={_configuration.EndIndex}");
+            _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}, StartIndex={_configuration.StartIndex}, EndIndex={_configuration.EndIndex}");
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -316,7 +316,13 @@ namespace SolutionGrader.UI
             
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} students (from index {_configuration.StartIndex} to {(_configuration.EndIndex == -1 ? "end" : _configuration.EndIndex.ToString())})");
-            _logger.LogInfo($"Parallel grading: {_configuration.MaxParallelStudents} student(s) at a time");
+            _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
+            
+            if (_configuration.MaxParallelStudents > 1)
+            {
+                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
+                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count)} students together, etc.)");
+            }
             
             try
             {
