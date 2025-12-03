@@ -185,22 +185,26 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
-                // Resolve server/client DLL paths based on examiner configuration:
-                // - HasServer=true means student MUST provide server, search student's solution
-                // - HasServer=false means use golden server from Meta/Given/Server
-                // - HasClient=true means student MUST provide client, search student's solution
-                // - HasClient=false means use golden client from Meta/Given/Client
+                // INITIAL DLL DISCOVERY: Find what DLLs the student provided
+                // This logic discovers which DLLs exist in the student's submission.
+                // The actual selection of which DLL to use (student vs golden) happens
+                // PER TEST CASE based on the Grade_Content field in each test case's Header.xlsx.
+                //
+                // - HasServer=true: Search for student's server in their solution
+                // - HasServer=false: Don't search for server, will use golden if needed
+                // - HasClient=true: Search for student's client in their solution
+                // - HasClient=false: Don't search for client, will use golden if needed
                 //
                 // The serverDllPath and clientDllPath parameters contain what was found in student's solution.
-                // If examiner didn't expect that component, we use the golden version instead.
+                // Each test case will decide whether to use student's DLLs or golden DLLs based on its Grade_Content.
                 
                 string? actualServerDllPath = null;
                 string? actualClientDllPath = null;
                 
-                // Server resolution
+                // Server discovery
                 if (config.HasServer)
                 {
-                    // Examiner expects student to provide server
+                    // Examiner expects student to provide server - use discovered path
                     actualServerDllPath = serverDllPath;
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
@@ -208,16 +212,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide server, use golden server from test kit
+                    // Examiner doesn't expect student to provide server, prepare golden server from test kit
                     actualServerDllPath = testKitConfig.GivenServerPath;
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
-                        OnProgress($"Using golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
                     }
                     else
                     {
@@ -225,10 +229,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Client resolution
+                // Client discovery
                 if (config.HasClient)
                 {
-                    // Examiner expects student to provide client
+                    // Examiner expects student to provide client - use discovered path
                     actualClientDllPath = clientDllPath;
                     if (string.IsNullOrEmpty(actualClientDllPath))
                     {
@@ -236,16 +240,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Discovered student's client: {Path.GetFileName(actualClientDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide client, use golden client from test kit
+                    // Examiner doesn't expect student to provide client, prepare golden client from test kit
                     actualClientDllPath = testKitConfig.GivenClientPath;
                     if (!string.IsNullOrEmpty(actualClientDllPath))
                     {
-                        OnProgress($"Using golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Prepared golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
                     }
                     else
                     {
@@ -253,9 +257,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Log final resolved paths
-                OnProgress($"Final Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
-                OnProgress($"Final Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                // Log discovered/prepared paths (final selection happens per test case based on Grade_Content)
+                OnProgress($"Available Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
+                OnProgress($"Available Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
                 // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
@@ -672,6 +677,73 @@ namespace SolutionGrader.Core.Services
             
             try
             {
+                // IMPORTANT: Resolve actual DLLs to use based on Grade_Content
+                // This determines whether to use student's code or golden code for each component
+                string? actualServerDll = serverDllPath;
+                string? actualClientDll = clientDllPath;
+                
+                var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
+                Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
+                
+                // Validate Grade_Content value
+                var validValues = new[] { "Client", "Server", "Client/Server" };
+                if (!validValues.Contains(gradeContent, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[TestCase] WARNING: Invalid Grade_Content value '{gradeContent}', defaulting to 'Client/Server'");
+                    gradeContent = "Client/Server";
+                }
+                
+                if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Grade student's CLIENT only - use golden SERVER
+                    actualClientDll = clientDllPath;
+                    actualServerDll = testKitConfig.GivenServerPath;
+                    Console.WriteLine($"[TestCase] Using student CLIENT + golden SERVER");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student CLIENT but none was found. Grade_Content='Client'");
+                    }
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden SERVER but none was found in Meta/Given/Server. Grade_Content='Client'");
+                    }
+                }
+                else if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Grade student's SERVER only - use golden CLIENT
+                    actualServerDll = serverDllPath;
+                    actualClientDll = testKitConfig.GivenClientPath;
+                    Console.WriteLine($"[TestCase] Using student SERVER + golden CLIENT");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student SERVER but none was found. Grade_Content='Server'");
+                    }
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden CLIENT but none was found in Meta/Given/Client. Grade_Content='Server'");
+                    }
+                }
+                else // "Client/Server" or default
+                {
+                    // Grade BOTH student's CLIENT and SERVER - no golden used
+                    actualClientDll = clientDllPath;
+                    actualServerDll = serverDllPath;
+                    Console.WriteLine($"[TestCase] Using student CLIENT + student SERVER (no golden)");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Note: For Client/Server mode, we allow one to be missing if the test only uses one
+                    // The test will fail naturally if it tries to use a missing component
+                }
+                
                 // Clear network captures for this test case
                 // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
                 // only traffic from this test case is captured
@@ -693,10 +765,10 @@ namespace SolutionGrader.Core.Services
                     ActionType = a.Action
                 }).ToList();
                 
-                // Execute actions and capture outputs
+                // Execute actions and capture outputs - use the resolved DLLs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(
                     actions, config, testKitConfig,
-                    serverDllPath, clientDllPath,
+                    actualServerDll, actualClientDll,
                     serverContainer, clientContainer, ct);
                 
                 // Compare outputs
@@ -710,18 +782,7 @@ namespace SolutionGrader.Core.Services
                 var capturedPackets = GetCapturedNetworkPackets();
                 Console.WriteLine($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
                 
-                result.NetworkCaptures = capturedPackets.Select(p => new NetworkCaptureRecord
-                {
-                    Stage = p.Stage,
-                    Timestamp = p.Timestamp,
-                    Flags = p.Flags,
-                    State = p.State,
-                    SourceRole = p.SourceRole,
-                    DestinationRole = p.DestinationRole,
-                    Data = p.Data,
-                    SourcePort = p.SourcePort,
-                    DestinationPort = p.DestinationPort
-                }).ToList();
+                result.NetworkCaptures = capturedPackets;
                 
                 // CRITICAL: Validate network monitoring is working
                 // If we expected network data but got none, this indicates a problem with network monitoring
@@ -761,46 +822,14 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Gets all captured network packets from the NetworkMonitor.
         /// </summary>
-        private List<CapturedPacketInfo> GetCapturedNetworkPackets()
+        private List<CapturedNetworkPacket> GetCapturedNetworkPackets()
         {
-            var packets = new List<CapturedPacketInfo>();
-            
             if (_networkMonitor == null)
-                return packets;
+                return new List<CapturedNetworkPacket>();
             
             // Get ALL captured packets from the RunContext (across all stages)
-            var capturedPackets = _runContext.GetAllCapturedNetworkPackets();
-            foreach (var packet in capturedPackets)
-            {
-                packets.Add(new CapturedPacketInfo
-                {
-                    // Use the stage stored at capture time, not the current stage
-                    Stage = packet.Stage,
-                    Timestamp = packet.Timestamp,
-                    Flags = packet.Flags,
-                    State = packet.State,
-                    SourceRole = packet.SourceRole,
-                    DestinationRole = packet.DestinationRole,
-                    Data = packet.Data,
-                    SourcePort = packet.SourcePort,
-                    DestinationPort = packet.DestinationPort
-                });
-            }
-            
-            return packets;
-        }
-        
-        private class CapturedPacketInfo
-        {
-            public int Stage { get; set; }
-            public DateTime Timestamp { get; set; }
-            public string Flags { get; set; } = "";
-            public string State { get; set; } = "";
-            public string SourceRole { get; set; } = "";
-            public string DestinationRole { get; set; } = "";
-            public string? Data { get; set; }
-            public int SourcePort { get; set; }
-            public int DestinationPort { get; set; }
+            // Returns packets with Stage, Timestamp, Flags, State, SourceRole, DestinationRole, Data, etc.
+            return _runContext.GetAllCapturedNetworkPackets().ToList();
         }
         
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
@@ -1120,16 +1149,21 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // Discover test cases and read per-test-case timeout from Header.xlsx
+            // Discover test cases and read per-test-case configuration from Header.xlsx
             tkConfig.TestCases = Directory.GetDirectories(testKitPath)
                 .Where(d => !Path.GetFileName(d).Equals("Meta", StringComparison.OrdinalIgnoreCase))
                 .Where(d => File.Exists(Path.Combine(d, "Detail.xlsx")))
-                .Select(d => new TestCaseInfo
+                .Select(d =>
                 {
-                    Name = Path.GetFileName(d),
-                    Path = d,
-                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
-                    TimeoutSeconds = ReadTestCaseTimeout(d, config.TestCaseTimeoutSeconds)
+                    var (timeout, gradeContent) = ReadTestCaseConfig(d, config.TestCaseTimeoutSeconds);
+                    return new TestCaseInfo
+                    {
+                        Name = Path.GetFileName(d),
+                        Path = d,
+                        MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
+                        TimeoutSeconds = timeout,
+                        GradeContent = gradeContent
+                    };
                 })
                 .OrderBy(tc => tc.Name)
                 .ToList();
@@ -1184,46 +1218,65 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Reads the per-test-case timeout from the test case's Header.xlsx file.
-        /// Looks for the Testcase_Property sheet and finds the Timeout(Seconds) row.
-        /// Falls back to the default timeout if not found or on error.
+        /// Reads the per-test-case configuration from the test case's Header.xlsx file.
+        /// Looks for the Testcase_Property sheet and reads:
+        /// - Timeout(Seconds): timeout in seconds
+        /// - Grade_Content: what to grade ("Client", "Server", or "Client/Server")
+        /// Falls back to defaults if not found or on error.
         /// </summary>
         /// <param name="testCasePath">Path to the test case folder</param>
         /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
-        /// <returns>Timeout in seconds</returns>
-        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
+        /// <returns>Tuple of (timeout, gradeContent)</returns>
+        private static (int timeout, string gradeContent) ReadTestCaseConfig(string testCasePath, int defaultTimeout)
         {
             var headerPath = Path.Combine(testCasePath, "Header.xlsx");
             if (!File.Exists(headerPath))
-                return defaultTimeout;
+                return (defaultTimeout, "Client/Server");
             
             try
             {
                 using var wb = new XLWorkbook(headerPath);
                 if (wb.TryGetWorksheet("Testcase_Property", out var ws))
                 {
+                    int timeout = defaultTimeout;
+                    string gradeContent = "Client/Server";
+                    
                     foreach (var row in ws.RowsUsed())
                     {
-                        var key = row.Cell(1).GetValue<string>()?.Trim();
-                        if (key?.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) == true ||
-                            key?.Equals("Timeout", StringComparison.OrdinalIgnoreCase) == true)
+                        var key = row.Cell(1).GetValue<string>()?.Trim() ?? "";
+                        var value = row.Cell(2).GetValue<string>()?.Trim() ?? "";
+                        
+                        // Read Timeout
+                        if (key.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) ||
+                            key.Equals("Timeout", StringComparison.OrdinalIgnoreCase))
                         {
-                            var valueStr = row.Cell(2).GetValue<string>()?.Trim();
-                            if (int.TryParse(valueStr, out var timeout) && timeout > 0)
+                            if (int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                             {
+                                timeout = parsedTimeout;
                                 Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
-                                return timeout;
+                            }
+                        }
+                        
+                        // Read Grade_Content
+                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                gradeContent = value;
+                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
                             }
                         }
                     }
+                    
+                    return (timeout, gradeContent);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TestKit] Warning: Could not read timeout from {headerPath}: {ex.Message}");
+                Console.WriteLine($"[TestKit] Warning: Could not read config from {headerPath}: {ex.Message}");
             }
             
-            return defaultTimeout;
+            return (defaultTimeout, "Client/Server");
         }
         
         private List<(int Stage, string Input, string Action)> ReadActions(string detailPath)
@@ -1855,6 +1908,17 @@ namespace SolutionGrader.Core.Services
         /// Defaults to 15 seconds if not specified in the test kit.
         /// </summary>
         public int TimeoutSeconds { get; set; } = 15;
+        
+        /// <summary>
+        /// Specifies what should be graded for this test case.
+        /// Values: "Client", "Server", or "Client/Server"
+        /// - "Client": Grade student's client with golden server
+        /// - "Server": Grade student's server with golden client
+        /// - "Client/Server": Grade both student's client and server (no golden used)
+        /// Read from Header.xlsx Testcase_Property sheet.
+        /// Defaults to "Client/Server" if not specified.
+        /// </summary>
+        public string GradeContent { get; set; } = "Client/Server";
     }
     
     internal class ExpectedNetworkFlow
@@ -1902,7 +1966,7 @@ namespace SolutionGrader.Core.Services
         public List<ComparisonResult> NetworkComparisons { get; set; } = new();
         
         /// <summary>Captured network packets - for Network sheet (raw captures)</summary>
-        public List<NetworkCaptureRecord> NetworkCaptures { get; set; } = new();
+        public List<CapturedNetworkPacket> NetworkCaptures { get; set; } = new();
     }
     
     /// <summary>
@@ -1933,21 +1997,6 @@ namespace SolutionGrader.Core.Services
         public string? Message { get; set; }
     }
     
-    /// <summary>
-    /// Network capture record for Network sheet - matches SampleLogging format exactly.
-    /// </summary>
-    public class NetworkCaptureRecord
-    {
-        public int Stage { get; set; }
-        public DateTime Timestamp { get; set; }
-        public string Flags { get; set; } = "";
-        public string State { get; set; } = "";
-        public string SourceRole { get; set; } = "";
-        public string DestinationRole { get; set; } = "";
-        public string? Data { get; set; }
-        public int SourcePort { get; set; }
-        public int DestinationPort { get; set; }
-    }
     
     /// <summary>
     /// Event arguments for grading progress updates.
