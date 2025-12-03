@@ -78,6 +78,11 @@ namespace SolutionGrader.UI
             // Display configuration info
             txtConfigInfo.Text = $"Submit: {_configuration.SubmitFolderPath} | TestKit: {_configuration.TestKitFolderPath} | Save: {_configuration.SaveResultFolderPath}";
             
+            // Initialize parallel grading configuration controls
+            txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
+            txtStartIndex.Text = _configuration.StartIndex.ToString();
+            txtEndIndex.Text = _configuration.EndIndex.ToString();
+            
             // Load students
             LoadStudents();
             
@@ -89,6 +94,7 @@ namespace SolutionGrader.UI
             _elapsedTimer.Tick += ElapsedTimer_Tick;
             
             _logger.LogInfo("Grading window initialized");
+            _logger.LogInfo($"Parallel grading configuration: MaxParallel={_configuration.MaxParallelStudents}, StartIndex={_configuration.StartIndex}, EndIndex={_configuration.EndIndex}");
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -228,6 +234,34 @@ namespace SolutionGrader.UI
             _logger.LogInfo("Unselected all students");
         }
 
+        /// <summary>
+        /// Apply index range filtering to the student list.
+        /// Allows grading from startIndex to endIndex (inclusive).
+        /// If endIndex is -1, grade from startIndex to the end.
+        /// </summary>
+        /// <param name="students">List of students to filter</param>
+        /// <param name="startIndex">Start index (0-based, inclusive)</param>
+        /// <param name="endIndex">End index (0-based, inclusive, or -1 for all)</param>
+        /// <returns>Filtered list of students</returns>
+        private List<StudentSolution> ApplyIndexRange(List<StudentSolution> students, int startIndex, int endIndex)
+        {
+            if (startIndex < 0) startIndex = 0;
+            if (startIndex >= students.Count) return new List<StudentSolution>();
+            
+            if (endIndex == -1 || endIndex >= students.Count)
+            {
+                // Grade from startIndex to end
+                return students.Skip(startIndex).ToList();
+            }
+            else
+            {
+                // Grade from startIndex to endIndex (inclusive)
+                var count = endIndex - startIndex + 1;
+                if (count <= 0) return new List<StudentSolution>();
+                return students.Skip(startIndex).Take(count).ToList();
+            }
+        }
+
         private async void StartAll_Click(object sender, RoutedEventArgs e)
         {
             await StartGradingAsync(false);
@@ -246,13 +280,31 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            var studentsToGrade = selectedOnly
+            // Read and update configuration from UI
+            if (int.TryParse(txtMaxParallelStudents.Text.Trim(), out int maxParallel))
+            {
+                _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
+            }
+            if (int.TryParse(txtStartIndex.Text.Trim(), out int startIndex))
+            {
+                _configuration.StartIndex = Math.Max(0, startIndex);
+            }
+            if (int.TryParse(txtEndIndex.Text.Trim(), out int endIndex))
+            {
+                _configuration.EndIndex = endIndex;
+            }
+            
+            // Get all students to grade (either selected or all with Not_Run/Paused status)
+            var allStudentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
             
+            // Apply index range filtering
+            var studentsToGrade = ApplyIndexRange(allStudentsToGrade, _configuration.StartIndex, _configuration.EndIndex);
+            
             if (studentsToGrade.Count == 0)
             {
-                System.Windows.MessageBox.Show("No students to grade.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("No students to grade in the specified range.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
@@ -263,30 +315,78 @@ namespace SolutionGrader.UI
             _elapsedTimer?.Start();
             
             UpdateButtonStates();
-            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} students");
+            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} students (from index {_configuration.StartIndex} to {(_configuration.EndIndex == -1 ? "end" : _configuration.EndIndex.ToString())})");
+            _logger.LogInfo($"Parallel grading: {_configuration.MaxParallelStudents} student(s) at a time");
             
             try
             {
-                foreach (var student in studentsToGrade)
+                if (_configuration.MaxParallelStudents <= 1)
                 {
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
-                    
-                    // Wait while paused
-                    while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                    // Sequential grading (original behavior)
+                    foreach (var student in studentsToGrade)
                     {
-                        await Task.Delay(500);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        // Wait while paused
+                        while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(500);
+                        }
+                        
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        await GradeStudentAsync(student, 0, _cancellationTokenSource.Token);
+                        
+                        // Write results after each student
+                        _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                        
+                        UpdateStatusBar();
                     }
+                }
+                else
+                {
+                    // Parallel grading using SemaphoreSlim to limit concurrency
+                    // Each student gets their own port offset based on their position in the batch
+                    var resultLock = new object();
+                    var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents);
                     
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
+                    var tasks = studentsToGrade.Select(async (student, index) =>
+                    {
+                        await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                        try
+                        {
+                            // Wait while paused
+                            while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                            {
+                                await Task.Delay(500, _cancellationTokenSource.Token);
+                            }
+                            
+                            if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                return;
+                            
+                            // Calculate port offset for this student to ensure unique ports in parallel execution
+                            // Port offset is based on position within the parallel batch
+                            var portOffset = index % _configuration.MaxParallelStudents;
+                            
+                            await GradeStudentAsync(student, portOffset, _cancellationTokenSource.Token);
+                            
+                            // Write results after each student (with lock for thread safety)
+                            lock (resultLock)
+                            {
+                                _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                            }
+                            
+                            UpdateStatusBar();
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }).ToList();
                     
-                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
-                    
-                    // Write results after each student
-                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
-                    
-                    UpdateStatusBar();
+                    await Task.WhenAll(tasks);
                 }
             }
             catch (OperationCanceledException)
@@ -314,7 +414,7 @@ namespace SolutionGrader.UI
             }
         }
 
-        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
+        private async Task GradeStudentAsync(StudentSolution student, int portOffset, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
@@ -358,9 +458,11 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
-                // Update configuration with test kit port settings
-                _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
-                _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
+                // Update configuration with test kit port settings and apply port offset for parallel grading
+                // Each parallel student gets incremented ports to avoid conflicts
+                // Internal and external ports MUST match for network monitoring with npcap/libpcap
+                _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort + portOffset;
+                _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort + portOffset;
                 _configuration.DatabaseImageName = testKitConfig.DatabaseImageName;
                 _configuration.DatabaseContainerName = testKitConfig.DatabaseContainerName;
                 _configuration.DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort;
@@ -368,7 +470,7 @@ namespace SolutionGrader.UI
                 _configuration.DatabaseUsername = testKitConfig.DatabaseUsername;
                 _configuration.DatabasePassword = testKitConfig.DatabasePassword;
                 
-                _logger.LogInfo($"Using ports - Internal: {testKitConfig.CodeContainerInternalPort}, Host: {testKitConfig.CodeContainerHostPort}");
+                _logger.LogInfo($"Using ports - Internal: {_configuration.CodeContainerInternalPort}, Host: {_configuration.CodeContainerHostPort} (base + offset {portOffset})");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
