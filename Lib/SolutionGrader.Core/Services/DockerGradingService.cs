@@ -185,22 +185,26 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
-                // Resolve server/client DLL paths based on examiner configuration:
-                // - HasServer=true means student MUST provide server, search student's solution
-                // - HasServer=false means use golden server from Meta/Given/Server
-                // - HasClient=true means student MUST provide client, search student's solution
-                // - HasClient=false means use golden client from Meta/Given/Client
+                // INITIAL DLL DISCOVERY: Find what DLLs the student provided
+                // This logic discovers which DLLs exist in the student's submission.
+                // The actual selection of which DLL to use (student vs golden) happens
+                // PER TEST CASE based on the Grade_Content field in each test case's Header.xlsx.
+                //
+                // - HasServer=true: Search for student's server in their solution
+                // - HasServer=false: Don't search for server, will use golden if needed
+                // - HasClient=true: Search for student's client in their solution
+                // - HasClient=false: Don't search for client, will use golden if needed
                 //
                 // The serverDllPath and clientDllPath parameters contain what was found in student's solution.
-                // If examiner didn't expect that component, we use the golden version instead.
+                // Each test case will decide whether to use student's DLLs or golden DLLs based on its Grade_Content.
                 
                 string? actualServerDllPath = null;
                 string? actualClientDllPath = null;
                 
-                // Server resolution
+                // Server discovery
                 if (config.HasServer)
                 {
-                    // Examiner expects student to provide server
+                    // Examiner expects student to provide server - use discovered path
                     actualServerDllPath = serverDllPath;
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
@@ -208,16 +212,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide server, use golden server from test kit
+                    // Examiner doesn't expect student to provide server, prepare golden server from test kit
                     actualServerDllPath = testKitConfig.GivenServerPath;
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
-                        OnProgress($"Using golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
                     }
                     else
                     {
@@ -225,10 +229,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Client resolution
+                // Client discovery
                 if (config.HasClient)
                 {
-                    // Examiner expects student to provide client
+                    // Examiner expects student to provide client - use discovered path
                     actualClientDllPath = clientDllPath;
                     if (string.IsNullOrEmpty(actualClientDllPath))
                     {
@@ -236,16 +240,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Discovered student's client: {Path.GetFileName(actualClientDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide client, use golden client from test kit
+                    // Examiner doesn't expect student to provide client, prepare golden client from test kit
                     actualClientDllPath = testKitConfig.GivenClientPath;
                     if (!string.IsNullOrEmpty(actualClientDllPath))
                     {
-                        OnProgress($"Using golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Prepared golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
                     }
                     else
                     {
@@ -253,9 +257,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Log final resolved paths
-                OnProgress($"Final Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
-                OnProgress($"Final Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                // Log discovered/prepared paths (final selection happens per test case based on Grade_Content)
+                OnProgress($"Available Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
+                OnProgress($"Available Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
                 // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
