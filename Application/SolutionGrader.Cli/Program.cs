@@ -96,13 +96,15 @@ public class Program
             TestCaseTimeoutSeconds = int.TryParse(map.GetValueOrDefault("tc-timeout"), out var tct) ? tct : 15,
             
             // Database settings
+            // Note: Database password is read from Environment.xlsx by DockerGradingService
+            // It can be overridden via --db-password or AUTOGRADING_DB_PASSWORD env var
             DatabaseContainerName = map.GetValueOrDefault("db-container", "auto-grading-sqlserver"),
             DatabaseContainerInternalPort = int.TryParse(map.GetValueOrDefault("db-internal-port"), out var dbip) ? dbip : 1433,
             DatabaseContainerHostPort = int.TryParse(map.GetValueOrDefault("db-host-port"), out var dbhp) ? dbhp : 1434,
             DatabaseUsername = map.GetValueOrDefault("db-user", "sa"),
             DatabasePassword = map.GetValueOrDefault("db-password") 
                 ?? Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") 
-                ?? throw new ArgumentException("Database password is required. Provide --db-password or set AUTOGRADING_DB_PASSWORD environment variable.")
+                ?? "" // Will be read from Environment.xlsx if not provided
         };
 
         // Optional: filter by paper or student
@@ -482,7 +484,7 @@ Examples:
   dotnet run -- validate --testkit ./TestKit/TestKit
 
 Environment Variables:
-  AUTOGRADING_DB_PASSWORD  Database password (to avoid passing on command line)
+  AUTOGRADING_DB_PASSWORD  Database password override (optional - defaults to Environment.xlsx)
 
 Notes:
   - Docker must be running for dockergrade command
