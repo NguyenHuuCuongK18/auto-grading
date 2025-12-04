@@ -228,7 +228,7 @@ namespace SolutionGrader.Core.Services
             {
                 try
                 {
-                    foreach (var line in File.ReadAllLines(PortFilePath))
+                    foreach (var line in File.ReadAllLines(PortFilePath).Where(l => !string.IsNullOrWhiteSpace(l)))
                     {
                         if (int.TryParse(line.Trim(), out int port))
                         {

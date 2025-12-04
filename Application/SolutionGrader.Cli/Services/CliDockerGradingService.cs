@@ -165,38 +165,39 @@ namespace SolutionGrader.Cli.Services
             {
                 // Parallel grading
                 var resultLock = new object();
-                var semaphore = new SemaphoreSlim(config.MaxParallelStudents);
-
-                var tasks = students.Select(async (student, index) =>
+                using (var semaphore = new SemaphoreSlim(config.MaxParallelStudents))
                 {
-                    await semaphore.WaitAsync();
-                    try
+                    var tasks = students.Select(async (student, index) =>
                     {
-                        var localIndex = index + 1;
-                        Console.WriteLine($"\n[Thread] [{localIndex}/{students.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
-
-                        // Calculate port offset for this student
-                        var portOffset = index % config.MaxParallelStudents;
-                        
-                        var result = await GradeStudentUsingSharedServiceAsync(student, config, portOffset);
-                        
-                        lock (resultLock)
+                        await semaphore.WaitAsync();
+                        try
                         {
-                            results.Add(result);
+                            var localIndex = index + 1;
+                            Console.WriteLine($"\n[Thread] [{localIndex}/{students.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
+
+                            // Calculate port offset for this student
+                            var portOffset = index % config.MaxParallelStudents;
+                            
+                            var result = await GradeStudentUsingSharedServiceAsync(student, config, portOffset);
+                            
+                            lock (resultLock)
+                            {
+                                results.Add(result);
+                            }
+
+                            Console.WriteLine($"[Thread] [{localIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
                         }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }).ToList();
 
-                        Console.WriteLine($"[Thread] [{localIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }).ToList();
+                    await Task.WhenAll(tasks);
 
-                await Task.WhenAll(tasks);
-
-                // Sort results by original order
-                results = results.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+                    // Sort results by original order
+                    results = results.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+                }
             }
 
             return results;
