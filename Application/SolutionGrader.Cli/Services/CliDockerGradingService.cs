@@ -194,7 +194,7 @@ namespace SolutionGrader.Cli.Services
         /// Grade a single student using the SHARED DockerGradingService.
         /// This ensures identical grading logic between CLI and UI.
         /// </summary>
-        /// <param name="portOffset">Port offset for parallel grading (0 for sequential)</param>
+        /// <param name="portOffset">Port offset for parallel grading (0 for sequential) - DEPRECATED, now uses PortAllocator</param>
         private async Task<StudentGradingResult> GradeStudentUsingSharedServiceAsync(StudentInfo student, CliGradingConfiguration config, int portOffset)
         {
             var result = new StudentGradingResult
@@ -202,6 +202,18 @@ namespace SolutionGrader.Cli.Services
                 StudentCode = student.StudentCode,
                 PaperNo = student.PaperNo
             };
+
+            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+            // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
+            using var portAllocator = new PortAllocator();
+            int allocatedPort = portAllocator.AllocatePort();
+            
+            if (allocatedPort == -1)
+            {
+                Console.WriteLine($"[ERROR] Failed to allocate port for student {student.StudentCode}");
+                result.ErrorMessage = "Failed to allocate port for grading";
+                return result;
+            }
 
             try
             {
@@ -219,18 +231,19 @@ namespace SolutionGrader.Cli.Services
                 var studentResultPath = Path.Combine(config.SaveResultFolderPath, student.StudentCode);
                 Directory.CreateDirectory(studentResultPath);
 
-                // Build DockerGradingConfig from CLI config with port offset applied
-                // Each parallel student gets incremented ports from the base port
+                // Build DockerGradingConfig with DYNAMICALLY ALLOCATED port
+                // Internal and external ports MUST MATCH for direct mapping (critical for network monitoring)
+                // Example: Student 1 gets port 8000 (8000:8000), Student 2 gets port 8001 (8001:8001)
                 var dockerConfig = new DockerGradingConfig
                 {
                     HasClient = config.HasClient,
                     HasServer = config.HasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
-                    // Apply port offset for parallel grading
-                    // Internal and external ports MUST match for network monitoring with npcap/libpcap
-                    CodeContainerInternalPort = config.CodeContainerInternalPort + portOffset,
-                    CodeContainerHostPort = config.CodeContainerHostPort + portOffset,
+                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
+                    // This ensures each student's client reaches their own server via host.docker.internal
+                    CodeContainerInternalPort = allocatedPort,
+                    CodeContainerHostPort = allocatedPort,
                     DockerNetwork = config.DockerNetwork,
                     DatabaseImageName = config.DatabaseImageName,
                     // Use same database container name for all students (shared container, different database instances)
@@ -242,6 +255,8 @@ namespace SolutionGrader.Cli.Services
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds,
                     TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds
                 };
+
+                Console.WriteLine($"[{student.StudentCode}] Using dynamically allocated port: {allocatedPort}");
 
                 // Create the SHARED services (same as SolutionGrader.UI)
                 IRunContext runContext = new RunContext();
