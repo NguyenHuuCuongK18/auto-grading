@@ -20,13 +20,20 @@ namespace SolutionGrader.Core.Services
     /// Example scenario that motivated this design:
     /// - Student A starts with port 8001
     /// - Student B starts with port 8000
-    /// - Student A finishes grading and releases 8001
-    /// - System incorrectly assumes 8000 is done and tries to reuse it
-    /// - CONFLICT: Student B is still using port 8000!
+    /// - Student A finishes grading
+    /// - If we released port 8001, the system might incorrectly try to reuse it
+    ///   while another process is still initializing on a different port
+    /// - CONFLICT: Race condition between allocation and release!
     /// 
     /// Solution: Never reuse ports. Once allocated, a port stays allocated for the
     /// entire grading session. This prevents all race conditions at the cost of
-    /// limiting parallel grading to 100 students maximum.
+    /// limiting parallel grading to 100 students maximum per session.
+    /// 
+    /// To clear ports after a grading session ends, delete the port tracking file:
+    /// - Linux/macOS: /tmp/AutoGrading_AssignedPorts.txt
+    /// - Windows: %TEMP%\AutoGrading_AssignedPorts.txt
+    /// 
+    /// Or use ClearAllAllocatedPorts() at the START of a new grading session.
     /// 
     /// Based on test-grader reference implementation:
     /// https://github.com/NguyenHuuCuongK18/test-grader.git
@@ -42,6 +49,7 @@ namespace SolutionGrader.Core.Services
             "AutoGrading_AssignedPorts.txt");
         
         private readonly Mutex _mutex;
+        private bool _disposed = false;
 
         public PortAllocator()
         {
@@ -61,6 +69,7 @@ namespace SolutionGrader.Core.Services
         /// 
         /// CRITICAL: Ports are NEVER RELEASED to avoid race conditions.
         /// Once a port is allocated, it remains allocated for the entire grading session.
+        /// This is intentional and prevents port reuse conflicts in parallel grading.
         /// </summary>
         /// <returns>An available port number, or -1 if no ports available</returns>
         public int AllocatePort()
@@ -85,13 +94,14 @@ namespace SolutionGrader.Core.Services
                         {
                             assignedPorts.Add(port);
                             SaveAssignedPorts(assignedPorts);
-                            Console.WriteLine($"[PortAllocator] Allocated port {port} (will NOT be released - no reuse)");
+                            Console.WriteLine($"[PortAllocator] Allocated port {port} (will NOT be released - no reuse policy)");
                             return port;
                         }
                     }
 
                     Console.WriteLine($"[PortAllocator] ERROR: No available ports in range {PORT_RANGE_START}-{PORT_RANGE_END}");
-                    Console.WriteLine($"[PortAllocator] TIP: Ports are never released during grading. Consider clearing {PortFilePath} if all ports are exhausted.");
+                    Console.WriteLine($"[PortAllocator] TIP: Ports are never released during grading to prevent race conditions.");
+                    Console.WriteLine($"[PortAllocator] TIP: To reset, delete {PortFilePath} or call ClearAllAllocatedPorts() at session start.");
                     return -1;
                 }
                 finally
@@ -113,41 +123,69 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Releases a previously allocated port.
+        /// Clears ALL allocated ports. 
+        /// 
+        /// IMPORTANT: Only call this at the START of a new grading session,
+        /// NEVER during an active grading session as it will cause port conflicts.
+        /// 
+        /// This is useful to reset the port pool when:
+        /// - Starting a completely new grading session
+        /// - All previous grading processes have completed
+        /// - The port file has become stale
         /// </summary>
-        /// <param name="port">Port number to release</param>
-        public void ReleasePort(int port)
+        public static void ClearAllAllocatedPorts()
         {
             try
             {
-                if (!_mutex.WaitOne(TimeSpan.FromSeconds(30)))
+                using var mutex = new Mutex(false, SHARED_MUTEX_NAME);
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(30)))
                 {
-                    Console.WriteLine($"[PortAllocator] WARNING: Timeout waiting for mutex to release port {port}");
+                    Console.WriteLine("[PortAllocator] WARNING: Timeout waiting for mutex to clear ports");
                     return;
                 }
 
                 try
                 {
-                    var assignedPorts = LoadAssignedPorts();
-                    if (assignedPorts.Remove(port))
+                    if (File.Exists(PortFilePath))
                     {
-                        SaveAssignedPorts(assignedPorts);
-                        Console.WriteLine($"[PortAllocator] Released port {port}");
+                        File.Delete(PortFilePath);
+                        Console.WriteLine($"[PortAllocator] Cleared all allocated ports (deleted {PortFilePath})");
                     }
                     else
                     {
-                        Console.WriteLine($"[PortAllocator] WARNING: Port {port} was not assigned");
+                        Console.WriteLine("[PortAllocator] No port allocation file to clear");
                     }
                 }
                 finally
                 {
-                    _mutex.ReleaseMutex();
+                    mutex.ReleaseMutex();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PortAllocator] ERROR releasing port {port}: {ex.Message}");
+                Console.WriteLine($"[PortAllocator] ERROR clearing ports: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Gets the current count of allocated ports.
+        /// Useful for monitoring and diagnostics.
+        /// </summary>
+        public static int GetAllocatedPortCount()
+        {
+            try
+            {
+                if (File.Exists(PortFilePath))
+                {
+                    var lines = File.ReadAllLines(PortFilePath);
+                    return lines.Count(line => int.TryParse(line.Trim(), out _));
+                }
+            }
+            catch
+            {
+                // Ignore errors for diagnostic method
+            }
+            return 0;
         }
 
         /// <summary>
@@ -214,16 +252,26 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Cleanup: Release allocated port when disposed.
+        /// Disposes the PortAllocator resources.
+        /// 
+        /// IMPORTANT: This does NOT release the allocated port.
+        /// Ports are intentionally kept allocated to prevent race conditions
+        /// in parallel grading. The port will be reused only when:
+        /// - ClearAllAllocatedPorts() is called at the start of a new session
+        /// - The port tracking file is manually deleted
         /// </summary>
         public void Dispose()
         {
-            if (_allocatedPort.HasValue)
+            if (!_disposed)
             {
-                ReleasePort(_allocatedPort.Value);
-                _allocatedPort = null;
+                _disposed = true;
+                // NOTE: We intentionally do NOT release the allocated port here.
+                // This is the core fix for the multi-grading port reuse issue.
+                // Ports remain allocated for the entire grading session to prevent
+                // race conditions where one student's port gets reassigned while
+                // another student is still being graded.
+                _mutex?.Dispose();
             }
-            _mutex?.Dispose();
         }
     }
 }
