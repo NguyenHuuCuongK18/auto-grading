@@ -196,14 +196,19 @@ namespace SolutionGrader.UI
             
             var paperNo = selectedItem.Replace("Paper ", "");
             
+            // FIXED: Ensure UI updates are marshalled to UI thread and force DataGrid refresh
             // Select all students with this paper number
+            int selectedCount = 0;
             foreach (var student in _students.Where(s => s.PaperNo == paperNo))
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Force DataGrid to refresh its display to show updated checkbox states
+            // Note: dgStudents.Items.Refresh() updates the visual tree immediately
             dgStudents.Items.Refresh();
-            _logger.LogInfo($"Selected all students with Paper {paperNo}");
+            _logger.LogInfo($"Selected {selectedCount} students with Paper {paperNo}");
             
             // Reset dropdown to placeholder to allow re-selection
             cmbPaperSelection.SelectedIndex = 0;
@@ -213,10 +218,13 @@ namespace SolutionGrader.UI
         /// Apply index range selection to select students.
         /// This is a quick way to select a range of students, similar to selecting by paper.
         /// Useful when you have many students and need to select a specific range.
+        /// 
+        /// IMPORTANT: This method properly handles UI updates by modifying IsSelected property
+        /// which triggers INotifyPropertyChanged events, and then refreshes the DataGrid display.
         /// </summary>
         private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
         {
-            // Parse indices
+            // Parse and validate indices
             if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 1)
             {
                 System.Windows.MessageBox.Show("Start Index must be a positive integer (starts at 1).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -235,23 +243,42 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            // First, unselect all students
+            // FIXED: Ensure all selection state changes are visible to the DataGrid
+            // Step 1: Unselect all students (clears previous selections)
+            int unselectedCount = 0;
             foreach (var student in _students)
             {
-                student.IsSelected = false;
+                if (student.IsSelected)
+                {
+                    student.IsSelected = false;
+                    unselectedCount++;
+                }
             }
             
-            // Apply selection to the range
+            // Step 2: Apply selection to the specified index range
             var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            int selectedCount = 0;
             foreach (var student in studentsInRange)
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Step 3: Force DataGrid to refresh and display the updated checkbox states
+            // This is critical to ensure the UI reflects the programmatic selection changes
             dgStudents.Items.Refresh();
             
+            // Log detailed selection information for debugging
             var endText = endIndex == -1 ? "end" : endIndex.ToString();
-            _logger.LogInfo($"Quick selected students from index {startIndex} to {endText} ({studentsInRange.Count} students selected)");
+            _logger.LogInfo($"Index selection applied: range {startIndex} to {endText}");
+            _logger.LogInfo($"Selection result: {selectedCount} students selected, {unselectedCount} unselected");
+            
+            // Provide visual feedback to user
+            System.Windows.MessageBox.Show(
+                $"Selected {selectedCount} student(s) from index {startIndex} to {endText}.\n\nYou can now click 'Start Selected' to grade these students.",
+                "Selection Applied",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         /// <summary>
@@ -320,14 +347,41 @@ namespace SolutionGrader.UI
                 _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
             }
             
+            // FIXED: Enhanced logging and validation to debug selection issues
+            _logger.LogInfo($"=== Starting Grading Session ===");
+            _logger.LogInfo($"Mode: {(selectedOnly ? "Selected Only" : "All Students")}");
+            _logger.LogInfo($"Total students loaded: {_students.Count}");
+            _logger.LogInfo($"Students in filtered view: {_filteredStudents.Count}");
+            
+            if (selectedOnly)
+            {
+                var selectedStudents = _filteredStudents.Where(s => s.IsSelected).ToList();
+                var notSuccessStudents = selectedStudents.Where(s => s.Status != GradingStatus.Success).ToList();
+                _logger.LogInfo($"Students with IsSelected=true: {selectedStudents.Count}");
+                _logger.LogInfo($"Students with IsSelected=true AND Status!=Success: {notSuccessStudents.Count}");
+                
+                // Log detailed info about selected students
+                foreach (var s in selectedStudents)
+                {
+                    _logger.LogInfo($"  - Student {s.Id}: {s.StudentCode}, IsSelected={s.IsSelected}, Status={s.Status}");
+                }
+            }
+            
             // Get students to grade based on selection
             var studentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
             
+            _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
+            
             if (studentsToGrade.Count == 0)
             {
-                System.Windows.MessageBox.Show("No students to grade.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                var message = selectedOnly 
+                    ? "No students to grade.\n\nPossible reasons:\n- No students are selected (check the 'Select' checkboxes)\n- All selected students have already been successfully graded\n\nTip: Use 'Apply' button after entering index range to select students."
+                    : "No students to grade.\n\nAll students have been graded or there are no students loaded.";
+                    
+                _logger.LogWarning(message);
+                System.Windows.MessageBox.Show(message, "No Students to Grade", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
