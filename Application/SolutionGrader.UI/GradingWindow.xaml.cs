@@ -42,7 +42,8 @@ namespace SolutionGrader.UI
         
         private readonly ObservableCollection<StudentSolution> _students = new ObservableCollection<StudentSolution>();
         private readonly ObservableCollection<StudentSolution> _filteredStudents = new ObservableCollection<StudentSolution>();
-        private readonly StringBuilder _logBuffer = new StringBuilder();
+        private StringBuilder _logBuffer = new StringBuilder();
+        private int _estimatedLogCapacity = 8192; // Default for unknown student count
         
         private CancellationTokenSource? _cancellationTokenSource;
         private DispatcherTimer? _elapsedTimer;
@@ -196,14 +197,19 @@ namespace SolutionGrader.UI
             
             var paperNo = selectedItem.Replace("Paper ", "");
             
+            // FIXED: Ensure UI updates are marshalled to UI thread and force DataGrid refresh
             // Select all students with this paper number
+            int selectedCount = 0;
             foreach (var student in _students.Where(s => s.PaperNo == paperNo))
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Force DataGrid to refresh its display to show updated checkbox states
+            // Note: dgStudents.Items.Refresh() updates the visual tree immediately
             dgStudents.Items.Refresh();
-            _logger.LogInfo($"Selected all students with Paper {paperNo}");
+            _logger.LogInfo($"Selected {selectedCount} students with Paper {paperNo}");
             
             // Reset dropdown to placeholder to allow re-selection
             cmbPaperSelection.SelectedIndex = 0;
@@ -213,10 +219,13 @@ namespace SolutionGrader.UI
         /// Apply index range selection to select students.
         /// This is a quick way to select a range of students, similar to selecting by paper.
         /// Useful when you have many students and need to select a specific range.
+        /// 
+        /// IMPORTANT: This method properly handles UI updates by modifying IsSelected property
+        /// which triggers INotifyPropertyChanged events, and then refreshes the DataGrid display.
         /// </summary>
         private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
         {
-            // Parse indices
+            // Parse and validate indices
             if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 1)
             {
                 System.Windows.MessageBox.Show("Start Index must be a positive integer (starts at 1).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -235,23 +244,42 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            // First, unselect all students
+            // FIXED: Ensure all selection state changes are visible to the DataGrid
+            // Step 1: Unselect all students (clears previous selections)
+            int unselectedCount = 0;
             foreach (var student in _students)
             {
-                student.IsSelected = false;
+                if (student.IsSelected)
+                {
+                    student.IsSelected = false;
+                    unselectedCount++;
+                }
             }
             
-            // Apply selection to the range
+            // Step 2: Apply selection to the specified index range
             var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            int selectedCount = 0;
             foreach (var student in studentsInRange)
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Step 3: Force DataGrid to refresh and display the updated checkbox states
+            // This is critical to ensure the UI reflects the programmatic selection changes
             dgStudents.Items.Refresh();
             
+            // Log detailed selection information for debugging
             var endText = endIndex == -1 ? "end" : endIndex.ToString();
-            _logger.LogInfo($"Quick selected students from index {startIndex} to {endText} ({studentsInRange.Count} students selected)");
+            _logger.LogInfo($"Index selection applied: range {startIndex} to {endText}");
+            _logger.LogInfo($"Selection result: {selectedCount} students selected, {unselectedCount} unselected");
+            
+            // Provide visual feedback to user
+            System.Windows.MessageBox.Show(
+                $"Selected {selectedCount} student(s) from index {startIndex} to {endText}.\n\nYou can now click 'Start Selected' to grade these students.",
+                "Selection Applied",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         /// <summary>
@@ -320,14 +348,41 @@ namespace SolutionGrader.UI
                 _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
             }
             
+            // FIXED: Enhanced logging and validation to debug selection issues
+            _logger.LogInfo($"=== Starting Grading Session ===");
+            _logger.LogInfo($"Mode: {(selectedOnly ? "Selected Only" : "All Students")}");
+            _logger.LogInfo($"Total students loaded: {_students.Count}");
+            _logger.LogInfo($"Students in filtered view: {_filteredStudents.Count}");
+            
+            if (selectedOnly)
+            {
+                var selectedStudents = _filteredStudents.Where(s => s.IsSelected).ToList();
+                var notSuccessStudents = selectedStudents.Where(s => s.Status != GradingStatus.Success).ToList();
+                _logger.LogInfo($"Students with IsSelected=true: {selectedStudents.Count}");
+                _logger.LogInfo($"Students with IsSelected=true AND Status!=Success: {notSuccessStudents.Count}");
+                
+                // Log detailed info about selected students
+                foreach (var s in selectedStudents)
+                {
+                    _logger.LogInfo($"  - Student {s.Id}: {s.StudentCode}, IsSelected={s.IsSelected}, Status={s.Status}");
+                }
+            }
+            
             // Get students to grade based on selection
             var studentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
             
+            _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
+            
             if (studentsToGrade.Count == 0)
             {
-                System.Windows.MessageBox.Show("No students to grade.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                var message = selectedOnly 
+                    ? "No students to grade.\n\nPossible reasons:\n- No students are selected (check the 'Select' checkboxes)\n- All selected students have already been successfully graded\n\nTip: Use 'Apply' button after entering index range to select students."
+                    : "No students to grade.\n\nAll students have been graded or there are no students loaded.";
+                    
+                _logger.LogWarning(message);
+                System.Windows.MessageBox.Show(message, "No Students to Grade", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
@@ -348,16 +403,35 @@ namespace SolutionGrader.UI
             _sessionStartTime = DateTime.Now;
             _elapsedTimer?.Start();
             
+            // OPTIMIZATION: Pre-allocate log buffer based on known student count
+            // Estimate ~2KB per student (includes test cases, setup, cleanup logs)
+            // This reduces memory allocations during grading
+            _estimatedLogCapacity = studentsToGrade.Count * 2048;
+            _logBuffer = new StringBuilder(_estimatedLogCapacity);
+            _logger.LogInfo($"Pre-allocated log buffer capacity: {_estimatedLogCapacity / 1024}KB for {studentsToGrade.Count} students");
+            
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
-            _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
-            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
-            if (_configuration.MaxParallelStudents > 1)
+            // Calculate actual parallelism (limited by both batch size and student count)
+            var actualParallel = Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count);
+            
+            if (_configuration.MaxParallelStudents <= 1)
             {
-                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
-                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count)} students together, etc.)");
+                _logger.LogInfo($"Sequential grading mode: 1 solution will be graded at a time");
             }
+            else if (actualParallel == studentsToGrade.Count)
+            {
+                _logger.LogInfo($"Parallel grading mode: All {studentsToGrade.Count} solutions will be graded simultaneously (batch size {_configuration.MaxParallelStudents} >= student count)");
+            }
+            else
+            {
+                _logger.LogInfo($"Batch grading mode: {actualParallel} solution(s) will be graded simultaneously per batch");
+                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
+                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {actualParallel} students together, etc.)");
+            }
+            
+            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
             try
             {
@@ -391,6 +465,8 @@ namespace SolutionGrader.UI
                     // Parallel grading using SemaphoreSlim to limit concurrency
                     // Each student gets a dynamically allocated port via PortAllocator
                     var resultLock = new object();
+                    var startupLock = new SemaphoreSlim(1, 1); // OPTIMIZATION: Stagger container startups
+                    
                     using (var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents))
                     {
                         var tasks = studentsToGrade.Select(async (student, index) =>
@@ -409,13 +485,12 @@ namespace SolutionGrader.UI
                                 
                                 // Port allocation is now handled inside GradeStudentAsync using PortAllocator
                                 // This ensures thread-safe, unique port allocation that never reuses ports
-                                await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                await GradeStudentAsync(student, _cancellationTokenSource.Token, startupLock);
                                 
-                                // Write results after each student (with lock for thread safety)
-                                lock (resultLock)
-                                {
-                                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
-                                }
+                                // Write results after each student
+                                // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
+                                // No need for lock - the ResultWriter handles thread safety internally
+                                _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
                                 
                                 UpdateStatusBar();
                             }
@@ -443,6 +518,9 @@ namespace SolutionGrader.UI
                 _elapsedTimer?.Stop();
                 UpdateButtonStates();
                 
+                // CRITICAL: Flush any pending result writes to ensure all data is saved
+                _resultWriter.FlushPendingWrites();
+                
                 // Dispose all Docker containers (including database) when grading session ends
                 // Only dispose if not paused (paused sessions may resume)
                 if (!_isPaused)
@@ -464,7 +542,7 @@ namespace SolutionGrader.UI
         /// </summary>
         /// <param name="student">Student to grade</param>
         /// <param name="ct">Cancellation token</param>
-        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct, SemaphoreSlim? startupLock = null)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
@@ -501,7 +579,28 @@ namespace SolutionGrader.UI
                 student.StartTime = DateTime.Now;
                 student.ProgressPercent = 0;
                 UpdateStudentInUI(student);
-                runCurrentStudent.Text = student.StudentCode;
+                
+                // CRITICAL FIX: Update UI element from UI thread to avoid cross-thread access issues
+                // Use BeginInvoke (async) instead of Invoke (blocking) to prevent deadlocks when
+                // batch size equals student pool size (all students start simultaneously)
+                // Show "Multiple students" for batch grading to avoid constant UI thrashing
+                // BALANCED: Use Render priority to update current student display
+                // This ensures user sees which student is being graded without blocking workers
+                if (_configuration.MaxParallelStudents > 1)
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        runCurrentStudent.Text = "Multiple students...";
+                    }), System.Windows.Threading.DispatcherPriority.Render);
+                }
+                else
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        runCurrentStudent.Text = student.StudentCode;
+                    }), System.Windows.Threading.DispatcherPriority.Render);
+                }
+                
+                // Brief yield to reduce thread contention on UI thread
+                await Task.Yield();
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
@@ -541,6 +640,49 @@ namespace SolutionGrader.UI
                 // NOTE: We use the dynamically allocated port from PortAllocator instead of the old
                 // offset-based approach. This prevents race conditions where ports get reused while
                 // still being in use by another student.
+                //
+                // APPROACH 2: Map Project1/Project2 role configuration directly to ClientProjectName/ServerProjectName
+                // This uses the new flexible role indication system instead of relying on legacy properties.
+                // The mapping logic ensures the correct project names are used based on configured roles.
+                
+                // Determine client and server project names from the flexible Project1/Project2 configuration
+                string clientProjectName;
+                string serverProjectName;
+                
+                bool hasProject1 = !string.IsNullOrWhiteSpace(_configuration.Project1Name);
+                bool hasProject2 = !string.IsNullOrWhiteSpace(_configuration.Project2Name);
+                
+                if (hasProject1 && hasProject2)
+                {
+                    // Two projects: Map based on their configured roles
+                    clientProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project1Name 
+                        : _configuration.Project2Name;
+                    serverProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project2Name 
+                        : _configuration.Project1Name;
+                    
+                    _logger.LogInfo($"Two-project configuration: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                else if (hasProject1 || hasProject2)
+                {
+                    // Single project: It handles both client and server roles
+                    var singleProjectName = hasProject1 ? _configuration.Project1Name : _configuration.Project2Name;
+                    clientProjectName = singleProjectName;
+                    serverProjectName = singleProjectName;
+                    
+                    _logger.LogInfo($"Single-project configuration: {singleProjectName} (handles both roles)");
+                }
+                else
+                {
+                    // Fallback to legacy properties if Project1/Project2 are not configured
+                    // This maintains backward compatibility with older configurations
+                    clientProjectName = _configuration.ClientProjectName;
+                    serverProjectName = _configuration.ServerProjectName;
+                    
+                    _logger.LogWarning($"Using legacy project names: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                
                 var studentConfig = new GradingConfiguration
                 {
                     SubmitFolderPath = _configuration.SubmitFolderPath,
@@ -548,8 +690,17 @@ namespace SolutionGrader.UI
                     SaveResultFolderPath = _configuration.SaveResultFolderPath,
                     HasClient = _configuration.HasClient,
                     HasServer = _configuration.HasServer,
-                    ClientProjectName = _configuration.ClientProjectName,
-                    ServerProjectName = _configuration.ServerProjectName,
+                    
+                    // Use the mapped project names from flexible role configuration
+                    ClientProjectName = clientProjectName,
+                    ServerProjectName = serverProjectName,
+                    
+                    // Also copy Project1/Project2 properties for services that might use them
+                    Project1Name = _configuration.Project1Name,
+                    Project2Name = _configuration.Project2Name,
+                    Project1IsClient = _configuration.Project1IsClient,
+                    Project2IsClient = _configuration.Project2IsClient,
+                    
                     MaxParallelStudents = _configuration.MaxParallelStudents,
                     GradingTimeoutSeconds = _configuration.GradingTimeoutSeconds,
                     DockerNetwork = _configuration.DockerNetwork,
@@ -571,43 +722,84 @@ namespace SolutionGrader.UI
                     DatabasePassword = testKitConfig.DatabasePassword
                 };
                 
+                _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
+                
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 
-                // Execute grading using the orchestration service - it handles status changes internally
-                // Pass the cancellation token so pause can abort the current grading
-                // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
-                var sessionState = new GradingSessionState();
-                await _gradingService.StartGradingAsync(
-                    new System.Collections.Generic.List<StudentSolution> { student },
-                    studentConfig,
-                    sessionState,
-                    ct);
+                // OPTIMIZATION: Stagger container startup to avoid Docker strain
+                // Acquire lock before starting containers, release when containers are actually ready
+                bool lockAcquired = false;
+                int lockReleasedFlag = 0; // 0 = not released, 1 = released (for Interlocked)
+                if (startupLock != null)
+                {
+                    await startupLock.WaitAsync(ct);
+                    lockAcquired = true;
+                    _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
+                }
                 
-                // Update final status
-                student.ProgressPercent = 100;
-                student.EndTime = DateTime.Now;
-                UpdateStudentInUI(student);
+                // Callback to release lock as soon as containers are ready
+                Action? onContainersReady = null;
+                if (lockAcquired && startupLock != null)
+                {
+                    onContainersReady = () =>
+                    {
+                        // Use Interlocked to prevent race condition if callback is invoked multiple times
+                        if (Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0)
+                        {
+                            startupLock.Release();
+                            _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
+                        }
+                    };
+                }
                 
-                _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}/{student.MaxMark}");
-            }
-            catch (OperationCanceledException)
-            {
-                // Grading was paused/cancelled - set status to Paused so it can be resumed
-                student.Status = GradingStatus.Paused;
-                student.StatusMessage = "Grading paused - will resume when unpaused";
-                student.EndTime = null; // Clear end time since not completed
-                _logger.LogInfo($"Grading paused for {student.StudentCode}");
-                UpdateStudentInUI(student);
-            }
-            catch (Exception ex)
-            {
-                student.Status = GradingStatus.Failed;
-                student.StatusMessage = ex.Message;
-                student.EndTime = DateTime.Now;
-                _logger.LogError($"Grading failed for {student.StudentCode}", ex);
-                UpdateStudentInUI(student);
+                try
+                {
+                    // Execute grading using the orchestration service - it handles status changes internally
+                    // Pass the cancellation token so pause can abort the current grading
+                    // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
+                    var sessionState = new GradingSessionState();
+                    await _gradingService.StartGradingAsync(
+                        new System.Collections.Generic.List<StudentSolution> { student },
+                        studentConfig,
+                        sessionState,
+                        ct,
+                        onContainersReady);
+                
+                    // Update final status
+                    student.ProgressPercent = 100;
+                    student.EndTime = DateTime.Now;
+                    UpdateStudentInUI(student);
+                    
+                    _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}/{student.MaxMark}");
+                }
+                catch (OperationCanceledException)
+                {
+                    // Grading was paused/cancelled - set status to Paused so it can be resumed
+                    student.Status = GradingStatus.Paused;
+                    student.StatusMessage = "Grading paused - will resume when unpaused";
+                    student.EndTime = null; // Clear end time since not completed
+                    _logger.LogInfo($"Grading paused for {student.StudentCode}");
+                    UpdateStudentInUI(student);
+                }
+                catch (Exception ex)
+                {
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = ex.Message;
+                    student.EndTime = DateTime.Now;
+                    _logger.LogError($"Grading failed for {student.StudentCode}", ex);
+                    UpdateStudentInUI(student);
+                }
+                finally
+                {
+                    // Ensure lock is released if callback was never invoked
+                    if (lockAcquired && Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0 && startupLock != null)
+                    {
+                        startupLock.Release();
+                        _logger.LogWarning($"[Staggered Startup] Released lock for {student.StudentCode} via fallback");
+                    }
+                }
             }
             finally
             {
@@ -739,7 +931,9 @@ namespace SolutionGrader.UI
 
         private void UpdateButtonStates()
         {
-            Dispatcher.Invoke(() =>
+            // BALANCED: Use BeginInvoke with Normal priority for responsive UI without blocking
+            // Normal priority ensures UI updates happen promptly while not blocking worker threads
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 btnStartAll.IsEnabled = !_isRunning || _isPaused;
                 btnStartSelected.IsEnabled = !_isRunning || _isPaused;
@@ -747,35 +941,41 @@ namespace SolutionGrader.UI
                 btnResume.IsEnabled = _isPaused;
                 btnResetAll.IsEnabled = !_isRunning;
                 btnResetSelected.IsEnabled = !_isRunning;
-            });
+            }), System.Windows.Threading.DispatcherPriority.Normal);
         }
 
         private void UpdateStatusBar()
         {
-            Dispatcher.Invoke(() =>
+            // BALANCED: Pre-compute on worker thread, update UI with Normal priority
+            // Ensures statistics are visible while maintaining performance
+            var total = _students.Count;
+            var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
+            var success = _students.Count(s => s.Status == GradingStatus.Success);
+            var failed = _students.Count(s => s.Status == GradingStatus.Failed);
+            var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
+            
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                var total = _students.Count;
-                var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
-                var success = _students.Count(s => s.Status == GradingStatus.Success);
-                var failed = _students.Count(s => s.Status == GradingStatus.Failed);
-                var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
-                
                 runTotal.Text = total.ToString();
                 runGraded.Text = graded.ToString();
                 runPercent.Text = total > 0 ? ((graded * 100) / total).ToString() : "0";
                 runSuccess.Text = success.ToString();
                 runFailed.Text = failed.ToString();
                 runNotRun.Text = notRun.ToString();
-            });
+            }), System.Windows.Threading.DispatcherPriority.Normal);
         }
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            Dispatcher.Invoke(() =>
+            // BALANCED: Use Render priority for DataGrid refresh (visible to user)
+            // Render priority ensures user sees updates without blocking workers
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-                UpdateStatusBar();
-            });
+            }), System.Windows.Threading.DispatcherPriority.Render);
+            
+            // Update status bar with Normal priority
+            UpdateStatusBar();
         }
 
         private void ElapsedTimer_Tick(object? sender, EventArgs e)
@@ -795,22 +995,30 @@ namespace SolutionGrader.UI
 
         private void Logger_LogAdded(object? sender, LogEventArgs e)
         {
-            Dispatcher.Invoke(() =>
+            // BALANCED: Use Background priority for logging (less critical than grid updates)
+            // Logs update without impacting more important UI elements
+            var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
+            
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
                 _logBuffer.Append(logLine);
                 
-                // Keep log buffer manageable
-                if (_logBuffer.Length > 50000)
+                // OPTIMIZATION: Keep log buffer manageable with dynamic threshold
+                // Use 2x estimated capacity as max to allow for overhead
+                var maxCapacity = Math.Max(50000, _estimatedLogCapacity * 2);
+                if (_logBuffer.Length > maxCapacity)
                 {
-                    var trimmed = _logBuffer.ToString().Substring(_logBuffer.Length - 40000);
+                    // Trim to 80% of max capacity to reduce frequent trimming
+                    var targetLength = (int)(maxCapacity * 0.8);
+                    var trimmed = _logBuffer.ToString().Substring(_logBuffer.Length - targetLength);
                     _logBuffer.Clear();
                     _logBuffer.Append(trimmed);
+                    _logger.LogDebug($"Log buffer trimmed to {targetLength / 1024}KB");
                 }
                 
                 txtLog.Text = _logBuffer.ToString();
                 txtLog.ScrollToEnd();
-            });
+            }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void GradingService_StudentGradingStarted(object? sender, StudentSolution student)

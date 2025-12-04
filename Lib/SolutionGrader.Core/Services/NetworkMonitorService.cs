@@ -312,7 +312,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         }
     }
     
-    private void CaptureLoop(CancellationToken ct)
+    private async Task CaptureLoop(CancellationToken ct)
     {
         try
         {
@@ -323,10 +323,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 try { dev.StartCapture(); } catch (Exception startEx) { Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Failed to start capture on {dev.Name}: {startEx.Message}"); }
             }
 
-            // Keep running until cancelled
+            // Keep running until cancelled - use async delay for better CPU efficiency
             while (!ct.IsCancellationRequested && _isCapturing)
             {
-                Thread.Sleep(10);
+                await Task.Delay(100, ct); // Increased delay from 10ms to 100ms for better CPU efficiency
             }
         }
         catch (OperationCanceledException)
@@ -339,7 +339,15 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         }
         finally
         {
-            foreach (var dev in _devices)
+            // CRITICAL FIX: Create a snapshot of devices to avoid "Collection was modified" exception
+            // In parallel grading, another thread might call Clear() on _devices while we're iterating
+            ICaptureDevice[] devicesSnapshot;
+            lock (_lock)
+            {
+                devicesSnapshot = _devices.ToArray();
+            }
+            
+            foreach (var dev in devicesSnapshot)
             {
                 try { dev.OnPacketArrival -= OnPacketArrival; } catch { }
             }

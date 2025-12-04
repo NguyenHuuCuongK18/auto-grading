@@ -5,11 +5,21 @@
 # needed for process cleanup between test cases.
 #
 # BUILD COMMAND:
-#   docker build -t auto-grading-console:latest ./DockerImage
+#   docker build -t fptuxaes/aes-dotnet8-console:latest ./DockerImage
+#
+# ALTERNATIVE BUILD (if base image not available):
+#   1. Edit line 16 below to use: FROM mcr.microsoft.com/dotnet/sdk:8.0
+#   2. Then build: docker build -t fptuxaes/aes-dotnet8-console:latest ./DockerImage
 #
 # The grading system will use this image by default.
 # You can also specify a custom image in TestKit/Header.xlsx Config sheet
 # by adding a row: CodeImageName | your-image-name:tag
+#
+# IMPORTANT: If you get "error: failed to fetch metadata" during build,
+# it means the base image 'fptuxaes/aes-dotnet8:latest' is not available.
+# Replace it with one of these official Microsoft images:
+#   - mcr.microsoft.com/dotnet/sdk:8.0 (includes build tools)
+#   - mcr.microsoft.com/dotnet/aspnet:8.0 (runtime only, smaller)
 #
 FROM fptuxaes/aes-dotnet8:latest
 

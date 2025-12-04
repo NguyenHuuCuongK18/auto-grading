@@ -16,6 +16,12 @@ namespace EnvironmentBuilder.DockerCommand
     public class DockerCommandExecutor
     {
         private readonly CommandExecutor _commandExecutor;
+        
+        // CRITICAL FIX: Thread-safe cache for verified Docker images
+        // Prevents race conditions in parallel batch grading where multiple threads
+        // check the same image simultaneously and get inconsistent results
+        private static readonly HashSet<string> _verifiedImages = new HashSet<string>();
+        private static readonly object _verifiedImagesLock = new object();
 
         public DockerCommandExecutor()
         {
@@ -529,12 +535,25 @@ namespace EnvironmentBuilder.DockerCommand
         {
             try
             {
-                // check if network is existed
-                // not implemented
+                // CRITICAL FIX: Check if network already exists before creating
+                // This prevents race conditions in parallel grading where multiple
+                // students are graded simultaneously and all try to create the same network
+                string checkCommand = $"docker network ls --format \"{{{{.Name}}}}\" --filter name=^{networkName}$";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(checkCommand, null, null, 10000);
+                
+                // If network exists, output will contain the network name
+                bool networkExists = result.Output.Any(line => line.Trim().Equals(networkName, StringComparison.OrdinalIgnoreCase));
+                
+                if (networkExists)
+                {
+                    Console.WriteLine($"[Docker] Network {networkName} already exists, skipping creation");
+                    return;
+                }
 
                 // create new network
                 string createNetworkCommand = $"docker network create {networkName}";
                 _commandExecutor.RunCommandWithoutExitCheck(createNetworkCommand, null, null, timeoutInMilliseconds);
+                Console.WriteLine($"[Docker] Network {networkName} created successfully");
             }
             catch (Exception ex)
             {
@@ -666,6 +685,131 @@ namespace EnvironmentBuilder.DockerCommand
 
                 // return
                 return false;
+            }
+        }
+        
+        /// <summary>
+        /// Checks if a Docker image exists locally with retry logic for parallel grading reliability.
+        /// 
+        /// CRITICAL FIX: Uses caching and retry logic to prevent race conditions in parallel batch grading.
+        /// When multiple threads check the same image simultaneously, Docker commands can return inconsistent
+        /// results due to timing issues. This implementation:
+        /// 1. Caches verified images to avoid redundant checks
+        /// 2. Retries on failure to handle transient Docker issues
+        /// 3. Uses thread-safe operations to prevent race conditions
+        /// </summary>
+        public bool IsImageExist(string imageName)
+        {
+            // Check cache first (thread-safe)
+            lock (_verifiedImagesLock)
+            {
+                if (_verifiedImages.Contains(imageName))
+                {
+                    return true;
+                }
+            }
+            
+            // Try up to 3 times with small delays to handle transient Docker issues
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                try
+                {
+                    // Use 'docker image inspect' instead of 'docker images -q' for more reliable results
+                    // inspect returns detailed JSON if image exists, or error if it doesn't
+                    string command = $"docker image inspect {imageName}";
+                    var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, 10000);
+                    
+                    // If inspect succeeds and returns output, image exists
+                    bool imageExists = result.ExitCode == 0 && result.Output.Any(line => !string.IsNullOrWhiteSpace(line));
+                    
+                    if (imageExists)
+                    {
+                        // Cache the result (thread-safe)
+                        lock (_verifiedImagesLock)
+                        {
+                            _verifiedImages.Add(imageName);
+                        }
+                        Console.WriteLine($"[Docker] Image {imageName} verified (attempt {attempt})");
+                        return true;
+                    }
+                    
+                    // CRITICAL FIX: Don't immediately return false on first failure
+                    // Docker commands can return inconsistent results under load
+                    // Retry to ensure we're not getting a false negative
+                    if (attempt < 3)
+                    {
+                        Console.WriteLine($"[Docker] Attempt {attempt}/3: Image {imageName} not found, retrying...");
+                        Thread.Sleep(100 * attempt); // Exponential backoff: 100ms, 200ms
+                    }
+                    else
+                    {
+                        // After all retries, if still not found, it really doesn't exist
+                        Console.WriteLine($"[Docker] Image {imageName} does not exist after {attempt} attempts");
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Docker] Attempt {attempt}/3: Error checking if image {imageName} exists: {ex.Message}");
+                    
+                    if (attempt < 3)
+                    {
+                        // Wait a bit before retrying (exponential backoff)
+                        Thread.Sleep(100 * attempt);
+                    }
+                    else
+                    {
+                        // Final attempt failed - assume image doesn't exist
+                        Console.WriteLine($"[Docker] All attempts failed to check image {imageName}. Assuming it doesn't exist.");
+                        return false;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// Ensures a Docker image exists locally. If it doesn't exist, provides clear error message.
+        /// This prevents silent failures and Docker pull hangs during grading.
+        /// </summary>
+        /// <param name="imageName">The name of the Docker image</param>
+        /// <throws>Exception if the image doesn't exist with instructions on how to build it</throws>
+        public void EnsureImageExists(string imageName)
+        {
+            if (!IsImageExist(imageName))
+            {
+                throw new Exception($"Docker image '{imageName}' does not exist locally.\n\n" +
+                    $"Please build the image using one of these methods:\n" +
+                    $"1. From DockerImage folder:\n" +
+                    $"   docker build -t {imageName} ./DockerImage\n\n" +
+                    $"2. If the image should be pulled from a registry:\n" +
+                    $"   docker pull {imageName}\n\n" +
+                    $"3. Check TestKit/[Question]/Environment.xlsx for the correct image name\n\n" +
+                    $"Available images:\n{GetAvailableImages()}");
+            }
+        }
+        
+        /// <summary>
+        /// Gets a list of all available Docker images for error messages.
+        /// </summary>
+        private string GetAvailableImages()
+        {
+            try
+            {
+                string command = "docker images --format \"{{.Repository}}:{{.Tag}}\"";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, 10000);
+                
+                if (result.Output.Any())
+                {
+                    return string.Join("\n", result.Output.Take(10)); // Show first 10 images
+                }
+                
+                return "(No images found)";
+            }
+            catch
+            {
+                return "(Unable to list images)";
             }
         }
         #endregion
