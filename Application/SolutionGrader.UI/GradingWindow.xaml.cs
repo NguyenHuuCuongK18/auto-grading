@@ -542,7 +542,7 @@ namespace SolutionGrader.UI
         /// </summary>
         /// <param name="student">Student to grade</param>
         /// <param name="ct">Cancellation token</param>
-        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct, SemaphoreSlim startupLock = null)
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct, SemaphoreSlim? startupLock = null)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
