@@ -475,11 +475,10 @@ namespace SolutionGrader.UI
                                 // This ensures thread-safe, unique port allocation that never reuses ports
                                 await GradeStudentAsync(student, _cancellationTokenSource.Token, startupLock);
                                 
-                                // Write results after each student (with lock for thread safety)
-                                lock (resultLock)
-                                {
-                                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
-                                }
+                                // Write results after each student
+                                // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
+                                // No need for lock - the ResultWriter handles thread safety internally
+                                _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
                                 
                                 UpdateStatusBar();
                             }

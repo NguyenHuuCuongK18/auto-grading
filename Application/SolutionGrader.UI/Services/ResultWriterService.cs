@@ -90,22 +90,34 @@ namespace SolutionGrader.UI.Services
         
         /// <summary>
         /// Internal method that performs the actual write operation.
+        /// OPTIMIZATION: Runs on background thread pool to prevent blocking UI or worker threads.
         /// </summary>
         private void WritePendingResults()
         {
+            List<StudentSolution> studentsToWrite;
+            
             lock (_writeLock)
             {
                 if (!_hasPendingWrites || _cachedStudents == null)
                     return;
-                    
+                
+                // Capture data inside lock, then release lock before heavy I/O
+                studentsToWrite = _cachedStudents.ToList();
+                _hasPendingWrites = false;
+            }
+            
+            // Execute heavy Excel write operations on background thread pool
+            // This prevents blocking UI thread or worker threads that are grading students
+            Task.Run(() =>
+            {
                 try
                 {
                     // Write global summary
                     var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-                    WriteStudentsSolutionSummaryToFile(filePath, _cachedStudents);
+                    WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
 
                     // Write per-paper summaries
-                    var paperGroups = _cachedStudents.GroupBy(s => s.PaperNo);
+                    var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
                     foreach (var group in paperGroups)
                     {
                         var paperDir = Path.Combine(_baseResultPath, group.Key);
@@ -117,14 +129,12 @@ namespace SolutionGrader.UI.Services
                         var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
                         WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
                     }
-                    
-                    _hasPendingWrites = false;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError("Failed to write pending results", ex);
                 }
-            }
+            });
         }
 
         /// <summary>
