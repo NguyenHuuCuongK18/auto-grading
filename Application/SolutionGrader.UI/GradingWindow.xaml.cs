@@ -42,7 +42,8 @@ namespace SolutionGrader.UI
         
         private readonly ObservableCollection<StudentSolution> _students = new ObservableCollection<StudentSolution>();
         private readonly ObservableCollection<StudentSolution> _filteredStudents = new ObservableCollection<StudentSolution>();
-        private readonly StringBuilder _logBuffer = new StringBuilder();
+        private StringBuilder _logBuffer = new StringBuilder();
+        private int _estimatedLogCapacity = 8192; // Default for unknown student count
         
         private CancellationTokenSource? _cancellationTokenSource;
         private DispatcherTimer? _elapsedTimer;
@@ -401,6 +402,13 @@ namespace SolutionGrader.UI
             _isPaused = false;
             _sessionStartTime = DateTime.Now;
             _elapsedTimer?.Start();
+            
+            // OPTIMIZATION: Pre-allocate log buffer based on known student count
+            // Estimate ~2KB per student (includes test cases, setup, cleanup logs)
+            // This reduces memory allocations during grading
+            _estimatedLogCapacity = studentsToGrade.Count * 2048;
+            _logBuffer = new StringBuilder(_estimatedLogCapacity);
+            _logger.LogInfo($"Pre-allocated log buffer capacity: {_estimatedLogCapacity / 1024}KB for {studentsToGrade.Count} students");
             
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
@@ -967,12 +975,17 @@ namespace SolutionGrader.UI
             {
                 _logBuffer.Append(logLine);
                 
-                // Keep log buffer manageable
-                if (_logBuffer.Length > 50000)
+                // OPTIMIZATION: Keep log buffer manageable with dynamic threshold
+                // Use 2x estimated capacity as max to allow for overhead
+                var maxCapacity = Math.Max(50000, _estimatedLogCapacity * 2);
+                if (_logBuffer.Length > maxCapacity)
                 {
-                    var trimmed = _logBuffer.ToString().Substring(_logBuffer.Length - 40000);
+                    // Trim to 80% of max capacity to reduce frequent trimming
+                    var targetLength = (int)(maxCapacity * 0.8);
+                    var trimmed = _logBuffer.ToString().Substring(_logBuffer.Length - targetLength);
                     _logBuffer.Clear();
                     _logBuffer.Append(trimmed);
+                    _logger.LogDebug($"Log buffer trimmed to {targetLength / 1024}KB");
                 }
                 
                 txtLog.Text = _logBuffer.ToString();
