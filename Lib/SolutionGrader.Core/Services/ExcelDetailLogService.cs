@@ -1178,7 +1178,7 @@ namespace SolutionGrader.Core.Services
         /// <returns>Column index (1-based) if found, 0 if not found</returns>
         private int TryGetColumnIndex(Dictionary<string, int> hdr, params string[] names)
         {
-            foreach (var name in names)
+            foreach (var name in names.Where(n => !string.IsNullOrEmpty(n)))
             {
                 if (hdr.TryGetValue(name, out int colIndex))
                 {

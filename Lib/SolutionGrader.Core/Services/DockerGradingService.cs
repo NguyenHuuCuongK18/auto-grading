@@ -737,8 +737,8 @@ namespace SolutionGrader.Core.Services
             {
                 // IMPORTANT: Resolve actual DLLs to use based on Grade_Content
                 // This determines whether to use student's code or golden code for each component
-                string? actualServerDll = serverDllPath;
-                string? actualClientDll = clientDllPath;
+                string? actualServerDll;
+                string? actualClientDll;
                 
                 var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
                 Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
@@ -1354,24 +1354,20 @@ namespace SolutionGrader.Core.Services
                         var value = row.Cell(2).GetValue<string>()?.Trim() ?? "";
                         
                         // Read Timeout
-                        if (key.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) ||
-                            key.Equals("Timeout", StringComparison.OrdinalIgnoreCase))
+                        if ((key.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) ||
+                             key.Equals("Timeout", StringComparison.OrdinalIgnoreCase)) &&
+                            int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
-                            if (int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
-                            {
-                                timeout = parsedTimeout;
-                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
-                            }
+                            timeout = parsedTimeout;
+                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
                         }
                         
                         // Read Grade_Content
-                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(value))
                         {
-                            if (!string.IsNullOrWhiteSpace(value))
-                            {
-                                gradeContent = value;
-                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
-                            }
+                            gradeContent = value;
+                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
                         }
                     }
                     
@@ -1832,8 +1828,8 @@ namespace SolutionGrader.Core.Services
                     netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
                     
                     // Find matching actual packet(s) for this expected flow
-                    var actualPacketsForStage = capturesByStage.ContainsKey(expectedFlow.Stage) 
-                        ? capturesByStage[expectedFlow.Stage] 
+                    var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
+                        ? packets 
                         : new List<CapturedNetworkPacket>();
                     
                     // Try to find a packet that matches the expected flags
@@ -1934,7 +1930,6 @@ namespace SolutionGrader.Core.Services
                 // No expected flows and no captures - add a note
                 netWs.Cell(netRow, 1).Value = "N/A";
                 netWs.Cell(netRow, 2).Value = "No network flows expected or captured for this test case";
-                netRow++;
             }
             
             netWs.Columns().AdjustToContents();
