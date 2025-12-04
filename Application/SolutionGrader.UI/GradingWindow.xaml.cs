@@ -128,14 +128,6 @@ namespace SolutionGrader.UI
         {
             _logger.LogInfo("Loading students...");
             
-            // DIAGNOSTIC: Log configuration state to understand project name mapping
-            _logger.LogInfo($"[LoadStudents] Configuration state:");
-            _logger.LogInfo($"  - Project1Name: '{_configuration.Project1Name}', IsClient: {_configuration.Project1IsClient}");
-            _logger.LogInfo($"  - Project2Name: '{_configuration.Project2Name}', IsClient: {_configuration.Project2IsClient}");
-            _logger.LogInfo($"  - ClientProjectName (legacy): '{_configuration.ClientProjectName}'");
-            _logger.LogInfo($"  - ServerProjectName (legacy): '{_configuration.ServerProjectName}'");
-            _logger.LogInfo($"  - HasClient: {_configuration.HasClient}, HasServer: {_configuration.HasServer}");
-            
             try
             {
                 var students = _studentDiscovery.DiscoverStudents(_configuration.SubmitFolderPath, _configuration);
@@ -404,12 +396,6 @@ namespace SolutionGrader.UI
             _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
             PortAllocator.ClearAllAllocatedPorts();
             
-            // CRITICAL FIX: Clear Docker image cache at the start of a new grading session
-            // This ensures fresh image checks and prevents race conditions where cached results
-            // from a previous session might be stale or incorrect
-            _logger.LogInfo("[UI] Clearing Docker image cache for fresh validation...");
-            EnvironmentBuilder.DockerCommand.DockerCommandExecutor.ClearImageCache();
-            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -618,11 +604,6 @@ namespace SolutionGrader.UI
                 // APPROACH 2: Map Project1/Project2 role configuration directly to ClientProjectName/ServerProjectName
                 // This uses the new flexible role indication system instead of relying on legacy properties.
                 // The mapping logic ensures the correct project names are used based on configured roles.
-                
-                // DIAGNOSTIC: Log configuration state before mapping
-                _logger.LogInfo($"[GradeStudentAsync] Configuration before mapping:");
-                _logger.LogInfo($"  - Project1Name: '{_configuration.Project1Name}', IsClient: {_configuration.Project1IsClient}");
-                _logger.LogInfo($"  - Project2Name: '{_configuration.Project2Name}', IsClient: {_configuration.Project2IsClient}");
                 
                 // Determine client and server project names from the flexible Project1/Project2 configuration
                 string clientProjectName;
