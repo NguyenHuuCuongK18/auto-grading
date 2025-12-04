@@ -342,7 +342,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // CRITICAL FIX: Create a snapshot of devices to avoid "Collection was modified" exception
             // In parallel grading, another thread might call Clear() on _devices while we're iterating
             ICaptureDevice[] devicesSnapshot;
-            lock (_devices)
+            lock (_lock)
             {
                 devicesSnapshot = _devices.ToArray();
             }

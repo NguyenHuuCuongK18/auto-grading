@@ -731,6 +731,7 @@ namespace SolutionGrader.UI
                 // OPTIMIZATION: Stagger container startup to avoid Docker strain
                 // Acquire lock before starting containers, release when containers are actually ready
                 bool lockAcquired = false;
+                bool lockReleased = false;
                 if (startupLock != null)
                 {
                     await startupLock.WaitAsync(ct);
@@ -744,45 +745,60 @@ namespace SolutionGrader.UI
                 {
                     onContainersReady = () =>
                     {
+                        if (lockReleased) return; // Prevent double-release
+                        lockReleased = true;
                         startupLock.Release();
                         _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
                     };
                 }
                 
-                // Execute grading using the orchestration service - it handles status changes internally
-                // Pass the cancellation token so pause can abort the current grading
-                // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
-                var sessionState = new GradingSessionState();
-                await _gradingService.StartGradingAsync(
-                    new System.Collections.Generic.List<StudentSolution> { student },
-                    studentConfig,
-                    sessionState,
-                    ct,
-                    onContainersReady);
+                try
+                {
+                    // Execute grading using the orchestration service - it handles status changes internally
+                    // Pass the cancellation token so pause can abort the current grading
+                    // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
+                    var sessionState = new GradingSessionState();
+                    await _gradingService.StartGradingAsync(
+                        new System.Collections.Generic.List<StudentSolution> { student },
+                        studentConfig,
+                        sessionState,
+                        ct,
+                        onContainersReady);
                 
-                // Update final status
-                student.ProgressPercent = 100;
-                student.EndTime = DateTime.Now;
-                UpdateStudentInUI(student);
-                
-                _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}/{student.MaxMark}");
-            }
-            catch (OperationCanceledException)
-            {
-                // Grading was paused/cancelled - set status to Paused so it can be resumed
-                student.Status = GradingStatus.Paused;
-                student.StatusMessage = "Grading paused - will resume when unpaused";
-                student.EndTime = null; // Clear end time since not completed
-                _logger.LogInfo($"Grading paused for {student.StudentCode}");
-                UpdateStudentInUI(student);
-            }
-            catch (Exception ex)
-            {
-                student.Status = GradingStatus.Failed;
-                student.StatusMessage = ex.Message;
-                student.EndTime = DateTime.Now;
-                _logger.LogError($"Grading failed for {student.StudentCode}", ex);
-                UpdateStudentInUI(student);
+                    // Update final status
+                    student.ProgressPercent = 100;
+                    student.EndTime = DateTime.Now;
+                    UpdateStudentInUI(student);
+                    
+                    _logger.LogInfo($"Grading completed for {student.StudentCode}. Mark: {student.Mark}/{student.MaxMark}");
+                }
+                catch (OperationCanceledException)
+                {
+                    // Grading was paused/cancelled - set status to Paused so it can be resumed
+                    student.Status = GradingStatus.Paused;
+                    student.StatusMessage = "Grading paused - will resume when unpaused";
+                    student.EndTime = null; // Clear end time since not completed
+                    _logger.LogInfo($"Grading paused for {student.StudentCode}");
+                    UpdateStudentInUI(student);
+                }
+                catch (Exception ex)
+                {
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = ex.Message;
+                    student.EndTime = DateTime.Now;
+                    _logger.LogError($"Grading failed for {student.StudentCode}", ex);
+                    UpdateStudentInUI(student);
+                }
+                finally
+                {
+                    // Ensure lock is released if callback was never invoked
+                    if (lockAcquired && !lockReleased && startupLock != null)
+                    {
+                        lockReleased = true;
+                        startupLock.Release();
+                        _logger.LogWarning($"[Staggered Startup] Released lock for {student.StudentCode} via fallback");
+                    }
+                }
             }
             finally
             {

@@ -83,8 +83,52 @@ namespace SolutionGrader.UI.Services
                 
                 if (_hasPendingWrites && _cachedStudents != null)
                 {
-                    WritePendingResults();
+                    WritePendingResultsSync();
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Synchronous version for FlushPendingWrites to ensure completion before return.
+        /// </summary>
+        private void WritePendingResultsSync()
+        {
+            List<StudentSolution> studentsToWrite;
+            
+            lock (_writeLock)
+            {
+                if (!_hasPendingWrites || _cachedStudents == null)
+                    return;
+                
+                // Capture data inside lock, then release lock before heavy I/O
+                studentsToWrite = _cachedStudents.ToList();
+                _hasPendingWrites = false;
+            }
+            
+            // Synchronous write for flush scenario
+            try
+            {
+                // Write global summary
+                var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
+                WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
+
+                // Write per-paper summaries
+                var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
+                foreach (var group in paperGroups)
+                {
+                    var paperDir = Path.Combine(_baseResultPath, group.Key);
+                    if (!Directory.Exists(paperDir))
+                    {
+                        Directory.CreateDirectory(paperDir);
+                    }
+
+                    var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
+                    WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to write pending results", ex);
             }
         }
         
