@@ -735,11 +735,24 @@ namespace EnvironmentBuilder.DockerCommand
                         {
                             _verifiedImages.Add(imageName);
                         }
+                        Console.WriteLine($"[Docker] Image {imageName} verified (attempt {attempt})");
                         return true;
                     }
                     
-                    // Image doesn't exist - no need to retry
-                    return false;
+                    // CRITICAL FIX: Don't immediately return false on first failure
+                    // Docker commands can return inconsistent results under load
+                    // Retry to ensure we're not getting a false negative
+                    if (attempt < 3)
+                    {
+                        Console.WriteLine($"[Docker] Attempt {attempt}/3: Image {imageName} not found, retrying...");
+                        Thread.Sleep(100 * attempt); // Exponential backoff: 100ms, 200ms
+                    }
+                    else
+                    {
+                        // After all retries, if still not found, it really doesn't exist
+                        Console.WriteLine($"[Docker] Image {imageName} does not exist after {attempt} attempts");
+                        return false;
+                    }
                 }
                 catch (Exception ex)
                 {
