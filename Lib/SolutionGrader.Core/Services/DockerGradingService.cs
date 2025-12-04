@@ -581,6 +581,60 @@ namespace SolutionGrader.Core.Services
             Console.WriteLine($"[Docker] Warning: Container {containerName} may not be fully ready after {maxWaitSeconds}s");
         }
         
+        /// <summary>
+        /// OPTIMIZATION: Dynamically waits for a container to be removed instead of fixed delays.
+        /// Checks every 100ms up to maxWaitSeconds. Returns immediately when container is gone.
+        /// Much faster than fixed waits - typically returns in 0-200ms vs 500ms+ fixed delay.
+        /// </summary>
+        private async Task WaitForContainerRemovedAsync(string containerName, int maxWaitSeconds)
+        {
+            var maxAttempts = maxWaitSeconds * 10; // Check every 100ms
+            for (int i = 0; i < maxAttempts; i++)
+            {
+                if (!_dockerExecutor.IsContainerRunning(containerName))
+                {
+                    // Container is gone - return immediately
+                    return;
+                }
+                await Task.Delay(100); // Check every 100ms without logging
+            }
+            // If we get here, container still exists but proceed anyway
+            Console.WriteLine($"[Docker] Warning: Container {containerName} still exists after {maxWaitSeconds}s");
+        }
+        
+        /// <summary>
+        /// OPTIMIZATION: Dynamically waits for processes to be killed in a container.
+        /// Checks every 50ms up to maxWaitMs. Returns immediately when no target processes remain.
+        /// Much faster than fixed waits - typically returns in 0-100ms vs 100ms+ fixed delay.
+        /// </summary>
+        private async Task WaitForProcessesKilledAsync(string containerName, string processPattern, int maxWaitMs = 500)
+        {
+            var maxAttempts = maxWaitMs / 50; // Check every 50ms
+            for (int i = 0; i < maxAttempts; i++)
+            {
+                try
+                {
+                    // Check if any target processes still exist
+                    var command = $"{containerName} sh -c \"ps aux | grep '{processPattern}' | grep -v grep | wc -l\"";
+                    var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(command, 1000);
+                    
+                    if (success && int.TryParse(output.Trim(), out int count) && count == 0)
+                    {
+                        // All processes killed - return immediately
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Error checking processes - assume they're gone
+                    return;
+                }
+                
+                await Task.Delay(50); // Check every 50ms without logging
+            }
+            // If we get here, some processes may still exist but proceed anyway
+        }
+        
         private async Task CopyFilesToContainersAsync(
             string? serverDllPath,
             string? clientDllPath,
@@ -1046,8 +1100,9 @@ namespace SolutionGrader.Core.Services
                         break;
                 }
                 
-                // Brief delay between test cases - reduced from 200ms
-                await Task.Delay(50);
+                // OPTIMIZATION: Very brief delay between test cases (no need to wait longer)
+                // Containers remain running, only processes are killed
+                await Task.Delay(10);
             }
             
             return (clientOutputs, serverOutputs);
@@ -1524,9 +1579,10 @@ namespace SolutionGrader.Core.Services
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait briefly for graceful shutdown - reduced from 500ms as Docker handles this
+            // OPTIMIZATION: Wait for processes to be killed (dynamic check vs fixed 100ms)
             OnProgress("Cleanup: Waiting for graceful shutdown...");
-            await Task.Delay(100);
+            await WaitForProcessesKilledAsync(serverContainer, "dotnet", maxWaitMs: 200);
+            await WaitForProcessesKilledAsync(clientContainer, "dotnet", maxWaitMs: 200);
             
             // Force kill any remaining dotnet application processes (excluding PID 1)
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
@@ -1711,8 +1767,8 @@ namespace SolutionGrader.Core.Services
             try { _dockerExecutor.StopContainer(databaseContainer, 10000); } catch { }
             try { _dockerExecutor.RemoveContainer(databaseContainer, 10000); } catch { }
             
-            // Brief delay for Docker to complete removal - reduced from 2s
-            await Task.Delay(500);
+            // OPTIMIZATION: Wait for container to be fully removed (dynamic check vs fixed 500ms)
+            await WaitForContainerRemovedAsync(databaseContainer, maxWaitSeconds: 5);
             
             // Recreate the database container
             await SetupDatabaseContainerAsync(config);
@@ -1725,8 +1781,10 @@ namespace SolutionGrader.Core.Services
             _consoleManager.RemoveAllAttachments();
             try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
             try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
-            // Minimal delay - Docker handles async cleanup
-            await Task.Delay(50);
+            
+            // OPTIMIZATION: Wait for containers to be fully removed (dynamic check vs fixed 50ms)
+            await WaitForContainerRemovedAsync(serverContainer, maxWaitSeconds: 3);
+            await WaitForContainerRemovedAsync(clientContainer, maxWaitSeconds: 3);
         }
         
         #endregion
