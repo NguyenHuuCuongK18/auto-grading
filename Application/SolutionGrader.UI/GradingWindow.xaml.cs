@@ -565,17 +565,19 @@ namespace SolutionGrader.UI
                 // Use BeginInvoke (async) instead of Invoke (blocking) to prevent deadlocks when
                 // batch size equals student pool size (all students start simultaneously)
                 // Show "Multiple students" for batch grading to avoid constant UI thrashing
+                // BALANCED: Use Render priority to update current student display
+                // This ensures user sees which student is being graded without blocking workers
                 if (_configuration.MaxParallelStudents > 1)
                 {
                     Dispatcher.BeginInvoke(new Action(() => {
                         runCurrentStudent.Text = "Multiple students...";
-                    }));
+                    }), System.Windows.Threading.DispatcherPriority.Render);
                 }
                 else
                 {
                     Dispatcher.BeginInvoke(new Action(() => {
                         runCurrentStudent.Text = student.StudentCode;
-                    }));
+                    }), System.Windows.Threading.DispatcherPriority.Render);
                 }
                 
                 // Brief yield to reduce thread contention on UI thread
@@ -893,8 +895,8 @@ namespace SolutionGrader.UI
 
         private void UpdateButtonStates()
         {
-            // OPTIMIZATION: Use BeginInvoke (non-blocking) instead of Invoke (blocking)
-            // This prevents worker threads from blocking during parallel grading
+            // BALANCED: Use BeginInvoke with Normal priority for responsive UI without blocking
+            // Normal priority ensures UI updates happen promptly while not blocking worker threads
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 btnStartAll.IsEnabled = !_isRunning || _isPaused;
@@ -903,13 +905,13 @@ namespace SolutionGrader.UI
                 btnResume.IsEnabled = _isPaused;
                 btnResetAll.IsEnabled = !_isRunning;
                 btnResetSelected.IsEnabled = !_isRunning;
-            }));
+            }), System.Windows.Threading.DispatcherPriority.Normal);
         }
 
         private void UpdateStatusBar()
         {
-            // OPTIMIZATION: Use BeginInvoke (non-blocking) and cache statistics calculation
-            // Prevents worker threads from blocking and reduces UI thread workload
+            // BALANCED: Pre-compute on worker thread, update UI with Normal priority
+            // Ensures statistics are visible while maintaining performance
             var total = _students.Count;
             var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
             var success = _students.Count(s => s.Status == GradingStatus.Success);
@@ -924,19 +926,19 @@ namespace SolutionGrader.UI
                 runSuccess.Text = success.ToString();
                 runFailed.Text = failed.ToString();
                 runNotRun.Text = notRun.ToString();
-            }));
+            }), System.Windows.Threading.DispatcherPriority.Normal);
         }
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            // OPTIMIZATION: Use BeginInvoke (non-blocking) to prevent deadlocks
-            // Also throttle UI updates to reduce overhead during parallel grading
+            // BALANCED: Use Render priority for DataGrid refresh (visible to user)
+            // Render priority ensures user sees updates without blocking workers
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-            }));
+            }), System.Windows.Threading.DispatcherPriority.Render);
             
-            // Update status bar separately (doesn't need to be synchronous)
+            // Update status bar with Normal priority
             UpdateStatusBar();
         }
 
@@ -957,8 +959,8 @@ namespace SolutionGrader.UI
 
         private void Logger_LogAdded(object? sender, LogEventArgs e)
         {
-            // CRITICAL OPTIMIZATION: Use BeginInvoke to prevent blocking during parallel grading
-            // Logging can happen asynchronously without blocking worker threads
+            // BALANCED: Use Background priority for logging (less critical than grid updates)
+            // Logs update without impacting more important UI elements
             var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
             
             Dispatcher.BeginInvoke(new Action(() =>
@@ -975,7 +977,7 @@ namespace SolutionGrader.UI
                 
                 txtLog.Text = _logBuffer.ToString();
                 txtLog.ScrollToEnd();
-            }));
+            }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void GradingService_StudentGradingStarted(object? sender, StudentSolution student)

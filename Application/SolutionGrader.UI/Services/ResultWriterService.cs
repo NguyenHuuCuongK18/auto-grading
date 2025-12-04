@@ -129,13 +129,19 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Writes the students solution summary to a specific file path.
+        /// FIX: Always recreates workbook with ALL students to avoid data loss in parallel grading.
+        /// Each call writes the complete current state, not incremental updates.
         /// </summary>
         private void WriteStudentsSolutionSummaryToFile(string filePath, List<StudentSolution> students)
         {
-            _logger.LogInfo($"Writing students summary to {filePath}");
+            _logger.LogInfo($"Writing students summary to {filePath} ({students.Count} students)");
 
             try
             {
+                // CRITICAL FIX: Always create fresh workbook with ALL students
+                // This prevents data loss when multiple threads try to write simultaneously
+                // The deferred write mechanism in WriteStudentsSolutionSummary ensures this is called
+                // with the complete list of students, not partial updates
                 using var workbook = new XLWorkbook();
                 var worksheet = workbook.Worksheets.Add("Sheet1");
 
@@ -153,7 +159,7 @@ namespace SolutionGrader.UI.Services
                 headerRow.Style.Font.Bold = true;
                 headerRow.Style.Fill.BackgroundColor = XLColor.LightBlue;
 
-                // Data rows
+                // Data rows - write ALL students in sorted order
                 int row = 2;
                 int no = 1;
                 foreach (var student in students.OrderBy(s => int.TryParse(s.PaperNo, out var n) ? n : 0).ThenBy(s => s.StudentCode))
@@ -189,7 +195,7 @@ namespace SolutionGrader.UI.Services
                 worksheet.Columns().AdjustToContents();
 
                 workbook.SaveAs(filePath);
-                _logger.LogInfo($"Students summary written successfully");
+                _logger.LogInfo($"Students summary written successfully with {no - 1} students");
             }
             catch (Exception ex)
             {
