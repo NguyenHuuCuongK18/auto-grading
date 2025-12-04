@@ -446,7 +446,19 @@ namespace SolutionGrader.Core.Services
             
             await Task.Delay(500);
             
-            // Create network if needed
+            // CRITICAL: Check if code image exists before creating containers
+            // This prevents Docker from attempting to pull the image which can cause hangs
+            try
+            {
+                _dockerExecutor.EnsureImageExists(testKitConfig.CodeImageName);
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"ERROR: {ex.Message}");
+                throw;
+            }
+            
+            // Create network if needed (now has built-in race condition protection)
             try
             {
                 _dockerExecutor.CreateNetwork(config.DockerNetwork);
@@ -534,6 +546,18 @@ namespace SolutionGrader.Core.Services
             
             // Create new MSSQL database container
             Console.WriteLine($"[Docker] Creating new MSSQL database container {databaseContainer}...");
+            
+            // CRITICAL: Check if database image exists before creating container
+            try
+            {
+                _dockerExecutor.EnsureImageExists(config.DatabaseImageName);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker] ERROR: {ex.Message}");
+                throw new Exception($"Database image not found. Please pull the image:\n" +
+                    $"docker pull {config.DatabaseImageName}");
+            }
             
             var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
             var databaseBase = new DockerBase
