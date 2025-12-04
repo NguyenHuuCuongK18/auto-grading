@@ -737,8 +737,8 @@ namespace SolutionGrader.Core.Services
             {
                 // IMPORTANT: Resolve actual DLLs to use based on Grade_Content
                 // This determines whether to use student's code or golden code for each component
-                string? actualServerDll;
-                string? actualClientDll;
+                string? actualServerDll = null;
+                string? actualClientDll = null;
                 
                 var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
                 Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
