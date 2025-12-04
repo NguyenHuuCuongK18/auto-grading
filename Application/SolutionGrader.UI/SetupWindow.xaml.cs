@@ -162,28 +162,12 @@ namespace SolutionGrader.UI
                 // If Project2 is server (not client): !Project2IsClient = true
                 // HasServer = (!Project1IsClient) OR (!Project2IsClient)
                 _configuration.HasServer = !_configuration.Project1IsClient || !_configuration.Project2IsClient;
-                
-                // CRITICAL FIX: Map Project1/Project2 to ClientProjectName/ServerProjectName
-                // for backward compatibility with GradingOrchestrationService
-                // This ensures the grading service can find the correct DLL files
-                _configuration.ClientProjectName = _configuration.Project1IsClient 
-                    ? _configuration.Project1Name 
-                    : _configuration.Project2Name;
-                _configuration.ServerProjectName = _configuration.Project1IsClient 
-                    ? _configuration.Project2Name 
-                    : _configuration.Project1Name;
             }
             else if (hasProject1 || hasProject2)
             {
                 // Only one project specified - it serves both roles (or is the only component)
                 _configuration.HasClient = true;
                 _configuration.HasServer = true;
-                
-                // CRITICAL FIX: Set both ClientProjectName and ServerProjectName to the same project
-                // since it handles both roles
-                var singleProjectName = hasProject1 ? _configuration.Project1Name : _configuration.Project2Name;
-                _configuration.ClientProjectName = singleProjectName;
-                _configuration.ServerProjectName = singleProjectName;
             }
             else
             {
@@ -191,6 +175,11 @@ namespace SolutionGrader.UI
                 _configuration.HasClient = false;
                 _configuration.HasServer = false;
             }
+            
+            // NOTE: We do NOT set ClientProjectName/ServerProjectName here.
+            // GradingWindow will map Project1/Project2 -> ClientProjectName/ServerProjectName
+            // directly when creating the student-specific configuration.
+            // This keeps the setup clean and delegates the mapping logic to where it's used.
 
             // Validate configuration
             if (!ValidateConfiguration())

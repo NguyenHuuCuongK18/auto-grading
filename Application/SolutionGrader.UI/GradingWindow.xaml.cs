@@ -600,6 +600,49 @@ namespace SolutionGrader.UI
                 // NOTE: We use the dynamically allocated port from PortAllocator instead of the old
                 // offset-based approach. This prevents race conditions where ports get reused while
                 // still being in use by another student.
+                //
+                // APPROACH 2: Map Project1/Project2 role configuration directly to ClientProjectName/ServerProjectName
+                // This uses the new flexible role indication system instead of relying on legacy properties.
+                // The mapping logic ensures the correct project names are used based on configured roles.
+                
+                // Determine client and server project names from the flexible Project1/Project2 configuration
+                string clientProjectName;
+                string serverProjectName;
+                
+                bool hasProject1 = !string.IsNullOrWhiteSpace(_configuration.Project1Name);
+                bool hasProject2 = !string.IsNullOrWhiteSpace(_configuration.Project2Name);
+                
+                if (hasProject1 && hasProject2)
+                {
+                    // Two projects: Map based on their configured roles
+                    clientProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project1Name 
+                        : _configuration.Project2Name;
+                    serverProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project2Name 
+                        : _configuration.Project1Name;
+                    
+                    _logger.LogInfo($"Two-project configuration: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                else if (hasProject1 || hasProject2)
+                {
+                    // Single project: It handles both client and server roles
+                    var singleProjectName = hasProject1 ? _configuration.Project1Name : _configuration.Project2Name;
+                    clientProjectName = singleProjectName;
+                    serverProjectName = singleProjectName;
+                    
+                    _logger.LogInfo($"Single-project configuration: {singleProjectName} (handles both roles)");
+                }
+                else
+                {
+                    // Fallback to legacy properties if Project1/Project2 are not configured
+                    // This maintains backward compatibility with older configurations
+                    clientProjectName = _configuration.ClientProjectName;
+                    serverProjectName = _configuration.ServerProjectName;
+                    
+                    _logger.LogWarning($"Using legacy project names: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                
                 var studentConfig = new GradingConfiguration
                 {
                     SubmitFolderPath = _configuration.SubmitFolderPath,
@@ -607,8 +650,17 @@ namespace SolutionGrader.UI
                     SaveResultFolderPath = _configuration.SaveResultFolderPath,
                     HasClient = _configuration.HasClient,
                     HasServer = _configuration.HasServer,
-                    ClientProjectName = _configuration.ClientProjectName,
-                    ServerProjectName = _configuration.ServerProjectName,
+                    
+                    // Use the mapped project names from flexible role configuration
+                    ClientProjectName = clientProjectName,
+                    ServerProjectName = serverProjectName,
+                    
+                    // Also copy Project1/Project2 properties for services that might use them
+                    Project1Name = _configuration.Project1Name,
+                    Project2Name = _configuration.Project2Name,
+                    Project1IsClient = _configuration.Project1IsClient,
+                    Project2IsClient = _configuration.Project2IsClient,
+                    
                     MaxParallelStudents = _configuration.MaxParallelStudents,
                     GradingTimeoutSeconds = _configuration.GradingTimeoutSeconds,
                     DockerNetwork = _configuration.DockerNetwork,
@@ -629,6 +681,8 @@ namespace SolutionGrader.UI
                     DatabaseUsername = testKitConfig.DatabaseUsername,
                     DatabasePassword = testKitConfig.DatabasePassword
                 };
+                
+                _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
                 
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
