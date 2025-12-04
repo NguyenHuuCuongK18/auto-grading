@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using SolutionGrader.Core.Services;
 using SolutionGrader.UI.Models;
 using SolutionGrader.UI.Services;
 
@@ -343,6 +344,17 @@ namespace SolutionGrader.UI
                 return;
             }
             
+            // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
+            // This prevents port exhaustion from previous runs while ensuring no port reuse
+            // DURING the current session (which could cause race conditions in parallel grading).
+            // 
+            // The "never reuse" policy applies WITHIN a session - once a port is allocated
+            // for this session, it stays allocated until the session ends. This prevents
+            // the race condition where Student A finishes and releases port 8001, but the
+            // system incorrectly reuses it while Student B is still being graded.
+            _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
+            PortAllocator.ClearAllAllocatedPorts();
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -352,6 +364,7 @@ namespace SolutionGrader.UI
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
             _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
+            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
             if (_configuration.MaxParallelStudents > 1)
             {
@@ -378,7 +391,7 @@ namespace SolutionGrader.UI
                         if (_cancellationTokenSource.Token.IsCancellationRequested)
                             break;
                         
-                        await GradeStudentAsync(student, 0, _cancellationTokenSource.Token);
+                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
                         
                         // Write results after each student
                         _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
@@ -389,7 +402,7 @@ namespace SolutionGrader.UI
                 else
                 {
                     // Parallel grading using SemaphoreSlim to limit concurrency
-                    // Each student gets their own port offset based on their position in the batch
+                    // Each student gets a dynamically allocated port via PortAllocator
                     var resultLock = new object();
                     var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents);
                     
@@ -407,11 +420,9 @@ namespace SolutionGrader.UI
                             if (_cancellationTokenSource.Token.IsCancellationRequested)
                                 return;
                             
-                            // Calculate port offset for this student to ensure unique ports in parallel execution
-                            // Port offset is based on position within the parallel batch
-                            var portOffset = index % _configuration.MaxParallelStudents;
-                            
-                            await GradeStudentAsync(student, portOffset, _cancellationTokenSource.Token);
+                            // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                            // This ensures thread-safe, unique port allocation that never reuses ports
+                            await GradeStudentAsync(student, _cancellationTokenSource.Token);
                             
                             // Write results after each student (with lock for thread safety)
                             lock (resultLock)
@@ -455,10 +466,45 @@ namespace SolutionGrader.UI
             }
         }
 
-        private async Task GradeStudentAsync(StudentSolution student, int portOffset, CancellationToken ct)
+        /// <summary>
+        /// Grades a single student using Docker-based grading.
+        /// 
+        /// Port allocation is handled dynamically using PortAllocator to ensure
+        /// thread-safe, unique port allocation that never reuses ports within a session.
+        /// This prevents race conditions in parallel grading where ports could be
+        /// incorrectly reused while still in use by another student.
+        /// </summary>
+        /// <param name="student">Student to grade</param>
+        /// <param name="ct">Cancellation token</param>
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
+            
+            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+            // This replaces the old portOffset-based approach which could lead to race conditions
+            // when students finish at different times and ports get reused incorrectly.
+            //
+            // CRITICAL: The PortAllocator ensures ports are NEVER reused within a grading session.
+            // This prevents the scenario where:
+            // - Student A starts with port 8001
+            // - Student B starts with port 8000  
+            // - Student A finishes and releases port 8001
+            // - The system incorrectly reuses port 8000 (still in use by Student B)
+            using var portAllocator = new PortAllocator();
+            int allocatedPort = portAllocator.AllocatePort();
+            
+            if (allocatedPort == -1)
+            {
+                _logger.LogError($"[UI] Failed to allocate port for student {student.StudentCode}");
+                student.Status = GradingStatus.Failed;
+                student.StatusMessage = "Failed to allocate port for grading";
+                student.EndTime = DateTime.Now;
+                UpdateStudentInUI(student);
+                return;
+            }
+            
+            _logger.LogInfo($"[UI] Allocated port {allocatedPort} for student {student.StudentCode}");
             
             try
             {
@@ -499,10 +545,14 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
-                // CRITICAL: Create a student-specific configuration copy with port offset
+                // CRITICAL: Create a student-specific configuration copy with DYNAMICALLY ALLOCATED port
                 // Each parallel student needs their own configuration with unique ports to avoid conflicts
                 // This ensures each student's network monitor captures traffic on their specific port
                 // Internal and external ports MUST match for network monitoring with npcap/libpcap
+                //
+                // NOTE: We use the dynamically allocated port from PortAllocator instead of the old
+                // offset-based approach. This prevents race conditions where ports get reused while
+                // still being in use by another student.
                 var studentConfig = new GradingConfiguration
                 {
                     SubmitFolderPath = _configuration.SubmitFolderPath,
@@ -518,9 +568,11 @@ namespace SolutionGrader.UI
                     StartIndex = _configuration.StartIndex,
                     EndIndex = _configuration.EndIndex,
                     
-                    // Apply port offset for parallel grading - each student gets unique ports
-                    CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort + portOffset,
-                    CodeContainerHostPort = testKitConfig.CodeContainerHostPort + portOffset,
+                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
+                    // This ensures each student's client reaches their own server via host.docker.internal
+                    // The PortAllocator ensures no port reuse during the grading session
+                    CodeContainerInternalPort = allocatedPort,
+                    CodeContainerHostPort = allocatedPort,
                     
                     // Database settings from test kit
                     DatabaseImageName = testKitConfig.DatabaseImageName,
@@ -531,9 +583,9 @@ namespace SolutionGrader.UI
                     DatabasePassword = testKitConfig.DatabasePassword
                 };
                 
-                _logger.LogInfo($"Using ports - Internal: {studentConfig.CodeContainerInternalPort}, Host: {studentConfig.CodeContainerHostPort} (base + offset {portOffset})");
+                _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
-                _logger.LogInfo($"Network monitor will capture traffic on host port {studentConfig.CodeContainerHostPort}");
+                _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
                 // Pass the cancellation token so pause can abort the current grading

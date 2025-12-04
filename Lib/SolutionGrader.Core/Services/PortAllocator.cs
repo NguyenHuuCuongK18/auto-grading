@@ -13,20 +13,33 @@ namespace SolutionGrader.Core.Services
     /// Uses a system-wide Mutex to ensure port allocation is synchronized across
     /// multiple parallel grading processes.
     /// 
-    /// CRITICAL DESIGN: Ports are NEVER RELEASED during a grading session to avoid
-    /// race conditions in parallel grading. With 100 available ports (8000-8099),
-    /// we have plenty of capacity without needing to reuse ports.
+    /// CRITICAL DESIGN: Ports are tracked but NEVER MARKED AS RELEASED during a grading 
+    /// session to avoid race conditions in parallel grading. The actual port binding 
+    /// (OS level) is released when Docker containers are cleaned up, but our tracking
+    /// file keeps the port marked as "in use" to prevent reuse.
+    /// 
+    /// With 100 available ports (8000-8099), we have plenty of capacity without needing 
+    /// to reuse ports within a single grading session.
     /// 
     /// Example scenario that motivated this design:
     /// - Student A starts with port 8001
     /// - Student B starts with port 8000
-    /// - Student A finishes grading and releases 8001
-    /// - System incorrectly assumes 8000 is done and tries to reuse it
-    /// - CONFLICT: Student B is still using port 8000!
+    /// - Student A finishes grading, Docker container is removed (OS releases port 8001)
+    /// - If we marked port 8001 as "released" in our tracking, the system might try to 
+    ///   reuse it while Student B is still being graded
+    /// - CONFLICT: Race condition between different grading processes!
     /// 
-    /// Solution: Never reuse ports. Once allocated, a port stays allocated for the
-    /// entire grading session. This prevents all race conditions at the cost of
-    /// limiting parallel grading to 100 students maximum.
+    /// Solution: 
+    /// - The actual port binding is released when Docker containers are cleaned up (normal)
+    /// - But our tracking file NEVER marks ports as released during a session
+    /// - Once a port is allocated for a student, it stays marked as "used" until the 
+    ///   entire grading session ends
+    /// 
+    /// To clear ports after a grading session ends, delete the port tracking file:
+    /// - Linux/macOS: /tmp/AutoGrading_AssignedPorts.txt
+    /// - Windows: %TEMP%\AutoGrading_AssignedPorts.txt
+    /// 
+    /// Or use ClearAllAllocatedPorts() at the START of a new grading session.
     /// 
     /// Based on test-grader reference implementation:
     /// https://github.com/NguyenHuuCuongK18/test-grader.git
@@ -42,6 +55,7 @@ namespace SolutionGrader.Core.Services
             "AutoGrading_AssignedPorts.txt");
         
         private readonly Mutex _mutex;
+        private bool _disposed = false;
 
         public PortAllocator()
         {
@@ -59,8 +73,10 @@ namespace SolutionGrader.Core.Services
         /// Allocates an available port for code containers (server/client).
         /// Uses Mutex to ensure thread-safe port allocation across parallel grading.
         /// 
-        /// CRITICAL: Ports are NEVER RELEASED to avoid race conditions.
-        /// Once a port is allocated, it remains allocated for the entire grading session.
+        /// CRITICAL: Ports are tracked but NEVER MARKED AS RELEASED during a session.
+        /// The actual port binding (OS level) is released when Docker containers are 
+        /// cleaned up, but our tracking file keeps the port marked as "in use" to 
+        /// prevent the grading system from reusing it within the same session.
         /// </summary>
         /// <returns>An available port number, or -1 if no ports available</returns>
         public int AllocatePort()
@@ -85,13 +101,14 @@ namespace SolutionGrader.Core.Services
                         {
                             assignedPorts.Add(port);
                             SaveAssignedPorts(assignedPorts);
-                            Console.WriteLine($"[PortAllocator] Allocated port {port} (will NOT be released - no reuse)");
+                            Console.WriteLine($"[PortAllocator] Allocated port {port} (tracked - will NOT be marked as released during this session)");
                             return port;
                         }
                     }
 
                     Console.WriteLine($"[PortAllocator] ERROR: No available ports in range {PORT_RANGE_START}-{PORT_RANGE_END}");
-                    Console.WriteLine($"[PortAllocator] TIP: Ports are never released during grading. Consider clearing {PortFilePath} if all ports are exhausted.");
+                    Console.WriteLine($"[PortAllocator] TIP: Ports are tracked and never marked as released during grading to prevent race conditions.");
+                    Console.WriteLine($"[PortAllocator] TIP: To reset, delete {PortFilePath} or call ClearAllAllocatedPorts() at session start.");
                     return -1;
                 }
                 finally
@@ -113,45 +130,74 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Releases a previously allocated port.
+        /// Clears ALL allocated ports from the tracking file.
+        /// 
+        /// IMPORTANT: Only call this at the START of a new grading session,
+        /// NEVER during an active grading session as it will cause port conflicts.
+        /// 
+        /// This is useful to reset the port pool when:
+        /// - Starting a completely new grading session
+        /// - All previous grading processes have completed
+        /// - The port file has become stale
         /// </summary>
-        /// <param name="port">Port number to release</param>
-        public void ReleasePort(int port)
+        public static void ClearAllAllocatedPorts()
         {
             try
             {
-                if (!_mutex.WaitOne(TimeSpan.FromSeconds(30)))
+                using var mutex = new Mutex(false, SHARED_MUTEX_NAME);
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(30)))
                 {
-                    Console.WriteLine($"[PortAllocator] WARNING: Timeout waiting for mutex to release port {port}");
+                    Console.WriteLine("[PortAllocator] WARNING: Timeout waiting for mutex to clear ports");
                     return;
                 }
 
                 try
                 {
-                    var assignedPorts = LoadAssignedPorts();
-                    if (assignedPorts.Remove(port))
+                    if (File.Exists(PortFilePath))
                     {
-                        SaveAssignedPorts(assignedPorts);
-                        Console.WriteLine($"[PortAllocator] Released port {port}");
+                        File.Delete(PortFilePath);
+                        Console.WriteLine($"[PortAllocator] Cleared all port tracking (deleted {PortFilePath})");
                     }
                     else
                     {
-                        Console.WriteLine($"[PortAllocator] WARNING: Port {port} was not assigned");
+                        Console.WriteLine("[PortAllocator] No port tracking file to clear");
                     }
                 }
                 finally
                 {
-                    _mutex.ReleaseMutex();
+                    mutex.ReleaseMutex();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PortAllocator] ERROR releasing port {port}: {ex.Message}");
+                Console.WriteLine($"[PortAllocator] ERROR clearing ports: {ex.Message}");
             }
         }
 
         /// <summary>
+        /// Gets the current count of tracked (allocated) ports.
+        /// Useful for monitoring and diagnostics.
+        /// </summary>
+        public static int GetAllocatedPortCount()
+        {
+            try
+            {
+                if (File.Exists(PortFilePath))
+                {
+                    var lines = File.ReadAllLines(PortFilePath);
+                    return lines.Count(line => int.TryParse(line.Trim(), out _));
+                }
+            }
+            catch
+            {
+                // Ignore errors for diagnostic method
+            }
+            return 0;
+        }
+
+        /// <summary>
         /// Checks if a port is available by attempting to bind to it.
+        /// This checks if the OS-level port is available (not bound by any process).
         /// </summary>
         private bool IsPortAvailable(int port)
         {
@@ -173,7 +219,7 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Loads currently assigned ports from shared file.
+        /// Loads currently tracked (allocated) ports from shared file.
         /// </summary>
         private HashSet<int> LoadAssignedPorts()
         {
@@ -199,7 +245,7 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Saves currently assigned ports to shared file.
+        /// Saves currently tracked (allocated) ports to shared file.
         /// </summary>
         private void SaveAssignedPorts(HashSet<int> assignedPorts)
         {
@@ -214,16 +260,40 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Cleanup: Release allocated port when disposed.
+        /// Disposes the PortAllocator resources.
+        /// 
+        /// IMPORTANT: This does NOT mark the port as "released" in our tracking file.
+        /// 
+        /// The actual port binding (OS level) is released when Docker containers are
+        /// cleaned up - this is normal and expected. However, our tracking file keeps
+        /// the port marked as "in use" to prevent the grading system from reusing it
+        /// within the same session.
+        /// 
+        /// This design prevents race conditions where:
+        /// - Student A finishes and their Docker containers are cleaned up
+        /// - The OS releases the port binding
+        /// - If we marked the port as "released", another student might get assigned the same port
+        /// - But the previous grading process might still have lingering processes/files
+        /// 
+        /// The port tracking will be cleared only when:
+        /// - ClearAllAllocatedPorts() is called at the start of a new session
+        /// - The port tracking file is manually deleted
         /// </summary>
         public void Dispose()
         {
-            if (_allocatedPort.HasValue)
+            if (!_disposed)
             {
-                ReleasePort(_allocatedPort.Value);
-                _allocatedPort = null;
+                _disposed = true;
+                // NOTE: We intentionally do NOT mark the port as "released" in our tracking file.
+                // The actual port binding (OS level) will be released when Docker containers 
+                // are cleaned up - this is normal. But we keep the port tracked as "used" in
+                // our file to prevent the grading system from reusing it during this session.
+                // 
+                // This is the core fix for the multi-grading port reuse issue:
+                // - Port is released at OS level (Docker container cleanup) ✓
+                // - Port is NOT marked as released in tracking file (prevents reuse) ✓
+                _mutex?.Dispose();
             }
-            _mutex?.Dispose();
         }
     }
 }

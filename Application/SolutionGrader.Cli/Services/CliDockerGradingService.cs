@@ -50,6 +50,17 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine("[CLI] This ensures IDENTICAL behavior between CLI and UI.");
             Console.WriteLine();
 
+            // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
+            // This prevents port exhaustion from previous runs while ensuring no port reuse
+            // DURING the current session (which could cause race conditions in parallel grading).
+            // 
+            // The "never reuse" policy applies WITHIN a session - once a port is allocated
+            // for this session, it stays allocated until the session ends. This prevents
+            // the race condition where Student A finishes and releases port 8001, but the
+            // system incorrectly reuses it while Student B is still being graded.
+            Console.WriteLine("[CLI] Clearing port allocation from previous sessions...");
+            PortAllocator.ClearAllAllocatedPorts();
+
             // Check if Docker is running
             if (!_dockerExecutor.IsDockerRunning())
             {
@@ -75,6 +86,7 @@ namespace SolutionGrader.Cli.Services
 
             Console.WriteLine($"[CLI] Found {allStudents.Count} student(s) total, grading {students.Count} student(s) in index range [{config.StartIndex}, {(config.EndIndex == -1 ? "end" : config.EndIndex.ToString())}].");
             Console.WriteLine($"[CLI] Parallel grading: {config.MaxParallelStudents} student(s) at a time.");
+            Console.WriteLine($"[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             Console.WriteLine();
 
             // Create output directory
