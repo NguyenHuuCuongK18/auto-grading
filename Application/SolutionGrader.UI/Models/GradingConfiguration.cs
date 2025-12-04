@@ -8,9 +8,28 @@ namespace SolutionGrader.UI.Models
     /// Configuration settings for a grading session.
     /// Contains paths, project names, and Docker container settings.
     /// 
+    /// Important: This system only grades Question 1. Question 2, 3, etc. are not supported.
+    /// 
     /// Note: Port configurations (CodeContainerInternalPort, CodeContainerHostPort) are read from
     /// each test kit's Environment.xlsx file. Defaults here are 0 to indicate "unspecified" so the
     /// Lib services will use values from the test kit and not override them from the UI.
+    /// 
+    /// Project Mapping (for Question 1 only):
+    /// - Project1Name/Project2Name: The names of the Question 1 projects (e.g., "Q1", "Q11", "Q12", "Project11", "Project12")
+    /// - Project1IsClient/Project2IsClient: Indicates the role (client or server) of each project
+    /// - If only one project is specified, it's assumed to be both client and server (or the only component)
+    /// - If two projects are specified (client/server architecture), roles must be explicitly defined
+    /// 
+    /// This flexible structure handles cases where:
+    /// 1. Students submit with generic names like "Q1_studentcode" instead of "Project11_studentcode"
+    /// 2. Students split Question 1 into client/server using Q11 (server) and Q12 (client)
+    /// 3. Different papers require students to code different components (client, server, or both)
+    /// 4. The test kit's Header.xlsx Grade content dictates which project is client/server
+    /// 
+    /// Examples:
+    /// - Single project: Q1 → Both client and server use Q1.dll
+    /// - Dual project traditional: Project11 (server) + Project12 (client)
+    /// - Dual project numbered: Q11 (server) + Q12 (client) - both for Question 1!
     /// </summary>
     public class GradingConfiguration : INotifyPropertyChanged
     {
@@ -19,6 +38,14 @@ namespace SolutionGrader.UI.Models
         private string _saveResultFolderPath = string.Empty;
         private bool _hasClient = true;
         private bool _hasServer = true;
+        
+        // New project mapping structure
+        private string _project1Name = string.Empty;
+        private string _project2Name = string.Empty;
+        private bool _project1IsClient = false; // true = client, false = server
+        private bool _project2IsClient = true;  // true = client, false = server
+        
+        // Legacy properties for backward compatibility
         private string _clientProjectName = "Project12";
         private string _serverProjectName = "Project11";
         // Default to 0 (unspecified). DockerGradingService will read from Environment.xlsx.
@@ -72,16 +99,115 @@ namespace SolutionGrader.UI.Models
             set { _hasServer = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// First project name (e.g., "Q1", "Project11"). Can be client or server based on Project1IsClient.
+        /// </summary>
+        public string Project1Name
+        {
+            get => _project1Name;
+            set { _project1Name = value; OnPropertyChanged(); UpdateLegacyProperties(); }
+        }
+
+        /// <summary>
+        /// Second project name (e.g., "Q2", "Project12"). Can be client or server based on Project2IsClient.
+        /// </summary>
+        public string Project2Name
+        {
+            get => _project2Name;
+            set { _project2Name = value; OnPropertyChanged(); UpdateLegacyProperties(); }
+        }
+
+        /// <summary>
+        /// Indicates whether Project1 is the client. If false, Project1 is the server.
+        /// </summary>
+        public bool Project1IsClient
+        {
+            get => _project1IsClient;
+            set { _project1IsClient = value; OnPropertyChanged(); UpdateLegacyProperties(); }
+        }
+
+        /// <summary>
+        /// Indicates whether Project2 is the client. If false, Project2 is the server.
+        /// </summary>
+        public bool Project2IsClient
+        {
+            get => _project2IsClient;
+            set { _project2IsClient = value; OnPropertyChanged(); UpdateLegacyProperties(); }
+        }
+
+        /// <summary>
+        /// Legacy property: Client project name for backward compatibility.
+        /// This is automatically updated based on Project1/Project2 mapping.
+        /// </summary>
         public string ClientProjectName
         {
             get => _clientProjectName;
             set { _clientProjectName = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// Legacy property: Server project name for backward compatibility.
+        /// This is automatically updated based on Project1/Project2 mapping.
+        /// </summary>
         public string ServerProjectName
         {
             get => _serverProjectName;
             set { _serverProjectName = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Updates the legacy ClientProjectName and ServerProjectName properties
+        /// based on the new Project1/Project2 mapping structure.
+        /// This ensures backward compatibility with existing code that uses the legacy properties.
+        /// </summary>
+        private void UpdateLegacyProperties()
+        {
+            // Determine which project is client and which is server
+            if (!string.IsNullOrWhiteSpace(_project1Name) && !string.IsNullOrWhiteSpace(_project2Name))
+            {
+                // Both projects specified - use role flags
+                AssignRoles(_project1Name, _project2Name, _project1IsClient);
+            }
+            else if (!string.IsNullOrWhiteSpace(_project1Name))
+            {
+                // Only project1 specified - it serves both roles or is the only component
+                AssignBothRoles(_project1Name);
+            }
+            else if (!string.IsNullOrWhiteSpace(_project2Name))
+            {
+                // Only project2 specified - it serves both roles or is the only component
+                AssignBothRoles(_project2Name);
+            }
+            
+            OnPropertyChanged(nameof(ClientProjectName));
+            OnPropertyChanged(nameof(ServerProjectName));
+        }
+        
+        /// <summary>
+        /// Assigns client and server roles based on which project is marked as client.
+        /// </summary>
+        private void AssignRoles(string project1, string project2, bool project1IsClient)
+        {
+            if (project1IsClient)
+            {
+                _clientProjectName = project1;
+                _serverProjectName = project2;
+            }
+            else
+            {
+                _serverProjectName = project1;
+                _clientProjectName = project2;
+            }
+        }
+        
+        /// <summary>
+        /// Assigns the same project name to both client and server roles.
+        /// Used when only one project is specified.
+        /// </summary>
+        private void AssignBothRoles(string projectName)
+        {
+            _clientProjectName = projectName;
+            _serverProjectName = projectName;
         }
 
         /// <summary>
@@ -194,6 +320,10 @@ namespace SolutionGrader.UI.Models
                 SaveResultFolderPath = this.SaveResultFolderPath,
                 HasClient = this.HasClient,
                 HasServer = this.HasServer,
+                Project1Name = this.Project1Name,
+                Project2Name = this.Project2Name,
+                Project1IsClient = this.Project1IsClient,
+                Project2IsClient = this.Project2IsClient,
                 ClientProjectName = this.ClientProjectName,
                 ServerProjectName = this.ServerProjectName,
                 CodeContainerInternalPort = this.CodeContainerInternalPort,

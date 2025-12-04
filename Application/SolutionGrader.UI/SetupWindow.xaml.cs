@@ -12,7 +12,13 @@ namespace SolutionGrader.UI
     /// - Select the Submit folder containing student solutions
     /// - Select the Test Kit folder containing test cases
     /// - Select the save location for grading results
-    /// - Configure client/server project names for DLL lookup
+    /// - Configure project names and their roles (client/server) for DLL lookup
+    /// 
+    /// Project Configuration:
+    /// - Users can specify 1 or 2 project names (e.g., Q1, Q2, Project11, Project12)
+    /// - If only 1 project is specified, it's assumed to be both client and server (or the only component)
+    /// - If 2 projects are specified, users must use radio buttons to indicate which is client and which is server
+    /// - This flexible structure handles various student submission formats
     /// 
     /// Port configurations are NOT set here - they are read from each test kit's
     /// Environment.xlsx file to ensure consistency with the test kit's expected
@@ -30,17 +36,14 @@ namespace SolutionGrader.UI
             InitializeComponent();
             _configuration = new GradingConfiguration();
 
-            // Hook up events AFTER components are created to avoid early invocation
-            chkHasClient.Checked += ChkHasClient_CheckedChanged;
-            chkHasClient.Unchecked += ChkHasClient_CheckedChanged;
-            chkHasServer.Checked += ChkHasServer_CheckedChanged;
-            chkHasServer.Unchecked += ChkHasServer_CheckedChanged;
-
-            // Sync initial state
-            txtClientProjectName.IsEnabled = chkHasClient.IsChecked == true;
-            txtServerProjectName.IsEnabled = chkHasServer.IsChecked == true;
-            _configuration.HasClient = chkHasClient.IsChecked == true;
-            _configuration.HasServer = chkHasServer.IsChecked == true;
+            // Initialize with default values - but roles are now flexible
+            // Default to Project 1 being server (typically Q1 is server in many scenarios)
+            // and Project 2 being client (typically Q2 is client)
+            rbProject1Server.IsChecked = true;
+            rbProject2Client.IsChecked = true;
+            
+            // Initially hide role toggles until projects are specified
+            UpdateRoleToggleVisibility();
         }
 
         /// <summary>
@@ -101,27 +104,77 @@ namespace SolutionGrader.UI
             }
         }
 
-        private void ChkHasClient_CheckedChanged(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Handles text changes in project name fields to update role toggle visibility.
+        /// Role toggles are only shown when both projects are specified.
+        /// </summary>
+        private void ProjectName_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
-            if (txtClientProjectName == null || chkHasClient == null) return; // safety
-            txtClientProjectName.IsEnabled = chkHasClient.IsChecked == true;
-            _configuration.HasClient = chkHasClient.IsChecked == true;
+            UpdateRoleToggleVisibility();
             ValidateConfiguration();
         }
 
-        private void ChkHasServer_CheckedChanged(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Updates the visibility of role toggle buttons based on project name inputs.
+        /// - If both project names are filled: Show both role toggle panels (user must specify which is client/server)
+        /// - If only one project is filled: Hide both role toggle panels (that project serves both roles)
+        /// - If no projects are filled: Hide both role toggle panels
+        /// </summary>
+        private void UpdateRoleToggleVisibility()
         {
-            if (txtServerProjectName == null || chkHasServer == null) return; // safety
-            txtServerProjectName.IsEnabled = chkHasServer.IsChecked == true;
-            _configuration.HasServer = chkHasServer.IsChecked == true;
-            ValidateConfiguration();
+            if (txtProject1Name == null || txtProject2Name == null || 
+                pnlProject1Role == null || pnlProject2Role == null)
+                return; // Safety check during initialization
+
+            bool hasProject1 = !string.IsNullOrWhiteSpace(txtProject1Name.Text);
+            bool hasProject2 = !string.IsNullOrWhiteSpace(txtProject2Name.Text);
+            
+            // Show role toggles only when BOTH projects are specified
+            bool showToggles = hasProject1 && hasProject2;
+            pnlProject1Role.Visibility = showToggles ? Visibility.Visible : Visibility.Collapsed;
+            pnlProject2Role.Visibility = showToggles ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void StartGrading_Click(object sender, RoutedEventArgs e)
         {
-            // Update configuration with project names
-            _configuration.ClientProjectName = txtClientProjectName.Text.Trim();
-            _configuration.ServerProjectName = txtServerProjectName.Text.Trim();
+            // Update configuration with project names and roles
+            _configuration.Project1Name = txtProject1Name.Text.Trim();
+            _configuration.Project2Name = txtProject2Name.Text.Trim();
+            
+            // Update role flags based on radio buttons
+            _configuration.Project1IsClient = rbProject1Client.IsChecked == true;
+            _configuration.Project2IsClient = rbProject2Client.IsChecked == true;
+            
+            // Determine HasClient and HasServer flags based on project configuration
+            bool hasProject1 = !string.IsNullOrWhiteSpace(_configuration.Project1Name);
+            bool hasProject2 = !string.IsNullOrWhiteSpace(_configuration.Project2Name);
+            
+            if (hasProject1 && hasProject2)
+            {
+                // Both projects specified - determine which roles are present
+                // Validation ensures they have different roles (one client, one server)
+                
+                // HasClient is true if at least one project is marked as client
+                _configuration.HasClient = _configuration.Project1IsClient || _configuration.Project2IsClient;
+                
+                // HasServer is true if at least one project is marked as server (i.e., NOT client)
+                // If Project1 is server (not client): !Project1IsClient = true
+                // If Project2 is server (not client): !Project2IsClient = true
+                // HasServer = (!Project1IsClient) OR (!Project2IsClient)
+                _configuration.HasServer = !_configuration.Project1IsClient || !_configuration.Project2IsClient;
+            }
+            else if (hasProject1 || hasProject2)
+            {
+                // Only one project specified - it serves both roles (or is the only component)
+                _configuration.HasClient = true;
+                _configuration.HasServer = true;
+            }
+            else
+            {
+                // No projects specified - this should be caught by validation
+                _configuration.HasClient = false;
+                _configuration.HasServer = false;
+            }
 
             // Validate configuration
             if (!ValidateConfiguration())
@@ -193,17 +246,28 @@ namespace SolutionGrader.UI
                 return false;
             }
 
-            // Check project names if client/server is enabled
-            if (_configuration.HasClient && string.IsNullOrWhiteSpace(txtClientProjectName.Text))
+            // Check project names
+            bool hasProject1 = !string.IsNullOrWhiteSpace(txtProject1Name.Text);
+            bool hasProject2 = !string.IsNullOrWhiteSpace(txtProject2Name.Text);
+
+            if (!hasProject1 && !hasProject2)
             {
-                txtValidation.Text = "Please enter a Client Project Name.";
+                txtValidation.Text = "Please enter at least one project name.";
                 return false;
             }
 
-            if (_configuration.HasServer && string.IsNullOrWhiteSpace(txtServerProjectName.Text))
+            // If both projects are specified, validate that roles are properly configured
+            if (hasProject1 && hasProject2)
             {
-                txtValidation.Text = "Please enter a Server Project Name.";
-                return false;
+                bool project1IsClient = rbProject1Client.IsChecked == true;
+                bool project2IsClient = rbProject2Client.IsChecked == true;
+                
+                // Both projects cannot have the same role
+                if (project1IsClient == project2IsClient)
+                {
+                    txtValidation.Text = "When two projects are specified, one must be client and one must be server.";
+                    return false;
+                }
             }
 
             return true;
