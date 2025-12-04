@@ -689,12 +689,6 @@ namespace EnvironmentBuilder.DockerCommand
         }
         
         /// <summary>
-        /// Checks if a Docker image exists locally.
-        /// This prevents Docker from attempting to pull the image which can cause hangs.
-        /// </summary>
-        /// <param name="imageName">The name of the Docker image (e.g., "fptuxaes/aes-dotnet8-console:latest")</param>
-        /// <returns>True if the image exists locally, false otherwise</returns>
-        /// <summary>
         /// Checks if a Docker image exists locally with retry logic for parallel grading reliability.
         /// 
         /// CRITICAL FIX: Uses caching and retry logic to prevent race conditions in parallel batch grading.
