@@ -1046,7 +1046,8 @@ namespace SolutionGrader.Core.Services
                         break;
                 }
                 
-                await Task.Delay(200);
+                // Brief delay between test cases - reduced from 200ms
+                await Task.Delay(50);
             }
             
             return (clientOutputs, serverOutputs);
@@ -1523,9 +1524,9 @@ namespace SolutionGrader.Core.Services
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown
-            OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
-            await Task.Delay(500);
+            // Wait briefly for graceful shutdown - reduced from 500ms as Docker handles this
+            OnProgress("Cleanup: Waiting for graceful shutdown...");
+            await Task.Delay(100);
             
             // Force kill any remaining dotnet application processes (excluding PID 1)
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
@@ -1710,7 +1711,8 @@ namespace SolutionGrader.Core.Services
             try { _dockerExecutor.StopContainer(databaseContainer, 10000); } catch { }
             try { _dockerExecutor.RemoveContainer(databaseContainer, 10000); } catch { }
             
-            await Task.Delay(2000);
+            // Brief delay for Docker to complete removal - reduced from 2s
+            await Task.Delay(500);
             
             // Recreate the database container
             await SetupDatabaseContainerAsync(config);
@@ -1723,7 +1725,8 @@ namespace SolutionGrader.Core.Services
             _consoleManager.RemoveAllAttachments();
             try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
             try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
-            await Task.Delay(200);
+            // Minimal delay - Docker handles async cleanup
+            await Task.Delay(50);
         }
         
         #endregion
