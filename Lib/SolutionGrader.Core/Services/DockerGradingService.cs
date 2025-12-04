@@ -288,32 +288,56 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
-                // Copy files to containers (use actual resolved paths)
-                await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                
-                // Generate appsettings.json in containers
-                GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
-                
                 // Execute test cases
                 bool isFirstTestCase = true;
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
                     
-                    // For subsequent test cases, cleanup and re-copy files
-                    // This approach is faster than disposing/rebuilding containers
+                    // CRITICAL FIX: For EACH test case, determine which files to copy based on Grade_Content
+                    // This ensures we use golden server when grading client, and golden client when grading server
+                    string? serverPath = actualServerDllPath;
+                    string? clientPath = actualClientDllPath;
+                    
+                    if (!string.IsNullOrEmpty(testCase.GradeContent))
+                    {
+                        if (testCase.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading client implementation -> use golden (given) server
+                            serverPath = testKitConfig.GivenServerPath;
+                            clientPath = actualClientDllPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
+                        }
+                        else if (testCase.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading server implementation -> use golden (given) client
+                            serverPath = actualServerDllPath;
+                            clientPath = testKitConfig.GivenClientPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                        }
+                    }
+                    
+                    // For subsequent test cases, cleanup before re-copying
                     if (!isFirstTestCase)
                     {
-                        // Cleanup between test cases (kills processes, removes files)
+                        // Cleanup between test cases (kills processes, removes log files)
                         await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
-                        
-                        // Re-copy files for next test case
-                        OnProgress($"Re-copying files for test case {testCase.Name}...");
-                        await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                        
-                        // Re-generate appsettings.json
-                        GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                     }
+                    else
+                    {
+                        // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
+                        // Without this delay, network monitor may not be ready to capture packets for TC1
+                        Console.WriteLine("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
+                        await Task.Delay(3000);
+                    }
+                    
+                    // Copy files to containers (will overwrite existing files)
+                    OnProgress($"Copying files for test case {testCase.Name}...");
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer);
+                    
+                    // Generate appsettings.json in containers
+                    GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
+                    
                     isFirstTestCase = false;
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -350,7 +374,7 @@ namespace SolutionGrader.Core.Services
                     // Write test case results
                     var tcResultPath = Path.Combine(studentResultPath, testCase.Name);
                     Directory.CreateDirectory(tcResultPath);
-                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult);
+                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, testCase.Path, tcResult);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
@@ -549,6 +573,8 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
                     }
@@ -568,6 +594,8 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
                     }
@@ -595,10 +623,19 @@ namespace SolutionGrader.Core.Services
                 config.DatabaseUsername,
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
-            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
-            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
-            var serverPort = config.CodeContainerInternalPort.ToString();
-            var clientPort = config.CodeContainerHostPort.ToString();
+            // CRITICAL: For network monitoring with libpcap/npcap, we need DIRECT port mapping.
+            // Server binds to internal port, which MUST equal the external host port.
+            // Client connects to host.docker.internal using the SAME port number.
+            // Example: Student 1 uses 8000:8000, Student 2 uses 8001:8001
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0
+            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;         // host.docker.internal
+            
+            // Both server and client use the SAME port number for direct mapping
+            var port = config.CodeContainerHostPort;  // e.g., 8000, 8001, 8002, etc.
+            var serverPort = port.ToString();
+            var clientPort = port.ToString();
+            
+            Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
             if (!string.IsNullOrEmpty(serverDllPath))
             {
@@ -616,10 +653,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Server)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old server appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort}");
+                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
@@ -648,10 +690,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Client)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old client appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort}");
+                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
@@ -1061,8 +1108,9 @@ namespace SolutionGrader.Core.Services
             {
                 var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
                 
+                // Use lenient flag comparison - check if all expected flags are present
                 bool matched = capturedPackets.Any(p =>
-                    (string.IsNullOrEmpty(exp.Flags) || p.Flags.Contains(exp.Flags.Split(',')[0].Trim())) &&
+                    (string.IsNullOrEmpty(exp.Flags) || CompareTcpFlags(exp.Flags, p.Flags)) &&
                     (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
                     (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
                 
@@ -1085,6 +1133,54 @@ namespace SolutionGrader.Core.Services
             var normExpected = expected.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             var normActual = (actual ?? "").Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             return normActual.Contains(normExpected);
+        }
+        
+        /// <summary>
+        /// Compares TCP flags in a lenient way - checks if all expected flags are present
+        /// regardless of order. TCP flags are bits (SYN, ACK, PSH, FIN, RST, URG) and their
+        /// order may differ between Windows/Linux or packet capture tools.
+        /// 
+        /// Examples:
+        /// - "PSH, ACK" matches "ACK, PSH" -> true
+        /// - "SYN" matches "SYN" -> true
+        /// - "ACK" matches "ACK, RST" -> true (actual has ACK plus extra RST)
+        /// - "SYN, ACK" matches "SYN" -> false (missing ACK)
+        /// </summary>
+        private bool CompareTcpFlags(string expectedFlags, string actualFlags)
+        {
+            if (string.IsNullOrEmpty(expectedFlags)) return true;
+            if (string.IsNullOrEmpty(actualFlags)) return false;
+            
+            // Split flags and normalize (trim whitespace, convert to uppercase)
+            var expectedSet = expectedFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            var actualSet = actualFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            // Check if all expected flags are present in actual flags
+            // (actual may have additional flags, which is acceptable)
+            return expectedSet.IsSubsetOf(actualSet);
+        }
+        
+        /// <summary>
+        /// Normalize flags for exact comparison - sorts flags alphabetically and removes whitespace
+        /// </summary>
+        private string NormalizeFlags(string flags)
+        {
+            if (string.IsNullOrEmpty(flags)) return "";
+            
+            var flagList = flags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .OrderBy(f => f)
+                .ToList();
+            
+            return string.Join(", ", flagList);
         }
         
         #endregion
@@ -1360,6 +1456,7 @@ namespace SolutionGrader.Core.Services
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
                     var flags = row.Cell(6).GetValue<string>();
+                    var state = row.Cell(7).GetValue<string>();
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
                     
@@ -1369,6 +1466,7 @@ namespace SolutionGrader.Core.Services
                         {
                             Stage = stage,
                             Flags = flags,
+                            State = state,
                             SourceRole = sourceRole,
                             DestinationRole = destRole
                         });
@@ -1401,28 +1499,27 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress("Cleanup: Stopping applications between test cases...");
             
-            // Step 1: Kill dotnet processes using PID-based approach (more reliable than pkill)
-            // First, get the list of processes and find dotnet PIDs
+            // Step 1: Kill dotnet application processes (excluding PID 1 - container's main process)
+            // This uses PID-based killing to safely terminate only application processes
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown - reduced from 1.5s to 500ms
+            // Wait for graceful shutdown
             OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
             await Task.Delay(500);
             
-            // Force kill any remaining dotnet processes
+            // Force kill any remaining dotnet application processes (excluding PID 1)
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
             await ForceKillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 3000);
+            // Use safe kill that excludes PID 1
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
             
-            // Step 3: Remove files from /apps folder and temp files
-            OnProgress("Cleanup: Removing files from containers...");
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 3000);
+            // Step 3: Clean up temp files ONLY (do NOT remove /apps/* - docker cp will overwrite files)
+            OnProgress("Cleanup: Removing temp files from containers...");
             _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             
@@ -1622,7 +1719,7 @@ namespace SolutionGrader.Core.Services
         /// - Network sheet: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
         /// - Database sheet: (empty)
         /// </summary>
-        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result)
+        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, string testCasePath, TestCaseResult result)
         {
             var detailPath = Path.Combine(tcResultPath, "GradeDetail.xlsx");
             using var wb = new XLWorkbook();
@@ -1691,112 +1788,153 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Enhanced format: Show testkit expected network FIRST, then student actual network with pass/fail comparison
-            // This matches the Client/Server sheet format for consistency
+            // IMPROVED FORMAT: Show ALL expected network flows and ALL actual captured packets
+            // This provides a comprehensive comparison that makes it easy to identify:
+            // - Missing packets (expected but not captured)
+            // - Extra packets (captured but not expected)
+            // - Mismatched packets (flags, roles differ from expected)
+            //
+            // The format shows expected flows on the left (columns 1-10) and actual captures 
+            // on the right (columns 11-15), with a Match column (16) showing comparison result.
+            // This allows reviewers to quickly scan for red (FAIL/MISSING) rows.
             var netWs = wb.Worksheets.Add("Network");
             SetNetworkSheetHeaders(netWs);
             int netRow = 2;
             
-            // First, write the expected network flows from testkit (if any)
-            // Group by stage and show expected vs actual side by side
-            var stagesWithExpected = result.NetworkComparisons
-                .Select(c => c.Stage)
-                .Distinct()
-                .OrderBy(s => s)
-                .ToList();
+            // Read expected network flows from testkit Detail.xlsx to get COMPLETE data
+            // This ensures we show ALL expected flows, not just the ones used in comparison
+            var detailPath_forNetwork = Path.Combine(testCasePath, "Detail.xlsx");
+            var expectedNetworkFlows = ReadExpectedNetwork(detailPath_forNetwork);
             
-            if (stagesWithExpected.Count > 0)
+            // Group actual captures by stage for easier lookup
+            var capturesByStage = result.NetworkCaptures
+                .GroupBy(p => p.Stage)
+                .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
+            
+            // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
+            // Show ALL expected flows with their matching actual captures
+            if (expectedNetworkFlows.Count > 0)
             {
-                foreach (var stage in stagesWithExpected)
+                Console.WriteLine($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
+                
+                foreach (var expectedFlow in expectedNetworkFlows.OrderBy(f => f.Stage))
                 {
-                    var comp = result.NetworkComparisons.FirstOrDefault(c => c.Stage == stage);
-                    var actualPackets = result.NetworkCaptures.Where(p => p.Stage == stage).ToList();
-                    
-                    // Parse expected from the comparison result (format: "Flags=X, From=Y, To=Z")
-                    string expectedFlags = "", expectedSourceRole = "", expectedDestRole = "";
-                    if (comp != null && !string.IsNullOrEmpty(comp.Expected))
-                    {
-                        var parts = comp.Expected.Split(',');
-                        foreach (var part in parts)
-                        {
-                            var kv = part.Split('=');
-                            if (kv.Length == 2)
-                            {
-                                var key = kv[0].Trim();
-                                var val = kv[1].Trim();
-                                if (key == "Flags") expectedFlags = val;
-                                else if (key == "From") expectedSourceRole = val;
-                                else if (key == "To") expectedDestRole = val;
-                            }
-                        }
-                    }
-                    
-                    // Write expected network flow (matches TestKit Detail.xlsx format)
-                    netWs.Cell(netRow, 1).Value = stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit)
+                    // Write expected network flow (columns 1-10)
+                    netWs.Cell(netRow, 1).Value = expectedFlow.Stage;  // Stage
+                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit - not always available)
                     netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                    netWs.Cell(netRow, 4).Value = "";  // Source
-                    netWs.Cell(netRow, 5).Value = "";  // Destination
-                    netWs.Cell(netRow, 6).Value = expectedFlags;  // Flags
-                    netWs.Cell(netRow, 7).Value = "";  // State
+                    netWs.Cell(netRow, 4).Value = "";  // Source (IP from testkit if available)
+                    netWs.Cell(netRow, 5).Value = "";  // Destination (IP from testkit if available)
+                    netWs.Cell(netRow, 6).Value = expectedFlow.Flags ?? "";  // Flags
+                    netWs.Cell(netRow, 7).Value = expectedFlow.State ?? "";  // State
                     netWs.Cell(netRow, 8).Value = "";  // Data
-                    netWs.Cell(netRow, 9).Value = expectedSourceRole;  // SourceRole
-                    netWs.Cell(netRow, 10).Value = expectedDestRole;  // DestinationRole
+                    netWs.Cell(netRow, 9).Value = expectedFlow.SourceRole ?? "";  // SourceRole
+                    netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
                     
-                    // Write actual network flow - columns 11-15 (ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
-                    if (actualPackets.Count > 0)
+                    // Find matching actual packet(s) for this expected flow
+                    var actualPacketsForStage = capturesByStage.ContainsKey(expectedFlow.Stage) 
+                        ? capturesByStage[expectedFlow.Stage] 
+                        : new List<CapturedNetworkPacket>();
+                    
+                    // Try to find a packet that matches the expected flags
+                    // Find matching packet by comparing flags
+                    // Flags must match exactly (case-insensitive, order-normalized)
+                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
+                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
+                        NormalizeFlags(expectedFlow.Flags) == NormalizeFlags(p.Flags));
+                    
+                    if (matchingPacket != null)
                     {
-                        // For simplicity, show the first matching packet
-                        var packet = actualPackets.First();
-                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
-                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
-                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
-                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
-                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        // Found matching packet - write actual data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = matchingPacket.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = matchingPacket.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = matchingPacket.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = matchingPacket.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
+                        
+                        // Check if it's an exact match or just partial
+                        // Flags must match exactly (but order doesn't matter - normalize both)
+                        bool exactMatch = true;
+                        
+                        // Compare flags - exact match required (but order-normalized)
+                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && NormalizeFlags(expectedFlow.Flags) != NormalizeFlags(matchingPacket.Flags))
+                            exactMatch = false;
+                        
+                        // Compare roles exactly
+                        if (!string.IsNullOrEmpty(expectedFlow.SourceRole) && matchingPacket.SourceRole != expectedFlow.SourceRole)
+                            exactMatch = false;
+                        if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
+                            exactMatch = false;
+                        
+                        netWs.Cell(netRow, 16).Value = exactMatch ? "PASS" : "PARTIAL";
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        
+                        // Remove from list so we can identify extra packets later
+                        actualPacketsForStage.Remove(matchingPacket);
                     }
                     else
                     {
-                        // No actual packet captured
-                        netWs.Cell(netRow, 11).Value = "(no capture)";  // ActualFlags
+                        // No matching packet found - expected flow is MISSING
+                        netWs.Cell(netRow, 11).Value = "(MISSING - not captured)";  // ActualFlags
                         netWs.Cell(netRow, 12).Value = "";  // ActualState
                         netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = "";  // ActualData
-                    }
-                    
-                    // Result: PASS or FAIL (column 16)
-                    netWs.Cell(netRow, 16).Value = comp?.Passed == true ? "PASS" : "FAIL";
-                    
-                    // Apply color coding to Result column
-                    if (comp?.Passed == true)
-                    {
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGreen;
-                    }
-                    else
-                    {
+                        netWs.Cell(netRow, 16).Value = "FAIL";
                         netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        
+                        Console.WriteLine($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
                     
                     netRow++;
                 }
             }
-            else if (result.NetworkCaptures.Count > 0)
+            
+            // === SECTION 2: Additional Captured Packets (not validated by this test case) ===
+            // These packets were captured but not validated by the test case.
+            // This is NORMAL - test cases intentionally validate only specific aspects:
+            //   - TC1 may only validate sending
+            //   - TC2 may validate send + server confirm
+            //   - TC3 may validate all communication + console output
+            //   - TC4 may validate disconnect behavior
+            // Extra packets are shown for information but DO NOT cause test failure.
+            foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
-                // No expected network, but we have captures - show them anyway
-                foreach (var packet in result.NetworkCaptures.OrderBy(p => p.Stage).ThenBy(p => p.Timestamp))
+                var remainingPackets = capturesByStage[stage];
+                if (remainingPackets.Count > 0)
                 {
-                    netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                    // Expected columns (empty)
-                    for (int i = 2; i <= 10; i++) netWs.Cell(netRow, i).Value = "";
-                    // Actual columns (11-15: ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData)
-                    netWs.Cell(netRow, 11).Value = packet.Flags;
-                    netWs.Cell(netRow, 12).Value = packet.State;
-                    netWs.Cell(netRow, 13).Value = packet.SourceRole;
-                    netWs.Cell(netRow, 14).Value = packet.DestinationRole;
-                    netWs.Cell(netRow, 15).Value = packet.Data ?? "";
-                    netWs.Cell(netRow, 16).Value = "N/A";  // No expected to compare (column 16: NetworkResult)
-                    netRow++;
+                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    
+                    foreach (var packet in remainingPackets)
+                    {
+                        // No expected flow for this packet - shown for information only
+                        netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                        netWs.Cell(netRow, 2).Value = "(Not validated by this test case)";  // Time
+                        // Leave expected columns 3-10 empty
+                        for (int i = 3; i <= 10; i++) 
+                            netWs.Cell(netRow, i).Value = "";
+                        
+                        // Write actual packet data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        netWs.Cell(netRow, 16).Value = "INFO";  // Informational - not validated
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGray;
+                        
+                        netRow++;
+                    }
                 }
+            }
+            
+            // === SECTION 3: No network data case ===
+            if (expectedNetworkFlows.Count == 0 && result.NetworkCaptures.Count == 0)
+            {
+                // No expected flows and no captures - add a note
+                netWs.Cell(netRow, 1).Value = "N/A";
+                netWs.Cell(netRow, 2).Value = "No network flows expected or captured for this test case";
+                netRow++;
             }
             
             netWs.Columns().AdjustToContents();
@@ -2020,6 +2158,7 @@ namespace SolutionGrader.Core.Services
     {
         public int Stage { get; set; }
         public string? Flags { get; set; }
+        public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
     }

@@ -455,16 +455,20 @@ public sealed class NetworkMonitorService : INetworkMonitorService
     
     /// <summary>
     /// Extracts TCP flags from a TCP packet and returns a human-readable string.
+    /// Order matches reference implementation: FIN, SYN, RST, PSH, ACK, URG
+    /// This ensures "PSH, ACK" instead of "ACK, PSH" to match TestKit expectations.
     /// </summary>
     private static string ExtractTcpFlags(TcpPacket tcp)
     {
         var flags = new List<string>();
         
-        if (tcp.Synchronize) flags.Add("SYN");
-        if (tcp.Acknowledgment) flags.Add("ACK");
-        if (tcp.Push) flags.Add("PSH");
+        // CRITICAL: Order matters for TestKit comparison
+        // Reference: https://github.com/NguyenHuuCuongK18/MiddlewareSniffPort.git
         if (tcp.Finished) flags.Add("FIN");
+        if (tcp.Synchronize) flags.Add("SYN");
         if (tcp.Reset) flags.Add("RST");
+        if (tcp.Push) flags.Add("PSH");
+        if (tcp.Acknowledgment) flags.Add("ACK");
         if (tcp.Urgent) flags.Add("URG");
         
         return string.Join(", ", flags);
@@ -733,7 +737,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         var selected = new List<ICaptureDevice>();
         try
         {
-            var devices = CaptureDeviceList.Instance;
+            // CRITICAL FIX for parallel grading: Get FRESH device list each time
+            // CaptureDeviceList.Instance returns singleton device objects that cannot be opened multiple times
+            // We need fresh device instances for each NetworkMonitorService in parallel grading
+            var devices = CaptureDeviceList.New();
 
             if (devices == null || devices.Count == 0)
             {
