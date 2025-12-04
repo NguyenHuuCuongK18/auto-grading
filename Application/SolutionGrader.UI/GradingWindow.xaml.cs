@@ -497,6 +497,9 @@ namespace SolutionGrader.UI
                 _elapsedTimer?.Stop();
                 UpdateButtonStates();
                 
+                // CRITICAL: Flush any pending result writes to ensure all data is saved
+                _resultWriter.FlushPendingWrites();
+                
                 // Dispose all Docker containers (including database) when grading session ends
                 // Only dispose if not paused (paused sessions may resume)
                 if (!_isPaused)

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using SolutionGrader.UI.Models;
 
@@ -26,6 +28,10 @@ namespace SolutionGrader.UI.Services
     {
         private readonly ILoggingService _logger;
         private readonly string _baseResultPath;
+        private System.Threading.Timer? _deferredWriteTimer;
+        private bool _hasPendingWrites = false;
+        private List<StudentSolution>? _cachedStudents;
+        private readonly object _writeLock = new object();
 
         public ResultWriterService(ILoggingService logger, string baseResultPath)
         {
@@ -44,25 +50,80 @@ namespace SolutionGrader.UI.Services
         /// Creates both a global summary and per-paper summaries.
         /// Format matches SampleLogging/StudentsSolution.xlsx exactly:
         /// No, StudentCode, ExamPaper, Status, FinalResult, StartDate, EndDate
+        /// OPTIMIZATION: Defers actual write by 2 seconds to batch multiple updates during parallel grading.
+        /// This prevents UI freezing when multiple students complete simultaneously.
         /// </summary>
         public void WriteStudentsSolutionSummary(List<StudentSolution> students)
         {
-            // Write global summary
-            var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-            WriteStudentsSolutionSummaryToFile(filePath, students);
-
-            // Write per-paper summaries
-            var paperGroups = students.GroupBy(s => s.PaperNo);
-            foreach (var group in paperGroups)
+            lock (_writeLock)
             {
-                var paperDir = Path.Combine(_baseResultPath, group.Key);
-                if (!Directory.Exists(paperDir))
+                // Cache the latest student data
+                _cachedStudents = students.ToList();
+                _hasPendingWrites = true;
+                
+                // Reset or create timer to write after 2 seconds of inactivity
+                // This batches writes when multiple students finish in quick succession
+                _deferredWriteTimer?.Dispose();
+                _deferredWriteTimer = new System.Threading.Timer(_ => {
+                    WritePendingResults();
+                }, null, 2000, Timeout.Infinite);
+            }
+        }
+        
+        /// <summary>
+        /// Forces immediate write of any pending results.
+        /// Call this when grading session completes to ensure all results are saved.
+        /// </summary>
+        public void FlushPendingWrites()
+        {
+            lock (_writeLock)
+            {
+                _deferredWriteTimer?.Dispose();
+                _deferredWriteTimer = null;
+                
+                if (_hasPendingWrites && _cachedStudents != null)
                 {
-                    Directory.CreateDirectory(paperDir);
+                    WritePendingResults();
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Internal method that performs the actual write operation.
+        /// </summary>
+        private void WritePendingResults()
+        {
+            lock (_writeLock)
+            {
+                if (!_hasPendingWrites || _cachedStudents == null)
+                    return;
+                    
+                try
+                {
+                    // Write global summary
+                    var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
+                    WriteStudentsSolutionSummaryToFile(filePath, _cachedStudents);
 
-                var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
-                WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
+                    // Write per-paper summaries
+                    var paperGroups = _cachedStudents.GroupBy(s => s.PaperNo);
+                    foreach (var group in paperGroups)
+                    {
+                        var paperDir = Path.Combine(_baseResultPath, group.Key);
+                        if (!Directory.Exists(paperDir))
+                        {
+                            Directory.CreateDirectory(paperDir);
+                        }
+
+                        var paperFilePath = Path.Combine(paperDir, "StudentsSolution.xlsx");
+                        WriteStudentsSolutionSummaryToFile(paperFilePath, group.ToList());
+                    }
+                    
+                    _hasPendingWrites = false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Failed to write pending results", ex);
+                }
             }
         }
 
