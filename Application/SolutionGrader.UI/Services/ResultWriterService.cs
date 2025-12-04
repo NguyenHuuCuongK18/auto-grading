@@ -128,7 +128,7 @@ namespace SolutionGrader.UI.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to write pending results", ex);
+                _logger.LogError("Failed to write pending results during synchronous flush", ex);
             }
         }
         

@@ -731,7 +731,7 @@ namespace SolutionGrader.UI
                 // OPTIMIZATION: Stagger container startup to avoid Docker strain
                 // Acquire lock before starting containers, release when containers are actually ready
                 bool lockAcquired = false;
-                bool lockReleased = false;
+                int lockReleasedFlag = 0; // 0 = not released, 1 = released (for Interlocked)
                 if (startupLock != null)
                 {
                     await startupLock.WaitAsync(ct);
@@ -745,10 +745,12 @@ namespace SolutionGrader.UI
                 {
                     onContainersReady = () =>
                     {
-                        if (lockReleased) return; // Prevent double-release
-                        lockReleased = true;
-                        startupLock.Release();
-                        _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
+                        // Use Interlocked to prevent race condition if callback is invoked multiple times
+                        if (Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0)
+                        {
+                            startupLock.Release();
+                            _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
+                        }
                     };
                 }
                 
@@ -792,9 +794,8 @@ namespace SolutionGrader.UI
                 finally
                 {
                     // Ensure lock is released if callback was never invoked
-                    if (lockAcquired && !lockReleased && startupLock != null)
+                    if (lockAcquired && Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0 && startupLock != null)
                     {
-                        lockReleased = true;
                         startupLock.Release();
                         _logger.LogWarning($"[Staggered Startup] Released lock for {student.StudentCode} via fallback");
                     }
