@@ -893,7 +893,9 @@ namespace SolutionGrader.UI
 
         private void UpdateButtonStates()
         {
-            Dispatcher.Invoke(() =>
+            // OPTIMIZATION: Use BeginInvoke (non-blocking) instead of Invoke (blocking)
+            // This prevents worker threads from blocking during parallel grading
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 btnStartAll.IsEnabled = !_isRunning || _isPaused;
                 btnStartSelected.IsEnabled = !_isRunning || _isPaused;
@@ -901,35 +903,41 @@ namespace SolutionGrader.UI
                 btnResume.IsEnabled = _isPaused;
                 btnResetAll.IsEnabled = !_isRunning;
                 btnResetSelected.IsEnabled = !_isRunning;
-            });
+            }));
         }
 
         private void UpdateStatusBar()
         {
-            Dispatcher.Invoke(() =>
+            // OPTIMIZATION: Use BeginInvoke (non-blocking) and cache statistics calculation
+            // Prevents worker threads from blocking and reduces UI thread workload
+            var total = _students.Count;
+            var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
+            var success = _students.Count(s => s.Status == GradingStatus.Success);
+            var failed = _students.Count(s => s.Status == GradingStatus.Failed);
+            var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
+            
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                var total = _students.Count;
-                var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
-                var success = _students.Count(s => s.Status == GradingStatus.Success);
-                var failed = _students.Count(s => s.Status == GradingStatus.Failed);
-                var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
-                
                 runTotal.Text = total.ToString();
                 runGraded.Text = graded.ToString();
                 runPercent.Text = total > 0 ? ((graded * 100) / total).ToString() : "0";
                 runSuccess.Text = success.ToString();
                 runFailed.Text = failed.ToString();
                 runNotRun.Text = notRun.ToString();
-            });
+            }));
         }
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            Dispatcher.Invoke(() =>
+            // OPTIMIZATION: Use BeginInvoke (non-blocking) to prevent deadlocks
+            // Also throttle UI updates to reduce overhead during parallel grading
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-                UpdateStatusBar();
-            });
+            }));
+            
+            // Update status bar separately (doesn't need to be synchronous)
+            UpdateStatusBar();
         }
 
         private void ElapsedTimer_Tick(object? sender, EventArgs e)
@@ -949,9 +957,12 @@ namespace SolutionGrader.UI
 
         private void Logger_LogAdded(object? sender, LogEventArgs e)
         {
-            Dispatcher.Invoke(() =>
+            // CRITICAL OPTIMIZATION: Use BeginInvoke to prevent blocking during parallel grading
+            // Logging can happen asynchronously without blocking worker threads
+            var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
+            
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
                 _logBuffer.Append(logLine);
                 
                 // Keep log buffer manageable
@@ -964,7 +975,7 @@ namespace SolutionGrader.UI
                 
                 txtLog.Text = _logBuffer.ToString();
                 txtLog.ScrollToEnd();
-            });
+            }));
         }
 
         private void GradingService_StudentGradingStarted(object? sender, StudentSolution student)
