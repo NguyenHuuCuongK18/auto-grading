@@ -218,6 +218,7 @@ namespace SolutionGrader.UI.Services
         /// <param name="studentCode">Student code for container naming</param>
         /// <param name="dockerConfig">Docker grading configuration (ports, network, etc.)</param>
         /// <param name="ct">Cancellation token</param>
+        /// <param name="onContainersReady">Optional callback when containers are ready</param>
         /// <returns>Docker grading result with test case scores</returns>
         public async Task<DockerGradingResult> ExecuteDockerGradingAsync(
             string testKitPath,
@@ -226,7 +227,8 @@ namespace SolutionGrader.UI.Services
             string? clientDllPath,
             string studentCode,
             DockerGradingConfig? dockerConfig = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Action? onContainersReady = null)
         {
             _uiLogger.LogInfo($"[LibGradingService] Starting Docker grading via Lib's DockerGradingService");
             _uiLogger.LogInfo($"[LibGradingService] Test kit: {testKitPath}");
@@ -256,6 +258,12 @@ namespace SolutionGrader.UI.Services
                 // Subscribe to progress events
                 dockerGrading.ProgressUpdated += (sender, args) => 
                     _uiLogger.LogInfo($"[DockerGrading] {args.Message}");
+                
+                // Subscribe to containers ready event for staggered startup optimization
+                if (onContainersReady != null)
+                {
+                    dockerGrading.ContainersReady += (sender, args) => onContainersReady();
+                }
 
                 _uiLogger.LogInfo($"[LibGradingService] Results will be saved to: {studentResultPath}");
 

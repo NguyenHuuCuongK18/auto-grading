@@ -138,6 +138,8 @@ namespace SolutionGrader.UI
         private void StartGrading_Click(object sender, RoutedEventArgs e)
         {
             // Update configuration with project names and roles
+            // CRITICAL FIX: Set ALL properties BEFORE the automatic UpdateLegacyProperties() mapping
+            // to ensure the mapping has complete information
             _configuration.Project1Name = txtProject1Name.Text.Trim();
             _configuration.Project2Name = txtProject2Name.Text.Trim();
             
@@ -145,10 +147,36 @@ namespace SolutionGrader.UI
             _configuration.Project1IsClient = rbProject1Client.IsChecked == true;
             _configuration.Project2IsClient = rbProject2Client.IsChecked == true;
             
-            // Determine HasClient and HasServer flags based on project configuration
+            // CRITICAL FIX: Explicitly map to legacy properties for backward compatibility
+            // This ensures LoadStudents() in GradingWindow can find student DLLs correctly
             bool hasProject1 = !string.IsNullOrWhiteSpace(_configuration.Project1Name);
             bool hasProject2 = !string.IsNullOrWhiteSpace(_configuration.Project2Name);
             
+            if (hasProject1 && hasProject2)
+            {
+                // Both projects specified - map based on roles
+                _configuration.ClientProjectName = _configuration.Project1IsClient 
+                    ? _configuration.Project1Name 
+                    : _configuration.Project2Name;
+                _configuration.ServerProjectName = _configuration.Project1IsClient 
+                    ? _configuration.Project2Name 
+                    : _configuration.Project1Name;
+            }
+            else if (hasProject1)
+            {
+                // Only project1 specified - it handles both roles
+                _configuration.ClientProjectName = _configuration.Project1Name;
+                _configuration.ServerProjectName = _configuration.Project1Name;
+            }
+            else if (hasProject2)
+            {
+                // Only project2 specified - it handles both roles
+                _configuration.ClientProjectName = _configuration.Project2Name;
+                _configuration.ServerProjectName = _configuration.Project2Name;
+            }
+            // else: No projects specified - keep defaults (will be caught by validation)
+            
+            // Determine HasClient and HasServer flags based on project configuration
             if (hasProject1 && hasProject2)
             {
                 // Both projects specified - determine which roles are present
@@ -176,10 +204,13 @@ namespace SolutionGrader.UI
                 _configuration.HasServer = false;
             }
             
-            // NOTE: We do NOT set ClientProjectName/ServerProjectName here.
-            // GradingWindow will map Project1/Project2 -> ClientProjectName/ServerProjectName
-            // directly when creating the student-specific configuration.
-            // This keeps the setup clean and delegates the mapping logic to where it's used.
+            // Log the final configuration for debugging
+            System.Diagnostics.Debug.WriteLine($"[SetupWindow] Final configuration:");
+            System.Diagnostics.Debug.WriteLine($"  Project1: {_configuration.Project1Name} (IsClient: {_configuration.Project1IsClient})");
+            System.Diagnostics.Debug.WriteLine($"  Project2: {_configuration.Project2Name} (IsClient: {_configuration.Project2IsClient})");
+            System.Diagnostics.Debug.WriteLine($"  ClientProjectName: {_configuration.ClientProjectName}");
+            System.Diagnostics.Debug.WriteLine($"  ServerProjectName: {_configuration.ServerProjectName}");
+            System.Diagnostics.Debug.WriteLine($"  HasClient: {_configuration.HasClient}, HasServer: {_configuration.HasServer}");
 
             // Validate configuration
             if (!ValidateConfiguration())
