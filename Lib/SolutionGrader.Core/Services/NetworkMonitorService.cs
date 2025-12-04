@@ -737,7 +737,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         var selected = new List<ICaptureDevice>();
         try
         {
-            var devices = CaptureDeviceList.Instance;
+            // CRITICAL FIX for parallel grading: Get FRESH device list each time
+            // CaptureDeviceList.Instance returns singleton device objects that cannot be opened multiple times
+            // We need fresh device instances for each NetworkMonitorService in parallel grading
+            var devices = CaptureDeviceList.New();
 
             if (devices == null || devices.Count == 0)
             {
