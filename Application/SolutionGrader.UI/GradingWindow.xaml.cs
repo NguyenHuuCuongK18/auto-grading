@@ -404,6 +404,12 @@ namespace SolutionGrader.UI
             _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
             PortAllocator.ClearAllAllocatedPorts();
             
+            // CRITICAL FIX: Clear Docker image cache at the start of a new grading session
+            // This ensures fresh image checks and prevents race conditions where cached results
+            // from a previous session might be stale or incorrect
+            _logger.LogInfo("[UI] Clearing Docker image cache for fresh validation...");
+            EnvironmentBuilder.DockerCommand.DockerCommandExecutor.ClearImageCache();
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;

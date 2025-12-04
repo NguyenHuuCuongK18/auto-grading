@@ -60,6 +60,12 @@ namespace SolutionGrader.Cli.Services
             // system incorrectly reuses it while Student B is still being graded.
             Console.WriteLine("[CLI] Clearing port allocation from previous sessions...");
             PortAllocator.ClearAllAllocatedPorts();
+            
+            // CRITICAL FIX: Clear Docker image cache at the start of a new grading session
+            // This ensures fresh image checks and prevents race conditions where cached results
+            // from a previous session might be stale or incorrect
+            Console.WriteLine("[CLI] Clearing Docker image cache for fresh validation...");
+            EnvironmentBuilder.DockerCommand.DockerCommandExecutor.ClearImageCache();
 
             // Check if Docker is running
             if (!_dockerExecutor.IsDockerRunning())
