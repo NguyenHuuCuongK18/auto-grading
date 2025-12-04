@@ -326,7 +326,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
             // Keep running until cancelled - use async delay for better CPU efficiency
             while (!ct.IsCancellationRequested && _isCapturing)
             {
-                await Task.Delay(100, ct); // Reduced CPU usage compared to Thread.Sleep(10)
+                await Task.Delay(100, ct); // Increased delay from 10ms to 100ms for better CPU efficiency
             }
         }
         catch (OperationCanceledException)
