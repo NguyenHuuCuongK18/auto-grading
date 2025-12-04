@@ -463,26 +463,9 @@ namespace SolutionGrader.UI
                                 if (_cancellationTokenSource.Token.IsCancellationRequested)
                                     return;
                                 
-                                // OPTIMIZATION: Stagger container startup to avoid Docker strain
-                                // Wait for exclusive startup lock, start container, brief delay, then release
-                                // This ensures containers start one at a time with small gap between them
-                                await startupLock.WaitAsync(_cancellationTokenSource.Token);
-                                try
-                                {
-                                    _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
-                                    
-                                    // Port allocation is now handled inside GradeStudentAsync using PortAllocator
-                                    // This ensures thread-safe, unique port allocation that never reuses ports
-                                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
-                                    
-                                    // Brief delay after container starts before allowing next student to start
-                                    // This gives Docker time to stabilize and reduces startup strain
-                                    await Task.Delay(1000, _cancellationTokenSource.Token);
-                                }
-                                finally
-                                {
-                                    startupLock.Release();
-                                }
+                                // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                                // This ensures thread-safe, unique port allocation that never reuses ports
+                                await GradeStudentAsync(student, _cancellationTokenSource.Token, startupLock);
                                 
                                 // Write results after each student (with lock for thread safety)
                                 lock (resultLock)
@@ -540,7 +523,7 @@ namespace SolutionGrader.UI
         /// </summary>
         /// <param name="student">Student to grade</param>
         /// <param name="ct">Cancellation token</param>
-        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct, SemaphoreSlim startupLock = null)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
@@ -709,6 +692,31 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
                 _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
+                
+                // OPTIMIZATION: Stagger container startup to avoid Docker strain
+                // Acquire lock before starting containers
+                if (startupLock != null)
+                {
+                    await startupLock.WaitAsync(ct);
+                    _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
+                    
+                    // Release lock after 3 seconds in background
+                    // This allows next student to start while current student continues grading
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(3000, ct); // Wait 3s for containers to initialize
+                            startupLock.Release();
+                            _logger.LogInfo($"[Staggered Startup] Container setup window complete for {student.StudentCode}, next student can start");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // If cancelled, still release the lock
+                            startupLock.Release();
+                        }
+                    }, ct);
+                }
                 
                 // Execute grading using the orchestration service - it handles status changes internally
                 // Pass the cancellation token so pause can abort the current grading
