@@ -8,20 +8,28 @@ namespace SolutionGrader.UI.Models
     /// Configuration settings for a grading session.
     /// Contains paths, project names, and Docker container settings.
     /// 
+    /// Important: This system only grades Question 1. Question 2, 3, etc. are not supported.
+    /// 
     /// Note: Port configurations (CodeContainerInternalPort, CodeContainerHostPort) are read from
     /// each test kit's Environment.xlsx file. Defaults here are 0 to indicate "unspecified" so the
     /// Lib services will use values from the test kit and not override them from the UI.
     /// 
-    /// Project Mapping:
-    /// - Project1Name/Project2Name: The names of the projects (e.g., "Q1", "Q2", "Project11", "Project12")
+    /// Project Mapping (for Question 1 only):
+    /// - Project1Name/Project2Name: The names of the Question 1 projects (e.g., "Q1", "Q11", "Q12", "Project11", "Project12")
     /// - Project1IsClient/Project2IsClient: Indicates the role (client or server) of each project
     /// - If only one project is specified, it's assumed to be both client and server (or the only component)
-    /// - If two projects are specified, roles must be explicitly defined
+    /// - If two projects are specified (client/server architecture), roles must be explicitly defined
     /// 
     /// This flexible structure handles cases where:
     /// 1. Students submit with generic names like "Q1_studentcode" instead of "Project11_studentcode"
-    /// 2. Different papers require students to code different components (client, server, or both)
-    /// 3. The test kit's Header.xlsx Grade content dictates which project is client/server
+    /// 2. Students split Question 1 into client/server using Q11 (server) and Q12 (client)
+    /// 3. Different papers require students to code different components (client, server, or both)
+    /// 4. The test kit's Header.xlsx Grade content dictates which project is client/server
+    /// 
+    /// Examples:
+    /// - Single project: Q1 → Both client and server use Q1.dll
+    /// - Dual project traditional: Project11 (server) + Project12 (client)
+    /// - Dual project numbered: Q11 (server) + Q12 (client) - both for Question 1!
     /// </summary>
     public class GradingConfiguration : INotifyPropertyChanged
     {

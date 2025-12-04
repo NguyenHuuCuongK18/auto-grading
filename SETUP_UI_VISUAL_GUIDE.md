@@ -95,7 +95,7 @@ When only one project is entered, toggles are hidden:
 
 
 ### Scenario 2: Two Projects (e.g., Submit folder with Project11 and Project12)
-When both projects are entered, toggles appear:
+When both projects are entered (both for Question 1 split into client/server), toggles appear:
 
 ```
 │ ┌────────────────────────────────────────────────────────┐  │
@@ -118,8 +118,8 @@ When both projects are entered, toggles appear:
 - System looks for Project11.dll (server) and Project12.dll (client)
 
 
-### Scenario 3: Two Projects with Generic Names
-When both projects use generic names like Q1 and Q2:
+### Scenario 3: Two Projects with Alternative Naming for Question 1
+When both projects use numbered naming for Question 1 client/server split:
 
 ```
 │ ┌────────────────────────────────────────────────────────┐  │
@@ -127,19 +127,26 @@ When both projects use generic names like Q1 and Q2:
 │ │                                                        │  │
 │ │ [Helper text...]                                       │  │
 │ │                                                        │  │
-│ │ Project 1: [Q1              ]  ●Client ⚪Server       │  │
+│ │ Project 1: [Q11             ]  ⚪Client ●Server       │  │
 │ │                                                        │  │
-│ │ Project 2: [Q2              ]  ⚪Client ●Server       │  │
+│ │ Project 2: [Q12             ]  ●Client ⚪Server       │  │
 │ │                                                        │  │
 │ └────────────────────────────────────────────────────────┘  │
 ```
 
 **Result:**
-- ClientProjectName = "Q1"
-- ServerProjectName = "Q2"
+- ClientProjectName = "Q12"
+- ServerProjectName = "Q11"
 - HasClient = true
 - HasServer = true
-- System looks for Q1.dll (client) and Q2.dll (server)
+- System looks for Q11.dll (server) and Q12.dll (client)
+- Both Q11 and Q12 are for Question 1 (client/server split)
+
+**Important Note:** Q2, Q3, etc. refer to Question 2, Question 3, etc., which this system does NOT support.
+Common naming for Question 1 client/server split:
+- Single: Q1 (both roles)
+- Dual: Q11 (server) + Q12 (client) - both for Question 1
+- Traditional: Project11 (server) + Project12 (client) - both for Question 1
 
 
 ## Validation Examples
@@ -211,19 +218,25 @@ Project 1:        ✓ Q1
 
 ## Benefits of New UI
 
-1. **Flexibility**: Handles any project naming convention
-   - Generic names: Q1, Q2, Q3
-   - Specific names: Project11, Project12
-   - Custom names: MyServer, MyClient
+1. **Flexibility**: Handles any project naming convention for Question 1
+   - Generic names: Q1 (single project for Question 1)
+   - Split numbered: Q11, Q12 (client/server for Question 1)
+   - Specific names: Project11, Project12 (client/server for Question 1)
+   - Custom names: MyServer, MyClient (for Question 1)
 
 2. **Clarity**: Role toggles only appear when needed
    - Single project: No confusion, no toggles needed
-   - Two projects: Clear client/server designation required
+   - Two projects (client/server): Clear client/server designation required
 
 3. **Validation**: Prevents invalid configurations
    - Must have at least one project
    - Two projects must have different roles
    - Clear error messages guide the user
+
+4. **System Limitation Awareness**: 
+   - Clear UI warning that only Question 1 is supported
+   - Prevents confusion about Q2, Q3, etc. (those are different questions, not supported)
+   - Examples use Q11/Q12 instead of Q1/Q2 to avoid implying multi-question support
 
 4. **Backward Compatibility**: Works with existing code
    - Legacy ClientProjectName/ServerProjectName still work
@@ -260,22 +273,25 @@ configuration.ServerProjectName = "Q1";
 ### Two Projects Example
 ```csharp
 // User Input
-txtProject1Name.Text = "Project11";
-txtProject2Name.Text = "Project12";
-rbProject1Server.IsChecked = true;  // Project1 is server
-rbProject2Client.IsChecked = true;  // Project2 is client
+txtProject1Name.Text = "Q11";
+txtProject2Name.Text = "Q12";
+rbProject1Server.IsChecked = true;  // Q11 is server (for Question 1)
+rbProject2Client.IsChecked = true;  // Q12 is client (for Question 1)
 
 // Result after StartGrading_Click
-configuration.Project1Name = "Project11";
-configuration.Project2Name = "Project12";
+configuration.Project1Name = "Q11";
+configuration.Project2Name = "Q12";
 configuration.Project1IsClient = false; // false = server
 configuration.Project2IsClient = true;  // true = client
 configuration.HasClient = true;
 configuration.HasServer = true;
 
 // Automatic mapping via UpdateLegacyProperties()
-configuration.ClientProjectName = "Project12";
-configuration.ServerProjectName = "Project11";
+configuration.ClientProjectName = "Q12";
+configuration.ServerProjectName = "Q11";
+
+// Note: Both Q11 and Q12 are for Question 1 (client/server architecture)
+// Q2 would be Question 2, which this system does NOT support
 ```
 
 

@@ -2,8 +2,10 @@
 
 ## Overview
 This document summarizes the fixes and enhancements made to the Solution Grader UI to address:
-1. Project mapping flexibility to handle various student submission formats
+1. Project mapping flexibility to handle various student submission formats for Question 1
 2. UI event verification to ensure all buttons trigger appropriate events
+
+**Important Note:** This system only grades Question 1. Question 2, 3, etc. are not supported by the current grading infrastructure.
 
 ## Changes Made
 
@@ -25,10 +27,16 @@ This document summarizes the fixes and enhancements made to the Solution Grader 
 - Updated `Clone()` method to include new properties
 
 **Why This Matters:**
-This flexible structure handles multiple student submission scenarios:
+This flexible structure handles multiple student submission scenarios for Question 1:
 - **Scenario 1**: Student submits only Q1 → Both client and server use Q1
-- **Scenario 2**: Student submits Q1 (server) and Q2 (client) → Roles are explicitly defined
-- **Scenario 3**: Student submits Project11 (server) and Project12 (client) → Traditional approach
+- **Scenario 2**: Student submits Q11 (server) and Q12 (client) → Both are for Question 1, roles are explicitly defined
+- **Scenario 3**: Student submits Project11 (server) and Project12 (client) → Traditional approach for Question 1
+
+**Important:** Q2, Q3, etc. refer to Question 2, Question 3, etc., which this system does NOT support. 
+The system only grades Question 1. If a student splits Question 1 into client/server, common naming conventions include:
+- Q1 (single project)
+- Q11 + Q12 (dual project - both for Question 1)
+- Project11 + Project12 (dual project - both for Question 1)
 
 ### 2. SetupWindow UI Redesign
 
@@ -115,12 +123,12 @@ Result:
 
 ### Example 2: Two Project Submission (Submit folder)
 ```
-Student structure:
+Student structure for Question 1 split into client/server:
   cuongnhhe186494/
     1/
       solution/
         Q11/
-          Project11.dll  ← Server DLL
+          Project11.dll  ← Server DLL for Question 1
         Q11_cuongnhhe186494/
           Project11.dll  ← Server DLL (published)
           
@@ -136,24 +144,28 @@ Result:
   - HasClient = true
   - HasServer = true
   - System looks for Project11.dll (server) and Project12.dll (client)
+  - Both projects are for Question 1 (client/server architecture)
+
+Note: Q2 would be Question 2, which this system does NOT support.
 ```
 
-### Example 3: Mixed Scenario
+### Example 3: Alternative Naming for Question 1 Split
 ```
-Student submits Q1 as server, needs Meta/Given/client from testkit
+Student splits Question 1 into Q11 (server) and Q12 (client)
 
 Setup Configuration:
-  Project 1 Name: Q1
-  Project 2 Name: [empty]
-  Toggles: Hidden
-
-TestKit Environment.xlsx:
-  Client: Meta/Given/client.dll  ← Reference client from testkit
-  Server: [empty]  ← Will use student's Q1
+  Project 1 Name: Q11
+  Project 2 Name: Q12
+  Project 1 Toggle: Server
+  Project 2 Toggle: Client
 
 Result:
-  - System uses student's Q1.dll for server
-  - System uses Meta/Given/client.dll from testkit for client
+  - ClientProjectName = "Q12"
+  - ServerProjectName = "Q11"
+  - HasClient = true
+  - HasServer = true
+  - System looks for Q11.dll (server) and Q12.dll (client)
+  - Both Q11 and Q12 are components of Question 1
 ```
 
 ## Testing Performed

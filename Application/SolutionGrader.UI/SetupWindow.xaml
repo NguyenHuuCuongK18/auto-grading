@@ -140,11 +140,15 @@
                                TextWrapping="Wrap"
                                Foreground="#666666"
                                FontSize="11">
-                        <Run Text="Enter project names as they appear in student submissions (e.g., Q1, Q2, Project11, Project12)."/>
+                        <Run Text="Enter project names for Question 1 as they appear in student submissions."/>
+                        <LineBreak/>
+                        <Run Text="Examples: Q1, Project11, Project12, Q11, Q12 (for client/server split)."/>
                         <LineBreak/>
                         <Run Text="If only one project is specified, toggles are not needed."/>
                         <LineBreak/>
-                        <Run Text="If two projects are specified, use toggles to indicate which is client and which is server."/>
+                        <Run Text="If two projects are specified (client/server architecture), use toggles to indicate which is client and which is server."/>
+                        <LineBreak/>
+                        <Run Text="Note: This system only grades Question 1. Q2, Q3, etc. are not supported." FontWeight="SemiBold" Foreground="#D32F2F"/>
                     </TextBlock>
                     
                     <!-- Project 1 -->
