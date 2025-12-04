@@ -445,6 +445,8 @@ namespace SolutionGrader.UI
                     // Parallel grading using SemaphoreSlim to limit concurrency
                     // Each student gets a dynamically allocated port via PortAllocator
                     var resultLock = new object();
+                    var startupLock = new SemaphoreSlim(1, 1); // OPTIMIZATION: Stagger container startups
+                    
                     using (var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents))
                     {
                         var tasks = studentsToGrade.Select(async (student, index) =>
@@ -461,9 +463,26 @@ namespace SolutionGrader.UI
                                 if (_cancellationTokenSource.Token.IsCancellationRequested)
                                     return;
                                 
-                                // Port allocation is now handled inside GradeStudentAsync using PortAllocator
-                                // This ensures thread-safe, unique port allocation that never reuses ports
-                                await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                // OPTIMIZATION: Stagger container startup to avoid Docker strain
+                                // Wait for exclusive startup lock, start container, brief delay, then release
+                                // This ensures containers start one at a time with small gap between them
+                                await startupLock.WaitAsync(_cancellationTokenSource.Token);
+                                try
+                                {
+                                    _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
+                                    
+                                    // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                                    // This ensures thread-safe, unique port allocation that never reuses ports
+                                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                    
+                                    // Brief delay after container starts before allowing next student to start
+                                    // This gives Docker time to stabilize and reduces startup strain
+                                    await Task.Delay(1000, _cancellationTokenSource.Token);
+                                }
+                                finally
+                                {
+                                    startupLock.Release();
+                                }
                                 
                                 // Write results after each student (with lock for thread safety)
                                 lock (resultLock)
