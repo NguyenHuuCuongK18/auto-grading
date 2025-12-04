@@ -38,6 +38,7 @@ namespace SolutionGrader.Cli.Services
 
         /// <summary>
         /// Execute grading for students based on configuration.
+        /// Supports parallel grading and index range selection.
         /// </summary>
         /// <param name="config">Grading configuration</param>
         /// <param name="paperFilter">Optional paper number filter</param>
@@ -49,6 +50,17 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine("[CLI] This ensures IDENTICAL behavior between CLI and UI.");
             Console.WriteLine();
 
+            // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
+            // This prevents port exhaustion from previous runs while ensuring no port reuse
+            // DURING the current session (which could cause race conditions in parallel grading).
+            // 
+            // The "never reuse" policy applies WITHIN a session - once a port is allocated
+            // for this session, it stays allocated until the session ends. This prevents
+            // the race condition where Student A finishes and releases port 8001, but the
+            // system incorrectly reuses it while Student B is still being graded.
+            Console.WriteLine("[CLI] Clearing port allocation from previous sessions...");
+            PortAllocator.ClearAllAllocatedPorts();
+
             // Check if Docker is running
             if (!_dockerExecutor.IsDockerRunning())
             {
@@ -57,35 +69,31 @@ namespace SolutionGrader.Cli.Services
             }
 
             // Discover students from submit folder
-            var students = DiscoverStudents(config.SubmitFolderPath, config, paperFilter, studentFilter);
-            if (students.Count == 0)
+            var allStudents = DiscoverStudents(config.SubmitFolderPath, config, paperFilter, studentFilter);
+            if (allStudents.Count == 0)
             {
                 Console.WriteLine("[WARNING] No students found in submit folder.");
                 return 0;
             }
 
-            Console.WriteLine($"[CLI] Found {students.Count} student(s) to grade.");
+            // Apply index range filtering
+            var students = ApplyIndexRange(allStudents, config.StartIndex, config.EndIndex);
+            if (students.Count == 0)
+            {
+                Console.WriteLine($"[WARNING] No students in the specified index range [{config.StartIndex}, {config.EndIndex}].");
+                return 0;
+            }
+
+            Console.WriteLine($"[CLI] Found {allStudents.Count} student(s) total, grading {students.Count} student(s) in index range [{config.StartIndex}, {(config.EndIndex == -1 ? "end" : config.EndIndex.ToString())}].");
+            Console.WriteLine($"[CLI] Parallel grading: {config.MaxParallelStudents} student(s) at a time.");
+            Console.WriteLine($"[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             Console.WriteLine();
 
             // Create output directory
             Directory.CreateDirectory(config.SaveResultFolderPath);
 
-            // Grade each student using the SHARED DockerGradingService
-            var results = new List<StudentGradingResult>();
-            int studentIndex = 0;
-
-            foreach (var student in students)
-            {
-                studentIndex++;
-                Console.WriteLine($"\n{'=',-60}");
-                Console.WriteLine($"[{studentIndex}/{students.Count}] Grading student: {student.StudentCode} (Paper {student.PaperNo})");
-                Console.WriteLine($"{'=',-60}");
-
-                var result = await GradeStudentUsingSharedServiceAsync(student, config);
-                results.Add(result);
-
-                Console.WriteLine($"[CLI] Result: {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
-            }
+            // Grade students using parallel or sequential execution
+            var results = await GradeStudentsAsync(students, config);
 
             // Write overall summary
             await WriteOverallSummaryAsync(config.SaveResultFolderPath, results);
@@ -103,16 +111,122 @@ namespace SolutionGrader.Cli.Services
         }
 
         /// <summary>
+        /// Apply index range filtering to the student list.
+        /// </summary>
+        private List<StudentInfo> ApplyIndexRange(List<StudentInfo> students, int startIndex, int endIndex)
+        {
+            if (startIndex < 0) startIndex = 0;
+            if (startIndex >= students.Count) return new List<StudentInfo>();
+            
+            if (endIndex == -1 || endIndex >= students.Count)
+            {
+                // Grade from startIndex to end
+                return students.Skip(startIndex).ToList();
+            }
+            else
+            {
+                // Grade from startIndex to endIndex (inclusive)
+                var count = endIndex - startIndex + 1;
+                if (count <= 0) return new List<StudentInfo>();
+                return students.Skip(startIndex).Take(count).ToList();
+            }
+        }
+
+        /// <summary>
+        /// Grade students either sequentially or in parallel based on configuration.
+        /// Each parallel student gets their own:
+        /// - Unique container names (with student code suffix)
+        /// - Incremented ports (from base port)
+        /// - Own database instance (same container, different database)
+        /// - Own network monitor
+        /// </summary>
+        private async Task<List<StudentGradingResult>> GradeStudentsAsync(List<StudentInfo> students, CliGradingConfiguration config)
+        {
+            var results = new List<StudentGradingResult>();
+            var studentIndex = 0;
+
+            if (config.MaxParallelStudents <= 1)
+            {
+                // Sequential grading (original behavior)
+                foreach (var student in students)
+                {
+                    studentIndex++;
+                    Console.WriteLine($"\n{'=',-60}");
+                    Console.WriteLine($"[{studentIndex}/{students.Count}] Grading student: {student.StudentCode} (Paper {student.PaperNo})");
+                    Console.WriteLine($"{'=',-60}");
+
+                    var result = await GradeStudentUsingSharedServiceAsync(student, config, 0);
+                    results.Add(result);
+
+                    Console.WriteLine($"[CLI] Result: {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                }
+            }
+            else
+            {
+                // Parallel grading
+                var resultLock = new object();
+                using (var semaphore = new SemaphoreSlim(config.MaxParallelStudents))
+                {
+                    var tasks = students.Select(async (student, index) =>
+                    {
+                        await semaphore.WaitAsync();
+                        try
+                        {
+                            var localIndex = index + 1;
+                            Console.WriteLine($"\n[Thread] [{localIndex}/{students.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
+
+                            // Calculate port offset for this student
+                            var portOffset = index % config.MaxParallelStudents;
+                            
+                            var result = await GradeStudentUsingSharedServiceAsync(student, config, portOffset);
+                            
+                            lock (resultLock)
+                            {
+                                results.Add(result);
+                            }
+
+                            Console.WriteLine($"[Thread] [{localIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }).ToList();
+
+                    await Task.WhenAll(tasks);
+
+                    // Sort results by original order
+                    results = results.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+                }
+            }
+
+            return results;
+        }
+
+        /// <summary>
         /// Grade a single student using the SHARED DockerGradingService.
         /// This ensures identical grading logic between CLI and UI.
         /// </summary>
-        private async Task<StudentGradingResult> GradeStudentUsingSharedServiceAsync(StudentInfo student, CliGradingConfiguration config)
+        /// <param name="portOffset">Port offset for parallel grading (0 for sequential) - DEPRECATED, now uses PortAllocator</param>
+        private async Task<StudentGradingResult> GradeStudentUsingSharedServiceAsync(StudentInfo student, CliGradingConfiguration config, int portOffset)
         {
             var result = new StudentGradingResult
             {
                 StudentCode = student.StudentCode,
                 PaperNo = student.PaperNo
             };
+
+            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+            // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
+            using var portAllocator = new PortAllocator();
+            int allocatedPort = portAllocator.AllocatePort();
+            
+            if (allocatedPort == -1)
+            {
+                Console.WriteLine($"[ERROR] Failed to allocate port for student {student.StudentCode}");
+                result.ErrorMessage = "Failed to allocate port for grading";
+                return result;
+            }
 
             try
             {
@@ -130,17 +244,22 @@ namespace SolutionGrader.Cli.Services
                 var studentResultPath = Path.Combine(config.SaveResultFolderPath, student.StudentCode);
                 Directory.CreateDirectory(studentResultPath);
 
-                // Build DockerGradingConfig from CLI config
+                // Build DockerGradingConfig with DYNAMICALLY ALLOCATED port
+                // Internal and external ports MUST MATCH for direct mapping (critical for network monitoring)
+                // Example: Student 1 gets port 8000 (8000:8000), Student 2 gets port 8001 (8001:8001)
                 var dockerConfig = new DockerGradingConfig
                 {
                     HasClient = config.HasClient,
                     HasServer = config.HasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
-                    CodeContainerInternalPort = config.CodeContainerInternalPort,
-                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
+                    // This ensures each student's client reaches their own server via host.docker.internal
+                    CodeContainerInternalPort = allocatedPort,
+                    CodeContainerHostPort = allocatedPort,
                     DockerNetwork = config.DockerNetwork,
                     DatabaseImageName = config.DatabaseImageName,
+                    // Use same database container name for all students (shared container, different database instances)
                     DatabaseContainerName = config.DatabaseContainerName,
                     DatabaseContainerInternalPort = config.DatabaseContainerInternalPort,
                     DatabaseContainerHostPort = config.DatabaseContainerHostPort,
@@ -149,6 +268,8 @@ namespace SolutionGrader.Cli.Services
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds,
                     TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds
                 };
+
+                Console.WriteLine($"[{student.StudentCode}] Using dynamically allocated port: {allocatedPort}");
 
                 // Create the SHARED services (same as SolutionGrader.UI)
                 IRunContext runContext = new RunContext();
@@ -159,9 +280,10 @@ namespace SolutionGrader.Cli.Services
 
                 // Subscribe to progress events
                 dockerGradingService.ProgressUpdated += (sender, args) =>
-                    Console.WriteLine($"  {args.Message}");
+                    Console.WriteLine($"  [{student.StudentCode}] {args.Message}");
 
                 // Reset database for this student (ensures clean state)
+                // For parallel grading, this creates a separate database instance in the shared container
                 await dockerGradingService.ResetDatabaseForNewStudentAsync(dockerConfig);
 
                 // Grade the student using the SHARED service

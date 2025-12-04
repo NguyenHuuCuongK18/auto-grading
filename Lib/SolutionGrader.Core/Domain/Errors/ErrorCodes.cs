@@ -10,7 +10,6 @@
         Network = 5,
         IO = 6,
         Compare = 7,
-        Middleware = 8,
         Timeout = 9,
         Unknown = 99
     }
@@ -51,13 +50,10 @@
         // Startup / readiness
         public const string SERVER_START_TIMEOUT = "SERVER_START_TIMEOUT";
         public const string PORT_NOT_LISTENING = "PORT_NOT_LISTENING";
-        public const string PROXY_START_FAILED = "PROXY_START_FAILED";
 
         // HTTP / TCP
         public const string HTTP_REQUEST_INVALID = "HTTP_REQUEST_INVALID";
         public const string HTTP_NON_SUCCESS = "HTTP_NON_SUCCESS";
-        public const string TCP_RELAY_ERROR = "TCP_RELAY_ERROR";
-        public const string MIDDLEWARE_ERROR = "MIDDLEWARE_ERROR";
 
         // IO / Files
         public const string FILE_NOT_FOUND = "FILE_NOT_FOUND";
@@ -100,9 +96,9 @@
             DB_RESET_FAILED or APPSETTINGS_REPLACE_FAILED => ErrorCategory.Env,
 
             CLIENT_EXE_MISSING or SERVER_EXE_MISSING or PROCESS_CRASHED or KILL_ALL_FAILED => ErrorCategory.Process,
-            SERVER_START_TIMEOUT or PORT_NOT_LISTENING or PROXY_START_FAILED => ErrorCategory.Process,
+            SERVER_START_TIMEOUT or PORT_NOT_LISTENING => ErrorCategory.Process,
 
-            HTTP_REQUEST_INVALID or HTTP_NON_SUCCESS or TCP_RELAY_ERROR or MIDDLEWARE_ERROR => ErrorCategory.Network,
+            HTTP_REQUEST_INVALID or HTTP_NON_SUCCESS => ErrorCategory.Network,
 
             FILE_NOT_FOUND or ACTUAL_FILE_MISSING or EXPECTED_FILE_MISSING or EXPECTED_CLIENT_OUTPUT_MISSING 
                 or EXPECTED_SERVER_OUTPUT_MISSING or FILE_COPY_FAILED or PATH_NOT_FOUND or PERMISSION_DENIED => ErrorCategory.IO,
@@ -142,13 +138,10 @@
             KILL_ALL_FAILED => new() { Code = KILL_ALL_FAILED, Title = "Kill All Failed", Description = "Failed to terminate client and/or server processes during cleanup", Category = ErrorCategory.Process },
             SERVER_START_TIMEOUT => new() { Code = SERVER_START_TIMEOUT, Title = "Server Start Timeout", Description = "Server did not become ready within the configured timeout period", Category = ErrorCategory.Process },
             PORT_NOT_LISTENING => new() { Code = PORT_NOT_LISTENING, Title = "Port Not Listening", Description = "Server process started but is not listening on the expected port", Category = ErrorCategory.Process },
-            PROXY_START_FAILED => new() { Code = PROXY_START_FAILED, Title = "Proxy Start Failed", Description = "Failed to start middleware proxy on port 5000", Category = ErrorCategory.Process },
 
             // Network
             HTTP_REQUEST_INVALID => new() { Code = HTTP_REQUEST_INVALID, Title = "HTTP Request Invalid", Description = "HTTP request step has invalid format (requires METHOD|URL at minimum)", Category = ErrorCategory.Network },
             HTTP_NON_SUCCESS => new() { Code = HTTP_NON_SUCCESS, Title = "HTTP Non-Success Status", Description = "HTTP request returned non-success status code or did not match expected status", Category = ErrorCategory.Network },
-            TCP_RELAY_ERROR => new() { Code = TCP_RELAY_ERROR, Title = "TCP Relay Error", Description = "TCP relay middleware encountered an error during traffic forwarding", Category = ErrorCategory.Network },
-            MIDDLEWARE_ERROR => new() { Code = MIDDLEWARE_ERROR, Title = "Middleware Error", Description = "Middleware proxy service encountered an unexpected error", Category = ErrorCategory.Network },
 
             // IO / Files
             FILE_NOT_FOUND => new() { Code = FILE_NOT_FOUND, Title = "File Not Found", Description = "Required file was not found at the specified path", Category = ErrorCategory.IO },

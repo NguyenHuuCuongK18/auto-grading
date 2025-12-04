@@ -21,6 +21,7 @@
   
   <ItemGroup>
     <!-- Network packet capture libraries (cross-platform via libpcap on Linux/macOS) -->
+    <PackageReference Include="EPPlus" Version="8.3.1" />
     <PackageReference Include="PacketDotNet" Version="1.4.8" />
     <PackageReference Include="SharpPcap" Version="6.3.1" />
     <!-- Excel file handling using ClosedXML (OpenPyXL-like for .NET) -->

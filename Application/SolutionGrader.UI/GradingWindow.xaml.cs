@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using SolutionGrader.Core.Services;
 using SolutionGrader.UI.Models;
 using SolutionGrader.UI.Services;
 
@@ -78,6 +79,13 @@ namespace SolutionGrader.UI
             // Display configuration info
             txtConfigInfo.Text = $"Submit: {_configuration.SubmitFolderPath} | TestKit: {_configuration.TestKitFolderPath} | Save: {_configuration.SaveResultFolderPath}";
             
+            // Initialize batch grading configuration control with default value
+            txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
+            
+            // Initialize index selection controls with 1-based defaults
+            txtSelectStartIndex.Text = "1";
+            txtSelectEndIndex.Text = "-1";
+            
             // Load students
             LoadStudents();
             
@@ -89,6 +97,7 @@ namespace SolutionGrader.UI
             _elapsedTimer.Tick += ElapsedTimer_Tick;
             
             _logger.LogInfo("Grading window initialized");
+            _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}");
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -126,21 +135,19 @@ namespace SolutionGrader.UI
                 _students.Clear();
                 _filteredStudents.Clear();
                 cmbPaperSelection.Items.Clear();
-                
-                // First item is instruction/placeholder
                 cmbPaperSelection.Items.Add("-- Select Paper --");
                 cmbPaperSelection.SelectedIndex = 0;
                 
                 // Get unique paper numbers
                 var paperNumbers = students.Select(s => s.PaperNo).Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : 0);
-                foreach (var paper in paperNumbers)
-                {
-                    cmbPaperSelection.Items.Add($"Paper {paper}");
-                }
+                foreach (var paper in paperNumbers) { cmbPaperSelection.Items.Add($"Paper {paper}"); }
                 
-                // Load test kit configs for each paper to get max marks
+                int idx = 1; // 1-based ids for clarity
                 foreach (var student in students)
                 {
+                    // assign 1-based Id
+                    student.Id = idx++;
+                    
                     // Get test kit config for this paper to set max mark
                     var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
                     if (!string.IsNullOrEmpty(testKitPath))
@@ -203,6 +210,67 @@ namespace SolutionGrader.UI
         }
 
         /// <summary>
+        /// Apply index range selection to select students.
+        /// This is a quick way to select a range of students, similar to selecting by paper.
+        /// Useful when you have many students and need to select a specific range.
+        /// </summary>
+        private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
+        {
+            // Parse indices
+            if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 1)
+            {
+                System.Windows.MessageBox.Show("Start Index must be a positive integer (starts at 1).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            if (!int.TryParse(txtSelectEndIndex.Text.Trim(), out int endIndex) || endIndex < -1)
+            {
+                System.Windows.MessageBox.Show("End Index must be -1 (for all) or a positive integer.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            if (endIndex != -1 && endIndex < startIndex)
+            {
+                System.Windows.MessageBox.Show("End Index must be greater than or equal to Start Index.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            // First, unselect all students
+            foreach (var student in _students)
+            {
+                student.IsSelected = false;
+            }
+            
+            // Apply selection to the range
+            var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            foreach (var student in studentsInRange)
+            {
+                student.IsSelected = true;
+            }
+            
+            dgStudents.Items.Refresh();
+            
+            var endText = endIndex == -1 ? "end" : endIndex.ToString();
+            _logger.LogInfo($"Quick selected students from index {startIndex} to {endText} ({studentsInRange.Count} students selected)");
+        }
+
+        /// <summary>
+        /// Apply index range to get a subset of students.
+        /// This is used for SELECTION purposes only.
+        /// </summary>
+        /// <param name="students">List of students to filter</param>
+        /// <param name="startIndex">Start index (0-based, inclusive)</param>
+        /// <param name="endIndex">End index (0-based, inclusive, or -1 for all)</param>
+        /// <returns>Filtered list of students</returns>
+        private List<StudentSolution> ApplyIndexRange(List<StudentSolution> students, int startIndex, int endIndex)
+        {
+            // 1-based indices: filter by Id property
+            var query = students.Where(s => s.Id >= startIndex);
+            if (endIndex != -1) query = query.Where(s => s.Id <= endIndex);
+            return query.ToList();
+        }
+
+        /// <summary>
         /// Select all visible students
         /// </summary>
         private void SelectAll_Click(object sender, RoutedEventArgs e)
@@ -246,6 +314,13 @@ namespace SolutionGrader.UI
                 return;
             }
             
+            // Read and update configuration from UI
+            if (int.TryParse(txtMaxParallelStudents.Text.Trim(), out int maxParallel))
+            {
+                _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
+            }
+            
+            // Get students to grade based on selection
             var studentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
@@ -256,6 +331,17 @@ namespace SolutionGrader.UI
                 return;
             }
             
+            // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
+            // This prevents port exhaustion from previous runs while ensuring no port reuse
+            // DURING the current session (which could cause race conditions in parallel grading).
+            // 
+            // The "never reuse" policy applies WITHIN a session - once a port is allocated
+            // for this session, it stays allocated until the session ends. This prevents
+            // the race condition where Student A finishes and releases port 8001, but the
+            // system incorrectly reuses it while Student B is still being graded.
+            _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
+            PortAllocator.ClearAllAllocatedPorts();
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -263,30 +349,84 @@ namespace SolutionGrader.UI
             _elapsedTimer?.Start();
             
             UpdateButtonStates();
-            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} students");
+            _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
+            _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
+            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
+            
+            if (_configuration.MaxParallelStudents > 1)
+            {
+                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
+                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count)} students together, etc.)");
+            }
             
             try
             {
-                foreach (var student in studentsToGrade)
+                if (_configuration.MaxParallelStudents <= 1)
                 {
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
-                    
-                    // Wait while paused
-                    while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                    // Sequential grading (original behavior)
+                    foreach (var student in studentsToGrade)
                     {
-                        await Task.Delay(500);
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        // Wait while paused
+                        while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(500);
+                        }
+                        
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                        
+                        // Write results after each student
+                        _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                        
+                        UpdateStatusBar();
                     }
-                    
-                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                        break;
-                    
-                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
-                    
-                    // Write results after each student
-                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
-                    
-                    UpdateStatusBar();
+                }
+                else
+                {
+                    // Parallel grading using SemaphoreSlim to limit concurrency
+                    // Each student gets a dynamically allocated port via PortAllocator
+                    var resultLock = new object();
+                    using (var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents))
+                    {
+                        var tasks = studentsToGrade.Select(async (student, index) =>
+                        {
+                            await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                            try
+                            {
+                                // Wait while paused
+                                while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    await Task.Delay(500, _cancellationTokenSource.Token);
+                                }
+                                
+                                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                    return;
+                                
+                                // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                                // This ensures thread-safe, unique port allocation that never reuses ports
+                                await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                
+                                // Write results after each student (with lock for thread safety)
+                                lock (resultLock)
+                                {
+                                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                }
+                                
+                                UpdateStatusBar();
+                            }
+                            finally
+                            {
+                                semaphore.Release();
+                            }
+                        }).ToList();
+                        
+                        await Task.WhenAll(tasks);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -314,10 +454,45 @@ namespace SolutionGrader.UI
             }
         }
 
+        /// <summary>
+        /// Grades a single student using Docker-based grading.
+        /// 
+        /// Port allocation is handled dynamically using PortAllocator to ensure
+        /// thread-safe, unique port allocation that never reuses ports within a session.
+        /// This prevents race conditions in parallel grading where ports could be
+        /// incorrectly reused while still in use by another student.
+        /// </summary>
+        /// <param name="student">Student to grade</param>
+        /// <param name="ct">Cancellation token</param>
         private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
+            
+            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+            // This replaces the old portOffset-based approach which could lead to race conditions
+            // when students finish at different times and ports get reused incorrectly.
+            //
+            // CRITICAL: The PortAllocator ensures ports are NEVER reused within a grading session.
+            // This prevents the scenario where:
+            // - Student A starts with port 8001
+            // - Student B starts with port 8000  
+            // - Student A finishes and releases port 8001
+            // - The system incorrectly reuses port 8000 (still in use by Student B)
+            using var portAllocator = new PortAllocator();
+            int allocatedPort = portAllocator.AllocatePort();
+            
+            if (allocatedPort == -1)
+            {
+                _logger.LogError($"[UI] Failed to allocate port for student {student.StudentCode}");
+                student.Status = GradingStatus.Failed;
+                student.StatusMessage = "Failed to allocate port for grading";
+                student.EndTime = DateTime.Now;
+                UpdateStudentInUI(student);
+                return;
+            }
+            
+            _logger.LogInfo($"[UI] Allocated port {allocatedPort} for student {student.StudentCode}");
             
             try
             {
@@ -358,25 +533,55 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
-                // Update configuration with test kit port settings
-                _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
-                _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
-                _configuration.DatabaseImageName = testKitConfig.DatabaseImageName;
-                _configuration.DatabaseContainerName = testKitConfig.DatabaseContainerName;
-                _configuration.DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort;
-                _configuration.DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort;
-                _configuration.DatabaseUsername = testKitConfig.DatabaseUsername;
-                _configuration.DatabasePassword = testKitConfig.DatabasePassword;
+                // CRITICAL: Create a student-specific configuration copy with DYNAMICALLY ALLOCATED port
+                // Each parallel student needs their own configuration with unique ports to avoid conflicts
+                // This ensures each student's network monitor captures traffic on their specific port
+                // Internal and external ports MUST match for network monitoring with npcap/libpcap
+                //
+                // NOTE: We use the dynamically allocated port from PortAllocator instead of the old
+                // offset-based approach. This prevents race conditions where ports get reused while
+                // still being in use by another student.
+                var studentConfig = new GradingConfiguration
+                {
+                    SubmitFolderPath = _configuration.SubmitFolderPath,
+                    TestKitFolderPath = _configuration.TestKitFolderPath,
+                    SaveResultFolderPath = _configuration.SaveResultFolderPath,
+                    HasClient = _configuration.HasClient,
+                    HasServer = _configuration.HasServer,
+                    ClientProjectName = _configuration.ClientProjectName,
+                    ServerProjectName = _configuration.ServerProjectName,
+                    MaxParallelStudents = _configuration.MaxParallelStudents,
+                    GradingTimeoutSeconds = _configuration.GradingTimeoutSeconds,
+                    DockerNetwork = _configuration.DockerNetwork,
+                    StartIndex = _configuration.StartIndex,
+                    EndIndex = _configuration.EndIndex,
+                    
+                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
+                    // This ensures each student's client reaches their own server via host.docker.internal
+                    // The PortAllocator ensures no port reuse during the grading session
+                    CodeContainerInternalPort = allocatedPort,
+                    CodeContainerHostPort = allocatedPort,
+                    
+                    // Database settings from test kit
+                    DatabaseImageName = testKitConfig.DatabaseImageName,
+                    DatabaseContainerName = testKitConfig.DatabaseContainerName,
+                    DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort,
+                    DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort,
+                    DatabaseUsername = testKitConfig.DatabaseUsername,
+                    DatabasePassword = testKitConfig.DatabasePassword
+                };
                 
-                _logger.LogInfo($"Using ports - Internal: {testKitConfig.CodeContainerInternalPort}, Host: {testKitConfig.CodeContainerHostPort}");
+                _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
+                _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 
                 // Execute grading using the orchestration service - it handles status changes internally
                 // Pass the cancellation token so pause can abort the current grading
+                // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
                 var sessionState = new GradingSessionState();
                 await _gradingService.StartGradingAsync(
                     new System.Collections.Generic.List<StudentSolution> { student },
-                    _configuration,
+                    studentConfig,
                     sessionState,
                     ct);
                 
@@ -629,5 +834,10 @@ namespace SolutionGrader.UI
         }
 
         #endregion
+
+        private void dgStudents_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+
+        }
     }
 }

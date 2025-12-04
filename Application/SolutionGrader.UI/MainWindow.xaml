@@ -110,6 +110,23 @@
                     <TextBox Text="{Binding Configuration.CodeContainerHostPort, UpdateSourceTrigger=PropertyChanged}" 
                              Width="60" VerticalAlignment="Center"/>
                     
+                    <!-- Parallel Grading Configuration -->
+                    <TextBlock Text="Parallel Students:" VerticalAlignment="Center" Margin="30,0,5,0" FontWeight="Bold"/>
+                    <TextBox Text="{Binding Configuration.MaxParallelStudents, UpdateSourceTrigger=PropertyChanged}" 
+                             Width="40" VerticalAlignment="Center"
+                             ToolTip="Number of students to grade simultaneously"/>
+                    
+                    <!-- Index Range Configuration -->
+                    <TextBlock Text="Start Index:" VerticalAlignment="Center" Margin="30,0,5,0"/>
+                    <TextBox Text="{Binding Configuration.StartIndex, UpdateSourceTrigger=PropertyChanged}" 
+                             Width="50" VerticalAlignment="Center"
+                             ToolTip="Start grading from this index (0-based)"/>
+                    
+                    <TextBlock Text="End Index:" VerticalAlignment="Center" Margin="15,0,5,0"/>
+                    <TextBox Text="{Binding Configuration.EndIndex, UpdateSourceTrigger=PropertyChanged}" 
+                             Width="50" VerticalAlignment="Center"
+                             ToolTip="End grading at this index (-1 for all)"/>
+                    
                     <!-- Load Students Button -->
                     <Button Content="Load Students" 
                             Command="{Binding LoadStudentsCommand}"

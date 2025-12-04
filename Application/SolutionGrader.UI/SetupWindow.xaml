@@ -122,8 +122,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="15"/>
-                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -176,14 +174,6 @@
                                      ToolTip="Enter the server project name (e.g., Project11). The DLL with this name will be searched for."/>
                         </StackPanel>
                     </StackPanel>
-                    
-                    <!-- Info text about ports -->
-                    <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" 
-                               Text="Note: Port configurations are read from each test kit's Environment.xlsx file."
-                               FontStyle="Italic" 
-                               Foreground="#666666"
-                               FontSize="11"
-                               Margin="0,10,0,0"/>
                 </Grid>
             </Border>
         </Grid>

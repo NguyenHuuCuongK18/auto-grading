@@ -1,6 +1,5 @@
-﻿using Common.Models;
+﻿using NetworkMonitor.Models;
 using Common.Models.Entities;
-using static Common.Models.Entities.MiddlewareModel;
 
 namespace Common.Interfaces.Services
 {

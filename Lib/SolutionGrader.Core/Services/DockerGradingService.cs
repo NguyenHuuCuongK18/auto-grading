@@ -185,22 +185,26 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
-                // Resolve server/client DLL paths based on examiner configuration:
-                // - HasServer=true means student MUST provide server, search student's solution
-                // - HasServer=false means use golden server from Meta/Given/Server
-                // - HasClient=true means student MUST provide client, search student's solution
-                // - HasClient=false means use golden client from Meta/Given/Client
+                // INITIAL DLL DISCOVERY: Find what DLLs the student provided
+                // This logic discovers which DLLs exist in the student's submission.
+                // The actual selection of which DLL to use (student vs golden) happens
+                // PER TEST CASE based on the Grade_Content field in each test case's Header.xlsx.
+                //
+                // - HasServer=true: Search for student's server in their solution
+                // - HasServer=false: Don't search for server, will use golden if needed
+                // - HasClient=true: Search for student's client in their solution
+                // - HasClient=false: Don't search for client, will use golden if needed
                 //
                 // The serverDllPath and clientDllPath parameters contain what was found in student's solution.
-                // If examiner didn't expect that component, we use the golden version instead.
+                // Each test case will decide whether to use student's DLLs or golden DLLs based on its Grade_Content.
                 
                 string? actualServerDllPath = null;
                 string? actualClientDllPath = null;
                 
-                // Server resolution
+                // Server discovery
                 if (config.HasServer)
                 {
-                    // Examiner expects student to provide server
+                    // Examiner expects student to provide server - use discovered path
                     actualServerDllPath = serverDllPath;
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
@@ -208,16 +212,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide server, use golden server from test kit
+                    // Examiner doesn't expect student to provide server, prepare golden server from test kit
                     actualServerDllPath = testKitConfig.GivenServerPath;
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
-                        OnProgress($"Using golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
                     }
                     else
                     {
@@ -225,10 +229,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Client resolution
+                // Client discovery
                 if (config.HasClient)
                 {
-                    // Examiner expects student to provide client
+                    // Examiner expects student to provide client - use discovered path
                     actualClientDllPath = clientDllPath;
                     if (string.IsNullOrEmpty(actualClientDllPath))
                     {
@@ -236,16 +240,16 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"Using student's client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Discovered student's client: {Path.GetFileName(actualClientDllPath)}");
                     }
                 }
                 else
                 {
-                    // Examiner doesn't expect student to provide client, use golden client from test kit
+                    // Examiner doesn't expect student to provide client, prepare golden client from test kit
                     actualClientDllPath = testKitConfig.GivenClientPath;
                     if (!string.IsNullOrEmpty(actualClientDllPath))
                     {
-                        OnProgress($"Using golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
+                        OnProgress($"Prepared golden client from Meta/Given/Client: {Path.GetFileName(actualClientDllPath)}");
                     }
                     else
                     {
@@ -253,9 +257,10 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Log final resolved paths
-                OnProgress($"Final Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
-                OnProgress($"Final Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                // Log discovered/prepared paths (final selection happens per test case based on Grade_Content)
+                OnProgress($"Available Server DLL: {(actualServerDllPath != null ? Path.GetFileName(actualServerDllPath) : "(NONE)")}");
+                OnProgress($"Available Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
+                OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
                 // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
@@ -263,22 +268,25 @@ namespace SolutionGrader.Core.Services
                 // - Initial TCP handshake (SYN, SYN-ACK, ACK)
                 // - All data transfers
                 // - Connection teardown (FIN-ACK)
+                // 
+                // PARALLEL GRADING: Each student gets their own NetworkMonitorService instance
+                // configured with their specific port (basePort + portOffset) to avoid conflicts
                 if (_networkMonitor != null)
                 {
                     _networkMonitor.MonitorPort = config.CodeContainerHostPort;
                     _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                    Console.WriteLine($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
                     await _networkMonitor.StartAsync(ct);
                     OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
+                    Console.WriteLine($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                }
+                else
+                {
+                    Console.WriteLine($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
-                
-                // Copy files to containers (use actual resolved paths)
-                await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                
-                // Generate appsettings.json in containers
-                GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
                 // Execute test cases
                 bool isFirstTestCase = true;
@@ -286,20 +294,50 @@ namespace SolutionGrader.Core.Services
                 {
                     ct.ThrowIfCancellationRequested();
                     
-                    // For subsequent test cases, cleanup and re-copy files
-                    // This approach is faster than disposing/rebuilding containers
+                    // CRITICAL FIX: For EACH test case, determine which files to copy based on Grade_Content
+                    // This ensures we use golden server when grading client, and golden client when grading server
+                    string? serverPath = actualServerDllPath;
+                    string? clientPath = actualClientDllPath;
+                    
+                    if (!string.IsNullOrEmpty(testCase.GradeContent))
+                    {
+                        if (testCase.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading client implementation -> use golden (given) server
+                            serverPath = testKitConfig.GivenServerPath;
+                            clientPath = actualClientDllPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
+                        }
+                        else if (testCase.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading server implementation -> use golden (given) client
+                            serverPath = actualServerDllPath;
+                            clientPath = testKitConfig.GivenClientPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                        }
+                    }
+                    
+                    // For subsequent test cases, cleanup before re-copying
                     if (!isFirstTestCase)
                     {
-                        // Cleanup between test cases (kills processes, removes files)
+                        // Cleanup between test cases (kills processes, removes log files)
                         await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
-                        
-                        // Re-copy files for next test case
-                        OnProgress($"Re-copying files for test case {testCase.Name}...");
-                        await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                        
-                        // Re-generate appsettings.json
-                        GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                     }
+                    else
+                    {
+                        // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
+                        // Without this delay, network monitor may not be ready to capture packets for TC1
+                        Console.WriteLine("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
+                        await Task.Delay(3000);
+                    }
+                    
+                    // Copy files to containers (will overwrite existing files)
+                    OnProgress($"Copying files for test case {testCase.Name}...");
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer);
+                    
+                    // Generate appsettings.json in containers
+                    GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
+                    
                     isFirstTestCase = false;
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -336,7 +374,7 @@ namespace SolutionGrader.Core.Services
                     // Write test case results
                     var tcResultPath = Path.Combine(studentResultPath, testCase.Name);
                     Directory.CreateDirectory(tcResultPath);
-                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, tcResult);
+                    await WriteTestCaseResultAsync(tcResultPath, testCase.Name, testCase.Path, tcResult);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
@@ -363,7 +401,9 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
+                    Console.WriteLine($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
+                    Console.WriteLine($"[NetworkMonitor] Monitor stopped for student {studentCode}");
                 }
                 
                 // Cleanup containers
@@ -533,6 +573,8 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
                     }
@@ -552,6 +594,8 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
                     }
@@ -579,10 +623,19 @@ namespace SolutionGrader.Core.Services
                 config.DatabaseUsername,
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
-            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
-            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
-            var serverPort = config.CodeContainerInternalPort.ToString();
-            var clientPort = config.CodeContainerHostPort.ToString();
+            // CRITICAL: For network monitoring with libpcap/npcap, we need DIRECT port mapping.
+            // Server binds to internal port, which MUST equal the external host port.
+            // Client connects to host.docker.internal using the SAME port number.
+            // Example: Student 1 uses 8000:8000, Student 2 uses 8001:8001
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0
+            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;         // host.docker.internal
+            
+            // Both server and client use the SAME port number for direct mapping
+            var port = config.CodeContainerHostPort;  // e.g., 8000, 8001, 8002, etc.
+            var serverPort = port.ToString();
+            var clientPort = port.ToString();
+            
+            Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
             if (!string.IsNullOrEmpty(serverDllPath))
             {
@@ -600,10 +653,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Server)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old server appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort}");
+                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
@@ -632,10 +690,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Client)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old client appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort}");
+                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
@@ -672,6 +735,73 @@ namespace SolutionGrader.Core.Services
             
             try
             {
+                // IMPORTANT: Resolve actual DLLs to use based on Grade_Content
+                // This determines whether to use student's code or golden code for each component
+                string? actualServerDll = null;
+                string? actualClientDll = null;
+                
+                var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
+                Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
+                
+                // Validate Grade_Content value
+                var validValues = new[] { "Client", "Server", "Client/Server" };
+                if (!validValues.Contains(gradeContent, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[TestCase] WARNING: Invalid Grade_Content value '{gradeContent}', defaulting to 'Client/Server'");
+                    gradeContent = "Client/Server";
+                }
+                
+                if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Grade student's CLIENT only - use golden SERVER
+                    actualClientDll = clientDllPath;
+                    actualServerDll = testKitConfig.GivenServerPath;
+                    Console.WriteLine($"[TestCase] Using student CLIENT + golden SERVER");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student CLIENT but none was found. Grade_Content='Client'");
+                    }
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden SERVER but none was found in Meta/Given/Server. Grade_Content='Client'");
+                    }
+                }
+                else if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Grade student's SERVER only - use golden CLIENT
+                    actualServerDll = serverDllPath;
+                    actualClientDll = testKitConfig.GivenClientPath;
+                    Console.WriteLine($"[TestCase] Using student SERVER + golden CLIENT");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualServerDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student SERVER but none was found. Grade_Content='Server'");
+                    }
+                    if (string.IsNullOrEmpty(actualClientDll))
+                    {
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden CLIENT but none was found in Meta/Given/Client. Grade_Content='Server'");
+                    }
+                }
+                else // "Client/Server" or default
+                {
+                    // Grade BOTH student's CLIENT and SERVER - no golden used
+                    actualClientDll = clientDllPath;
+                    actualServerDll = serverDllPath;
+                    Console.WriteLine($"[TestCase] Using student CLIENT + student SERVER (no golden)");
+                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    
+                    // Note: For Client/Server mode, we allow one to be missing if the test only uses one
+                    // The test will fail naturally if it tries to use a missing component
+                }
+                
                 // Clear network captures for this test case
                 // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
                 // only traffic from this test case is captured
@@ -693,10 +823,10 @@ namespace SolutionGrader.Core.Services
                     ActionType = a.Action
                 }).ToList();
                 
-                // Execute actions and capture outputs
+                // Execute actions and capture outputs - use the resolved DLLs
                 var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(
                     actions, config, testKitConfig,
-                    serverDllPath, clientDllPath,
+                    actualServerDll, actualClientDll,
                     serverContainer, clientContainer, ct);
                 
                 // Compare outputs
@@ -710,18 +840,7 @@ namespace SolutionGrader.Core.Services
                 var capturedPackets = GetCapturedNetworkPackets();
                 Console.WriteLine($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
                 
-                result.NetworkCaptures = capturedPackets.Select(p => new NetworkCaptureRecord
-                {
-                    Stage = p.Stage,
-                    Timestamp = p.Timestamp,
-                    Flags = p.Flags,
-                    State = p.State,
-                    SourceRole = p.SourceRole,
-                    DestinationRole = p.DestinationRole,
-                    Data = p.Data,
-                    SourcePort = p.SourcePort,
-                    DestinationPort = p.DestinationPort
-                }).ToList();
+                result.NetworkCaptures = capturedPackets;
                 
                 // CRITICAL: Validate network monitoring is working
                 // If we expected network data but got none, this indicates a problem with network monitoring
@@ -761,46 +880,14 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Gets all captured network packets from the NetworkMonitor.
         /// </summary>
-        private List<CapturedPacketInfo> GetCapturedNetworkPackets()
+        private List<CapturedNetworkPacket> GetCapturedNetworkPackets()
         {
-            var packets = new List<CapturedPacketInfo>();
-            
             if (_networkMonitor == null)
-                return packets;
+                return new List<CapturedNetworkPacket>();
             
             // Get ALL captured packets from the RunContext (across all stages)
-            var capturedPackets = _runContext.GetAllCapturedNetworkPackets();
-            foreach (var packet in capturedPackets)
-            {
-                packets.Add(new CapturedPacketInfo
-                {
-                    // Use the stage stored at capture time, not the current stage
-                    Stage = packet.Stage,
-                    Timestamp = packet.Timestamp,
-                    Flags = packet.Flags,
-                    State = packet.State,
-                    SourceRole = packet.SourceRole,
-                    DestinationRole = packet.DestinationRole,
-                    Data = packet.Data,
-                    SourcePort = packet.SourcePort,
-                    DestinationPort = packet.DestinationPort
-                });
-            }
-            
-            return packets;
-        }
-        
-        private class CapturedPacketInfo
-        {
-            public int Stage { get; set; }
-            public DateTime Timestamp { get; set; }
-            public string Flags { get; set; } = "";
-            public string State { get; set; } = "";
-            public string SourceRole { get; set; } = "";
-            public string DestinationRole { get; set; } = "";
-            public string? Data { get; set; }
-            public int SourcePort { get; set; }
-            public int DestinationPort { get; set; }
+            // Returns packets with Stage, Timestamp, Flags, State, SourceRole, DestinationRole, Data, etc.
+            return _runContext.GetAllCapturedNetworkPackets().ToList();
         }
         
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsAsync(
@@ -1021,8 +1108,9 @@ namespace SolutionGrader.Core.Services
             {
                 var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
                 
+                // Use lenient flag comparison - check if all expected flags are present
                 bool matched = capturedPackets.Any(p =>
-                    (string.IsNullOrEmpty(exp.Flags) || p.Flags.Contains(exp.Flags.Split(',')[0].Trim())) &&
+                    (string.IsNullOrEmpty(exp.Flags) || CompareTcpFlags(exp.Flags, p.Flags)) &&
                     (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
                     (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
                 
@@ -1045,6 +1133,54 @@ namespace SolutionGrader.Core.Services
             var normExpected = expected.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             var normActual = (actual ?? "").Trim().Replace("\r\n", "\n").Replace("\r", "\n");
             return normActual.Contains(normExpected);
+        }
+        
+        /// <summary>
+        /// Compares TCP flags in a lenient way - checks if all expected flags are present
+        /// regardless of order. TCP flags are bits (SYN, ACK, PSH, FIN, RST, URG) and their
+        /// order may differ between Windows/Linux or packet capture tools.
+        /// 
+        /// Examples:
+        /// - "PSH, ACK" matches "ACK, PSH" -> true
+        /// - "SYN" matches "SYN" -> true
+        /// - "ACK" matches "ACK, RST" -> true (actual has ACK plus extra RST)
+        /// - "SYN, ACK" matches "SYN" -> false (missing ACK)
+        /// </summary>
+        private bool CompareTcpFlags(string expectedFlags, string actualFlags)
+        {
+            if (string.IsNullOrEmpty(expectedFlags)) return true;
+            if (string.IsNullOrEmpty(actualFlags)) return false;
+            
+            // Split flags and normalize (trim whitespace, convert to uppercase)
+            var expectedSet = expectedFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            var actualSet = actualFlags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
+            
+            // Check if all expected flags are present in actual flags
+            // (actual may have additional flags, which is acceptable)
+            return expectedSet.IsSubsetOf(actualSet);
+        }
+        
+        /// <summary>
+        /// Normalize flags for exact comparison - sorts flags alphabetically and removes whitespace
+        /// </summary>
+        private string NormalizeFlags(string flags)
+        {
+            if (string.IsNullOrEmpty(flags)) return "";
+            
+            var flagList = flags.Split(',')
+                .Select(f => f.Trim().ToUpperInvariant())
+                .Where(f => !string.IsNullOrEmpty(f))
+                .OrderBy(f => f)
+                .ToList();
+            
+            return string.Join(", ", flagList);
         }
         
         #endregion
@@ -1120,16 +1256,21 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // Discover test cases and read per-test-case timeout from Header.xlsx
+            // Discover test cases and read per-test-case configuration from Header.xlsx
             tkConfig.TestCases = Directory.GetDirectories(testKitPath)
                 .Where(d => !Path.GetFileName(d).Equals("Meta", StringComparison.OrdinalIgnoreCase))
                 .Where(d => File.Exists(Path.Combine(d, "Detail.xlsx")))
-                .Select(d => new TestCaseInfo
+                .Select(d =>
                 {
-                    Name = Path.GetFileName(d),
-                    Path = d,
-                    MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
-                    TimeoutSeconds = ReadTestCaseTimeout(d, config.TestCaseTimeoutSeconds)
+                    var (timeout, gradeContent) = ReadTestCaseConfig(d, config.TestCaseTimeoutSeconds);
+                    return new TestCaseInfo
+                    {
+                        Name = Path.GetFileName(d),
+                        Path = d,
+                        MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
+                        TimeoutSeconds = timeout,
+                        GradeContent = gradeContent
+                    };
                 })
                 .OrderBy(tc => tc.Name)
                 .ToList();
@@ -1184,46 +1325,61 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Reads the per-test-case timeout from the test case's Header.xlsx file.
-        /// Looks for the Testcase_Property sheet and finds the Timeout(Seconds) row.
-        /// Falls back to the default timeout if not found or on error.
+        /// Reads the per-test-case configuration from the test case's Header.xlsx file.
+        /// Looks for the Testcase_Property sheet and reads:
+        /// - Timeout(Seconds): timeout in seconds
+        /// - Grade_Content: what to grade ("Client", "Server", or "Client/Server")
+        /// Falls back to defaults if not found or on error.
         /// </summary>
         /// <param name="testCasePath">Path to the test case folder</param>
         /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
-        /// <returns>Timeout in seconds</returns>
-        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
+        /// <returns>Tuple of (timeout, gradeContent)</returns>
+        private static (int timeout, string gradeContent) ReadTestCaseConfig(string testCasePath, int defaultTimeout)
         {
             var headerPath = Path.Combine(testCasePath, "Header.xlsx");
             if (!File.Exists(headerPath))
-                return defaultTimeout;
+                return (defaultTimeout, "Client/Server");
             
             try
             {
                 using var wb = new XLWorkbook(headerPath);
                 if (wb.TryGetWorksheet("Testcase_Property", out var ws))
                 {
+                    int timeout = defaultTimeout;
+                    string gradeContent = "Client/Server";
+                    
                     foreach (var row in ws.RowsUsed())
                     {
-                        var key = row.Cell(1).GetValue<string>()?.Trim();
-                        if (key?.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) == true ||
-                            key?.Equals("Timeout", StringComparison.OrdinalIgnoreCase) == true)
+                        var key = row.Cell(1).GetValue<string>()?.Trim() ?? "";
+                        var value = row.Cell(2).GetValue<string>()?.Trim() ?? "";
+                        
+                        // Read Timeout
+                        if ((key.Equals("Timeout(Seconds)", StringComparison.OrdinalIgnoreCase) ||
+                             key.Equals("Timeout", StringComparison.OrdinalIgnoreCase)) &&
+                            int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
-                            var valueStr = row.Cell(2).GetValue<string>()?.Trim();
-                            if (int.TryParse(valueStr, out var timeout) && timeout > 0)
-                            {
-                                Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
-                                return timeout;
-                            }
+                            timeout = parsedTimeout;
+                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
+                        }
+                        
+                        // Read Grade_Content
+                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(value))
+                        {
+                            gradeContent = value;
+                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
                         }
                     }
+                    
+                    return (timeout, gradeContent);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TestKit] Warning: Could not read timeout from {headerPath}: {ex.Message}");
+                Console.WriteLine($"[TestKit] Warning: Could not read config from {headerPath}: {ex.Message}");
             }
             
-            return defaultTimeout;
+            return (defaultTimeout, "Client/Server");
         }
         
         private List<(int Stage, string Input, string Action)> ReadActions(string detailPath)
@@ -1296,6 +1452,7 @@ namespace SolutionGrader.Core.Services
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
                     var flags = row.Cell(6).GetValue<string>();
+                    var state = row.Cell(7).GetValue<string>();
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
                     
@@ -1305,6 +1462,7 @@ namespace SolutionGrader.Core.Services
                         {
                             Stage = stage,
                             Flags = flags,
+                            State = state,
                             SourceRole = sourceRole,
                             DestinationRole = destRole
                         });
@@ -1337,28 +1495,27 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress("Cleanup: Stopping applications between test cases...");
             
-            // Step 1: Kill dotnet processes using PID-based approach (more reliable than pkill)
-            // First, get the list of processes and find dotnet PIDs
+            // Step 1: Kill dotnet application processes (excluding PID 1 - container's main process)
+            // This uses PID-based killing to safely terminate only application processes
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown - reduced from 1.5s to 500ms
+            // Wait for graceful shutdown
             OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
             await Task.Delay(500);
             
-            // Force kill any remaining dotnet processes
+            // Force kill any remaining dotnet application processes (excluding PID 1)
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
             await ForceKillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 3000);
+            // Use safe kill that excludes PID 1
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
             
-            // Step 3: Remove files from /apps folder and temp files
-            OnProgress("Cleanup: Removing files from containers...");
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 3000);
+            // Step 3: Clean up temp files ONLY (do NOT remove /apps/* - docker cp will overwrite files)
+            OnProgress("Cleanup: Removing temp files from containers...");
             _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             
@@ -1558,7 +1715,7 @@ namespace SolutionGrader.Core.Services
         /// - Network sheet: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, ActualFlags, ActualState, ActualSourceRole, ActualDestRole, ActualData, NetworkResult
         /// - Database sheet: (empty)
         /// </summary>
-        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, TestCaseResult result)
+        private async Task WriteTestCaseResultAsync(string tcResultPath, string tcName, string testCasePath, TestCaseResult result)
         {
             var detailPath = Path.Combine(tcResultPath, "GradeDetail.xlsx");
             using var wb = new XLWorkbook();
@@ -1627,36 +1784,154 @@ namespace SolutionGrader.Core.Services
             wb.Worksheets.Add("Database");
             
             // === Network Sheet ===
-            // Contains TCP packet captures in the EXACT testkit Detail.xlsx format for easy debugging
-            // Format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
+            // IMPROVED FORMAT: Show ALL expected network flows and ALL actual captured packets
+            // This provides a comprehensive comparison that makes it easy to identify:
+            // - Missing packets (expected but not captured)
+            // - Extra packets (captured but not expected)
+            // - Mismatched packets (flags, roles differ from expected)
+            //
+            // The format shows expected flows on the left (columns 1-10) and actual captures 
+            // on the right (columns 11-15), with a Match column (16) showing comparison result.
+            // This allows reviewers to quickly scan for red (FAIL/MISSING) rows.
             var netWs = wb.Worksheets.Add("Network");
             SetNetworkSheetHeaders(netWs);
             int netRow = 2;
-            foreach (var packet in result.NetworkCaptures)
-            {
-                netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                netWs.Cell(netRow, 2).Value = packet.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");  // Time
-                netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                netWs.Cell(netRow, 4).Value = $"127.0.0.1:{packet.SourcePort}";  // Source
-                netWs.Cell(netRow, 5).Value = $"127.0.0.1:{packet.DestinationPort}";  // Destination
-                netWs.Cell(netRow, 6).Value = packet.Flags;  // Flags
-                netWs.Cell(netRow, 7).Value = packet.State;  // State
-                netWs.Cell(netRow, 8).Value = packet.Data ?? "";  // Data
-                netWs.Cell(netRow, 9).Value = packet.SourceRole;  // SourceRole
-                netWs.Cell(netRow, 10).Value = packet.DestinationRole;  // DestinationRole
-                netRow++;
-            }
             
-            // If no captures but we have expected network flows, log them as empty rows for debugging
-            if (result.NetworkCaptures.Count == 0 && result.NetworkComparisons.Count > 0)
+            // Read expected network flows from testkit Detail.xlsx to get COMPLETE data
+            // This ensures we show ALL expected flows, not just the ones used in comparison
+            var detailPath_forNetwork = Path.Combine(testCasePath, "Detail.xlsx");
+            var expectedNetworkFlows = ReadExpectedNetwork(detailPath_forNetwork);
+            
+            // Group actual captures by stage for easier lookup
+            var capturesByStage = result.NetworkCaptures
+                .GroupBy(p => p.Stage)
+                .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
+            
+            // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
+            // Show ALL expected flows with their matching actual captures
+            if (expectedNetworkFlows.Count > 0)
             {
-                foreach (var comp in result.NetworkComparisons)
+                Console.WriteLine($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
+                
+                foreach (var expectedFlow in expectedNetworkFlows.OrderBy(f => f.Stage))
                 {
-                    netWs.Cell(netRow, 1).Value = comp.Stage;
-                    netWs.Cell(netRow, 6).Value = comp.Expected;  // Expected flags
+                    // Write expected network flow (columns 1-10)
+                    netWs.Cell(netRow, 1).Value = expectedFlow.Stage;  // Stage
+                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit - not always available)
+                    netWs.Cell(netRow, 3).Value = "TCP";  // Info
+                    netWs.Cell(netRow, 4).Value = "";  // Source (IP from testkit if available)
+                    netWs.Cell(netRow, 5).Value = "";  // Destination (IP from testkit if available)
+                    netWs.Cell(netRow, 6).Value = expectedFlow.Flags ?? "";  // Flags
+                    netWs.Cell(netRow, 7).Value = expectedFlow.State ?? "";  // State
+                    netWs.Cell(netRow, 8).Value = "";  // Data
+                    netWs.Cell(netRow, 9).Value = expectedFlow.SourceRole ?? "";  // SourceRole
+                    netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
+                    
+                    // Find matching actual packet(s) for this expected flow
+                    var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
+                        ? packets 
+                        : new List<CapturedNetworkPacket>();
+                    
+                    // Try to find a packet that matches the expected flags
+                    // Find matching packet by comparing flags
+                    // Flags must match exactly (case-insensitive, order-normalized)
+                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
+                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
+                        NormalizeFlags(expectedFlow.Flags) == NormalizeFlags(p.Flags));
+                    
+                    if (matchingPacket != null)
+                    {
+                        // Found matching packet - write actual data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = matchingPacket.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = matchingPacket.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = matchingPacket.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = matchingPacket.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
+                        
+                        // Check if it's an exact match or just partial
+                        // Flags must match exactly (but order doesn't matter - normalize both)
+                        bool exactMatch = true;
+                        
+                        // Compare flags - exact match required (but order-normalized)
+                        if (!string.IsNullOrEmpty(expectedFlow.Flags) && NormalizeFlags(expectedFlow.Flags) != NormalizeFlags(matchingPacket.Flags))
+                            exactMatch = false;
+                        
+                        // Compare roles exactly
+                        if (!string.IsNullOrEmpty(expectedFlow.SourceRole) && matchingPacket.SourceRole != expectedFlow.SourceRole)
+                            exactMatch = false;
+                        if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
+                            exactMatch = false;
+                        
+                        netWs.Cell(netRow, 16).Value = exactMatch ? "PASS" : "PARTIAL";
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        
+                        // Remove from list so we can identify extra packets later
+                        actualPacketsForStage.Remove(matchingPacket);
+                    }
+                    else
+                    {
+                        // No matching packet found - expected flow is MISSING
+                        netWs.Cell(netRow, 11).Value = "(MISSING - not captured)";  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = "";  // ActualState
+                        netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = "";  // ActualData
+                        netWs.Cell(netRow, 16).Value = "FAIL";
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        
+                        Console.WriteLine($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
+                    }
+                    
                     netRow++;
                 }
             }
+            
+            // === SECTION 2: Additional Captured Packets (not validated by this test case) ===
+            // These packets were captured but not validated by the test case.
+            // This is NORMAL - test cases intentionally validate only specific aspects:
+            //   - TC1 may only validate sending
+            //   - TC2 may validate send + server confirm
+            //   - TC3 may validate all communication + console output
+            //   - TC4 may validate disconnect behavior
+            // Extra packets are shown for information but DO NOT cause test failure.
+            foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
+            {
+                var remainingPackets = capturesByStage[stage];
+                if (remainingPackets.Count > 0)
+                {
+                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    
+                    foreach (var packet in remainingPackets)
+                    {
+                        // No expected flow for this packet - shown for information only
+                        netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
+                        netWs.Cell(netRow, 2).Value = "(Not validated by this test case)";  // Time
+                        // Leave expected columns 3-10 empty
+                        for (int i = 3; i <= 10; i++) 
+                            netWs.Cell(netRow, i).Value = "";
+                        
+                        // Write actual packet data (columns 11-15)
+                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
+                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
+                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
+                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
+                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        netWs.Cell(netRow, 16).Value = "INFO";  // Informational - not validated
+                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGray;
+                        
+                        netRow++;
+                    }
+                }
+            }
+            
+            // === SECTION 3: No network data case ===
+            if (expectedNetworkFlows.Count == 0 && result.NetworkCaptures.Count == 0)
+            {
+                // No expected flows and no captures - add a note
+                netWs.Cell(netRow, 1).Value = "N/A";
+                netWs.Cell(netRow, 2).Value = "No network flows expected or captured for this test case";
+            }
+            
             netWs.Columns().AdjustToContents();
             
             wb.SaveAs(detailPath);
@@ -1712,10 +1987,16 @@ namespace SolutionGrader.Core.Services
         
         private static void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
-            // Match the EXACT testkit Detail.xlsx Network sheet format for easy debugging
-            // Testkit format: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole
-            var headers = new[] { "Stage", "Time", "Info", "Source", "Destination", "Flags", "State", "Data", 
-                "SourceRole", "DestinationRole" };
+            // Network sheet format matching ExcelDetailLogService naming convention (NO underscores).
+            // Format: Stage, expected columns (Time, Flags, etc.), then Actual* columns, then NetworkResult.
+            // This ensures consistency across both Docker and regular grading flows.
+            var headers = new[] { 
+                "Stage",  // Test stage number
+                "Time", "Info", "Source", "Destination", 
+                "Flags", "State", "Data", "SourceRole", "DestinationRole",
+                "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData",
+                "NetworkResult"  // PASS or FAIL for network flow matching
+            };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
@@ -1855,12 +2136,24 @@ namespace SolutionGrader.Core.Services
         /// Defaults to 15 seconds if not specified in the test kit.
         /// </summary>
         public int TimeoutSeconds { get; set; } = 15;
+        
+        /// <summary>
+        /// Specifies what should be graded for this test case.
+        /// Values: "Client", "Server", or "Client/Server"
+        /// - "Client": Grade student's client with golden server
+        /// - "Server": Grade student's server with golden client
+        /// - "Client/Server": Grade both student's client and server (no golden used)
+        /// Read from Header.xlsx Testcase_Property sheet.
+        /// Defaults to "Client/Server" if not specified.
+        /// </summary>
+        public string GradeContent { get; set; } = "Client/Server";
     }
     
     internal class ExpectedNetworkFlow
     {
         public int Stage { get; set; }
         public string? Flags { get; set; }
+        public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
     }
@@ -1902,7 +2195,7 @@ namespace SolutionGrader.Core.Services
         public List<ComparisonResult> NetworkComparisons { get; set; } = new();
         
         /// <summary>Captured network packets - for Network sheet (raw captures)</summary>
-        public List<NetworkCaptureRecord> NetworkCaptures { get; set; } = new();
+        public List<CapturedNetworkPacket> NetworkCaptures { get; set; } = new();
     }
     
     /// <summary>
@@ -1933,21 +2226,6 @@ namespace SolutionGrader.Core.Services
         public string? Message { get; set; }
     }
     
-    /// <summary>
-    /// Network capture record for Network sheet - matches SampleLogging format exactly.
-    /// </summary>
-    public class NetworkCaptureRecord
-    {
-        public int Stage { get; set; }
-        public DateTime Timestamp { get; set; }
-        public string Flags { get; set; } = "";
-        public string State { get; set; } = "";
-        public string SourceRole { get; set; } = "";
-        public string DestinationRole { get; set; } = "";
-        public string? Data { get; set; }
-        public int SourcePort { get; set; }
-        public int DestinationPort { get; set; }
-    }
     
     /// <summary>
     /// Event arguments for grading progress updates.

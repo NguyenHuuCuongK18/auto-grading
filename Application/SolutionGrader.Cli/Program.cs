@@ -96,13 +96,20 @@ public class Program
             TestCaseTimeoutSeconds = int.TryParse(map.GetValueOrDefault("tc-timeout"), out var tct) ? tct : 15,
             
             // Database settings
+            // Note: Database password is read from Environment.xlsx by DockerGradingService
+            // It can be overridden via --db-password or AUTOGRADING_DB_PASSWORD env var
             DatabaseContainerName = map.GetValueOrDefault("db-container", "auto-grading-sqlserver"),
             DatabaseContainerInternalPort = int.TryParse(map.GetValueOrDefault("db-internal-port"), out var dbip) ? dbip : 1433,
             DatabaseContainerHostPort = int.TryParse(map.GetValueOrDefault("db-host-port"), out var dbhp) ? dbhp : 1434,
             DatabaseUsername = map.GetValueOrDefault("db-user", "sa"),
             DatabasePassword = map.GetValueOrDefault("db-password") 
                 ?? Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") 
-                ?? throw new ArgumentException("Database password is required. Provide --db-password or set AUTOGRADING_DB_PASSWORD environment variable.")
+                ?? "", // Will be read from Environment.xlsx if not provided
+            
+            // Parallel grading and index range settings
+            MaxParallelStudents = int.TryParse(map.GetValueOrDefault("parallel"), out var parallel) ? Math.Max(1, parallel) : 1,
+            StartIndex = int.TryParse(map.GetValueOrDefault("start-index"), out var si) ? Math.Max(0, si) : 0,
+            EndIndex = int.TryParse(map.GetValueOrDefault("end-index"), out var ei) ? ei : -1
         };
 
         // Optional: filter by paper or student
@@ -455,6 +462,9 @@ Docker Grading (syncs with SolutionGrader.UI):
     --network      Docker network name (default: auto-grading-network)
     --timeout      Overall grading timeout in seconds (default: 60)
     --tc-timeout   Per-test-case timeout in seconds (default: 15)
+    --parallel     Number of students to grade simultaneously (default: 1)
+    --start-index  Start grading from this index, 0-based (default: 0)
+    --end-index    End grading at this index, -1 for all (default: -1)
 
 Local Grading (Windows only):
   SolutionGrader.Cli executesuite --suite <suiteFolder> --out <resultRoot>
@@ -472,6 +482,12 @@ Examples:
   # Docker grading for all students in paper 1
   dotnet run -- dockergrade --submit ./Submit --testkit ./TestKit/TestKit --paper 1
 
+  # Docker grading for 3 students in parallel from paper 1
+  dotnet run -- dockergrade --submit ./Submit --testkit ./TestKit/TestKit --paper 1 --parallel 3
+
+  # Docker grading from index 5 to 10 (restart after incident)
+  dotnet run -- dockergrade --submit ./Submit --testkit ./TestKit/TestKit --paper 1 --start-index 5 --end-index 10
+
   # Docker grading for a specific student
   dotnet run -- dockergrade --submit ./Submit --testkit ./TestKit/TestKit --paper 1 --student dongnvhe172649
 
@@ -482,7 +498,7 @@ Examples:
   dotnet run -- validate --testkit ./TestKit/TestKit
 
 Environment Variables:
-  AUTOGRADING_DB_PASSWORD  Database password (to avoid passing on command line)
+  AUTOGRADING_DB_PASSWORD  Database password override (optional - defaults to Environment.xlsx)
 
 Notes:
   - Docker must be running for dockergrade command

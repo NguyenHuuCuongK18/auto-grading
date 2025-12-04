@@ -1,7 +1,7 @@
 ﻿using Common.Interfaces.Services;
 using NetworkMonitor.Abstractions;
 using NetworkMonitor.Keywords;
-using Common.Models;
+using NetworkMonitor.Models;
 using PacketDotNet;
 using SharpPcap;
 using System.Text;
