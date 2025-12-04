@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Auto Grading System - Setup" 
-        Height="600" Width="800"
+        Height="680" Width="800"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         MinHeight="550" MinWidth="700">
@@ -132,8 +132,7 @@
                     <TextBlock Grid.Row="0" 
                                Text="Project Configuration" 
                                FontWeight="Bold" 
-                               FontSize="14"
-                               Margin="0,0,0,0"/>
+                               FontSize="14"/>
                     
                     <!-- Helper Text -->
                     <TextBlock Grid.Row="2" 
@@ -146,7 +145,7 @@
                         <LineBreak/>
                         <Run Text="If only one project is specified, toggles are not needed."/>
                         <LineBreak/>
-                        <Run Text="If two projects are specified (client/server architecture), use toggles to indicate which is client and which is server."/>
+                        <Run Text="If two projects are specified use toggles to indicate which is client and which is server."/>
                         <LineBreak/>
                         <Run Text="Note: This system only grades Question 1. Q2, Q3, etc. are not supported." FontWeight="SemiBold" Foreground="#D32F2F"/>
                     </TextBlock>
@@ -155,37 +154,31 @@
                     <Grid Grid.Row="4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="300"/>
                             <ColumnDefinition Width="20"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         
-                        <TextBlock Grid.Column="0" 
-                                   Text="Project 1:" 
-                                   VerticalAlignment="Center" 
-                                   Margin="0,0,10,0"
-                                   FontWeight="SemiBold"/>
-                        <TextBox Grid.Column="1" 
-                                 x:Name="txtProject1Name"
-                                 Height="28"
-                                 VerticalContentAlignment="Center"
-                                 Padding="5,0"
-                                 ToolTip="Enter project name (e.g., Q1, Project11)"
-                                 TextChanged="ProjectName_TextChanged"/>
+                        <TextBlock Grid.Column="0" Text="Project 1:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="SemiBold"/>
+                        <TextBox Grid.Column="1" x:Name="txtProject1Name" Height="28" VerticalContentAlignment="Center" Padding="5,0" ToolTip="Enter project name (e.g., Q1, Project11)" TextChanged="ProjectName_TextChanged"/>
                         
                         <!-- Client/Server Toggles for Project 1 -->
                         <StackPanel Grid.Column="3" Orientation="Horizontal" x:Name="pnlProject1Role">
-                            <RadioButton x:Name="rbProject1Client"
-                                       Content="Client"
-                                       GroupName="Project1Role"
-                                       Margin="0,0,10,0"
-                                       VerticalAlignment="Center"/>
-                            <RadioButton x:Name="rbProject1Server"
-                                       Content="Server"
-                                       GroupName="Project1Role"
-                                       VerticalAlignment="Center"
-                                       IsChecked="True"/>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=txtProject1Name}" Value="">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Text, ElementName=txtProject1Name}" Value="{x:Null}">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <RadioButton x:Name="rbProject1Client" Content="Client" GroupName="Project1Role" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <RadioButton x:Name="rbProject1Server" Content="Server" GroupName="Project1Role" VerticalAlignment="Center" IsChecked="True"/>
                         </StackPanel>
                     </Grid>
                     
@@ -193,37 +186,31 @@
                     <Grid Grid.Row="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="300"/>
                             <ColumnDefinition Width="20"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         
-                        <TextBlock Grid.Column="0" 
-                                   Text="Project 2:" 
-                                   VerticalAlignment="Center" 
-                                   Margin="0,0,10,0"
-                                   FontWeight="SemiBold"/>
-                        <TextBox Grid.Column="1" 
-                                 x:Name="txtProject2Name"
-                                 Height="28"
-                                 VerticalContentAlignment="Center"
-                                 Padding="5,0"
-                                 ToolTip="Enter project name (e.g., Q2, Project12)"
-                                 TextChanged="ProjectName_TextChanged"/>
+                        <TextBlock Grid.Column="0" Text="Project 2:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="SemiBold"/>
+                        <TextBox Grid.Column="1" x:Name="txtProject2Name" Height="28" VerticalContentAlignment="Center" Padding="5,0" ToolTip="Enter project name (e.g., Q2, Project12)" TextChanged="ProjectName_TextChanged"/>
                         
                         <!-- Client/Server Toggles for Project 2 -->
                         <StackPanel Grid.Column="3" Orientation="Horizontal" x:Name="pnlProject2Role">
-                            <RadioButton x:Name="rbProject2Client"
-                                       Content="Client"
-                                       GroupName="Project2Role"
-                                       Margin="0,0,10,0"
-                                       VerticalAlignment="Center"
-                                       IsChecked="True"/>
-                            <RadioButton x:Name="rbProject2Server"
-                                       Content="Server"
-                                       GroupName="Project2Role"
-                                       VerticalAlignment="Center"/>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=txtProject2Name}" Value="">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Text, ElementName=txtProject2Name}" Value="{x:Null}">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <RadioButton x:Name="rbProject2Client" Content="Client" GroupName="Project2Role" Margin="0,0,10,0" VerticalAlignment="Center" IsChecked="True"/>
+                            <RadioButton x:Name="rbProject2Server" Content="Server" GroupName="Project2Role" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Grid>
                 </Grid>
@@ -231,27 +218,16 @@
         </Grid>
         
         <!-- Footer with Start Button -->
-        <Border Grid.Row="2" Background="#F0F0F0" Padding="20">
+        <Border Grid.Row="2" Background="#F0F0F0" Padding="20" Margin="0,10,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 
-                <TextBlock x:Name="txtValidation" 
-                           Grid.Column="0"
-                           Foreground="Red" 
-                           VerticalAlignment="Center"
-                           TextWrapping="Wrap"/>
+                <TextBlock x:Name="txtValidation" Grid.Column="0" Foreground="Red" VerticalAlignment="Center" TextWrapping="Wrap"/>
                 
-                <Button Grid.Column="1" 
-                        x:Name="btnStartGrading"
-                        Content="▶ Start Grading" 
-                        Background="#28A745" 
-                        Foreground="White"
-                        FontWeight="Bold"
-                        Style="{StaticResource ActionButton}"
-                        Click="StartGrading_Click"/>
+                <Button Grid.Column="1" x:Name="btnStartGrading" Content="▶ Start Grading" Background="#28A745" Foreground="White" FontWeight="Bold" Style="{StaticResource ActionButton}" Click="StartGrading_Click"/>
             </Grid>
         </Border>
     </Grid>

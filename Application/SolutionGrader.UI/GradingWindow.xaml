@@ -85,93 +85,83 @@
             </Grid>
         </Border>
 
-        <!-- Control Section -->
+        <!-- Control Section: wrapped in ScrollViewer and stacked vertically to avoid overlap -->
         <Border Grid.Row="1" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1" Padding="10" Background="#FFFFFF">
-            <!-- Changed from stacked Grid to horizontal Grid for side-by-side layout -->
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <!-- Student Selection -->
-                    <ColumnDefinition Width="15"/>
-                    <!-- Spacer -->
-                    <ColumnDefinition Width="Auto"/>
-                    <!-- Grading Actions -->
-                    <ColumnDefinition Width="*"/>
-                    <!-- Fill -->
-                </Grid.ColumnDefinitions>
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- Section 1: Student Selection (full width) -->
+                    <Border BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="STUDENT SELECTION" 
+                                       FontWeight="Bold"
+                                       FontSize="11"
+                                       Foreground="#6C757D"
+                                       Margin="0,0,0,8"/>
 
-                <!-- Section 1: Student Selection -->
-                <Border Grid.Column="0" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA">
-                    <StackPanel>
-                        <TextBlock Text="STUDENT SELECTION" 
-                                   FontWeight="Bold"
-                                   FontSize="11"
-                                   Foreground="#6C757D"
-                                   Margin="0,0,0,8"/>
+                            <WrapPanel VerticalAlignment="Center">
+                                <!-- Index Range -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                    <TextBlock Text="Index:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                    <TextBox x:Name="txtSelectStartIndex" Width="60" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="1"/>
+                                    <TextBlock Text="-" VerticalAlignment="Center" Margin="5,0"/>
+                                    <TextBox x:Name="txtSelectEndIndex" Width="60" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="-1"/>
+                                    <Button x:Name="btnApplyIndexSelection" Content="Apply" Margin="5,0,0,0" Padding="8,0" Height="26" Click="ApplyIndexSelection_Click"/>
+                                </StackPanel>
 
-                        <WrapPanel VerticalAlignment="Center">
-                            <!-- Index Range -->
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
-                                <TextBlock Text="Index:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
-                                <TextBox x:Name="txtSelectStartIndex" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="1"/>
-                                <TextBlock Text="-" VerticalAlignment="Center" Margin="5,0"/>
-                                <TextBox x:Name="txtSelectEndIndex" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="-1"/>
-                                <Button x:Name="btnApplyIndexSelection" Content="Apply" Margin="5,0,0,0" Padding="8,0" Height="26" Click="ApplyIndexSelection_Click"/>
-                            </StackPanel>
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
-                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+                                <!-- Paper Selection -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                    <TextBlock Text="Paper:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                    <ComboBox x:Name="cmbPaperSelection" Width="120" Height="26" VerticalContentAlignment="Center" SelectionChanged="PaperSelection_SelectionChanged"/>
+                                </StackPanel>
 
-                            <!-- Paper Selection -->
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
-                                <TextBlock Text="Paper:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
-                                <ComboBox x:Name="cmbPaperSelection" Width="100" Height="26" VerticalContentAlignment="Center" SelectionChanged="PaperSelection_SelectionChanged"/>
-                            </StackPanel>
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
-                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+                                <!-- Buttons -->
+                                <Button x:Name="btnSelectAll" Content="All" Height="26" Padding="10,0" Margin="0,0,5,0" Click="SelectAll_Click"/>
+                                <Button x:Name="btnUnselectAll" Content="None" Height="26" Padding="10,0" Click="UnselectAll_Click"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
 
-                            <!-- Buttons -->
-                            <Button x:Name="btnSelectAll" Content="All" Height="26" Padding="10,0" Margin="0,0,5,0" Click="SelectAll_Click"/>
-                            <Button x:Name="btnUnselectAll" Content="None" Height="26" Padding="10,0" Click="UnselectAll_Click"/>
-                        </WrapPanel>
-                    </StackPanel>
-                </Border>
+                    <!-- Section 2: Grading Actions (full width) -->
+                    <Border BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA">
+                        <StackPanel>
+                            <TextBlock Text="GRADING ACTIONS" 
+                                       FontWeight="Bold"
+                                       FontSize="11"
+                                       Foreground="#6C757D"
+                                       Margin="0,0,0,8"/>
 
-                <!-- Section 2: Grading Actions -->
-                <Border Grid.Column="2" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA">
-                    <StackPanel>
-                        <TextBlock Text="GRADING ACTIONS" 
-                                   FontWeight="Bold"
-                                   FontSize="11"
-                                   Foreground="#6C757D"
-                                   Margin="0,0,0,8"/>
+                            <WrapPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                    <TextBlock Text="Batch:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                    <TextBox x:Name="txtMaxParallelStudents" Width="60" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" FontWeight="Bold"/>
+                                </StackPanel>
 
-                        <WrapPanel VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
-                                <TextBlock Text="Batch:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
-                                <TextBox x:Name="txtMaxParallelStudents" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" FontWeight="Bold"/>
-                            </StackPanel>
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
-                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+                                <!-- Start Buttons -->
+                                <Button x:Name="btnStartAll" Content="▶ Start All" Background="#28A745" Foreground="White" Padding="12,4" Margin="0,0,5,0" Height="26" Click="StartAll_Click" BorderThickness="0"/>
+                                <Button x:Name="btnStartSelected" Content="▶ Start Selected" Background="#17A2B8" Foreground="White" Padding="12,4" Margin="0,0,15,0" Height="26" Click="StartSelected_Click" BorderThickness="0"/>
 
-                            <!-- Start Buttons -->
-                            <Button x:Name="btnStartAll" Content="▶ Start All" Background="#28A745" Foreground="White" Padding="12,4" Margin="0,0,5,0" Height="26" Click="StartAll_Click" BorderThickness="0"/>
-                            <Button x:Name="btnStartSelected" Content="▶ Selected" Background="#17A2B8" Foreground="White" Padding="12,4" Margin="0,0,15,0" Height="26" Click="StartSelected_Click" BorderThickness="0"/>
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
-                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+                                <!-- Control Buttons -->
+                                <Button x:Name="btnPause" Content="⏸" ToolTip="Pause" Background="#FFC107" Padding="10,4" Margin="0,0,5,0" Height="26" Click="Pause_Click" BorderThickness="0"/>
+                                <Button x:Name="btnResume" Content="▶" ToolTip="Resume" Background="#20C997" Foreground="White" Padding="10,4" Margin="0,0,15,0" Height="26" Click="Resume_Click" BorderThickness="0"/>
 
-                            <!-- Control Buttons -->
-                            <Button x:Name="btnPause" Content="⏸" ToolTip="Pause" Background="#FFC107" Padding="10,4" Margin="0,0,5,0" Height="26" Click="Pause_Click" BorderThickness="0"/>
-                            <Button x:Name="btnResume" Content="▶" ToolTip="Resume" Background="#20C997" Foreground="White" Padding="10,4" Margin="0,0,15,0" Height="26" Click="Resume_Click" BorderThickness="0"/>
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
-                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
-
-                            <!-- Reset Buttons -->
-                            <Button x:Name="btnResetAll" Content="Reset All" Background="#DC3545" Foreground="White" Padding="10,4" Margin="0,0,5,0" Height="26" Click="ResetAll_Click" BorderThickness="0"/>
-                            <Button x:Name="btnResetSelected" Content="Reset Selected" Background="#FD7E14" Foreground="White" Padding="10,4" Height="26" Click="ResetSelected_Click" BorderThickness="0"/>
-                        </WrapPanel>
-                    </StackPanel>
-                </Border>
-            </Grid>
+                                <!-- Reset Buttons -->
+                                <Button x:Name="btnResetAll" Content="Reset All" Background="#DC3545" Foreground="White" Padding="10,4" Margin="0,0,5,0" Height="26" Click="ResetAll_Click" BorderThickness="0"/>
+                                <Button x:Name="btnResetSelected" Content="Reset Selected" Background="#FD7E14" Foreground="White" Padding="10,4" Height="26" Click="ResetSelected_Click" BorderThickness="0"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
         </Border>
 
         <!-- Main Content Area: DataGrid -->

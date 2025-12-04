@@ -5,7 +5,7 @@
 # needed for process cleanup between test cases.
 #
 # BUILD COMMAND:
-#   docker build -t auto-grading-console:latest ./DockerImage
+#   docker build -t fptuxaes/aes-dotnet8-console:latest ./DockerImage
 #
 # The grading system will use this image by default.
 # You can also specify a custom image in TestKit/Header.xlsx Config sheet
