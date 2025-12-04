@@ -818,19 +818,6 @@ namespace EnvironmentBuilder.DockerCommand
                 return "(Unable to list images)";
             }
         }
-        
-        /// <summary>
-        /// Clears the verified images cache.
-        /// Should be called at the start of a new grading session to ensure fresh image checks.
-        /// </summary>
-        public static void ClearImageCache()
-        {
-            lock (_verifiedImagesLock)
-            {
-                _verifiedImages.Clear();
-                Console.WriteLine("[Docker] Image cache cleared for new grading session");
-            }
-        }
         #endregion
 
         #region DOTNET

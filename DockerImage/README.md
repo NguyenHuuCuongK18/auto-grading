@@ -161,15 +161,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 ```
 
-## Related Documentation
-
-- [DOCKER_SETUP_GUIDE.md](../DOCKER_SETUP_GUIDE.md) - Complete Docker setup guide
-- [README.md](../README.md) - Main project README
-- [TestKit Documentation](../TestKit/README.md) - Test kit configuration
-
 ## Support
 
 If you need help with Docker image setup:
-1. Check the complete [Docker Setup Guide](../DOCKER_SETUP_GUIDE.md)
-2. Review Docker logs: `docker build --progress=plain --no-cache -t fptuxaes/aes-dotnet8-console:latest ./DockerImage`
-3. Verify Docker is running: `docker info`
+1. Review Docker logs: `docker build --progress=plain --no-cache -t fptuxaes/aes-dotnet8-console:latest ./DockerImage`
+2. Verify Docker is running: `docker info`

@@ -601,7 +601,7 @@ namespace SolutionGrader.Core.Services
             var maxAttempts = maxWaitSeconds * 10; // Check every 100ms
             for (int i = 0; i < maxAttempts; i++)
             {
-                if (!_dockerExecutor.IsContainerRunning(containerName))
+                if (!_dockerExecutor.IsContainerExist(containerName))
                 {
                     // Container is gone - return immediately
                     return;
