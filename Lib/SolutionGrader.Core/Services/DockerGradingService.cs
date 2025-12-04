@@ -324,9 +324,9 @@ namespace SolutionGrader.Core.Services
                         await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
                     }
                     
-                    // Copy files to containers (with forceClean=true to avoid file mixing between test cases)
+                    // Copy files to containers (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
-                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer, forceClean: !isFirstTestCase);
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer);
                     
                     // Generate appsettings.json in containers
                     GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
@@ -555,8 +555,7 @@ namespace SolutionGrader.Core.Services
             string? serverDllPath,
             string? clientDllPath,
             string serverContainer,
-            string clientContainer,
-            bool forceClean = false)
+            string clientContainer)
         {
             if (!string.IsNullOrEmpty(serverDllPath))
             {
@@ -568,14 +567,7 @@ namespace SolutionGrader.Core.Services
                     {
                         _dockerExecutor.MakeDirectory(serverContainer, "/apps");
                         
-                        // CRITICAL FIX: Remove existing directory before copying to avoid file mixing
-                        // This ensures golden server files don't mix with student files and vice versa
-                        if (forceClean)
-                        {
-                            Console.WriteLine($"[Docker] Cleaning existing server directory: /apps/{folderName}");
-                            _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -rf /apps/{folderName}", 5000);
-                        }
-                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
                     }
@@ -596,14 +588,7 @@ namespace SolutionGrader.Core.Services
                     {
                         _dockerExecutor.MakeDirectory(clientContainer, "/apps");
                         
-                        // CRITICAL FIX: Remove existing directory before copying to avoid file mixing
-                        // This ensures golden client files don't mix with student files and vice versa
-                        if (forceClean)
-                        {
-                            Console.WriteLine($"[Docker] Cleaning existing client directory: /apps/{folderName}");
-                            _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -rf /apps/{folderName}", 5000);
-                        }
-                        
+                        // Docker cp will overwrite existing files automatically
                         _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
                     }
@@ -1526,8 +1511,7 @@ namespace SolutionGrader.Core.Services
             _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
             _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
             
-            // Step 3: Clean up temp files ONLY (do NOT remove /apps/* - files will be overwritten by next test case)
-            // The forceClean parameter in CopyFilesToContainersAsync handles directory cleanup before copying new files
+            // Step 3: Clean up temp files ONLY (do NOT remove /apps/* - docker cp will overwrite files)
             OnProgress("Cleanup: Removing temp files from containers...");
             _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
