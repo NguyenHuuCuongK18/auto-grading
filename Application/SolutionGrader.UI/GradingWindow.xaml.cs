@@ -196,14 +196,19 @@ namespace SolutionGrader.UI
             
             var paperNo = selectedItem.Replace("Paper ", "");
             
+            // FIXED: Ensure UI updates are marshalled to UI thread and force DataGrid refresh
             // Select all students with this paper number
+            int selectedCount = 0;
             foreach (var student in _students.Where(s => s.PaperNo == paperNo))
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Force DataGrid to refresh its display to show updated checkbox states
+            // Note: dgStudents.Items.Refresh() updates the visual tree immediately
             dgStudents.Items.Refresh();
-            _logger.LogInfo($"Selected all students with Paper {paperNo}");
+            _logger.LogInfo($"Selected {selectedCount} students with Paper {paperNo}");
             
             // Reset dropdown to placeholder to allow re-selection
             cmbPaperSelection.SelectedIndex = 0;
@@ -213,10 +218,13 @@ namespace SolutionGrader.UI
         /// Apply index range selection to select students.
         /// This is a quick way to select a range of students, similar to selecting by paper.
         /// Useful when you have many students and need to select a specific range.
+        /// 
+        /// IMPORTANT: This method properly handles UI updates by modifying IsSelected property
+        /// which triggers INotifyPropertyChanged events, and then refreshes the DataGrid display.
         /// </summary>
         private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
         {
-            // Parse indices
+            // Parse and validate indices
             if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 1)
             {
                 System.Windows.MessageBox.Show("Start Index must be a positive integer (starts at 1).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -235,23 +243,42 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            // First, unselect all students
+            // FIXED: Ensure all selection state changes are visible to the DataGrid
+            // Step 1: Unselect all students (clears previous selections)
+            int unselectedCount = 0;
             foreach (var student in _students)
             {
-                student.IsSelected = false;
+                if (student.IsSelected)
+                {
+                    student.IsSelected = false;
+                    unselectedCount++;
+                }
             }
             
-            // Apply selection to the range
+            // Step 2: Apply selection to the specified index range
             var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            int selectedCount = 0;
             foreach (var student in studentsInRange)
             {
                 student.IsSelected = true;
+                selectedCount++;
             }
             
+            // Step 3: Force DataGrid to refresh and display the updated checkbox states
+            // This is critical to ensure the UI reflects the programmatic selection changes
             dgStudents.Items.Refresh();
             
+            // Log detailed selection information for debugging
             var endText = endIndex == -1 ? "end" : endIndex.ToString();
-            _logger.LogInfo($"Quick selected students from index {startIndex} to {endText} ({studentsInRange.Count} students selected)");
+            _logger.LogInfo($"Index selection applied: range {startIndex} to {endText}");
+            _logger.LogInfo($"Selection result: {selectedCount} students selected, {unselectedCount} unselected");
+            
+            // Provide visual feedback to user
+            System.Windows.MessageBox.Show(
+                $"Selected {selectedCount} student(s) from index {startIndex} to {endText}.\n\nYou can now click 'Start Selected' to grade these students.",
+                "Selection Applied",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         /// <summary>
@@ -320,14 +347,41 @@ namespace SolutionGrader.UI
                 _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
             }
             
+            // FIXED: Enhanced logging and validation to debug selection issues
+            _logger.LogInfo($"=== Starting Grading Session ===");
+            _logger.LogInfo($"Mode: {(selectedOnly ? "Selected Only" : "All Students")}");
+            _logger.LogInfo($"Total students loaded: {_students.Count}");
+            _logger.LogInfo($"Students in filtered view: {_filteredStudents.Count}");
+            
+            if (selectedOnly)
+            {
+                var selectedStudents = _filteredStudents.Where(s => s.IsSelected).ToList();
+                var notSuccessStudents = selectedStudents.Where(s => s.Status != GradingStatus.Success).ToList();
+                _logger.LogInfo($"Students with IsSelected=true: {selectedStudents.Count}");
+                _logger.LogInfo($"Students with IsSelected=true AND Status!=Success: {notSuccessStudents.Count}");
+                
+                // Log detailed info about selected students
+                foreach (var s in selectedStudents)
+                {
+                    _logger.LogInfo($"  - Student {s.Id}: {s.StudentCode}, IsSelected={s.IsSelected}, Status={s.Status}");
+                }
+            }
+            
             // Get students to grade based on selection
             var studentsToGrade = selectedOnly
                 ? _filteredStudents.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                 : _filteredStudents.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
             
+            _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
+            
             if (studentsToGrade.Count == 0)
             {
-                System.Windows.MessageBox.Show("No students to grade.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                var message = selectedOnly 
+                    ? "No students to grade.\n\nPossible reasons:\n- No students are selected (check the 'Select' checkboxes)\n- All selected students have already been successfully graded\n\nTip: Use 'Apply' button after entering index range to select students."
+                    : "No students to grade.\n\nAll students have been graded or there are no students loaded.";
+                    
+                _logger.LogWarning(message);
+                System.Windows.MessageBox.Show(message, "No Students to Grade", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
@@ -546,6 +600,49 @@ namespace SolutionGrader.UI
                 // NOTE: We use the dynamically allocated port from PortAllocator instead of the old
                 // offset-based approach. This prevents race conditions where ports get reused while
                 // still being in use by another student.
+                //
+                // APPROACH 2: Map Project1/Project2 role configuration directly to ClientProjectName/ServerProjectName
+                // This uses the new flexible role indication system instead of relying on legacy properties.
+                // The mapping logic ensures the correct project names are used based on configured roles.
+                
+                // Determine client and server project names from the flexible Project1/Project2 configuration
+                string clientProjectName;
+                string serverProjectName;
+                
+                bool hasProject1 = !string.IsNullOrWhiteSpace(_configuration.Project1Name);
+                bool hasProject2 = !string.IsNullOrWhiteSpace(_configuration.Project2Name);
+                
+                if (hasProject1 && hasProject2)
+                {
+                    // Two projects: Map based on their configured roles
+                    clientProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project1Name 
+                        : _configuration.Project2Name;
+                    serverProjectName = _configuration.Project1IsClient 
+                        ? _configuration.Project2Name 
+                        : _configuration.Project1Name;
+                    
+                    _logger.LogInfo($"Two-project configuration: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                else if (hasProject1 || hasProject2)
+                {
+                    // Single project: It handles both client and server roles
+                    var singleProjectName = hasProject1 ? _configuration.Project1Name : _configuration.Project2Name;
+                    clientProjectName = singleProjectName;
+                    serverProjectName = singleProjectName;
+                    
+                    _logger.LogInfo($"Single-project configuration: {singleProjectName} (handles both roles)");
+                }
+                else
+                {
+                    // Fallback to legacy properties if Project1/Project2 are not configured
+                    // This maintains backward compatibility with older configurations
+                    clientProjectName = _configuration.ClientProjectName;
+                    serverProjectName = _configuration.ServerProjectName;
+                    
+                    _logger.LogWarning($"Using legacy project names: Client={clientProjectName}, Server={serverProjectName}");
+                }
+                
                 var studentConfig = new GradingConfiguration
                 {
                     SubmitFolderPath = _configuration.SubmitFolderPath,
@@ -553,8 +650,17 @@ namespace SolutionGrader.UI
                     SaveResultFolderPath = _configuration.SaveResultFolderPath,
                     HasClient = _configuration.HasClient,
                     HasServer = _configuration.HasServer,
-                    ClientProjectName = _configuration.ClientProjectName,
-                    ServerProjectName = _configuration.ServerProjectName,
+                    
+                    // Use the mapped project names from flexible role configuration
+                    ClientProjectName = clientProjectName,
+                    ServerProjectName = serverProjectName,
+                    
+                    // Also copy Project1/Project2 properties for services that might use them
+                    Project1Name = _configuration.Project1Name,
+                    Project2Name = _configuration.Project2Name,
+                    Project1IsClient = _configuration.Project1IsClient,
+                    Project2IsClient = _configuration.Project2IsClient,
+                    
                     MaxParallelStudents = _configuration.MaxParallelStudents,
                     GradingTimeoutSeconds = _configuration.GradingTimeoutSeconds,
                     DockerNetwork = _configuration.DockerNetwork,
@@ -575,6 +681,8 @@ namespace SolutionGrader.UI
                     DatabaseUsername = testKitConfig.DatabaseUsername,
                     DatabasePassword = testKitConfig.DatabasePassword
                 };
+                
+                _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
                 
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");

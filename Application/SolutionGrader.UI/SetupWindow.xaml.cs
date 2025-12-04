@@ -175,6 +175,11 @@ namespace SolutionGrader.UI
                 _configuration.HasClient = false;
                 _configuration.HasServer = false;
             }
+            
+            // NOTE: We do NOT set ClientProjectName/ServerProjectName here.
+            // GradingWindow will map Project1/Project2 -> ClientProjectName/ServerProjectName
+            // directly when creating the student-specific configuration.
+            // This keeps the setup clean and delegates the mapping logic to where it's used.
 
             // Validate configuration
             if (!ValidateConfiguration())
