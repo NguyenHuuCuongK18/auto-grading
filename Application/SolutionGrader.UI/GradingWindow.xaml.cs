@@ -82,8 +82,8 @@ namespace SolutionGrader.UI
             // Initialize batch grading configuration control with default value
             txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
             
-            // Initialize index selection controls with default values
-            txtSelectStartIndex.Text = "0";
+            // Initialize index selection controls with 1-based defaults
+            txtSelectStartIndex.Text = "1";
             txtSelectEndIndex.Text = "-1";
             
             // Load students
@@ -135,21 +135,19 @@ namespace SolutionGrader.UI
                 _students.Clear();
                 _filteredStudents.Clear();
                 cmbPaperSelection.Items.Clear();
-                
-                // First item is instruction/placeholder
                 cmbPaperSelection.Items.Add("-- Select Paper --");
                 cmbPaperSelection.SelectedIndex = 0;
                 
                 // Get unique paper numbers
                 var paperNumbers = students.Select(s => s.PaperNo).Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : 0);
-                foreach (var paper in paperNumbers)
-                {
-                    cmbPaperSelection.Items.Add($"Paper {paper}");
-                }
+                foreach (var paper in paperNumbers) { cmbPaperSelection.Items.Add($"Paper {paper}"); }
                 
-                // Load test kit configs for each paper to get max marks
+                int idx = 1; // 1-based ids for clarity
                 foreach (var student in students)
                 {
+                    // assign 1-based Id
+                    student.Id = idx++;
+                    
                     // Get test kit config for this paper to set max mark
                     var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
                     if (!string.IsNullOrEmpty(testKitPath))
@@ -219,15 +217,15 @@ namespace SolutionGrader.UI
         private void ApplyIndexSelection_Click(object sender, RoutedEventArgs e)
         {
             // Parse indices
-            if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 0)
+            if (!int.TryParse(txtSelectStartIndex.Text.Trim(), out int startIndex) || startIndex < 1)
             {
-                System.Windows.MessageBox.Show("Start Index must be a non-negative integer (0 or greater).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("Start Index must be a positive integer (starts at 1).", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             
             if (!int.TryParse(txtSelectEndIndex.Text.Trim(), out int endIndex) || endIndex < -1)
             {
-                System.Windows.MessageBox.Show("End Index must be -1 (for all) or a non-negative integer.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show("End Index must be -1 (for all) or a positive integer.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             
@@ -266,21 +264,10 @@ namespace SolutionGrader.UI
         /// <returns>Filtered list of students</returns>
         private List<StudentSolution> ApplyIndexRange(List<StudentSolution> students, int startIndex, int endIndex)
         {
-            if (startIndex < 0) startIndex = 0;
-            if (startIndex >= students.Count) return new List<StudentSolution>();
-            
-            if (endIndex == -1 || endIndex >= students.Count)
-            {
-                // Select from startIndex to end
-                return students.Skip(startIndex).ToList();
-            }
-            else
-            {
-                // Select from startIndex to endIndex (inclusive)
-                var count = endIndex - startIndex + 1;
-                if (count <= 0) return new List<StudentSolution>();
-                return students.Skip(startIndex).Take(count).ToList();
-            }
+            // 1-based indices: filter by Id property
+            var query = students.Where(s => s.Id >= startIndex);
+            if (endIndex != -1) query = query.Where(s => s.Id <= endIndex);
+            return query.ToList();
         }
 
         /// <summary>
@@ -846,5 +833,10 @@ namespace SolutionGrader.UI
         }
 
         #endregion
+
+        private void dgStudents_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+
+        }
     }
 }

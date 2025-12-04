@@ -30,6 +30,7 @@ namespace SolutionGrader.UI.Models
     /// </summary>
     public class StudentSolution : INotifyPropertyChanged
     {
+        private int _id; // 1-based index in UI list
         private string _studentCode = string.Empty;
         private string _paperNo = string.Empty;
         private string _solutionPath = string.Empty;
@@ -45,6 +46,15 @@ namespace SolutionGrader.UI.Models
         private bool _isSelected;
 
         public event PropertyChangedEventHandler? PropertyChanged;
+
+        /// <summary>
+        /// 1-based identifier used for UI selection by index.
+        /// </summary>
+        public int Id
+        {
+            get => _id;
+            set { _id = value; OnPropertyChanged(); }
+        }
 
         /// <summary>
         /// Unique identifier for the student (e.g., "cuongnhhe186494")

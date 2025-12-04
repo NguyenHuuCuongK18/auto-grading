@@ -1,7 +1,0 @@
-{
-  "ConnectionStrings": {
-    "MyCnn": "server=LAPTOP-F4UG6RGH\SQLEXPRESS05;database=TCP_Server_Client;uid=sa;pwd=123;TrustServerCertificate=true"
-  },
-  "IpAddress": "127.0.0.1",
-  "Port": "61675"
-}
