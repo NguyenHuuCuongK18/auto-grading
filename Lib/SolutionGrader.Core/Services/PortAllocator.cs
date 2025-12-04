@@ -13,6 +13,21 @@ namespace SolutionGrader.Core.Services
     /// Uses a system-wide Mutex to ensure port allocation is synchronized across
     /// multiple parallel grading processes.
     /// 
+    /// CRITICAL DESIGN: Ports are NEVER RELEASED during a grading session to avoid
+    /// race conditions in parallel grading. With 100 available ports (8000-8099),
+    /// we have plenty of capacity without needing to reuse ports.
+    /// 
+    /// Example scenario that motivated this design:
+    /// - Student A starts with port 8001
+    /// - Student B starts with port 8000
+    /// - Student A finishes grading and releases 8001
+    /// - System incorrectly assumes 8000 is done and tries to reuse it
+    /// - CONFLICT: Student B is still using port 8000!
+    /// 
+    /// Solution: Never reuse ports. Once allocated, a port stays allocated for the
+    /// entire grading session. This prevents all race conditions at the cost of
+    /// limiting parallel grading to 100 students maximum.
+    /// 
     /// Based on test-grader reference implementation:
     /// https://github.com/NguyenHuuCuongK18/test-grader.git
     /// </summary>
@@ -27,7 +42,6 @@ namespace SolutionGrader.Core.Services
             "AutoGrading_AssignedPorts.txt");
         
         private readonly Mutex _mutex;
-        private int? _allocatedPort;
 
         public PortAllocator()
         {
@@ -44,6 +58,9 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Allocates an available port for code containers (server/client).
         /// Uses Mutex to ensure thread-safe port allocation across parallel grading.
+        /// 
+        /// CRITICAL: Ports are NEVER RELEASED to avoid race conditions.
+        /// Once a port is allocated, it remains allocated for the entire grading session.
         /// </summary>
         /// <returns>An available port number, or -1 if no ports available</returns>
         public int AllocatePort()
@@ -68,13 +85,13 @@ namespace SolutionGrader.Core.Services
                         {
                             assignedPorts.Add(port);
                             SaveAssignedPorts(assignedPorts);
-                            _allocatedPort = port;
-                            Console.WriteLine($"[PortAllocator] Allocated port {port}");
+                            Console.WriteLine($"[PortAllocator] Allocated port {port} (will NOT be released - no reuse)");
                             return port;
                         }
                     }
 
                     Console.WriteLine($"[PortAllocator] ERROR: No available ports in range {PORT_RANGE_START}-{PORT_RANGE_END}");
+                    Console.WriteLine($"[PortAllocator] TIP: Ports are never released during grading. Consider clearing {PortFilePath} if all ports are exhausted.");
                     return -1;
                 }
                 finally
