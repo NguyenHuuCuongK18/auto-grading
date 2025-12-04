@@ -323,6 +323,13 @@ namespace SolutionGrader.Core.Services
                         // Cleanup between test cases (kills processes, removes log files)
                         await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
                     }
+                    else
+                    {
+                        // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
+                        // Without this delay, network monitor may not be ready to capture packets for TC1
+                        Console.WriteLine("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
+                        await Task.Delay(3000);
+                    }
                     
                     // Copy files to containers (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
