@@ -147,6 +147,8 @@
                         <LineBreak/>
                         <Run Text="If two projects are specified use toggles to indicate which is client and which is server."/>
                         <LineBreak/>
+                        <Run Text="Project 2 refers to a second project for Question 1 (e.g., Q12 for client/server split), not Question 2." FontWeight="SemiBold" Foreground="#1976D2"/>
+                        <LineBreak/>
                         <Run Text="Note: This system only grades Question 1. Q2, Q3, etc. are not supported." FontWeight="SemiBold" Foreground="#D32F2F"/>
                     </TextBlock>
                     
