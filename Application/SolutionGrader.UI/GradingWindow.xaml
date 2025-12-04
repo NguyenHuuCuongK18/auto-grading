@@ -6,16 +6,16 @@
         xmlns:local="clr-namespace:SolutionGrader.UI"
         mc:Ignorable="d"
         Title="Auto Grading System - Grading" 
-        Height="800" Width="1200"
+        Height="850" Width="1200"
         WindowStartupLocation="CenterScreen"
         WindowState="Maximized"
         Loaded="Window_Loaded"
         Closing="Window_Closing">
-    
+
     <Window.Resources>
         <!-- Status to Color Converter -->
         <local:StatusToColorConverter x:Key="StatusToColorConverter" />
-        
+
         <!-- Button Style -->
         <Style x:Key="ActionButton" TargetType="Button">
             <Setter Property="Padding" Value="10,6"/>
@@ -23,161 +23,217 @@
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
-        
+
         <!-- Boolean to Visibility Converter -->
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </Window.Resources>
-    
-    <Grid>
+
+    <Grid Background="#F0F0F0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- 0: Header -->
             <RowDefinition Height="Auto"/>
+            <!-- 1: Controls -->
             <RowDefinition Height="*"/>
+            <!-- 2: DataGrid (Fills remaining space) -->
+            <RowDefinition Height="5"/>
+            <!-- 3: Spacer -->
+            <RowDefinition Height="200"/>
+            <!-- 4: Log Area -->
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <!-- 5: Status Bar -->
         </Grid.RowDefinitions>
-        
-        <!-- Header Section (compact) -->
-        <Border Grid.Row="0" Background="#2D2D30" Padding="8">
+
+        <!-- Header Section -->
+        <Border Grid.Row="0" Background="#2D2D30" Padding="12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                
+
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Auto Grading System" 
-                               FontSize="18" 
+                               FontSize="20" 
                                FontWeight="Bold" 
                                Foreground="White"
-                               Margin="0,0,10,0"/>
-                    <TextBlock x:Name="txtConfigInfo" 
-                               Foreground="#AAAAAA"
-                               FontSize="11"
-                               VerticalAlignment="Center"/>
+                               Margin="0,0,15,0"/>
+                    <Border Background="#3E3E42" CornerRadius="3" Padding="8,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="txtConfigInfo" 
+                                   Text="Config Loaded"
+                                   Foreground="#DDDDDD"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"/>
+                    </Border>
                 </StackPanel>
-                
+
                 <Button Grid.Column="1" 
                         Content="← Back to Setup"
                         Background="Transparent"
                         Foreground="White"
                         BorderBrush="#666666"
-                        Padding="10,6"
-                        Click="BackToSetup_Click"/>
+                        BorderThickness="1"
+                        Padding="12,6"
+                        Cursor="Hand"
+                        Click="BackToSetup_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="3"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
             </Grid>
         </Border>
-        
-        <!-- Control Section (compact without toggle) -->
-        <Border Grid.Row="1" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1" Padding="8" Background="#F8F9FA">
-            <StackPanel>
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="8"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    
-                    <!-- Section 1: Student Selection (compact) -->
-                    <Border Grid.Row="0" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="8">
-                        <StackPanel>
-                            <TextBlock Text="STUDENT SELECTION" 
-                                       FontWeight="Bold"
-                                       FontSize="12"
-                                       Foreground="#495057"
-                                       Margin="0,0,0,6"/>
-                            
-                            <WrapPanel ItemHeight="28" ItemWidth="Auto" VerticalAlignment="Center" Margin="0" >
-                                <TextBlock Text="Quick Select by Index Range:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold"/>
-                                <TextBlock Text="From:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                <TextBox x:Name="txtSelectStartIndex" Width="60" Height="24" VerticalContentAlignment="Center" TextAlignment="Center" FontSize="12" Text="1" ToolTip="Start index for selection (1-based)."/>
-                                <TextBlock Text="To:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                                <TextBox x:Name="txtSelectEndIndex" Width="60" Height="24" VerticalContentAlignment="Center" TextAlignment="Center" FontSize="12" Text="-1" ToolTip="End index (1-based, -1 for end)."/>
-                                <Button x:Name="btnApplyIndexSelection" Content="✓ Apply" Background="#007BFF" Foreground="White" Padding="10,4" Margin="8,0,0,0" FontSize="12" Cursor="Hand" Click="ApplyIndexSelection_Click"/>
-                                
-                                <Border Width="2" Height="24" Background="#DEE2E6" Margin="10,0"/>
-                                
-                                <TextBlock Text="Quick Select by Paper:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold"/>
-                                <ComboBox x:Name="cmbPaperSelection" Width="120" Height="24" VerticalContentAlignment="Center" SelectionChanged="PaperSelection_SelectionChanged"/>
-                                
-                                <Border Width="2" Height="24" Background="#DEE2E6" Margin="10,0"/>
-                                
-                                <Button x:Name="btnSelectAll" Content="☑ Select All" Background="#6C757D" Foreground="White" Padding="10,4" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="SelectAll_Click"/>
-                                <Button x:Name="btnUnselectAll" Content="☐ Unselect All" Background="#6C757D" Foreground="White" Padding="10,4" FontSize="12" Cursor="Hand" Click="UnselectAll_Click"/>
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-                    
-                    <!-- Spacer -->
-                    <Border Grid.Row="1" Background="Transparent" Height="8" />
 
-                    <!-- Section 2: Grading Actions (compact) -->
-                    <Border Grid.Row="2" Background="White" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="8">
-                        <WrapPanel ItemHeight="28" ItemWidth="Auto" VerticalAlignment="Center">
-                            <TextBlock Text="Batch Size:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold" Foreground="#495057"/>
-                            <TextBox x:Name="txtMaxParallelStudents" Width="50" Height="24" VerticalContentAlignment="Center" TextAlignment="Center" FontSize="12" FontWeight="Bold"/>
-                            
-                            <Border Width="2" Height="24" Background="#DEE2E6" Margin="10,0"/>
-                            
-                            <TextBlock Text="Start:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold" Foreground="#495057"/>
-                            <Button x:Name="btnStartAll" Content="▶ Start All" Background="#28A745" Foreground="White" Padding="12,5" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="StartAll_Click"/>
-                            <Button x:Name="btnStartSelected" Content="▶ Start Selected" Background="#17A2B8" Foreground="White" Padding="12,5" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="StartSelected_Click"/>
-                            
-                            <Border Width="2" Height="24" Background="#DEE2E6" Margin="10,0"/>
-                            
-                            <TextBlock Text="Control:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold" Foreground="#495057"/>
-                            <Button x:Name="btnPause" Content="⏸ Pause" Background="#FFC107" Foreground="#000" Padding="12,5" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="Pause_Click"/>
-                            <Button x:Name="btnResume" Content="▶ Resume" Background="#20C997" Foreground="White" Padding="12,5" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="Resume_Click"/>
-                            
-                            <Border Width="2" Height="24" Background="#DEE2E6" Margin="10,0"/>
-                            
-                            <TextBlock Text="Reset:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="SemiBold" Foreground="#495057"/>
-                            <Button x:Name="btnResetAll" Content="↻ Reset All" Background="#DC3545" Foreground="White" Padding="12,5" Margin="0,0,6,0" FontSize="12" Cursor="Hand" Click="ResetAll_Click"/>
-                            <Button x:Name="btnResetSelected" Content="↻ Reset Selected" Background="#FD7E14" Foreground="White" Padding="12,5" FontSize="12" Cursor="Hand" Click="ResetSelected_Click"/>
+        <!-- Control Section -->
+        <Border Grid.Row="1" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1" Padding="10" Background="#FFFFFF">
+            <!-- Changed from stacked Grid to horizontal Grid for side-by-side layout -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- Student Selection -->
+                    <ColumnDefinition Width="15"/>
+                    <!-- Spacer -->
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- Grading Actions -->
+                    <ColumnDefinition Width="*"/>
+                    <!-- Fill -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Section 1: Student Selection -->
+                <Border Grid.Column="0" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA">
+                    <StackPanel>
+                        <TextBlock Text="STUDENT SELECTION" 
+                                   FontWeight="Bold"
+                                   FontSize="11"
+                                   Foreground="#6C757D"
+                                   Margin="0,0,0,8"/>
+
+                        <WrapPanel VerticalAlignment="Center">
+                            <!-- Index Range -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                <TextBlock Text="Index:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                <TextBox x:Name="txtSelectStartIndex" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="1"/>
+                                <TextBlock Text="-" VerticalAlignment="Center" Margin="5,0"/>
+                                <TextBox x:Name="txtSelectEndIndex" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" Text="-1"/>
+                                <Button x:Name="btnApplyIndexSelection" Content="Apply" Margin="5,0,0,0" Padding="8,0" Height="26" Click="ApplyIndexSelection_Click"/>
+                            </StackPanel>
+
+                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                            <!-- Paper Selection -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                <TextBlock Text="Paper:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                <ComboBox x:Name="cmbPaperSelection" Width="100" Height="26" VerticalContentAlignment="Center" SelectionChanged="PaperSelection_SelectionChanged"/>
+                            </StackPanel>
+
+                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                            <!-- Buttons -->
+                            <Button x:Name="btnSelectAll" Content="All" Height="26" Padding="10,0" Margin="0,0,5,0" Click="SelectAll_Click"/>
+                            <Button x:Name="btnUnselectAll" Content="None" Height="26" Padding="10,0" Click="UnselectAll_Click"/>
                         </WrapPanel>
-                    </Border>
-                </Grid>
-            </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Section 2: Grading Actions -->
+                <Border Grid.Column="2" BorderBrush="#DEE2E6" BorderThickness="1" CornerRadius="4" Padding="10" Background="#FAFAFA">
+                    <StackPanel>
+                        <TextBlock Text="GRADING ACTIONS" 
+                                   FontWeight="Bold"
+                                   FontSize="11"
+                                   Foreground="#6C757D"
+                                   Margin="0,0,0,8"/>
+
+                        <WrapPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                <TextBlock Text="Batch:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                <TextBox x:Name="txtMaxParallelStudents" Width="40" Height="26" VerticalContentAlignment="Center" TextAlignment="Center" FontWeight="Bold"/>
+                            </StackPanel>
+
+                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                            <!-- Start Buttons -->
+                            <Button x:Name="btnStartAll" Content="▶ Start All" Background="#28A745" Foreground="White" Padding="12,4" Margin="0,0,5,0" Height="26" Click="StartAll_Click" BorderThickness="0"/>
+                            <Button x:Name="btnStartSelected" Content="▶ Selected" Background="#17A2B8" Foreground="White" Padding="12,4" Margin="0,0,15,0" Height="26" Click="StartSelected_Click" BorderThickness="0"/>
+
+                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                            <!-- Control Buttons -->
+                            <Button x:Name="btnPause" Content="⏸" ToolTip="Pause" Background="#FFC107" Padding="10,4" Margin="0,0,5,0" Height="26" Click="Pause_Click" BorderThickness="0"/>
+                            <Button x:Name="btnResume" Content="▶" ToolTip="Resume" Background="#20C997" Foreground="White" Padding="10,4" Margin="0,0,15,0" Height="26" Click="Resume_Click" BorderThickness="0"/>
+
+                            <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                            <!-- Reset Buttons -->
+                            <Button x:Name="btnResetAll" Content="Reset All" Background="#DC3545" Foreground="White" Padding="10,4" Margin="0,0,5,0" Height="26" Click="ResetAll_Click" BorderThickness="0"/>
+                            <Button x:Name="btnResetSelected" Content="Reset Selected" Background="#FD7E14" Foreground="White" Padding="10,4" Height="26" Click="ResetSelected_Click" BorderThickness="0"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
         </Border>
-        
-        <!-- Main Content Area: DataGrid occupies full row -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            
-            <DataGrid Grid.Column="0" 
-                      x:Name="dgStudents"
+
+        <!-- Main Content Area: DataGrid -->
+        <!-- Removed bottom margin hack, now handled by Grid.Row="2" height="*" -->
+        <Grid Grid.Row="2" Margin="10">
+            <DataGrid x:Name="dgStudents"
                       AutoGenerateColumns="False"
                       CanUserAddRows="False"
                       CanUserDeleteRows="False"
                       SelectionMode="Extended"
-                      AlternatingRowBackground="#F8F8F8"
+                      AlternatingRowBackground="#FAFAFA"
                       GridLinesVisibility="Horizontal"
-                      Margin="10,10,10,177" 
-                      RowHeight="28"
+                      HorizontalGridLinesBrush="#EEEEEE"
+                      VerticalGridLinesBrush="Transparent"
+                      BorderThickness="1"
+                      BorderBrush="#DDDDDD"
+                      RowHeight="32"
+                      FontSize="13"
                       EnableColumnVirtualization="True"
                       EnableRowVirtualization="True"
-                      ScrollViewer.CanContentScroll="True"
-                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                       SelectionChanged="dgStudents_SelectionChanged">
+
+                <DataGrid.Resources>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Padding" Value="10,8"/>
+                        <Setter Property="Background" Value="#F8F9FA"/>
+                        <Setter Property="FontWeight" Value="SemiBold"/>
+                        <Setter Property="BorderBrush" Value="#DDDDDD"/>
+                        <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                    </Style>
+                    <Style TargetType="DataGridCell">
+                        <Setter Property="Padding" Value="5,0"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="DataGridCell">
+                                    <Border Padding="{TemplateBinding Padding}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                                        <ContentPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.Resources>
+
                 <DataGrid.Columns>
-                    <DataGridTemplateColumn Header="Select" Width="60">
+                    <DataGridTemplateColumn Header="Select" Width="50">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                          HorizontalAlignment="Center" VerticalAlignment="Center" Padding="6"/>
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
                     <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="40" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Student Code" Binding="{Binding StudentCode}" Width="150" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Student Code" Binding="{Binding StudentCode}" Width="120" IsReadOnly="True" FontWeight="SemiBold"/>
                     <DataGridTextColumn Header="Paper" Binding="{Binding PaperNo}" Width="60" IsReadOnly="True"/>
                     <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="100" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Mark" Binding="{Binding Mark, StringFormat=N1}" Width="60" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Max" Binding="{Binding MaxMark, StringFormat=N1}" Width="50" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Progress" Binding="{Binding ProgressPercent, StringFormat={}{0}%}" Width="70" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Start" Binding="{Binding StartTime, StringFormat=HH:mm:ss}" Width="70" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="End" Binding="{Binding EndTime, StringFormat=HH:mm:ss}" Width="70" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Mark" Binding="{Binding Mark, StringFormat=N1}" Width="60" IsReadOnly="True" FontWeight="Bold"/>
+                    <DataGridTextColumn Header="Max" Binding="{Binding MaxMark, StringFormat=N1}" Width="50" IsReadOnly="True" Foreground="#888"/>
+                    <DataGridTextColumn Header="Progress" Binding="{Binding ProgressPercent, StringFormat={}{0}%}" Width="80" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Start" Binding="{Binding StartTime, StringFormat=HH:mm:ss}" Width="80" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="End" Binding="{Binding EndTime, StringFormat=HH:mm:ss}" Width="80" IsReadOnly="True"/>
                     <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="80" IsReadOnly="True"/>
                     <DataGridTextColumn Header="Message" Binding="{Binding StatusMessage}" Width="*" IsReadOnly="True"/>
                 </DataGrid.Columns>
@@ -185,16 +241,20 @@
                     <Style TargetType="DataGridRow">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding Status}" Value="Success">
-                                <Setter Property="Background" Value="#D4EDDA"/>
+                                <Setter Property="Background" Value="#E8F5E9"/>
+                                <!-- Lighter Green -->
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Failed">
-                                <Setter Property="Background" Value="#F8D7DA"/>
+                                <Setter Property="Background" Value="#FFEBEE"/>
+                                <!-- Lighter Red -->
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="InProgress">
-                                <Setter Property="Background" Value="#FFF3CD"/>
+                                <Setter Property="Background" Value="#FFF8E1"/>
+                                <!-- Lighter Yellow -->
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Paused">
-                                <Setter Property="Background" Value="#D1ECF1"/>
+                                <Setter Property="Background" Value="#E1F5FE"/>
+                                <!-- Lighter Blue -->
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Status}" Value="Not_Run">
                                 <Setter Property="Background" Value="#FFFFFF"/>
@@ -204,33 +264,42 @@
                 </DataGrid.RowStyle>
             </DataGrid>
         </Grid>
-        
-        <!-- Grading Log: horizontal below grid -->
-        <Border Grid.Row="3" BorderBrush="#CCCCCC" BorderThickness="1" Margin="10,0,10,10">
+
+        <!-- Grid Splitter (Optional resize handle) -->
+        <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="#DDDDDD"/>
+
+        <!-- Grading Log -->
+        <!-- Fixed layout: No negative margins -->
+        <Border Grid.Row="4" BorderBrush="#CCCCCC" BorderThickness="1" Background="White" Margin="10,0,10,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                
-                <Border Grid.Row="0" Background="#2D2D30" Padding="10" Margin="0,-153,0,0">
-                    <TextBlock Text="Grading Log" Foreground="White" FontWeight="Bold"/>
+
+                <Border Grid.Row="0" Background="#F1F1F1" Padding="10,6" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Grading Log" FontWeight="Bold" Foreground="#333333"/>
+                        <TextBlock Text="(Output from execution)" Margin="10,0,0,0" Foreground="#888888" FontStyle="Italic"/>
+                    </StackPanel>
                 </Border>
-                
+
                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                     <TextBox x:Name="txtLog"
                              IsReadOnly="True"
-                             TextWrapping="NoWrap"
+                             TextWrapping="Wrap"
                              FontFamily="Consolas"
-                             FontSize="11"
+                             FontSize="12"
+                             Padding="5"
+                             BorderThickness="0"
                              Background="#1E1E1E"
                              Foreground="#DCDCDC"/>
                 </ScrollViewer>
             </Grid>
         </Border>
-        
+
         <!-- Status Bar -->
-        <Border Grid.Row="4" Background="#007ACC" Padding="8">
+        <Border Grid.Row="5" Background="#007ACC" Padding="10,5">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -240,40 +309,44 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                
-                <TextBlock Grid.Column="0" Foreground="White" x:Name="txtCurrentStudent">
-                    <Run Text="Current: "/>
+
+                <TextBlock Grid.Column="0" Foreground="White" x:Name="txtCurrentStudent" TextTrimming="CharacterEllipsis">
+                    <Run Text="Current: " FontWeight="SemiBold"/>
                     <Run x:Name="runCurrentStudent" Text="-"/>
                 </TextBlock>
-                
-                <TextBlock Grid.Column="1" Foreground="White" Margin="20,0">
-                    <Run Text="Progress: "/>
-                    <Run x:Name="runGraded" Text="0"/>
-                    <Run Text="/"/>
-                    <Run x:Name="runTotal" Text="0"/>
-                    <Run Text=" ("/>
-                    <Run x:Name="runPercent" Text="0"/>
-                    <Run Text="%)"/>
-                </TextBlock>
-                
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0">
+                    <TextBlock Foreground="White"><Run Text="Progress: "/></TextBlock>
+                    <TextBlock Foreground="White" FontWeight="Bold">
+                        <Run x:Name="runGraded" Text="0"/>
+                        <Run Text="/"/>
+                        <Run x:Name="runTotal" Text="0"/>
+                    </TextBlock>
+                    <TextBlock Foreground="#E0E0E0" Margin="5,0,0,0">
+                        <Run Text="("/>
+                        <Run x:Name="runPercent" Text="0"/>
+                        <Run Text="%)"/>
+                    </TextBlock>
+                </StackPanel>
+
                 <TextBlock Grid.Column="2" Foreground="#90EE90" Margin="20,0">
                     <Run Text="Success: "/>
-                    <Run x:Name="runSuccess" Text="0"/>
+                    <Run x:Name="runSuccess" Text="0" FontWeight="Bold"/>
                 </TextBlock>
-                
+
                 <TextBlock Grid.Column="3" Foreground="#FFB6C1" Margin="20,0">
                     <Run Text="Failed: "/>
-                    <Run x:Name="runFailed" Text="0"/>
+                    <Run x:Name="runFailed" Text="0" FontWeight="Bold"/>
                 </TextBlock>
-                
+
                 <TextBlock Grid.Column="4" Foreground="#FFFACD" Margin="20,0">
                     <Run Text="Not Run: "/>
-                    <Run x:Name="runNotRun" Text="0"/>
+                    <Run x:Name="runNotRun" Text="0" FontWeight="Bold"/>
                 </TextBlock>
-                
+
                 <TextBlock Grid.Column="5" Foreground="White" Margin="20,0,0,0">
                     <Run Text="Elapsed: "/>
-                    <Run x:Name="runElapsed" Text="-"/>
+                    <Run x:Name="runElapsed" Text="-" FontWeight="Bold"/>
                 </TextBlock>
             </Grid>
         </Border>
