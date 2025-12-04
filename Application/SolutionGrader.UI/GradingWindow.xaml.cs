@@ -412,14 +412,26 @@ namespace SolutionGrader.UI
             
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
-            _logger.LogInfo($"Batch grading mode: {_configuration.MaxParallelStudents} solution(s) will be graded simultaneously per batch");
-            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
-            if (_configuration.MaxParallelStudents > 1)
+            // Calculate actual parallelism (limited by both batch size and student count)
+            var actualParallel = Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count);
+            
+            if (_configuration.MaxParallelStudents <= 1)
             {
-                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
-                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count)} students together, etc.)");
+                _logger.LogInfo($"Sequential grading mode: 1 solution will be graded at a time");
             }
+            else if (actualParallel == studentsToGrade.Count)
+            {
+                _logger.LogInfo($"Parallel grading mode: All {studentsToGrade.Count} solutions will be graded simultaneously (batch size {_configuration.MaxParallelStudents} >= student count)");
+            }
+            else
+            {
+                _logger.LogInfo($"Batch grading mode: {actualParallel} solution(s) will be graded simultaneously per batch");
+                var totalBatches = (int)Math.Ceiling((double)studentsToGrade.Count / _configuration.MaxParallelStudents);
+                _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {actualParallel} students together, etc.)");
+            }
+            
+            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
             try
             {
