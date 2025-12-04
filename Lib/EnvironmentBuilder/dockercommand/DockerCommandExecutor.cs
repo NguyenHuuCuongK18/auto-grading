@@ -529,12 +529,25 @@ namespace EnvironmentBuilder.DockerCommand
         {
             try
             {
-                // check if network is existed
-                // not implemented
+                // CRITICAL FIX: Check if network already exists before creating
+                // This prevents race conditions in parallel grading where multiple
+                // students are graded simultaneously and all try to create the same network
+                string checkCommand = $"docker network ls --format \"{{{{.Name}}}}\" --filter name=^{networkName}$";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(checkCommand, null, null, 10000);
+                
+                // If network exists, output will contain the network name
+                bool networkExists = result.Output.Any(line => line.Trim().Equals(networkName, StringComparison.OrdinalIgnoreCase));
+                
+                if (networkExists)
+                {
+                    Console.WriteLine($"[Docker] Network {networkName} already exists, skipping creation");
+                    return;
+                }
 
                 // create new network
                 string createNetworkCommand = $"docker network create {networkName}";
                 _commandExecutor.RunCommandWithoutExitCheck(createNetworkCommand, null, null, timeoutInMilliseconds);
+                Console.WriteLine($"[Docker] Network {networkName} created successfully");
             }
             catch (Exception ex)
             {
@@ -666,6 +679,75 @@ namespace EnvironmentBuilder.DockerCommand
 
                 // return
                 return false;
+            }
+        }
+        
+        /// <summary>
+        /// Checks if a Docker image exists locally.
+        /// This prevents Docker from attempting to pull the image which can cause hangs.
+        /// </summary>
+        /// <param name="imageName">The name of the Docker image (e.g., "fptuxaes/aes-dotnet8-console:latest")</param>
+        /// <returns>True if the image exists locally, false otherwise</returns>
+        public bool IsImageExist(string imageName)
+        {
+            try
+            {
+                string command = $"docker images -q {imageName}";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, 10000);
+                
+                // If image exists, output will contain the image ID
+                bool imageExists = result.Output.Any(line => !string.IsNullOrWhiteSpace(line));
+                
+                return imageExists;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker] Error checking if image {imageName} exists: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Ensures a Docker image exists locally. If it doesn't exist, provides clear error message.
+        /// This prevents silent failures and Docker pull hangs during grading.
+        /// </summary>
+        /// <param name="imageName">The name of the Docker image</param>
+        /// <throws>Exception if the image doesn't exist with instructions on how to build it</throws>
+        public void EnsureImageExists(string imageName)
+        {
+            if (!IsImageExist(imageName))
+            {
+                throw new Exception($"Docker image '{imageName}' does not exist locally.\n\n" +
+                    $"Please build the image using one of these methods:\n" +
+                    $"1. From DockerImage folder:\n" +
+                    $"   docker build -t {imageName} ./DockerImage\n\n" +
+                    $"2. If the image should be pulled from a registry:\n" +
+                    $"   docker pull {imageName}\n\n" +
+                    $"3. Check TestKit/[Question]/Environment.xlsx for the correct image name\n\n" +
+                    $"Available images:\n{GetAvailableImages()}");
+            }
+        }
+        
+        /// <summary>
+        /// Gets a list of all available Docker images for error messages.
+        /// </summary>
+        private string GetAvailableImages()
+        {
+            try
+            {
+                string command = "docker images --format \"{{.Repository}}:{{.Tag}}\"";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(command, null, null, 10000);
+                
+                if (result.Output.Any())
+                {
+                    return string.Join("\n", result.Output.Take(10)); // Show first 10 images
+                }
+                
+                return "(No images found)";
+            }
+            catch
+            {
+                return "(Unable to list images)";
             }
         }
         #endregion

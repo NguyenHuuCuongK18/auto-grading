@@ -501,7 +501,12 @@ namespace SolutionGrader.UI
                 student.StartTime = DateTime.Now;
                 student.ProgressPercent = 0;
                 UpdateStudentInUI(student);
-                runCurrentStudent.Text = student.StudentCode;
+                
+                // CRITICAL FIX: Update UI element from UI thread to avoid cross-thread access issues
+                // In parallel grading, multiple threads try to update the same UI element causing hangs
+                Dispatcher.Invoke(() => {
+                    runCurrentStudent.Text = student.StudentCode;
+                });
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
