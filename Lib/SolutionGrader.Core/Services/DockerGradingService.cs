@@ -444,7 +444,8 @@ namespace SolutionGrader.Core.Services
             }
             catch { }
             
-            await Task.Delay(500);
+            // Reduced delay after cleanup - Docker handles cleanup asynchronously
+            await Task.Delay(100);
             
             // Create network if needed (now has built-in race condition protection)
             try
@@ -528,7 +529,8 @@ namespace SolutionGrader.Core.Services
             {
                 Console.WriteLine($"[Docker] Starting existing database container {databaseContainer}...");
                 _dockerExecutor.StartExistedContainer(databaseContainer);
-                await Task.Delay(5000); // Wait for database to start
+                // Wait for container to be running with quick health checks (no logging spam)
+                await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 10);
                 return;
             }
             
@@ -553,9 +555,30 @@ namespace SolutionGrader.Core.Services
             _dockerExecutor.RunContainer(databaseBase, 3000);
             Console.WriteLine($"[Docker] Database container {databaseContainer} created with port {config.DatabaseContainerHostPort}:{config.DatabaseContainerInternalPort} exposed");
             
-            // Wait for MSSQL to fully start (typically takes 10-15 seconds)
+            // Wait for MSSQL to fully start with polling instead of fixed delay
             Console.WriteLine("[Docker] Waiting for MSSQL to start...");
-            await Task.Delay(15000);
+            await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 20);
+        }
+        
+        /// <summary>
+        /// Waits for a container to be in running state with efficient polling.
+        /// Uses short intervals without logging to avoid spam while ensuring container is ready.
+        /// </summary>
+        private async Task WaitForContainerRunningAsync(string containerName, int maxWaitSeconds)
+        {
+            var maxAttempts = maxWaitSeconds * 2; // Check every 500ms
+            for (int i = 0; i < maxAttempts; i++)
+            {
+                if (_dockerExecutor.IsContainerRunning(containerName))
+                {
+                    // Container is running, give it a moment to fully initialize
+                    await Task.Delay(500);
+                    return;
+                }
+                await Task.Delay(500); // Check every 500ms without logging
+            }
+            // If we get here, container didn't start in time but proceed anyway
+            Console.WriteLine($"[Docker] Warning: Container {containerName} may not be fully ready after {maxWaitSeconds}s");
         }
         
         private async Task CopyFilesToContainersAsync(

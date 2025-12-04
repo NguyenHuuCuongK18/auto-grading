@@ -312,7 +312,7 @@ public sealed class NetworkMonitorService : INetworkMonitorService
         }
     }
     
-    private void CaptureLoop(CancellationToken ct)
+    private async Task CaptureLoop(CancellationToken ct)
     {
         try
         {
@@ -323,10 +323,10 @@ public sealed class NetworkMonitorService : INetworkMonitorService
                 try { dev.StartCapture(); } catch (Exception startEx) { Console.WriteLine($"{NetworkKeywords.LOG_PREFIX_MONITOR} WARNING: Failed to start capture on {dev.Name}: {startEx.Message}"); }
             }
 
-            // Keep running until cancelled
+            // Keep running until cancelled - use async delay for better CPU efficiency
             while (!ct.IsCancellationRequested && _isCapturing)
             {
-                Thread.Sleep(10);
+                await Task.Delay(100, ct); // Reduced CPU usage compared to Thread.Sleep(10)
             }
         }
         catch (OperationCanceledException)
