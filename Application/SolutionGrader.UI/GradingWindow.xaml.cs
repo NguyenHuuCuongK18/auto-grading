@@ -391,7 +391,7 @@ namespace SolutionGrader.UI
                         if (_cancellationTokenSource.Token.IsCancellationRequested)
                             break;
                         
-                        await GradeStudentAsync(student, 0, _cancellationTokenSource.Token);
+                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
                         
                         // Write results after each student
                         _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
@@ -402,7 +402,7 @@ namespace SolutionGrader.UI
                 else
                 {
                     // Parallel grading using SemaphoreSlim to limit concurrency
-                    // Each student gets their own port offset based on their position in the batch
+                    // Each student gets a dynamically allocated port via PortAllocator
                     var resultLock = new object();
                     var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents);
                     
@@ -420,11 +420,9 @@ namespace SolutionGrader.UI
                             if (_cancellationTokenSource.Token.IsCancellationRequested)
                                 return;
                             
-                            // Calculate port offset for this student to ensure unique ports in parallel execution
-                            // Port offset is based on position within the parallel batch
-                            var portOffset = index % _configuration.MaxParallelStudents;
-                            
-                            await GradeStudentAsync(student, portOffset, _cancellationTokenSource.Token);
+                            // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                            // This ensures thread-safe, unique port allocation that never reuses ports
+                            await GradeStudentAsync(student, _cancellationTokenSource.Token);
                             
                             // Write results after each student (with lock for thread safety)
                             lock (resultLock)
@@ -468,7 +466,17 @@ namespace SolutionGrader.UI
             }
         }
 
-        private async Task GradeStudentAsync(StudentSolution student, int portOffset, CancellationToken ct)
+        /// <summary>
+        /// Grades a single student using Docker-based grading.
+        /// 
+        /// Port allocation is handled dynamically using PortAllocator to ensure
+        /// thread-safe, unique port allocation that never reuses ports within a session.
+        /// This prevents race conditions in parallel grading where ports could be
+        /// incorrectly reused while still in use by another student.
+        /// </summary>
+        /// <param name="student">Student to grade</param>
+        /// <param name="ct">Cancellation token</param>
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
