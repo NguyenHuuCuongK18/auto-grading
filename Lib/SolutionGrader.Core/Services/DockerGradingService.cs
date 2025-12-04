@@ -288,49 +288,49 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
-                // Copy files to containers (use actual resolved paths)
-                await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                
-                // CRITICAL: Also copy golden server/client files if ANY test case uses them (Grade_Content='Client' or 'Server')
-                // Check if any test case needs golden files
-                bool needsGoldenServer = testKitConfig.TestCases.Any(tc => tc.GradeContent?.Equals("Client", StringComparison.OrdinalIgnoreCase) == true);
-                bool needsGoldenClient = testKitConfig.TestCases.Any(tc => tc.GradeContent?.Equals("Server", StringComparison.OrdinalIgnoreCase) == true);
-                
-                if (needsGoldenServer && !string.IsNullOrEmpty(testKitConfig.GivenServerPath))
-                {
-                    Console.WriteLine("[Docker] Copying golden server files (needed by test cases with Grade_Content='Client')...");
-                    await CopyFilesToContainersAsync(testKitConfig.GivenServerPath, null, serverContainer, clientContainer);
-                }
-                
-                if (needsGoldenClient && !string.IsNullOrEmpty(testKitConfig.GivenClientPath))
-                {
-                    Console.WriteLine("[Docker] Copying golden client files (needed by test cases with Grade_Content='Server')...");
-                    await CopyFilesToContainersAsync(null, testKitConfig.GivenClientPath, serverContainer, clientContainer);
-                }
-                
-                // Generate appsettings.json in containers
-                GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
-                
                 // Execute test cases
                 bool isFirstTestCase = true;
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
                     
-                    // For subsequent test cases, cleanup and re-copy files
-                    // This approach is faster than disposing/rebuilding containers
+                    // CRITICAL FIX: For EACH test case, determine which files to copy based on Grade_Content
+                    // This ensures we use golden server when grading client, and golden client when grading server
+                    string? serverPath = actualServerDllPath;
+                    string? clientPath = actualClientDllPath;
+                    
+                    if (!string.IsNullOrEmpty(testCase.GradeContent))
+                    {
+                        if (testCase.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading client implementation -> use golden (given) server
+                            serverPath = testKitConfig.GivenServerPath;
+                            clientPath = actualClientDllPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
+                        }
+                        else if (testCase.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Grading server implementation -> use golden (given) client
+                            serverPath = actualServerDllPath;
+                            clientPath = testKitConfig.GivenClientPath;
+                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                        }
+                    }
+                    
+                    // For subsequent test cases, cleanup before re-copying
                     if (!isFirstTestCase)
                     {
-                        // Cleanup between test cases (kills processes, removes files)
+                        // Cleanup between test cases (kills processes, removes log files)
                         await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
-                        
-                        // Re-copy files for next test case
-                        OnProgress($"Re-copying files for test case {testCase.Name}...");
-                        await CopyFilesToContainersAsync(actualServerDllPath, actualClientDllPath, serverContainer, clientContainer);
-                        
-                        // Re-generate appsettings.json
-                        GenerateAppsettingsInContainers(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                     }
+                    
+                    // Copy files to containers (with forceClean=true to avoid file mixing between test cases)
+                    OnProgress($"Copying files for test case {testCase.Name}...");
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer, forceClean: !isFirstTestCase);
+                    
+                    // Generate appsettings.json in containers
+                    GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
+                    
                     isFirstTestCase = false;
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -555,7 +555,8 @@ namespace SolutionGrader.Core.Services
             string? serverDllPath,
             string? clientDllPath,
             string serverContainer,
-            string clientContainer)
+            string clientContainer,
+            bool forceClean = false)
         {
             if (!string.IsNullOrEmpty(serverDllPath))
             {
@@ -566,6 +567,15 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        
+                        // CRITICAL FIX: Remove existing directory before copying to avoid file mixing
+                        // This ensures golden server files don't mix with student files and vice versa
+                        if (forceClean)
+                        {
+                            Console.WriteLine($"[Docker] Cleaning existing server directory: /apps/{folderName}");
+                            _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -rf /apps/{folderName}", 5000);
+                        }
+                        
                         _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
                     }
@@ -585,6 +595,15 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        
+                        // CRITICAL FIX: Remove existing directory before copying to avoid file mixing
+                        // This ensures golden client files don't mix with student files and vice versa
+                        if (forceClean)
+                        {
+                            Console.WriteLine($"[Docker] Cleaning existing client directory: /apps/{folderName}");
+                            _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -rf /apps/{folderName}", 5000);
+                        }
+                        
                         _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
                         Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
                     }
@@ -642,10 +661,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Server)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old server appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort}");
+                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
@@ -674,10 +698,15 @@ namespace SolutionGrader.Core.Services
                     string? tempFile = null;
                     try
                     {
+                        // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Client)
+                        // This ensures we use the dynamically generated appsettings with correct port for this student
+                        Console.WriteLine($"[Appsettings] Removing old client appsettings: {containerPath}");
+                        _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -f {containerPath}", 3000);
+                        
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort}");
+                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
