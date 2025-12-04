@@ -562,10 +562,24 @@ namespace SolutionGrader.UI
                 UpdateStudentInUI(student);
                 
                 // CRITICAL FIX: Update UI element from UI thread to avoid cross-thread access issues
-                // In parallel grading, multiple threads try to update the same UI element causing hangs
-                Dispatcher.Invoke(() => {
-                    runCurrentStudent.Text = student.StudentCode;
-                });
+                // Use BeginInvoke (async) instead of Invoke (blocking) to prevent deadlocks when
+                // batch size equals student pool size (all students start simultaneously)
+                // Show "Multiple students" for batch grading to avoid constant UI thrashing
+                if (_configuration.MaxParallelStudents > 1)
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        runCurrentStudent.Text = "Multiple students...";
+                    }));
+                }
+                else
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        runCurrentStudent.Text = student.StudentCode;
+                    }));
+                }
+                
+                // Brief yield to reduce thread contention on UI thread
+                await Task.Yield();
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
