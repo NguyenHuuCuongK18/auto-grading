@@ -73,6 +73,12 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         public event EventHandler<GradingProgressEventArgs>? ProgressUpdated;
         
+        /// <summary>
+        /// Event raised when Docker containers are ready (setup complete).
+        /// This allows staggered startup to release its lock early.
+        /// </summary>
+        public event EventHandler? ContainersReady;
+        
         public DockerGradingService(INetworkMonitorService? networkMonitor, IRunContext runContext)
         {
             _dockerExecutor = new DockerCommandExecutor();
@@ -287,6 +293,10 @@ namespace SolutionGrader.Core.Services
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
+                
+                // Notify that containers are ready (for staggered startup optimization)
+                OnProgress($"Docker containers ready for {studentCode}");
+                ContainersReady?.Invoke(this, EventArgs.Empty);
                 
                 // Execute test cases
                 bool isFirstTestCase = true;

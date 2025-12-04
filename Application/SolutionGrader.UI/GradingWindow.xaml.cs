@@ -694,28 +694,24 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 
                 // OPTIMIZATION: Stagger container startup to avoid Docker strain
-                // Acquire lock before starting containers
+                // Acquire lock before starting containers, release when containers are actually ready
+                bool lockAcquired = false;
                 if (startupLock != null)
                 {
                     await startupLock.WaitAsync(ct);
+                    lockAcquired = true;
                     _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
-                    
-                    // Release lock after 3 seconds in background
-                    // This allows next student to start while current student continues grading
-                    _ = Task.Run(async () =>
+                }
+                
+                // Callback to release lock as soon as containers are ready
+                Action? onContainersReady = null;
+                if (lockAcquired && startupLock != null)
+                {
+                    onContainersReady = () =>
                     {
-                        try
-                        {
-                            await Task.Delay(3000, ct); // Wait 3s for containers to initialize
-                            startupLock.Release();
-                            _logger.LogInfo($"[Staggered Startup] Container setup window complete for {student.StudentCode}, next student can start");
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // If cancelled, still release the lock
-                            startupLock.Release();
-                        }
-                    }, ct);
+                        startupLock.Release();
+                        _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
+                    };
                 }
                 
                 // Execute grading using the orchestration service - it handles status changes internally
@@ -726,7 +722,8 @@ namespace SolutionGrader.UI
                     new System.Collections.Generic.List<StudentSolution> { student },
                     studentConfig,
                     sessionState,
-                    ct);
+                    ct,
+                    onContainersReady);
                 
                 // Update final status
                 student.ProgressPercent = 100;
