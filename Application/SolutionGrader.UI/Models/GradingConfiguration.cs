@@ -21,7 +21,7 @@ namespace SolutionGrader.UI.Models
     /// This flexible structure handles cases where:
     /// 1. Students submit with generic names like "Q1_studentcode" instead of "Project11_studentcode"
     /// 2. Different papers require students to code different components (client, server, or both)
-    /// 3. The testkit's Header.xlsx Grade content dictates which project is client/server
+    /// 3. The test kit's Header.xlsx Grade content dictates which project is client/server
     /// </summary>
     public class GradingConfiguration : INotifyPropertyChanged
     {
@@ -158,32 +158,48 @@ namespace SolutionGrader.UI.Models
             if (!string.IsNullOrWhiteSpace(_project1Name) && !string.IsNullOrWhiteSpace(_project2Name))
             {
                 // Both projects specified - use role flags
-                if (_project1IsClient)
-                {
-                    _clientProjectName = _project1Name;
-                    _serverProjectName = _project2Name;
-                }
-                else
-                {
-                    _serverProjectName = _project1Name;
-                    _clientProjectName = _project2Name;
-                }
+                AssignRoles(_project1Name, _project2Name, _project1IsClient);
             }
             else if (!string.IsNullOrWhiteSpace(_project1Name))
             {
                 // Only project1 specified - it serves both roles or is the only component
-                _clientProjectName = _project1Name;
-                _serverProjectName = _project1Name;
+                AssignBothRoles(_project1Name);
             }
             else if (!string.IsNullOrWhiteSpace(_project2Name))
             {
                 // Only project2 specified - it serves both roles or is the only component
-                _clientProjectName = _project2Name;
-                _serverProjectName = _project2Name;
+                AssignBothRoles(_project2Name);
             }
             
             OnPropertyChanged(nameof(ClientProjectName));
             OnPropertyChanged(nameof(ServerProjectName));
+        }
+        
+        /// <summary>
+        /// Assigns client and server roles based on which project is marked as client.
+        /// </summary>
+        private void AssignRoles(string project1, string project2, bool project1IsClient)
+        {
+            if (project1IsClient)
+            {
+                _clientProjectName = project1;
+                _serverProjectName = project2;
+            }
+            else
+            {
+                _serverProjectName = project1;
+                _clientProjectName = project2;
+            }
+        }
+        
+        /// <summary>
+        /// Assigns the same project name to both client and server roles.
+        /// Used when only one project is specified.
+        /// </summary>
+        private void AssignBothRoles(string projectName)
+        {
+            _clientProjectName = projectName;
+            _serverProjectName = projectName;
         }
 
         /// <summary>

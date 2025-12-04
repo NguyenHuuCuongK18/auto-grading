@@ -151,8 +151,16 @@ namespace SolutionGrader.UI
             
             if (hasProject1 && hasProject2)
             {
-                // Both projects specified - use role flags to determine client/server presence
+                // Both projects specified - determine which roles are present
+                // Validation ensures they have different roles (one client, one server)
+                
+                // HasClient is true if at least one project is marked as client
                 _configuration.HasClient = _configuration.Project1IsClient || _configuration.Project2IsClient;
+                
+                // HasServer is true if at least one project is marked as server (i.e., NOT client)
+                // If Project1 is server (not client): !Project1IsClient = true
+                // If Project2 is server (not client): !Project2IsClient = true
+                // HasServer = (!Project1IsClient) OR (!Project2IsClient)
                 _configuration.HasServer = !_configuration.Project1IsClient || !_configuration.Project2IsClient;
             }
             else if (hasProject1 || hasProject2)
