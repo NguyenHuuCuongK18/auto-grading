@@ -128,6 +128,14 @@ namespace SolutionGrader.UI
         {
             _logger.LogInfo("Loading students...");
             
+            // DIAGNOSTIC: Log configuration state to understand project name mapping
+            _logger.LogInfo($"[LoadStudents] Configuration state:");
+            _logger.LogInfo($"  - Project1Name: '{_configuration.Project1Name}', IsClient: {_configuration.Project1IsClient}");
+            _logger.LogInfo($"  - Project2Name: '{_configuration.Project2Name}', IsClient: {_configuration.Project2IsClient}");
+            _logger.LogInfo($"  - ClientProjectName (legacy): '{_configuration.ClientProjectName}'");
+            _logger.LogInfo($"  - ServerProjectName (legacy): '{_configuration.ServerProjectName}'");
+            _logger.LogInfo($"  - HasClient: {_configuration.HasClient}, HasServer: {_configuration.HasServer}");
+            
             try
             {
                 var students = _studentDiscovery.DiscoverStudents(_configuration.SubmitFolderPath, _configuration);
@@ -604,6 +612,11 @@ namespace SolutionGrader.UI
                 // APPROACH 2: Map Project1/Project2 role configuration directly to ClientProjectName/ServerProjectName
                 // This uses the new flexible role indication system instead of relying on legacy properties.
                 // The mapping logic ensures the correct project names are used based on configured roles.
+                
+                // DIAGNOSTIC: Log configuration state before mapping
+                _logger.LogInfo($"[GradeStudentAsync] Configuration before mapping:");
+                _logger.LogInfo($"  - Project1Name: '{_configuration.Project1Name}', IsClient: {_configuration.Project1IsClient}");
+                _logger.LogInfo($"  - Project2Name: '{_configuration.Project2Name}', IsClient: {_configuration.Project2IsClient}");
                 
                 // Determine client and server project names from the flexible Project1/Project2 configuration
                 string clientProjectName;
