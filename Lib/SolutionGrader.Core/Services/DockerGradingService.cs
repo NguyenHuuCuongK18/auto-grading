@@ -1507,28 +1507,28 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress("Cleanup: Stopping applications between test cases...");
             
-            // Step 1: Kill dotnet processes using PID-based approach (more reliable than pkill)
-            // First, get the list of processes and find dotnet PIDs
+            // Step 1: Kill dotnet application processes (excluding PID 1 - container's main process)
+            // This uses PID-based killing to safely terminate only application processes
             await KillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await KillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
-            // Wait for graceful shutdown - reduced from 1.5s to 500ms
+            // Wait for graceful shutdown
             OnProgress("Cleanup: Waiting 500ms for graceful shutdown...");
             await Task.Delay(500);
             
-            // Force kill any remaining dotnet processes
+            // Force kill any remaining dotnet application processes (excluding PID 1)
             OnProgress("Cleanup: Force killing any remaining dotnet processes...");
             await ForceKillDotnetProcessesInContainerAsync(serverContainer, "Server");
             await ForceKillDotnetProcessesInContainerAsync(clientContainer, "Client");
             
             // Step 2: Kill sleep processes that keep input pipes open
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} pkill -KILL sleep", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} pkill -KILL sleep", 3000);
+            // Use safe kill that excludes PID 1
+            _dockerExecutor.TryExecDockerCommand($"{serverContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
+            _dockerExecutor.TryExecDockerCommand($"{clientContainer} sh -c \"ps aux | grep 'sleep 10000' | grep -v grep | awk '{{if ($2 != 1) print $2}}' | xargs -r kill -9 2>/dev/null || true\"", 3000);
             
-            // Step 3: Remove files from /apps folder and temp files
-            OnProgress("Cleanup: Removing files from containers...");
-            _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -rf /apps/*", 3000);
-            _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -rf /apps/*", 3000);
+            // Step 3: Clean up temp files ONLY (do NOT remove /apps/* - files will be overwritten by next test case)
+            // The forceClean parameter in CopyFilesToContainersAsync handles directory cleanup before copying new files
+            OnProgress("Cleanup: Removing temp files from containers...");
             _dockerExecutor.TryExecDockerCommand($"{serverContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             _dockerExecutor.TryExecDockerCommand($"{clientContainer} rm -f /tmp/*.pid /tmp/*.port /tmp/*_output.log /tmp/*_input_pipe", 3000);
             
