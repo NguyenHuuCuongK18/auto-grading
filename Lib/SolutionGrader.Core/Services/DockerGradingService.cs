@@ -612,10 +612,19 @@ namespace SolutionGrader.Core.Services
                 config.DatabaseUsername,
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
-            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
-            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
-            var serverPort = config.CodeContainerInternalPort.ToString();
-            var clientPort = config.CodeContainerHostPort.ToString();
+            // CRITICAL: For network monitoring with libpcap/npcap, we need DIRECT port mapping.
+            // Server binds to internal port, which MUST equal the external host port.
+            // Client connects to host.docker.internal using the SAME port number.
+            // Example: Student 1 uses 8000:8000, Student 2 uses 8001:8001
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0
+            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;         // host.docker.internal
+            
+            // Both server and client use the SAME port number for direct mapping
+            var port = config.CodeContainerHostPort;  // e.g., 8000, 8001, 8002, etc.
+            var serverPort = port.ToString();
+            var clientPort = port.ToString();
+            
+            Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
             if (!string.IsNullOrEmpty(serverDllPath))
             {
