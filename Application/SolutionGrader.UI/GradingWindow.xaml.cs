@@ -404,41 +404,42 @@ namespace SolutionGrader.UI
                     // Parallel grading using SemaphoreSlim to limit concurrency
                     // Each student gets a dynamically allocated port via PortAllocator
                     var resultLock = new object();
-                    var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents);
-                    
-                    var tasks = studentsToGrade.Select(async (student, index) =>
+                    using (var semaphore = new SemaphoreSlim(_configuration.MaxParallelStudents))
                     {
-                        await semaphore.WaitAsync(_cancellationTokenSource.Token);
-                        try
+                        var tasks = studentsToGrade.Select(async (student, index) =>
                         {
-                            // Wait while paused
-                            while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                            await semaphore.WaitAsync(_cancellationTokenSource.Token);
+                            try
                             {
-                                await Task.Delay(500, _cancellationTokenSource.Token);
+                                // Wait while paused
+                                while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    await Task.Delay(500, _cancellationTokenSource.Token);
+                                }
+                                
+                                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                    return;
+                                
+                                // Port allocation is now handled inside GradeStudentAsync using PortAllocator
+                                // This ensures thread-safe, unique port allocation that never reuses ports
+                                await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                
+                                // Write results after each student (with lock for thread safety)
+                                lock (resultLock)
+                                {
+                                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                }
+                                
+                                UpdateStatusBar();
                             }
-                            
-                            if (_cancellationTokenSource.Token.IsCancellationRequested)
-                                return;
-                            
-                            // Port allocation is now handled inside GradeStudentAsync using PortAllocator
-                            // This ensures thread-safe, unique port allocation that never reuses ports
-                            await GradeStudentAsync(student, _cancellationTokenSource.Token);
-                            
-                            // Write results after each student (with lock for thread safety)
-                            lock (resultLock)
+                            finally
                             {
-                                _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                semaphore.Release();
                             }
-                            
-                            UpdateStatusBar();
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }).ToList();
-                    
-                    await Task.WhenAll(tasks);
+                        }).ToList();
+                        
+                        await Task.WhenAll(tasks);
+                    }
                 }
             }
             catch (OperationCanceledException)
