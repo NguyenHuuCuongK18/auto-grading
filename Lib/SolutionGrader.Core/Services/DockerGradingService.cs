@@ -2037,6 +2037,10 @@ namespace SolutionGrader.Core.Services
             
             wb.SaveAs(detailPath);
             
+            // NO LONGER NEEDED: {TestCase}_Result.xlsx files are not logging anything useful
+            // They were redundant with GradeDetail.xlsx and OverallSummary.xlsx
+            // Removed per user requirement: "remove the excessive sheet {testcasename}_Result under each student folder"
+            /*
             // Also write TC_Result.xlsx (summary file per test case)
             var resultFilePath = Path.Combine(tcResultPath, $"{tcName}_Result.xlsx");
             using var resultWb = new XLWorkbook();
@@ -2052,6 +2056,7 @@ namespace SolutionGrader.Core.Services
             resultWs.Cell(2, 4).Value = result.MaxMark;
             resultWs.Columns().AdjustToContents();
             resultWb.SaveAs(resultFilePath);
+            */
             
             await Task.CompletedTask;
         }

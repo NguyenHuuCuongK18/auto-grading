@@ -161,6 +161,7 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Internal method to log a message to all outputs.
+        /// Thread-safe with proper disposal guards to prevent writing to closed StreamWriter.
         /// </summary>
         private void LogMessage(GradingMessage msg)
         {
@@ -170,23 +171,39 @@ namespace SolutionGrader.UI.Services
             // Write to console (color-coded)
             WriteToConsole(msg);
 
-            // Write to text log file
+            // Write to text log file with disposal guard
             lock (_fileLock)
             {
-                _textLogWriter?.WriteLine(msg.ToString());
-                if (msg.Exception != null)
+                // Check if disposed before attempting to write
+                if (_disposed || _textLogWriter == null)
+                    return;
+
+                try
                 {
-                    _textLogWriter?.WriteLine($"  Exception: {msg.Exception.Message}");
-                    if (!string.IsNullOrEmpty(msg.StackTrace))
+                    _textLogWriter.WriteLine(msg.ToString());
+                    if (msg.Exception != null)
                     {
-                        _textLogWriter?.WriteLine($"  Stack Trace:");
-                        foreach (var line in msg.StackTrace.Split('\n'))
+                        _textLogWriter.WriteLine($"  Exception: {msg.Exception.Message}");
+                        if (!string.IsNullOrEmpty(msg.StackTrace))
                         {
-                            _textLogWriter?.WriteLine($"    {line.TrimEnd()}");
+                        _textLogWriter.WriteLine($"  Stack Trace:");
+                            foreach (var line in msg.StackTrace.Split('\n'))
+                            {
+                                _textLogWriter.WriteLine($"    {line.TrimEnd()}");
+                            }
                         }
                     }
+                    _textLogWriter.WriteLine();
                 }
-                _textLogWriter?.WriteLine();
+                catch (ObjectDisposedException)
+                {
+                    // StreamWriter was disposed - this can happen during shutdown
+                    // Message is already in memory collection, so it won't be lost
+                }
+                catch (IOException)
+                {
+                    // File I/O error - ignore to prevent cascading failures
+                }
             }
         }
 
@@ -433,24 +450,46 @@ namespace SolutionGrader.UI.Services
 
         public void Dispose()
         {
-            if (_disposed) return;
-
-            // Export to Excel before closing
-            ExportToExcel();
-
-            // Close text log
             lock (_fileLock)
             {
-                _textLogWriter?.WriteLine();
-                _textLogWriter?.WriteLine("=".PadRight(100, '='));
-                _textLogWriter?.WriteLine($"SESSION ENDED - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                _textLogWriter?.WriteLine($"Total messages: {_messages.Count}");
-                _textLogWriter?.WriteLine("=".PadRight(100, '='));
-                _textLogWriter?.Close();
-                _textLogWriter?.Dispose();
-            }
+                if (_disposed) return;
+                _disposed = true;
 
-            _disposed = true;
+                // Export to Excel before closing
+                try
+                {
+                    ExportToExcel();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GradingMessageLogger] Failed to export to Excel during disposal: {ex.Message}");
+                }
+
+                // Close text log with proper error handling
+                try
+                {
+                    if (_textLogWriter != null)
+                    {
+                        _textLogWriter.WriteLine();
+                        _textLogWriter.WriteLine("=".PadRight(100, '='));
+                        _textLogWriter.WriteLine($"SESSION ENDED - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                        _textLogWriter.WriteLine($"Total messages: {_messages.Count}");
+                        _textLogWriter.WriteLine("=".PadRight(100, '='));
+                        _textLogWriter.Flush();
+                        _textLogWriter.Close();
+                        _textLogWriter.Dispose();
+                        _textLogWriter = null;
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GradingMessageLogger] Error closing text log writer: {ex.Message}");
+                }
+            }
         }
     }
 }

@@ -148,44 +148,69 @@ namespace SolutionGrader.UI.Services
         {
             lock (_lock)
             {
-                // Close previous student log if exists
-                _currentStudentLogWriter?.Close();
-                _currentStudentLogWriter?.Dispose();
-                _currentStudentLogWriter = null;
+                // Close previous student log if exists with proper error handling
+                try
+                {
+                    if (_currentStudentLogWriter != null)
+                    {
+                        _currentStudentLogWriter.Flush();
+                        _currentStudentLogWriter.Close();
+                        _currentStudentLogWriter.Dispose();
+                        _currentStudentLogWriter = null;
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                    _currentStudentLogWriter = null;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[LoggingService] Error closing previous student log: {ex.Message}");
+                    _currentStudentLogWriter = null;
+                }
 
                 _currentStudentCode = studentCode;
                 _currentPaperNo = paperNo;
 
-                if (!string.IsNullOrEmpty(studentCode))
+                if (!string.IsNullOrEmpty(studentCode) && !_disposed)
                 {
-                    // All logs are consolidated into a single "Logs" folder
-                    // Format: Logs/Log_{StudentCode}_{Date}_{Paper}
-                    // This makes it easy to find all logs in one place
-                    var logDir = Path.Combine(_baseLogPath, "Logs");
-                    if (!Directory.Exists(logDir))
+                    try
                     {
-                        Directory.CreateDirectory(logDir);
+                        // All logs are consolidated into a single "Logs" folder
+                        // Format: Logs/Log_{StudentCode}_{Date}_{Paper}
+                        // This makes it easy to find all logs in one place
+                        var logDir = Path.Combine(_baseLogPath, "Logs");
+                        if (!Directory.Exists(logDir))
+                        {
+                            Directory.CreateDirectory(logDir);
+                        }
+                        
+                        // Include paper number in folder name if provided (for context)
+                        var folderSuffix = !string.IsNullOrEmpty(paperNo) ? $"_Paper{paperNo}" : "";
+                        var studentLogDir = Path.Combine(logDir, $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}{folderSuffix}");
+
+                        if (!Directory.Exists(studentLogDir))
+                        {
+                            Directory.CreateDirectory(studentLogDir);
+                        }
+
+                        // Create student log file with FileShare.ReadWrite to allow deletion while app is running
+                        var studentLogPath = Path.Combine(studentLogDir, $"grading_{DateTime.Now:HHmmss}.log");
+                        _currentStudentLogWriter = new StreamWriter(
+                            new FileStream(studentLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                            Encoding.UTF8)
+                        {
+                            AutoFlush = true
+                        };
+
+                        LogInfo($"Started logging for student: {studentCode}{(paperNo != null ? $" (Paper {paperNo})" : "")}");
                     }
-                    
-                    // Include paper number in folder name if provided (for context)
-                    var folderSuffix = !string.IsNullOrEmpty(paperNo) ? $"_Paper{paperNo}" : "";
-                    var studentLogDir = Path.Combine(logDir, $"Log_{studentCode}_{DateTime.Now:yyyyMMdd}{folderSuffix}");
-
-                    if (!Directory.Exists(studentLogDir))
+                    catch (Exception ex)
                     {
-                        Directory.CreateDirectory(studentLogDir);
+                        Console.WriteLine($"[LoggingService] Failed to create student log file: {ex.Message}");
+                        _currentStudentLogWriter = null;
                     }
-
-                    // Create student log file with FileShare.ReadWrite to allow deletion while app is running
-                    var studentLogPath = Path.Combine(studentLogDir, $"grading_{DateTime.Now:HHmmss}.log");
-                    _currentStudentLogWriter = new StreamWriter(
-                        new FileStream(studentLogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
-                        Encoding.UTF8)
-                    {
-                        AutoFlush = true
-                    };
-
-                    LogInfo($"Started logging for student: {studentCode}{(paperNo != null ? $" (Paper {paperNo})" : "")}");
                 }
             }
         }
@@ -224,24 +249,45 @@ namespace SolutionGrader.UI.Services
 
             lock (_lock)
             {
+                // Check if disposed before proceeding
+                if (_disposed)
+                    return;
+
                 // Add to in-memory log
                 _allLogs.AppendLine(formattedMessage);
 
-                // Write to system log
-                try
+                // Write to system log with disposal guard
+                if (_systemLogWriter != null && !_disposed)
                 {
-                    _systemLogWriter?.WriteLine(formattedMessage);
+                    try
+                    {
+                        _systemLogWriter.WriteLine(formattedMessage);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // StreamWriter was disposed - this can happen during shutdown
+                    }
+                    catch (IOException)
+                    {
+                        // File I/O error - ignore to prevent cascading failures
+                    }
                 }
-                catch { /* Ignore write errors */ }
 
-                // Write to student log if context is set
-                if (_currentStudentLogWriter != null)
+                // Write to student log if context is set with disposal guard
+                if (_currentStudentLogWriter != null && !_disposed)
                 {
                     try
                     {
                         _currentStudentLogWriter.WriteLine(formattedMessage);
                     }
-                    catch { /* Ignore write errors */ }
+                    catch (ObjectDisposedException)
+                    {
+                        // StreamWriter was disposed - this can happen during shutdown
+                    }
+                    catch (IOException)
+                    {
+                        // File I/O error - ignore to prevent cascading failures
+                    }
                 }
 
                 // Write to console for debugging
@@ -258,14 +304,17 @@ namespace SolutionGrader.UI.Services
                 Console.ForegroundColor = originalColor;
             }
 
-            // Raise event for UI binding
-            LogAdded?.Invoke(this, new LogEventArgs
+            // Raise event for UI binding (outside lock to prevent deadlocks)
+            if (!_disposed)
             {
-                Level = level,
-                Message = message,
-                Timestamp = timestamp,
-                StudentCode = _currentStudentCode
-            });
+                LogAdded?.Invoke(this, new LogEventArgs
+                {
+                    Level = level,
+                    Message = message,
+                    Timestamp = timestamp,
+                    StudentCode = _currentStudentCode
+                });
+            }
         }
 
         /// <summary>
@@ -310,15 +359,50 @@ namespace SolutionGrader.UI.Services
 
         public void Dispose()
         {
-            if (_disposed) return;
-            
             lock (_lock)
             {
-                _currentStudentLogWriter?.Close();
-                _currentStudentLogWriter?.Dispose();
-                _systemLogWriter?.Close();
-                _systemLogWriter?.Dispose();
+                if (_disposed) return;
                 _disposed = true;
+                
+                // Close and dispose student log writer with error handling
+                try
+                {
+                    if (_currentStudentLogWriter != null)
+                    {
+                        _currentStudentLogWriter.Flush();
+                        _currentStudentLogWriter.Close();
+                        _currentStudentLogWriter.Dispose();
+                        _currentStudentLogWriter = null;
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[LoggingService] Error disposing student log writer: {ex.Message}");
+                }
+                
+                // Close and dispose system log writer with error handling
+                try
+                {
+                    if (_systemLogWriter != null)
+                    {
+                        _systemLogWriter.Flush();
+                        _systemLogWriter.Close();
+                        _systemLogWriter.Dispose();
+                        _systemLogWriter = null;
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[LoggingService] Error disposing system log writer: {ex.Message}");
+                }
             }
         }
     }
