@@ -5,7 +5,7 @@ using System.Linq;
 using ClosedXML.Excel;
 using FileMaster.FileEngine;
 
-namespace SolutionGrader.UI.Services
+namespace SolutionGrader.Core.Services
 {
     /// <summary>
     /// Shared discovery services to eliminate code duplication between CLI and UI.

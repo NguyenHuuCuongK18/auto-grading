@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using FileMaster.FileEngine;
 using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Services;
 
 namespace SolutionGrader.UI.Services
 {
