@@ -91,4 +91,13 @@ public sealed class EnvironmentConfiguration
     /// Default: false (disabled)
     /// </summary>
     public bool EnableDllModificationFallback { get; set; } = false;
+    
+    /// <summary>
+    /// Indicates whether student code is running in Docker containers.
+    /// When true, DLL modification uses Docker-specific IP addresses:
+    /// - Server: 0.0.0.0 (bind to all interfaces)
+    /// - Client: host.docker.internal (connect to host)
+    /// Default: false (local execution)
+    /// </summary>
+    public bool UseDockerForStudentCode { get; set; } = false;
 }

@@ -175,10 +175,8 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // Determine target IP based on protocol
-                    var targetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
-                        ? "127.0.0.1"
-                        : "http://localhost";
+                    // Determine if we're using Docker for student code
+                    bool useDocker = envConfig?.UseDockerForStudentCode == true;
                     
                     // Apply DLL modification to client if appsettings is missing
                     if (!clientAppsettingsExists && !string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
@@ -187,7 +185,26 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrEmpty(clientDir))
                         {
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client appsettings.json not found, attempting DLL modification...");
-                            var clientModified = _dllMod.TryModifyDlls(clientDir, targetIp, _monitorPort);
+                            
+                            bool clientModified;
+                            if (useDocker)
+                            {
+                                // In Docker: client connects to host.docker.internal
+                                var clientTargetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
+                                    ? AppsettingKeywords.DOCKER_HOST_INTERNAL
+                                    : $"http://{AppsettingKeywords.DOCKER_HOST_INTERNAL}";
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using Docker client address: {clientTargetIp}");
+                                clientModified = _dllMod.TryModifyDllsForDocker(clientDir, clientTargetIp, _monitorPort, isServer: false);
+                            }
+                            else
+                            {
+                                // Local execution: use localhost
+                                var targetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
+                                    ? "127.0.0.1"
+                                    : "http://localhost";
+                                clientModified = _dllMod.TryModifyDlls(clientDir, targetIp, _monitorPort);
+                            }
+                            
                             if (clientModified)
                             {
                                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client DLLs modified successfully");
@@ -206,7 +223,24 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrEmpty(serverDir))
                         {
                             Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server appsettings.json not found, attempting DLL modification...");
-                            var serverModified = _dllMod.TryModifyDlls(serverDir, targetIp, _monitorPort);
+                            
+                            bool serverModified;
+                            if (useDocker)
+                            {
+                                // In Docker: server binds to 0.0.0.0 (all interfaces)
+                                var serverTargetIp = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using Docker server bind address: {serverTargetIp}");
+                                serverModified = _dllMod.TryModifyDllsForDocker(serverDir, serverTargetIp, _monitorPort, isServer: true);
+                            }
+                            else
+                            {
+                                // Local execution: use localhost
+                                var targetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
+                                    ? "127.0.0.1"
+                                    : "http://localhost";
+                                serverModified = _dllMod.TryModifyDlls(serverDir, targetIp, _monitorPort);
+                            }
+                            
                             if (serverModified)
                             {
                                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server DLLs modified successfully");

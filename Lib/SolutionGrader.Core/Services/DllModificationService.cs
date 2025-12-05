@@ -44,13 +44,37 @@ public sealed class DllModificationService : IDllModificationService
     /// <returns>True if any modifications were made successfully, false otherwise</returns>
     public bool TryModifyDlls(string dllDirectory, string targetIp, int targetPort)
     {
+        return TryModifyDllsInternal(dllDirectory, targetIp, targetPort, useDockerAddress: false, isServer: false);
+    }
+    
+    /// <summary>
+    /// Attempts to modify DLL files with Docker-aware IP address handling.
+    /// For server DLLs: replaces localhost with 0.0.0.0 (bind to all interfaces)
+    /// For client DLLs: replaces localhost with host.docker.internal (connect to host)
+    /// </summary>
+    /// <param name="dllDirectory">Directory containing DLL files to modify</param>
+    /// <param name="targetIp">Target IP address for the specific role (server: 0.0.0.0, client: host.docker.internal)</param>
+    /// <param name="targetPort">Target port number for the grading environment</param>
+    /// <param name="isServer">True if modifying server DLLs (bind address), false for client DLLs (connect address)</param>
+    /// <returns>True if any modifications were made successfully, false otherwise</returns>
+    public bool TryModifyDllsForDocker(string dllDirectory, string targetIp, int targetPort, bool isServer)
+    {
+        return TryModifyDllsInternal(dllDirectory, targetIp, targetPort, useDockerAddress: true, isServer: isServer);
+    }
+    
+    /// <summary>
+    /// Internal method that performs the actual DLL modification.
+    /// </summary>
+    private bool TryModifyDllsInternal(string dllDirectory, string targetIp, int targetPort, bool useDockerAddress, bool isServer)
+    {
         if (!Directory.Exists(dllDirectory))
         {
             Console.WriteLine($"{LOG_PREFIX} Directory not found: {dllDirectory}");
             return false;
         }
         
-        Console.WriteLine($"{LOG_PREFIX} Searching for DLL files in: {dllDirectory}");
+        var roleLabel = useDockerAddress ? (isServer ? "Server (Docker bind)" : "Client (Docker connect)") : "Local";
+        Console.WriteLine($"{LOG_PREFIX} Searching for DLL files in: {dllDirectory} [{roleLabel}]");
         var dllFiles = Directory.GetFiles(dllDirectory, "*.dll", SearchOption.TopDirectoryOnly);
         
         if (dllFiles.Length == 0)
@@ -60,6 +84,7 @@ public sealed class DllModificationService : IDllModificationService
         }
         
         Console.WriteLine($"{LOG_PREFIX} Found {dllFiles.Length} DLL file(s) to scan");
+        Console.WriteLine($"{LOG_PREFIX} Target IP: {targetIp}, Target Port: {targetPort}");
         
         bool anySuccess = false;
         foreach (var dllPath in dllFiles)

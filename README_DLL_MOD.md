@@ -30,6 +30,7 @@ Sheet: Config
 | Key                            | Value |
 +--------------------------------+-------+
 | EnableDllModificationFallback  | true  |
+| UseDockerForStudentCode        | true  | (if using Docker)
 +--------------------------------+-------+
 ```
 
@@ -39,25 +40,41 @@ The system will automatically replace:
 - **IPs**: `localhost`, `127.0.0.1`, `http://localhost`, `https://localhost`
 - **Ports**: `3000`, `4000`, `5000`, `8000`, `8080`
 
-With the correct grading environment values (typically port `8888`).
+With the correct grading environment values:
+- **Local execution**: `localhost` or `127.0.0.1` with configured port (typically `8888`)
+- **Docker execution**:
+  - Server: `0.0.0.0` (bind to all interfaces)
+  - Client: `host.docker.internal` (connect to host)
 
 ## Usage Scenarios
 
-### Scenario 1: Test Kit Without Appsettings Files
+### Scenario 1: Test Kit Without Appsettings Files (Local)
 
 If your test kit's `Meta/Given/Client` and `Meta/Given/Server` don't use appsettings.json:
 
 1. Enable `EnableDllModificationFallback = true` in Environment.xlsx
-2. Run grading normally
-3. The system will patch student DLLs automatically
+2. Set `UseDockerForStudentCode = false` (or omit, as this is the default)
+3. Run grading normally
+4. The system will patch student DLLs with localhost addresses
 
-### Scenario 2: Mixed Student Submissions
+### Scenario 2: Test Kit Without Appsettings Files (Docker)
 
-Some students use appsettings.json, others hardcode values:
+If running student code in Docker containers:
+
+1. Enable `EnableDllModificationFallback = true` in Environment.xlsx
+2. Set `UseDockerForStudentCode = true`
+3. Run grading normally
+4. Server DLLs will be patched with `0.0.0.0` (bind address)
+5. Client DLLs will be patched with `host.docker.internal` (connect address)
+
+### Scenario 2: Mixed Student Submissions (Docker)
+
+Some students use appsettings.json, others hardcode values, running in Docker:
 
 1. Enable `EnableDllModificationFallback = true`
-2. Students with appsettings.json will use them (preferred)
-3. Students without appsettings.json will have their DLLs patched automatically
+2. Set `UseDockerForStudentCode = true`
+3. Students with appsettings.json will use them (preferred)
+4. Students without appsettings.json will have their DLLs patched with Docker-specific addresses
 
 ### Scenario 3: No Modification Needed
 
@@ -69,18 +86,39 @@ If all submissions properly use appsettings.json:
 
 ## Example Log Output
 
+### Local Execution
 ```
 [AppsettingsCreation] Using GraderPort from config: 8888
 [AppsettingsCreation] Warning: Failed to generate server appsettings.json: File not found
 [TestCase] DLL modification fallback is enabled
 [TestCase] Server appsettings.json not found, attempting DLL modification...
-[DllMod] Searching for DLL files in: /submit/student1/server
+[DllMod] Searching for DLL files in: /submit/student1/server [Local]
+[DllMod] Target IP: 127.0.0.1, Target Port: 8888
 [DllMod] Found 3 DLL file(s) to scan
 [DllMod] Skipping system DLL: System.Runtime.dll
 [DllMod] Attempting to patch: StudentServer.dll
 [DllMod] Successfully patched StudentServer.dll: 2 IP(s), 1 port(s) replaced
 [TestCase] Server DLLs modified successfully
 [TestCase] [Step 1] Environment setup completed
+```
+
+### Docker Execution
+```
+[AppsettingsCreation] Using GraderPort from config: 8888
+[AppsettingsCreation] Warning: Failed to generate server appsettings.json: File not found
+[TestCase] DLL modification fallback is enabled
+[TestCase] Server appsettings.json not found, attempting DLL modification...
+[TestCase] Using Docker server bind address: 0.0.0.0
+[DllMod] Searching for DLL files in: /submit/student1/server [Server (Docker bind)]
+[DllMod] Target IP: 0.0.0.0, Target Port: 8888
+[DllMod] Successfully patched StudentServer.dll: 2 IP(s), 1 port(s) replaced
+[TestCase] Server DLLs modified successfully
+[TestCase] Client appsettings.json not found, attempting DLL modification...
+[TestCase] Using Docker client address: http://host.docker.internal
+[DllMod] Searching for DLL files in: /submit/student1/client [Client (Docker connect)]
+[DllMod] Target IP: http://host.docker.internal, Target Port: 8888
+[DllMod] Successfully patched StudentClient.dll: 1 IP(s), 1 port(s) replaced
+[TestCase] Client DLLs modified successfully
 ```
 
 ## Safety Features

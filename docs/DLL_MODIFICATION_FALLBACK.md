@@ -27,12 +27,20 @@ Add the following to your `Environment.xlsx` file in the test kit:
 | Key | Value |
 |-----|-------|
 | EnableDllModificationFallback | true |
+| UseDockerForStudentCode | true (if using Docker containers) |
 
 ### Default Behavior
 
-- **Default**: `false` (disabled)
-- **When disabled**: Appsettings errors are still non-fatal (logged as warnings), but no DLL modification is attempted
-- **When enabled**: DLL modification is attempted when appsettings.json is missing
+- **EnableDllModificationFallback**: `false` (disabled)
+- **UseDockerForStudentCode**: `false` (local execution)
+
+**When disabled**: Appsettings errors are still non-fatal (logged as warnings), but no DLL modification is attempted
+
+**When enabled for local execution**: DLL modification uses localhost/127.0.0.1
+
+**When enabled for Docker containers**: DLL modification uses Docker-specific addresses:
+- **Server DLLs**: `0.0.0.0` (bind to all interfaces)
+- **Client DLLs**: `host.docker.internal` (connect to host)
 
 ## How It Works
 
@@ -48,6 +56,24 @@ The DLL modification service uses **Mono.Cecil** to analyze and modify IL (Inter
 - `3000`, `4000`, `5000`, `8000`, `8080`
 
 When these patterns are found in string literals or integer constants, they are replaced with the grading environment's configured IP and port.
+
+### Docker Container Support
+
+When `UseDockerForStudentCode = true`, the system applies Docker-specific IP addresses:
+
+**Server DLLs** (binding address):
+```csharp
+// Before: string ip = "localhost";
+// After:  string ip = "0.0.0.0";  // Binds to all interfaces in container
+```
+
+**Client DLLs** (connection address):
+```csharp
+// Before: string url = "http://localhost:5000";
+// After:  string url = "http://host.docker.internal:8888";  // Connects to host
+```
+
+This matches how `appsettings.json` generation works for Docker containers.
 
 ## Credits
 
