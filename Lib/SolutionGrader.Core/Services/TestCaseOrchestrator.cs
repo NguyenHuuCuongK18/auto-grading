@@ -148,11 +148,10 @@ namespace SolutionGrader.Core.Services
                 // Reset database using effective environment config
                 await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, false, envConfig, ct);
                 
-                // Apply DLL modification fallback if enabled and appsettings might be missing
-                if (envConfig?.EnableDllModificationFallback == true && _dllMod != null)
+                // Automatically apply DLL modification fallback if appsettings is missing
+                // This is always enabled as a transparent fallback mechanism
+                if (_dllMod != null)
                 {
-                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} DLL modification fallback is enabled");
-                    
                     // Check if appsettings.json exists for client and server
                     bool clientAppsettingsExists = false;
                     bool serverAppsettingsExists = false;
@@ -175,8 +174,9 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // Determine if we're using Docker for student code
-                    bool useDocker = envConfig?.UseDockerForStudentCode == true;
+                    // Auto-detect Docker mode: check if server path contains docker-related indicators
+                    // or if we're in ExecutePaper flow (indicated by certain environment settings)
+                    bool useDocker = IsDockerExecution(serverExePath, clientExePath, envConfig);
                     
                     // Apply DLL modification to client if appsettings is missing
                     if (!clientAppsettingsExists && !string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
@@ -184,7 +184,7 @@ namespace SolutionGrader.Core.Services
                         var clientDir = Path.GetDirectoryName(clientExePath);
                         if (!string.IsNullOrEmpty(clientDir))
                         {
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client appsettings.json not found, attempting DLL modification...");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client appsettings.json not found, applying DLL modification fallback...");
                             
                             bool clientModified;
                             if (useDocker)
@@ -193,7 +193,7 @@ namespace SolutionGrader.Core.Services
                                 var clientTargetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
                                     ? AppsettingKeywords.DOCKER_HOST_INTERNAL
                                     : $"http://{AppsettingKeywords.DOCKER_HOST_INTERNAL}";
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using Docker client address: {clientTargetIp}");
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Docker mode detected - using client address: {clientTargetIp}");
                                 clientModified = _dllMod.TryModifyDllsForDocker(clientDir, clientTargetIp, _monitorPort, isServer: false);
                             }
                             else
@@ -222,14 +222,14 @@ namespace SolutionGrader.Core.Services
                         var serverDir = Path.GetDirectoryName(serverExePath);
                         if (!string.IsNullOrEmpty(serverDir))
                         {
-                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server appsettings.json not found, attempting DLL modification...");
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server appsettings.json not found, applying DLL modification fallback...");
                             
                             bool serverModified;
                             if (useDocker)
                             {
                                 // In Docker: server binds to 0.0.0.0 (all interfaces)
                                 var serverTargetIp = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;
-                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Using Docker server bind address: {serverTargetIp}");
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Docker mode detected - using server bind address: {serverTargetIp}");
                                 serverModified = _dllMod.TryModifyDllsForDocker(serverDir, serverTargetIp, _monitorPort, isServer: true);
                             }
                             else
@@ -638,6 +638,50 @@ namespace SolutionGrader.Core.Services
             var lastDash = id?.LastIndexOf('-') ?? -1;
             if (lastDash >= 0 && lastDash + 1 < id!.Length && int.TryParse(id.Substring(lastDash + 1), out var s)) return s;
             return null;
+        }
+        
+        /// <summary>
+        /// Auto-detects if code is running in Docker containers based on execution paths and environment.
+        /// Docker execution is indicated by paths containing docker-specific directories or container runtime indicators.
+        /// </summary>
+        private static bool IsDockerExecution(string? serverExePath, string? clientExePath, EnvironmentConfiguration? envConfig)
+        {
+            // Check if paths contain Docker-related indicators
+            var paths = new[] { serverExePath, clientExePath }.Where(p => !string.IsNullOrEmpty(p));
+            
+            foreach (var path in paths)
+            {
+                if (path != null)
+                {
+                    // Docker container paths typically contain these patterns
+                    if (path.Contains("/var/lib/docker", StringComparison.OrdinalIgnoreCase) ||
+                        path.Contains("/docker/", StringComparison.OrdinalIgnoreCase) ||
+                        path.Contains("\\docker\\", StringComparison.OrdinalIgnoreCase) ||
+                        path.Contains("/tmp/", StringComparison.OrdinalIgnoreCase) && path.Contains("container", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            
+            // Check environment configuration for Docker-related settings
+            if (envConfig != null)
+            {
+                // If GivenServerPath or GivenClientPath are set, we're likely in Docker mode (ExecutePaper flow)
+                if (!string.IsNullOrEmpty(envConfig.GivenServerPath) || !string.IsNullOrEmpty(envConfig.GivenClientPath))
+                {
+                    return true;
+                }
+            }
+            
+            // Check if running inside a Docker container by checking for /.dockerenv file
+            if (File.Exists("/.dockerenv"))
+            {
+                return true;
+            }
+            
+            // Default to false (local execution)
+            return false;
         }
     }
 }

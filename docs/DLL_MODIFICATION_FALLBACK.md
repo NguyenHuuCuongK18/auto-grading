@@ -2,47 +2,25 @@
 
 ## Overview
 
-This feature addresses the scenario where student submissions have hardcoded IP addresses and ports in their code but don't use `appsettings.json` files. When the grader cannot find or generate `appsettings.json` files, it can optionally attempt to patch the compiled DLL files to replace hardcoded values with the correct grading environment settings.
+This feature addresses the scenario where student submissions have hardcoded IP addresses and ports in their code but don't use `appsettings.json` files. When the grader cannot find `appsettings.json` files, it **automatically** attempts to patch the compiled DLL files to replace hardcoded values with the correct grading environment settings.
 
 ## Background
 
-The auto-grading system previously required student submissions to use `appsettings.json` files for configuration. If these files were missing or could not be generated, the grading process would fail with a fatal error. However, some students may hardcode connection details directly in their code, which after compilation becomes embedded in the DLL files.
+The auto-grading system can generate `appsettings.json` files for configuration. However, some students may hardcode connection details directly in their code, which after compilation becomes embedded in the DLL files. This feature provides an automatic fallback when appsettings files are missing.
 
 ## Solution
 
-This feature implements a non-fatal fallback mechanism that:
+This feature implements an **automatic, transparent fallback mechanism**:
 
-1. **Makes appsettings errors non-fatal**: The grader now logs warnings instead of failing when appsettings.json cannot be created
-2. **Provides DLL modification as a fallback**: When enabled, the grader attempts to patch compiled DLL files to replace hardcoded values
-3. **Is configurable**: Can be enabled/disabled per test suite via the Environment.xlsx configuration
+1. **Non-fatal appsettings handling**: The grader logs warnings instead of failing when appsettings.json cannot be created
+2. **Automatic DLL patching**: When appsettings.json is missing, the grader automatically attempts to patch compiled DLL files
+3. **Docker auto-detection**: The system detects if code is running in Docker containers and applies appropriate IP addresses
 
-## Configuration
-
-### Enabling DLL Modification Fallback
-
-Add the following to your `Environment.xlsx` file in the test kit:
-
-**Sheet: Config**
-
-| Key | Value |
-|-----|-------|
-| EnableDllModificationFallback | true |
-| UseDockerForStudentCode | true (if using Docker containers) |
-
-### Default Behavior
-
-- **EnableDllModificationFallback**: `false` (disabled)
-- **UseDockerForStudentCode**: `false` (local execution)
-
-**When disabled**: Appsettings errors are still non-fatal (logged as warnings), but no DLL modification is attempted
-
-**When enabled for local execution**: DLL modification uses localhost/127.0.0.1
-
-**When enabled for Docker containers**: DLL modification uses Docker-specific addresses:
-- **Server DLLs**: `0.0.0.0` (bind to all interfaces)
-- **Client DLLs**: `host.docker.internal` (connect to host)
+**No configuration required** - this feature works automatically as part of the normal grading flow.
 
 ## How It Works
+
+### DLL Patching Process
 
 The DLL modification service uses **Mono.Cecil** to analyze and modify IL (Intermediate Language) code in compiled .NET assemblies. It searches for:
 
@@ -57,9 +35,9 @@ The DLL modification service uses **Mono.Cecil** to analyze and modify IL (Inter
 
 When these patterns are found in string literals or integer constants, they are replaced with the grading environment's configured IP and port.
 
-### Docker Container Support
+### Docker Container Support (Auto-detected)
 
-When `UseDockerForStudentCode = true`, the system applies Docker-specific IP addresses:
+The system automatically detects Docker execution and applies Docker-specific IP addresses:
 
 **Server DLLs** (binding address):
 ```csharp
@@ -73,7 +51,14 @@ When `UseDockerForStudentCode = true`, the system applies Docker-specific IP add
 // After:  string url = "http://host.docker.internal:8888";  // Connects to host
 ```
 
-This matches how `appsettings.json` generation works for Docker containers.
+### Docker Detection
+
+The system automatically detects Docker execution based on:
+- File paths containing `/docker/` or `/var/lib/docker`
+- Presence of `/.dockerenv` file
+- Environment configuration indicating Given paths (ExecutePaper flow)
+
+No manual configuration needed!
 
 ## Credits
 
