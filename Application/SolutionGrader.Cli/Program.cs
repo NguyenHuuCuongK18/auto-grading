@@ -389,8 +389,11 @@ public class Program
         IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
         
-        // Create DLL modification service for fallback support
-        IDllModificationService dllMod = new DllModificationService();
+        // Create DLL modification service for automatic fallback support when appsettings.json is missing
+        // To disable DLL modification: set environment variable DISABLE_DLL_MOD=true or change this line to: IDllModificationService? dllMod = null;
+        IDllModificationService? dllMod = Environment.GetEnvironmentVariable("DISABLE_DLL_MOD") == "true" 
+            ? null 
+            : new DllModificationService();
 
         var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings, dllMod);
         

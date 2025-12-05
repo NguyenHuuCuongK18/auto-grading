@@ -18,6 +18,50 @@ This feature implements an **automatic, transparent fallback mechanism**:
 
 **No configuration required** - this feature works automatically as part of the normal grading flow.
 
+## How to Disable DLL Modification
+
+If you need to disable the automatic DLL modification feature, you have two options:
+
+### Option 1: Environment Variable (Recommended)
+Set the environment variable before running the grader:
+
+**Windows (PowerShell):**
+```powershell
+$env:DISABLE_DLL_MOD = "true"
+dotnet run --project Application/SolutionGrader.Cli -- executesuite --suite "path" --out "path"
+```
+
+**Windows (CMD):**
+```cmd
+set DISABLE_DLL_MOD=true
+dotnet run --project Application/SolutionGrader.Cli -- executesuite --suite "path" --out "path"
+```
+
+**Linux/Mac:**
+```bash
+export DISABLE_DLL_MOD=true
+dotnet run --project Application/SolutionGrader.Cli -- executesuite --suite "path" --out "path"
+```
+
+### Option 2: Code Modification
+Edit the service instantiation in:
+- **CLI**: `Application/SolutionGrader.Cli/Program.cs` (around line 393)
+- **UI**: `Application/SolutionGrader.UI/Services/LibGradingService.cs` (around line 113)
+
+Change:
+```csharp
+IDllModificationService? dllMod = Environment.GetEnvironmentVariable("DISABLE_DLL_MOD") == "true" 
+    ? null 
+    : new DllModificationService();
+```
+
+To:
+```csharp
+IDllModificationService? dllMod = null;  // DLL modification disabled
+```
+
+When `dllMod` is `null`, the DLL modification feature is completely disabled and the system will only use appsettings.json files.
+
 ## How It Works
 
 ### DLL Patching Process

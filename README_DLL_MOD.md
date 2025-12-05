@@ -31,6 +31,24 @@ The DLL modification feature works **automatically** as part of the grading proc
 3. System detects Docker vs local execution
 4. Appropriate IP addresses and ports are patched
 
+### How to Disable (If Needed)
+
+To disable DLL modification, set the environment variable:
+
+**Windows:**
+```powershell
+$env:DISABLE_DLL_MOD = "true"
+```
+
+**Linux/Mac:**
+```bash
+export DISABLE_DLL_MOD=true
+```
+
+Or modify the code to pass `null` instead of `new DllModificationService()` in:
+- `Application/SolutionGrader.Cli/Program.cs` (line ~393)
+- `Application/SolutionGrader.UI/Services/LibGradingService.cs` (line ~113)
+
 ### What Gets Modified
 
 The system automatically replaces:
