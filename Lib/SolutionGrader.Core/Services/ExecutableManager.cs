@@ -461,6 +461,8 @@ namespace SolutionGrader.Core.Services
                                         {
                                             // StreamWriter was disposed due to race condition, but we still capture output in memory
                                             // This ensures grading continues successfully even if file logging fails
+                                            // Log occurrence for debugging (helps track frequency of race condition)
+                                            Console.WriteLine($"[DEBUG] StreamWriter disposed during newline flush - output still captured in memory");
                                         }
                                         
                                         lock (buffer) { buffer.Append(output); }
@@ -490,6 +492,8 @@ namespace SolutionGrader.Core.Services
                                 catch (ObjectDisposedException)
                                 {
                                     // StreamWriter was disposed, but memory capture continues to ensure grading succeeds
+                                    // Log occurrence for debugging
+                                    Console.WriteLine($"[DEBUG] StreamWriter disposed during partial flush - output still captured in memory");
                                 }
                                 
                                 lock (buffer) { buffer.Append(output); }
@@ -516,6 +520,8 @@ namespace SolutionGrader.Core.Services
                             catch (ObjectDisposedException)
                             {
                                 // StreamWriter was disposed, but memory capture continues for comparison logic
+                                // Log occurrence for debugging
+                                Console.WriteLine($"[DEBUG] StreamWriter disposed during final flush - output still captured in memory");
                             }
                             
                             lock (buffer) { buffer.Append(output); }
