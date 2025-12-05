@@ -67,6 +67,7 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
+        private string? _currentStudentCode; // Track current student for logging
         
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -180,6 +181,9 @@ namespace SolutionGrader.Core.Services
         {
             var result = new DockerGradingResult { StudentCode = studentCode };
             Directory.CreateDirectory(studentResultPath);
+            
+            // Set current student code for logging
+            _currentStudentCode = studentCode;
             
             // Container names
             var serverContainer = $"ag-server-{studentCode}";
@@ -411,13 +415,16 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
-                    Console.WriteLine($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
+                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
-                    Console.WriteLine($"[NetworkMonitor] Monitor stopped for student {studentCode}");
+                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor stopped for student {studentCode}");
                 }
                 
                 // Cleanup containers
                 await CleanupContainersAsync(serverContainer, clientContainer);
+                
+                // Clear student context
+                _currentStudentCode = null;
             }
             
             return result;
@@ -1618,32 +1625,14 @@ namespace SolutionGrader.Core.Services
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
             
-            // Step 6: Wait for port release with timeout (3 seconds max, check every 100ms)
-            OnProgress($"Cleanup: Waiting for port {hostPort} to be released...");
-            var portCheckStart = DateTime.UtcNow;
-            bool portReleased = false;
-            
-            while ((DateTime.UtcNow - portCheckStart).TotalSeconds < 3)
-            {
-                try
-                {
-                    using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, hostPort);
-                    listener.Start();
-                    listener.Stop();
-                    portReleased = true;
-                    OnProgress($"Cleanup: Port {hostPort} is now available");
-                    break;
-                }
-                catch
-                {
-                    await Task.Delay(100);  // Reduced from 200ms
-                }
-            }
-            
-            if (!portReleased)
-            {
-                OnProgress($"Cleanup: WARNING: Port {hostPort} still in use after 3s timeout - next test case may fail");
-            }
+            // REMOVED: Port release waiting - NOT NEEDED
+            // Ports are assigned incrementally from testkit base port (e.g., 8000, 8001, 8002...)
+            // Each student gets their own unique port that is marked as occupied for the entire grading flow.
+            // There's no need to wait for port release because:
+            // 1. We're not reusing ports during a grading session
+            // 2. Even grading 1000 students only occupies ports 8000-8999 (plenty of ports available)
+            // 3. Port availability check happens during assignment, not during cleanup
+            // This speeds up test case transitions and prevents unnecessary delays.
             
             OnProgress("Cleanup: Complete, ready for next test case");
         }
@@ -2129,8 +2118,12 @@ namespace SolutionGrader.Core.Services
         
         private void OnProgress(string message)
         {
-            Console.WriteLine($"[DockerGrading] {message}");
-            ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(message));
+            // Add [StudentCode] prefix to help with debugging
+            var formattedMessage = !string.IsNullOrEmpty(_currentStudentCode) 
+                ? $"[{_currentStudentCode}] {message}" 
+                : message;
+            Console.WriteLine($"[DockerGrading] {formattedMessage}");
+            ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(formattedMessage));
         }
     }
     

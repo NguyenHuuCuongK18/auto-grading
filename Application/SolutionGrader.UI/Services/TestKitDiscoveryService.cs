@@ -235,5 +235,42 @@ namespace SolutionGrader.UI.Services
 
             return (serverPath, clientPath);
         }
+
+        /// <summary>
+        /// Gets the total maximum marks for a test kit by reading Header.xlsx.
+        /// Sums up all test case marks from the QuestionMark sheet.
+        /// </summary>
+        /// <param name="testKitPath">Path to the test kit folder</param>
+        /// <returns>Total maximum marks for the test kit, or 0 if not found</returns>
+        public double GetTestKitMaxMark(string testKitPath)
+        {
+            var headerPath = Path.Combine(testKitPath, "Header.xlsx");
+            if (!File.Exists(headerPath))
+            {
+                _logger.LogWarning($"Header.xlsx not found in {testKitPath}");
+                return 0.0;
+            }
+
+            try
+            {
+                using var workbook = new ClosedXML.Excel.XLWorkbook(headerPath);
+                if (workbook.TryGetWorksheet("QuestionMark", out var markSheet))
+                {
+                    double totalMark = 0.0;
+                    foreach (var row in markSheet.RowsUsed().Skip(1)) // Skip header
+                    {
+                        var mark = row.Cell(2).GetValue<double>();
+                        totalMark += mark;
+                    }
+                    return totalMark;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error reading max marks from {headerPath}: {ex.Message}");
+            }
+
+            return 0.0;
+        }
     }
 }
