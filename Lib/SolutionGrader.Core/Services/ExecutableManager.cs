@@ -449,7 +449,18 @@ namespace SolutionGrader.Core.Services
                                         lineBuffer.Clear();
                                         lastFlushTime = DateTime.UtcNow;
                                         
-                                        await sw.WriteAsync(output);
+                                        // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
+                                        // This can occur if the StreamWriter is disposed while async operations are still running
+                                        try
+                                        {
+                                            await sw.WriteAsync(output);
+                                        }
+                                        catch (ObjectDisposedException)
+                                        {
+                                            // StreamWriter was disposed, but we still need to capture output in memory
+                                            // Continue execution to preserve console output even if file logging fails
+                                        }
+                                        
                                         lock (buffer) { buffer.Append(output); }
                                         
                                         var outputForFile = output.TrimEnd('\r', '\n');
@@ -468,7 +479,16 @@ namespace SolutionGrader.Core.Services
                                 lineBuffer.Clear();
                                 lastFlushTime = DateTime.UtcNow;
                                 
-                                await sw.WriteAsync(output);
+                                // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
+                                try
+                                {
+                                    await sw.WriteAsync(output);
+                                }
+                                catch (ObjectDisposedException)
+                                {
+                                    // StreamWriter was disposed, continue to capture in memory
+                                }
+                                
                                 lock (buffer) { buffer.Append(output); }
                                 
                                 var outputForFile = output.TrimEnd('\r', '\n');
@@ -483,7 +503,17 @@ namespace SolutionGrader.Core.Services
                         if (lineBuffer.Length > 0)
                         {
                             var output = lineBuffer.ToString();
-                            await sw.WriteAsync(output);
+                            
+                            // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
+                            try
+                            {
+                                await sw.WriteAsync(output);
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                // StreamWriter was disposed, continue to capture in memory
+                            }
+                            
                             lock (buffer) { buffer.Append(output); }
                             
                             var outputForFile = output.TrimEnd('\r', '\n');
