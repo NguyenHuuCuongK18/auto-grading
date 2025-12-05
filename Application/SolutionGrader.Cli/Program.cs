@@ -388,8 +388,11 @@ public class Program
 
         IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
         IReportService rep = new ReportService(files);
+        
+        // Create DLL modification service for fallback support
+        IDllModificationService dllMod = new DllModificationService();
 
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
+        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings, dllMod);
         
         Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
 

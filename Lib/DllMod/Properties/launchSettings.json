@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DllMod": {
+      "commandName": "Project",
+      "commandLineArgs": "dllmod -d \"C:\\Users\\NPC\\Documents\\FPT\\Capstone\\Code\\PRN222_FA25\\PRN222_FA25_PE_537462\\StudentSolution\\1\\anlpvhe187047\\1\\Q1_anlpvhe187047\\Q1.dll\" -oi 127.0.0.1 -i 127.0.0.2 -op 3636 -p 6969"
+    }
+  }
+}

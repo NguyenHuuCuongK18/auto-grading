@@ -108,9 +108,12 @@ namespace SolutionGrader.UI.Services
 
                 IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
                 IReportService rep = new ReportService(files);
+                
+                // Create DLL modification service for fallback support
+                IDllModificationService dllMod = new DllModificationService();
 
                 // Create SuiteRunner with all dependencies - SAME as CLI
-                var runner = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
+                var runner = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings, dllMod);
                 
                 _uiLogger.LogInfo($"[LibGradingService] Results will be saved to: {timestampedResultRoot}");
 

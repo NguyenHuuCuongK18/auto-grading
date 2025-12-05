@@ -31,6 +31,7 @@ namespace SolutionGrader.Core.Services
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
         private readonly IAppsettingsCreationService _appsettings;
+        private readonly IDllModificationService? _dllMod;
         
         // Configured port for all communication (server listen, client connect, monitor sniff)
         private int _monitorPort;
@@ -46,7 +47,8 @@ namespace SolutionGrader.Core.Services
             INetworkMonitorService? networkMonitor,
             IDetailLogService log,
             IRunContext run,
-            IAppsettingsCreationService appsettings)
+            IAppsettingsCreationService appsettings,
+            IDllModificationService? dllMod = null)
         {
             _files = files;
             _env = env;
@@ -58,6 +60,7 @@ namespace SolutionGrader.Core.Services
             _log = log;
             _run = run;
             _appsettings = appsettings;
+            _dllMod = dllMod;
         }
 
         /// <summary>
@@ -144,6 +147,77 @@ namespace SolutionGrader.Core.Services
                 
                 // Reset database using effective environment config
                 await _env.RunDatabaseResetAsync(dbScriptPath, suite.DatabaseConfig, false, envConfig, ct);
+                
+                // Apply DLL modification fallback if enabled and appsettings might be missing
+                if (envConfig?.EnableDllModificationFallback == true && _dllMod != null)
+                {
+                    Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} DLL modification fallback is enabled");
+                    
+                    // Check if appsettings.json exists for client and server
+                    bool clientAppsettingsExists = false;
+                    bool serverAppsettingsExists = false;
+                    
+                    if (!string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
+                    {
+                        var clientDir = Path.GetDirectoryName(clientExePath);
+                        if (!string.IsNullOrEmpty(clientDir))
+                        {
+                            clientAppsettingsExists = File.Exists(Path.Combine(clientDir, FileKeywords.FileName_AppSettings));
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
+                    {
+                        var serverDir = Path.GetDirectoryName(serverExePath);
+                        if (!string.IsNullOrEmpty(serverDir))
+                        {
+                            serverAppsettingsExists = File.Exists(Path.Combine(serverDir, FileKeywords.FileName_AppSettings));
+                        }
+                    }
+                    
+                    // Determine target IP based on protocol
+                    var targetIp = _protocol.Equals(NetworkKeywords.Protocol_TCP, StringComparison.OrdinalIgnoreCase)
+                        ? "127.0.0.1"
+                        : "http://localhost";
+                    
+                    // Apply DLL modification to client if appsettings is missing
+                    if (!clientAppsettingsExists && !string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
+                    {
+                        var clientDir = Path.GetDirectoryName(clientExePath);
+                        if (!string.IsNullOrEmpty(clientDir))
+                        {
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client appsettings.json not found, attempting DLL modification...");
+                            var clientModified = _dllMod.TryModifyDlls(clientDir, targetIp, _monitorPort);
+                            if (clientModified)
+                            {
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Client DLLs modified successfully");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: No client DLLs were modified");
+                            }
+                        }
+                    }
+                    
+                    // Apply DLL modification to server if appsettings is missing
+                    if (!serverAppsettingsExists && !string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
+                    {
+                        var serverDir = Path.GetDirectoryName(serverExePath);
+                        if (!string.IsNullOrEmpty(serverDir))
+                        {
+                            Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server appsettings.json not found, attempting DLL modification...");
+                            var serverModified = _dllMod.TryModifyDlls(serverDir, targetIp, _monitorPort);
+                            if (serverModified)
+                            {
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Server DLLs modified successfully");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} Warning: No server DLLs were modified");
+                            }
+                        }
+                    }
+                }
                 
                 Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_TESTCASE} [Step 1] Environment setup completed");
                 return (true, "Environment setup successful");

@@ -82,4 +82,13 @@ public sealed class EnvironmentConfiguration
     /// Stop grading if database reset fails (default: true)
     /// </summary>
     public bool StopGradingIfResetFails { get; set; } = false;
+    
+    /// <summary>
+    /// Enable DLL modification as a fallback when appsettings.json is not found.
+    /// When enabled, the grader will attempt to patch student DLLs to replace hardcoded
+    /// IP addresses (localhost, 127.0.0.1) and common ports (3000, 4000, 5000, 8000, 8080)
+    /// with the correct grading environment values.
+    /// Default: false (disabled)
+    /// </summary>
+    public bool EnableDllModificationFallback { get; set; } = false;
 }

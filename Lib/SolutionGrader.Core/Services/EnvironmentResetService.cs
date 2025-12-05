@@ -27,8 +27,9 @@ public sealed class EnvironmentResetService : IEnvironmentResetService
             CopyAppsettingsIfNeeded(clientTemplate, clientExe);
         }
         catch (System.Exception ex) 
-        { 
-            throw new System.InvalidOperationException(AppsettingKeywords.MSG_APPSETTINGS_REPLACE_FAILED, ex); 
+        {
+            // Log warning but don't throw - appsettings replacement is now non-fatal
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} Warning: {AppsettingKeywords.MSG_APPSETTINGS_REPLACE_FAILED} {ex.Message}");
         }
     }
 

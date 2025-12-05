@@ -30,6 +30,7 @@ namespace SolutionGrader.Core.Services
         private readonly IDetailLogService _log;
         private readonly IRunContext _run;
         private readonly IAppsettingsCreationService _appsettings;
+        private readonly IDllModificationService? _dllMod;
         private readonly TestCaseOrchestrator _orchestrator;
 
         public SuiteRunner()
@@ -47,12 +48,13 @@ namespace SolutionGrader.Core.Services
             INetworkMonitorService? networkMonitor,
             IDetailLogService log,
             IRunContext run,
-            IAppsettingsCreationService appsettings)
+            IAppsettingsCreationService appsettings,
+            IDllModificationService? dllMod = null)
         {
-            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _networkMonitor = networkMonitor; _log = log; _run = run; _appsettings = appsettings;
+            _files = files; _env = env; _suite = suite; _parser = parser; _exec = exec; _report = report; _proc = proc; _networkMonitor = networkMonitor; _log = log; _run = run; _appsettings = appsettings; _dllMod = dllMod;
 
             // Create orchestrator for step-based execution
-            _orchestrator = new TestCaseOrchestrator(files, env, parser, exec, report, proc, networkMonitor, log, run, appsettings);
+            _orchestrator = new TestCaseOrchestrator(files, env, parser, exec, report, proc, networkMonitor, log, run, appsettings, dllMod);
         }
 
         public async Task<int> ExecutePaper(ExecuteSuiteArgs args, CancellationToken ct = default)

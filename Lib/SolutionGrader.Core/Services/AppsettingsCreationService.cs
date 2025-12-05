@@ -44,15 +44,26 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
         var ipAddress = DetermineIpAddress(protocol ?? dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
 
+        bool serverAppsettingsGenerated = false;
+        bool clientAppsettingsGenerated = false;
+
         if (!string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
         {
             var serverDir = Path.GetDirectoryName(serverExePath);
             if (!string.IsNullOrEmpty(serverDir))
             {
-                var serverAppsettingsPath = Path.Combine(serverDir, FileKeywords.FileName_AppSettings);
-                var serverConfig = CreateServerAppsettings(ipAddress, _serverPort, dbConfig, envConfig);
-                File.WriteAllText(serverAppsettingsPath, JsonSerializer.Serialize(serverConfig, new JsonSerializerOptions { WriteIndented = true }));
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_SERVER_APPSETTINGS, serverAppsettingsPath)}");
+                try
+                {
+                    var serverAppsettingsPath = Path.Combine(serverDir, FileKeywords.FileName_AppSettings);
+                    var serverConfig = CreateServerAppsettings(ipAddress, _serverPort, dbConfig, envConfig);
+                    File.WriteAllText(serverAppsettingsPath, JsonSerializer.Serialize(serverConfig, new JsonSerializerOptions { WriteIndented = true }));
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_SERVER_APPSETTINGS, serverAppsettingsPath)}");
+                    serverAppsettingsGenerated = true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Warning: Failed to generate server appsettings.json: {ex.Message}");
+                }
             }
         }
 
@@ -61,11 +72,25 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
             var clientDir = Path.GetDirectoryName(clientExePath);
             if (!string.IsNullOrEmpty(clientDir))
             {
-                var clientAppsettingsPath = Path.Combine(clientDir, FileKeywords.FileName_AppSettings);
-                var clientConfig = CreateClientAppsettings(ipAddress, _proxyPort);
-                File.WriteAllText(clientAppsettingsPath, JsonSerializer.Serialize(clientConfig, new JsonSerializerOptions { WriteIndented = true }));
-                Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_CLIENT_APPSETTINGS, clientAppsettingsPath)}");
+                try
+                {
+                    var clientAppsettingsPath = Path.Combine(clientDir, FileKeywords.FileName_AppSettings);
+                    var clientConfig = CreateClientAppsettings(ipAddress, _proxyPort);
+                    File.WriteAllText(clientAppsettingsPath, JsonSerializer.Serialize(clientConfig, new JsonSerializerOptions { WriteIndented = true }));
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_CLIENT_APPSETTINGS, clientAppsettingsPath)}");
+                    clientAppsettingsGenerated = true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Warning: Failed to generate client appsettings.json: {ex.Message}");
+                }
             }
+        }
+
+        // Log status but don't fail - appsettings generation is now non-fatal
+        if (!serverAppsettingsGenerated && !clientAppsettingsGenerated)
+        {
+            Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} Warning: No appsettings.json files were generated. Consider using DLL modification fallback if enabled.");
         }
 
         Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_ALLOCATED_PORTS, _proxyPort, _serverPort)}");
