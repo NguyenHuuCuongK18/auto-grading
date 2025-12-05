@@ -9,6 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- Enable building Windows-targeting projects on non-Windows platforms -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+	<ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
