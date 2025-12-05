@@ -449,16 +449,18 @@ namespace SolutionGrader.Core.Services
                                         lineBuffer.Clear();
                                         lastFlushTime = DateTime.UtcNow;
                                         
-                                        // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
-                                        // This can occur if the StreamWriter is disposed while async operations are still running
+                                        // Handle race condition: StreamWriter may be disposed while async readAsync tasks are still executing
+                                        // This occurs when the using block (line 393) completes and disposes the StreamWriter,
+                                        // but this async task is still running and attempting to write output.
+                                        // We catch ObjectDisposedException to continue capturing output in memory for comparison.
                                         try
                                         {
                                             await sw.WriteAsync(output);
                                         }
                                         catch (ObjectDisposedException)
                                         {
-                                            // StreamWriter was disposed, but we still need to capture output in memory
-                                            // Continue execution to preserve console output even if file logging fails
+                                            // StreamWriter was disposed due to race condition, but we still capture output in memory
+                                            // This ensures grading continues successfully even if file logging fails
                                         }
                                         
                                         lock (buffer) { buffer.Append(output); }
@@ -479,14 +481,15 @@ namespace SolutionGrader.Core.Services
                                 lineBuffer.Clear();
                                 lastFlushTime = DateTime.UtcNow;
                                 
-                                // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
+                                // Handle race condition: StreamWriter may be disposed while this async task is still executing
+                                // This occurs when the using block completes while readAsync tasks are still running
                                 try
                                 {
                                     await sw.WriteAsync(output);
                                 }
                                 catch (ObjectDisposedException)
                                 {
-                                    // StreamWriter was disposed, continue to capture in memory
+                                    // StreamWriter was disposed, but memory capture continues to ensure grading succeeds
                                 }
                                 
                                 lock (buffer) { buffer.Append(output); }
@@ -504,14 +507,15 @@ namespace SolutionGrader.Core.Services
                         {
                             var output = lineBuffer.ToString();
                             
-                            // Wrap StreamWriter operations in try-catch to handle ObjectDisposedException
+                            // Handle race condition: StreamWriter may be disposed while this async task is flushing final output
+                            // This is the final flush when the stream ends, and timing may cause the using block to complete first
                             try
                             {
                                 await sw.WriteAsync(output);
                             }
                             catch (ObjectDisposedException)
                             {
-                                // StreamWriter was disposed, continue to capture in memory
+                                // StreamWriter was disposed, but memory capture continues for comparison logic
                             }
                             
                             lock (buffer) { buffer.Append(output); }
