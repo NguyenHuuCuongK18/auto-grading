@@ -1161,6 +1161,14 @@ namespace SolutionGrader.Core.Services
                     var match = NormalizeAndContains(actual, exp.ClientConsole);
                     if (match) passed++;
                     
+                    // Log detailed comparison for debugging (NO TRUNCATION - full output for debugging)
+                    Console.WriteLine($"  [Stage {stage}] Client comparison: {(match ? "PASS" : "FAIL")}");
+                    if (!match)
+                    {
+                        Console.WriteLine($"    Expected (contains): '{exp.ClientConsole}'");
+                        Console.WriteLine($"    Actual output: '{actual}'");
+                    }
+                    
                     comparisons.Add(new ComparisonResult
                     {
                         Source = "Client",
@@ -1178,6 +1186,14 @@ namespace SolutionGrader.Core.Services
                     var match = NormalizeAndContains(actual, exp.ServerConsole);
                     if (match) passed++;
                     
+                    // Log detailed comparison for debugging (NO TRUNCATION - full output for debugging)
+                    Console.WriteLine($"  [Stage {stage}] Server comparison: {(match ? "PASS" : "FAIL")}");
+                    if (!match)
+                    {
+                        Console.WriteLine($"    Expected (contains): '{exp.ServerConsole}'");
+                        Console.WriteLine($"    Actual output: '{actual}'");
+                    }
+                    
                     comparisons.Add(new ComparisonResult
                     {
                         Source = "Server",
@@ -1192,6 +1208,8 @@ namespace SolutionGrader.Core.Services
             // ALL-OR-NOTHING policy
             bool allPassed = passed == total && total > 0;
             double earnedMark = allPassed ? maxMark : 0;
+            
+            Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
             
             return (earnedMark, allPassed, comparisons);
         }
