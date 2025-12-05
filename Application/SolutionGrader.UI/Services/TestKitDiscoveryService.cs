@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using SolutionGrader.Core.Services;
 
 namespace SolutionGrader.UI.Services
 {
@@ -62,84 +63,20 @@ namespace SolutionGrader.UI.Services
 
         /// <summary>
         /// Gets the test kit path for a specific paper number.
-        /// Uses the Mapping.xlsx file if available, otherwise uses convention-based matching.
+        /// 
+        /// REFACTORED: Now uses SharedDiscoveryServices to eliminate code duplication
+        /// with CliDockerGradingService.
         /// </summary>
         /// <param name="testKitFolderPath">Path to the TestKit folder</param>
         /// <param name="paperNo">Paper number (e.g., "1")</param>
         /// <returns>Path to the test kit for this paper, or null if not found</returns>
         public string? GetTestKitForPaper(string testKitFolderPath, string paperNo)
         {
-            // First, check for a Mapping.xlsx file
-            var mappingPath = Path.Combine(testKitFolderPath, "Mapping.xlsx");
-            if (File.Exists(mappingPath))
-            {
-                var mapping = ReadMapping(mappingPath);
-                if (mapping.TryGetValue(paperNo, out var testKitName))
-                {
-                    var testKitPath = Path.Combine(testKitFolderPath, testKitName);
-                    if (Directory.Exists(testKitPath))
-                    {
-                        return testKitPath;
-                    }
-                }
-            }
-
-            // Fall back to convention-based matching (Q{paperNo})
-            var conventionPath = Path.Combine(testKitFolderPath, $"Q{paperNo}");
-            if (Directory.Exists(conventionPath))
-            {
-                return conventionPath;
-            }
-
-            // Try other common patterns
-            var patterns = new[] { $"Paper{paperNo}", $"P{paperNo}", paperNo };
-            foreach (var pattern in patterns)
-            {
-                var path = Path.Combine(testKitFolderPath, pattern);
-                if (Directory.Exists(path) && File.Exists(Path.Combine(path, "Header.xlsx")))
-                {
-                    return path;
-                }
-            }
-
-            _logger.LogWarning($"No test kit found for paper {paperNo}");
-            return null;
-        }
-
-        /// <summary>
-        /// Reads the paper-to-testkit mapping from Mapping.xlsx
-        /// </summary>
-        private Dictionary<string, string> ReadMapping(string mappingPath)
-        {
-            var mapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            try
-            {
-                using var workbook = new ClosedXML.Excel.XLWorkbook(mappingPath);
-                var worksheet = workbook.Worksheets.First();
-
-                // Assume format: Column A = Paper Number, Column B = Test Kit Name
-                var rows = worksheet.RowsUsed().Skip(1); // Skip header row
-
-                foreach (var row in rows)
-                {
-                    var paperNo = row.Cell(1).GetValue<string>()?.Trim();
-                    var testKitName = row.Cell(2).GetValue<string>()?.Trim();
-
-                    if (!string.IsNullOrEmpty(paperNo) && !string.IsNullOrEmpty(testKitName))
-                    {
-                        mapping[paperNo] = testKitName;
-                    }
-                }
-
-                _logger.LogDebug($"Loaded {mapping.Count} paper-to-testkit mappings from Mapping.xlsx");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error reading Mapping.xlsx: {ex.Message}");
-            }
-
-            return mapping;
+            // Use shared discovery service to eliminate code duplication
+            return SharedDiscoveryServices.GetTestKitForPaper(
+                testKitFolderPath,
+                paperNo,
+                logger: msg => _logger.LogDebug(msg));
         }
 
         /// <summary>
@@ -234,6 +171,43 @@ namespace SolutionGrader.UI.Services
             }
 
             return (serverPath, clientPath);
+        }
+
+        /// <summary>
+        /// Gets the total maximum marks for a test kit by reading Header.xlsx.
+        /// Sums up all test case marks from the QuestionMark sheet.
+        /// </summary>
+        /// <param name="testKitPath">Path to the test kit folder</param>
+        /// <returns>Total maximum marks for the test kit, or 0 if not found</returns>
+        public double GetTestKitMaxMark(string testKitPath)
+        {
+            var headerPath = Path.Combine(testKitPath, "Header.xlsx");
+            if (!File.Exists(headerPath))
+            {
+                _logger.LogWarning($"Header.xlsx not found in {testKitPath}");
+                return 0.0;
+            }
+
+            try
+            {
+                using var workbook = new ClosedXML.Excel.XLWorkbook(headerPath);
+                if (workbook.TryGetWorksheet("QuestionMark", out var markSheet))
+                {
+                    double totalMark = 0.0;
+                    foreach (var row in markSheet.RowsUsed().Skip(1)) // Skip header
+                    {
+                        var mark = row.Cell(2).GetValue<double>();
+                        totalMark += mark;
+                    }
+                    return totalMark;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error reading max marks from {headerPath}: {ex.Message}");
+            }
+
+            return 0.0;
         }
     }
 }

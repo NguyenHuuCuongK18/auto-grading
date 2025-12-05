@@ -373,56 +373,24 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Writes raw test result data for a test case.
         /// Creates {PaperNo}/student/{StudentCode}/{TestCase}/{TestCase}_Result.xlsx
+        /// 
+        /// OBSOLETE: This method is no longer used as the {TestCaseName}_Result.xlsx files
+        /// are not logging anything useful. They are redundant with GradeDetail.xlsx and 
+        /// OverallSummary.xlsx. Kept for backward compatibility but should not be called.
         /// </summary>
+        [Obsolete("This method creates {TestCaseName}_Result.xlsx files that are not useful. Use WriteTestCaseDetail instead.")]
         public void WriteTestCaseResult(StudentSolution student, string testCaseName, List<StepResult> steps)
         {
-            var testCaseDir = Path.Combine(GetStudentResultFolder(student.StudentCode, student.PaperNo), testCaseName);
-            if (!Directory.Exists(testCaseDir))
-            {
-                Directory.CreateDirectory(testCaseDir);
-            }
-
-            var filePath = Path.Combine(testCaseDir, $"{testCaseName}_Result.xlsx");
+            // NO LONGER CREATES FILES - method kept for backward compatibility only
+            // The {TestCaseName}_Result.xlsx files were removed per user requirement:
+            // "remove the excessive sheet {testcasename}_Result under each student folder, 
+            // it is not logging anything useful anymore"
             
-            _logger.LogDebug($"Writing test case result for {student.StudentCode}/{testCaseName}");
-
-            try
-            {
-                using var workbook = new XLWorkbook();
-                var worksheet = workbook.Worksheets.Add("Result");
-
-                // Header row - matching SampleLogging format
-                worksheet.Cell(1, 1).Value = "StepId";
-                worksheet.Cell(1, 2).Value = "Stage";
-                worksheet.Cell(1, 3).Value = "Action";
-                worksheet.Cell(1, 4).Value = "Passed";
-                worksheet.Cell(1, 5).Value = "Message";
-                worksheet.Cell(1, 6).Value = "DurationMs";
-
-                var headerRow = worksheet.Row(1);
-                headerRow.Style.Font.Bold = true;
-                headerRow.Style.Fill.BackgroundColor = XLColor.LightBlue;
-
-                int row = 2;
-                foreach (var step in steps)
-                {
-                    worksheet.Cell(row, 1).Value = step.StepId;
-                    worksheet.Cell(row, 2).Value = step.Stage;
-                    worksheet.Cell(row, 3).Value = step.Action;
-                    worksheet.Cell(row, 4).Value = step.Passed;
-                    worksheet.Cell(row, 5).Value = step.Message ?? "";
-                    worksheet.Cell(row, 6).Value = step.DurationMs;
-
-                    row++;
-                }
-
-                worksheet.Columns().AdjustToContents();
-                workbook.SaveAs(filePath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to write test case result: {ex.Message}");
-            }
+            // All test case information is now available in:
+            // 1. GradeDetail.xlsx - detailed step-by-step results
+            // 2. OverallSummary.xlsx - summary of all test cases
+            
+            _logger.LogDebug($"WriteTestCaseResult called for {student.StudentCode}/{testCaseName} but no longer creates files (obsolete)");
         }
 
         /// <summary>

@@ -31,6 +31,8 @@ namespace SolutionGrader.UI.Services
         private readonly TestKitDiscoveryService _testKitDiscovery;
         private readonly LibGradingService _libGrading;
         private ResultWriterService? _resultWriter;
+        private ExcelLogCoordinator? _excelCoordinator;
+        private GradingMessageLogger? _messageLogger;
         
         private CancellationTokenSource? _cancellationTokenSource;
         
@@ -82,6 +84,13 @@ namespace SolutionGrader.UI.Services
                 : Path.Combine(config.SubmitFolderPath, "Results");
             _resultWriter = new ResultWriterService(_logger, resultPath);
 
+            // Initialize Excel log coordinator for centralized, thread-safe Excel updates
+            _excelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
+
+            // Initialize centralized message logger for structured error/message logging
+            _messageLogger = new GradingMessageLogger(resultPath);
+            _messageLogger.LogInfo($"Starting grading session for {students.Count} students");
+
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
             sessionState.SessionStartTime = DateTime.Now;
@@ -91,6 +100,45 @@ namespace SolutionGrader.UI.Services
             _logger.LogInfo($"Starting grading for {students.Count} students");
             _logger.LogInfo($"Results will be saved to: {resultPath}");
             SessionStateChanged?.Invoke(this, sessionState);
+
+            // PRE-POPULATE Excel file with all students and predetermined information
+            // This solves the batch grading issue where multiple processes overwrite the file
+            try
+            {
+                // Collect max marks for each paper from test kits
+                var testKitMaxMarks = new Dictionary<string, double>();
+                foreach (var student in students)
+                {
+                    if (!testKitMaxMarks.ContainsKey(student.PaperNo))
+                    {
+                        var testKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
+                        if (string.IsNullOrEmpty(testKitPath))
+                        {
+                            // Test kit not found - this is a test kit error
+                            var errorMsg = GradingMessageCatalog.Format(
+                                GradingMessageCatalog.TestKitError.MappingNotFound, 
+                                student.PaperNo);
+                            _messageLogger.LogTestKitError(errorMsg, student.StudentCode);
+                            _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                            continue;
+                        }
+                        
+                        var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                        testKitMaxMarks[student.PaperNo] = maxMark;
+                    }
+                }
+
+                _excelCoordinator.InitializeExcelFile(students, testKitMaxMarks);
+                _logger.LogInfo($"[ExcelCoordinator] Pre-populated StudentsSolution.xlsx with {students.Count} students");
+                _messageLogger.LogInfo("Excel log file initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to initialize Excel file", ex);
+                _messageLogger.LogGraderError(
+                    GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.ExcelFileWriteFailed, ex.Message), 
+                    null, ex);
+            }
 
             try
             {
@@ -123,24 +171,37 @@ namespace SolutionGrader.UI.Services
                     sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
                     SessionStateChanged?.Invoke(this, sessionState);
 
-                    // Write StudentsSolution.xlsx incrementally
-                    _resultWriter.WriteStudentsSolutionSummary(students);
+                    // NO LONGER NEEDED: Old approach that recreated entire Excel file on each update
+                    // _resultWriter.WriteStudentsSolutionSummary(students);
+                    // Now handled by ExcelLogCoordinator which updates individual rows in-place
                 }
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInfo("Grading operation was cancelled");
-                _resultWriter?.WriteStudentsSolutionSummary(students);
+                _messageLogger?.LogInfo("Grading session cancelled by user");
+                // NO LONGER NEEDED: Excel file already has all students
+                // _resultWriter?.WriteStudentsSolutionSummary(students);
             }
             catch (Exception ex)
             {
                 _logger.LogError("Error during grading", ex);
+                _messageLogger?.LogGraderError(
+                    GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.UnexpectedError, ex.Message), 
+                    null, ex);
             }
             finally
             {
                 sessionState.IsRunning = false;
                 sessionState.SessionEndTime = DateTime.Now;
                 sessionState.CurrentStudentCode = null;
+                
+                _excelCoordinator?.Dispose();
+                
+                // Dispose message logger - this will export all messages to Excel
+                _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
+                _messageLogger?.Dispose();
+                
                 SessionStateChanged?.Invoke(this, sessionState);
                 _logger.LogInfo("Grading session completed");
             }
@@ -174,11 +235,18 @@ namespace SolutionGrader.UI.Services
             student.StartTime = DateTime.Now;
             student.Status = GradingStatus.InProgress;
             student.ProgressPercent = 0;
+            
+            // Update Excel: Student started grading
+            _excelCoordinator?.UpdateStudentStarted(student.StudentCode, student.PaperNo, student.StartTime.Value);
+            
             StudentGradingStarted?.Invoke(this, student);
 
             try
             {
-                _logger.LogInfo($"Starting DOCKER grading for student: {student.StudentCode} (Paper {student.PaperNo})");
+                _logger.LogInfo($"[{student.StudentCode}] Starting DOCKER grading for student: {student.StudentCode} (Paper {student.PaperNo})");
+                _messageLogger?.LogInfo(
+                    GradingMessageCatalog.Format(GradingMessageCatalog.Info.GradingStarted, student.StudentCode, student.PaperNo),
+                    student.StudentCode);
 
                 // Step 1: Find test kit for this paper
                 student.ProgressPercent = 10;
@@ -187,13 +255,19 @@ namespace SolutionGrader.UI.Services
                 var testKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
                 if (string.IsNullOrEmpty(testKitPath))
                 {
-                    student.Status = GradingStatus.Not_Run;
-                    student.StatusMessage = $"No test kit for paper {student.PaperNo}";
-                    _logger.LogWarning(student.StatusMessage);
+                    // Test kit error - log but don't abort other students
+                    var errorMsg = GradingMessageCatalog.Format(
+                        GradingMessageCatalog.TestKitError.MappingNotFound, 
+                        student.PaperNo);
+                    
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = errorMsg;
+                    _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                    _messageLogger?.LogTestKitError(errorMsg, student.StudentCode);
                     return;
                 }
 
-                _logger.LogInfo($"Using test kit: {testKitPath}");
+                _logger.LogInfo($"[{student.StudentCode}] Using test kit: {testKitPath}");
 
                 // Step 2: Build paths for Docker grading
                 student.ProgressPercent = 20;
@@ -208,6 +282,25 @@ namespace SolutionGrader.UI.Services
                 // Get student's DLL paths (client and/or server)
                 var clientDllPath = GetStudentExecutablePath(student, config, "Client");
                 var serverDllPath = GetStudentExecutablePath(student, config, "Server");
+                
+                // Check for missing DLLs and log student errors (but continue grading attempt)
+                if (config.HasClient && string.IsNullOrEmpty(clientDllPath))
+                {
+                    var errorMsg = GradingMessageCatalog.Format(
+                        GradingMessageCatalog.StudentError.MissingClientDll, 
+                        config.ClientProjectName);
+                    _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                    _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                }
+                
+                if (config.HasServer && string.IsNullOrEmpty(serverDllPath))
+                {
+                    var errorMsg = GradingMessageCatalog.Format(
+                        GradingMessageCatalog.StudentError.MissingServerDll, 
+                        config.ServerProjectName);
+                    _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                    _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                }
 
                 _logger.LogDebug($"Client DLL path: {clientDllPath ?? "(none)"}");
                 _logger.LogDebug($"Server DLL path: {serverDllPath ?? "(none)"}");
@@ -255,8 +348,8 @@ namespace SolutionGrader.UI.Services
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds
                 };
                 
-                _logger.LogInfo($"Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
-                _logger.LogInfo($"Project names: Client={config.ClientProjectName}, Server={config.ServerProjectName}");
+                _logger.LogInfo($"[{student.StudentCode}] Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
+                _logger.LogInfo($"[{student.StudentCode}] Project names: Client={config.ClientProjectName}, Server={config.ServerProjectName}");
                 
                 var result = await _libGrading.ExecuteDockerGradingAsync(
                     testKitPath,
@@ -277,32 +370,74 @@ namespace SolutionGrader.UI.Services
                     student.Status = GradingStatus.Success;
                     student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
                     student.Mark = result.TotalMark;
+                    
+                    _messageLogger?.LogInfo(
+                        GradingMessageCatalog.Format(GradingMessageCatalog.Info.GradingCompleted, 
+                            student.StudentCode, result.TotalMark, result.MaxMark),
+                        student.StudentCode);
                 }
                 else
                 {
                     student.Status = GradingStatus.Failed;
                     student.StatusMessage = result.ErrorMessage ?? $"Docker grading failed: 0/{result.MaxMark:F2}";
                     student.Mark = 0;
+                    
+                    // Log as student error if there's a specific error message
+                    if (!string.IsNullOrEmpty(result.ErrorMessage))
+                    {
+                        _messageLogger?.LogStudentError(student.StudentCode, result.ErrorMessage);
+                    }
                 }
 
                 student.ProgressPercent = 100;
-                _logger.LogInfo($"Docker grading completed for {student.StudentCode}. Mark: {student.Mark:F2}, Status: {student.Status}");
+                _logger.LogInfo($"[{student.StudentCode}] Docker grading completed for {student.StudentCode}. Mark: {student.Mark:F2}, Status: {student.Status}");
             }
             catch (OperationCanceledException)
             {
                 student.Status = GradingStatus.Paused;
                 student.StatusMessage = "Grading was paused/cancelled";
-                _logger.LogWarning($"Grading paused for {student.StudentCode}");
+                _logger.LogWarning($"[{student.StudentCode}] Grading paused for {student.StudentCode}");
+                _messageLogger?.LogInfo("Grading cancelled by user", student.StudentCode);
             }
             catch (Exception ex)
             {
+                // Student error - log but don't abort grading for other students
                 student.Status = GradingStatus.Failed;
                 student.StatusMessage = $"Error: {ex.Message}";
-                _logger.LogError($"Grading failed for {student.StudentCode}", ex);
+                _logger.LogError($"[{student.StudentCode}] Grading failed for {student.StudentCode}", ex);
+                
+                // Determine if this is a student error or grader error based on exception type
+                if (ex.Message.Contains("DLL") || ex.Message.Contains("executable") || ex.Message.Contains("project"))
+                {
+                    _messageLogger?.LogStudentError(student.StudentCode, 
+                        GradingMessageCatalog.Format(GradingMessageCatalog.StudentError.ProjectCrashed, "project", ex.Message),
+                        ex: ex);
+                }
+                else if (ex.Message.Contains("Docker") || ex.Message.Contains("container"))
+                {
+                    _messageLogger?.LogGraderError(
+                        GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.DockerContainerFailed, ex.Message),
+                        student.StudentCode, ex);
+                }
+                else
+                {
+                    _messageLogger?.LogGraderError(
+                        GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.UnexpectedError, ex.Message),
+                        student.StudentCode, ex);
+                }
             }
             finally
             {
                 student.EndTime = DateTime.Now;
+                
+                // Update Excel: Student completed grading
+                _excelCoordinator?.UpdateStudentCompleted(
+                    student.StudentCode, 
+                    student.PaperNo, 
+                    student.EndTime.Value, 
+                    student.Mark, 
+                    student.Status);
+                
                 StudentGradingCompleted?.Invoke(this, student);
                 _logger.SetStudentContext(null);
             }
