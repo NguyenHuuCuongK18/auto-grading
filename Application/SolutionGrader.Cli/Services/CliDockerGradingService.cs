@@ -572,50 +572,6 @@ namespace SolutionGrader.Cli.Services
             await Task.CompletedTask;
         }
 
-        #endregion
-    }
-
-    #region Model Classes
-
-    /// <summary>
-    /// Information about a student to be graded.
-    /// </summary>
-    public class StudentInfo
-    {
-        public string StudentCode { get; set; } = "";
-        public string PaperNo { get; set; } = "";
-        public string SolutionPath { get; set; } = "";
-        public string? ServerDllPath { get; set; }
-        public string? ClientDllPath { get; set; }
-    }
-
-    /// <summary>
-    /// Result of grading a single student.
-    /// </summary>
-    public class StudentGradingResult
-    {
-        public string StudentCode { get; set; } = "";
-        public string PaperNo { get; set; } = "";
-        public double TotalMark { get; set; }
-        public double MaxMark { get; set; }
-        public bool Passed { get; set; }
-        public string? ErrorMessage { get; set; }
-        public List<TestCaseResult> TestCaseResults { get; set; } = new();
-    }
-
-    /// <summary>
-    /// Result of a single test case (simplified for CLI).
-    /// The detailed results are written by DockerGradingService.
-    /// </summary>
-    public class TestCaseResult
-    {
-        public string TestCaseName { get; set; } = "";
-        public double EarnedMark { get; set; }
-        public double MaxMark { get; set; }
-        public bool Passed { get; set; }
-        public string? ErrorMessage { get; set; }
-    }
-
         /// <summary>
         /// Reads the starting port for PortAllocator from the test kit's Environment.xlsx file.
         /// This ensures that port allocation starts from the correct base port specified in the test kit.
@@ -708,6 +664,50 @@ namespace SolutionGrader.Cli.Services
 
             return 0;  // Will use PortAllocator default (8000)
         }
+
+        #endregion
+    }
+
+    #region Model Classes
+
+    /// <summary>
+    /// Information about a student to be graded.
+    /// </summary>
+    public class StudentInfo
+    {
+        public string StudentCode { get; set; } = "";
+        public string PaperNo { get; set; } = "";
+        public string SolutionPath { get; set; } = "";
+        public string? ServerDllPath { get; set; }
+        public string? ClientDllPath { get; set; }
+    }
+
+    /// <summary>
+    /// Result of grading a single student.
+    /// </summary>
+    public class StudentGradingResult
+    {
+        public string StudentCode { get; set; } = "";
+        public string PaperNo { get; set; } = "";
+        public double TotalMark { get; set; }
+        public double MaxMark { get; set; }
+        public bool Passed { get; set; }
+        public string? ErrorMessage { get; set; }
+        public List<TestCaseResult> TestCaseResults { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Result of a single test case (simplified for CLI).
+    /// The detailed results are written by DockerGradingService.
+    /// </summary>
+    public class TestCaseResult
+    {
+        public string TestCaseName { get; set; } = "";
+        public double EarnedMark { get; set; }
+        public double MaxMark { get; set; }
+        public bool Passed { get; set; }
+        public string? ErrorMessage { get; set; }
+    }
 
     #endregion
 }
