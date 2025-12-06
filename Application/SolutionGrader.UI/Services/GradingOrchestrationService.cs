@@ -344,6 +344,38 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
+                // CRITICAL FIX: Allocate a unique port for this student using PortAllocator
+                // This prevents port conflicts in batch grading where multiple students run in parallel
+                // Each student MUST have their own dedicated port for client-server communication
+                using var portAllocator = new PortAllocator();
+                int allocatedPort = portAllocator.AllocatePort();
+                
+                if (allocatedPort == -1)
+                {
+                    var errorMsg = "Failed to allocate port for grading";
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = errorMsg;
+                    student.EndTime = DateTime.Now;
+                    _logger.LogError($"[{student.StudentCode}] {errorMsg}");
+                    _messageLogger?.LogGraderError(
+                        GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.UnexpectedError, errorMsg),
+                        student.StudentCode, null);
+                    
+                    // Update Excel: Student failed due to port allocation
+                    student.ProgressPercent = 100;
+                    _excelCoordinator?.UpdateStudentCompleted(
+                        student.StudentCode,
+                        student.PaperNo,
+                        DateTime.Now,
+                        0.0,
+                        GradingStatus.Failed);
+                    
+                    StudentGradingCompleted?.Invoke(this, student);
+                    return;
+                }
+                
+                _logger.LogInfo($"[{student.StudentCode}] Allocated port {allocatedPort} for student grading");
+                
                 // Build Docker configuration from UI config
                 // The examiner sets HasClient/HasServer to indicate what the student should provide:
                 // - HasClient=true, HasServer=true  → student provides both
@@ -357,9 +389,11 @@ namespace SolutionGrader.UI.Services
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
-                    // Container settings
-                    CodeContainerInternalPort = config.CodeContainerInternalPort,
-                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    // Container settings - USE ALLOCATED PORT for both internal and host
+                    // CRITICAL: Both ports must be the same for network monitoring to work correctly
+                    // The server binds to this port inside the container, and it's exposed to host on the same port
+                    CodeContainerInternalPort = allocatedPort,
+                    CodeContainerHostPort = allocatedPort,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
                     
                     // Database container settings
