@@ -145,6 +145,11 @@ namespace SolutionGrader.UI.Services
             // Initialize PortAllocator with starting port from Environment.xlsx
             // This ensures each student gets a unique sequential port (no port reuse)
             // User requirement: Never reuse ports to avoid waiting and potential issues
+            //
+            // CRITICAL: Clear tracking file at START of each grading session to ensure
+            // we always start from the port specified in Environment.xlsx.
+            // This fixes the issue where editing Environment.xlsx didn't take effect
+            // because the old tracking file was still present.
             try
             {
                 var firstStudent = students.FirstOrDefault();
@@ -164,9 +169,22 @@ namespace SolutionGrader.UI.Services
                             _logger.LogInfo($"[Port Config] Read starting port {startingPort} from Environment.xlsx");
                         }
                         
+                        // CRITICAL FIX: Clear tracking file before creating PortAllocator
+                        // This ensures each UI grading session starts fresh from Environment.xlsx
+                        // User requirement: When Environment.xlsx is changed, use the new port
+                        try
+                        {
+                            SolutionGrader.Core.Services.PortAllocator.ClearAllAllocatedPorts();
+                            _logger.LogInfo($"[Port Config] Cleared port tracking file - session will start from Environment.xlsx port {startingPort}");
+                        }
+                        catch (Exception clearEx)
+                        {
+                            _logger.LogWarning($"[Port Config] Failed to clear port tracking file: {clearEx.Message}");
+                        }
+                        
                         _portAllocator = new SolutionGrader.Core.Services.PortAllocator(startingPort);
                         _logger.LogInfo($"[Port Config] Initialized PortAllocator with starting port {startingPort} - each student will get sequential unique port");
-                        _messageLogger.LogInfo($"Port allocation initialized at {startingPort} (sequential, no reuse)");
+                        _messageLogger.LogInfo($"Port allocation initialized at {startingPort} (sequential, no reuse within session)");
                     }
                 }
             }
