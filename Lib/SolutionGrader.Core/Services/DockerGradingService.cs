@@ -659,102 +659,199 @@ namespace SolutionGrader.Core.Services
             string clientContainer,
             DockerGradingConfig config)
         {
-            // CRITICAL: DLL modification MUST happen BEFORE copying to container
-            // We modify the DLL files on the HOST machine (where student submissions are)
-            // Then the modified DLL is copied into the Docker container
+            // CRITICAL FIX: DLL modification must operate on TEMPORARY COPIES to prevent port value accumulation
+            // 
+            // Problem: Modifying student DLLs in-place caused port values to stack across sequential gradings:
+            // - Student 1: Modify DLL hardcoded → 8001, copy to container
+            // - Student 2: Modify SAME DLL (already has 8001) → adds 8003, creates port confusion
+            // - Result: Client connects to 8001, server on 8003 → MISMATCH!
+            //
+            // Solution: Copy student DLL folders to temp, modify temp copies, then copy temp to container
+            // - Each grading gets FRESH DLL files with correct single port
+            // - Original student files remain untouched (preserved for review)
+            // - No port value accumulation across students
+            //
+            // Flow: Student DLL → Temp Staging → Modify → Copy to Container
             var dllModService = new DllModificationService();
+            var tempDirectories = new List<string>();  // Track temp dirs for cleanup
             
-            if (!string.IsNullOrEmpty(serverDllPath))
+            try
             {
-                var serverDir = Path.GetDirectoryName(serverDllPath);
-                if (serverDir != null)
+                if (!string.IsNullOrEmpty(serverDllPath))
                 {
-                    var folderName = Path.GetFileName(serverDir);
+                    var serverDir = Path.GetDirectoryName(serverDllPath);
+                    if (serverDir != null)
+                    {
+                        var folderName = Path.GetFileName(serverDir);
+                        string dirToCopy = serverDir;  // Default: use original directory
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback using TEMP copy if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                // Create temporary staging directory for isolated modification
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_Server_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                Console.WriteLine($"[DllMod] Created temp staging directory for server: {tempStagingDir}");
+                                Console.WriteLine($"[DllMod] Copying server files from {serverDir} to temp for isolated modification...");
+                                
+                                // Copy entire server directory to temp
+                                CopyDirectory(serverDir, tempStagingDir);
+                                Console.WriteLine($"[DllMod] Server files copied to temp staging area");
+                                
+                                // NOW modify the TEMP copy, not the original student files
+                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ServerProjectName,
+                                    isServer: true,
+                                    targetPort: config.CodeContainerHostPort
+                                );
+                                
+                                Console.WriteLine($"[DllMod] Server fallback result: {result.GetSummary()}");
+                                
+                                if (result.RequiresDllModification && !result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
+                                }
+                                else if (result.RequiresDllModification && result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
+                                }
+                                
+                                // Use temp directory for container copy (contains modified DLL)
+                                dirToCopy = tempStagingDir;
+                                folderName = Path.GetFileName(tempStagingDir);
+                            }
+                            
+                            // Copy from temp staging (if modified) or original (if not) to container
+                            _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{serverContainer}:/apps/{folderName}");
+                            Console.WriteLine($"[Docker] Copied server files from {dirToCopy} to container {serverContainer}:/apps/{folderName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Warning] Failed to copy server files: {ex.Message}");
+                        }
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(clientDllPath))
+                {
+                    var clientDir = Path.GetDirectoryName(clientDllPath);
+                    if (clientDir != null)
+                    {
+                        var folderName = Path.GetFileName(clientDir);
+                        string dirToCopy = clientDir;  // Default: use original directory
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback using TEMP copy if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                // Create temporary staging directory for isolated modification
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_Client_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                Console.WriteLine($"[DllMod] Created temp staging directory for client: {tempStagingDir}");
+                                Console.WriteLine($"[DllMod] Copying client files from {clientDir} to temp for isolated modification...");
+                                
+                                // Copy entire client directory to temp
+                                CopyDirectory(clientDir, tempStagingDir);
+                                Console.WriteLine($"[DllMod] Client files copied to temp staging area");
+                                
+                                // NOW modify the TEMP copy, not the original student files
+                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ClientProjectName,
+                                    isServer: false,
+                                    targetPort: config.CodeContainerHostPort
+                                );
+                                
+                                Console.WriteLine($"[DllMod] Client fallback result: {result.GetSummary()}");
+                                
+                                if (result.RequiresDllModification && !result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
+                                }
+                                else if (result.RequiresDllModification && result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
+                                }
+                                
+                                // Use temp directory for container copy (contains modified DLL)
+                                dirToCopy = tempStagingDir;
+                                folderName = Path.GetFileName(tempStagingDir);
+                            }
+                            
+                            // Copy from temp staging (if modified) or original (if not) to container
+                            _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{clientContainer}:/apps/{folderName}");
+                            Console.WriteLine($"[Docker] Copied client files from {dirToCopy} to container {clientContainer}:/apps/{folderName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Warning] Failed to copy client files: {ex.Message}");
+                        }
+                    }
+                }
+                
+                await Task.Delay(500);
+            }
+            finally
+            {
+                // ALWAYS cleanup temporary directories
+                foreach (var tempDir in tempDirectories)
+                {
                     try
                     {
-                        // Apply DLL modification fallback on HOST machine BEFORE copying
-                        if (config.UseDllModificationFallback)
+                        if (Directory.Exists(tempDir))
                         {
-                            Console.WriteLine($"[DllMod] Checking server directory on HOST: {serverDir}");
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                serverDir,
-                                config.ServerProjectName,
-                                isServer: true,
-                                targetPort: config.CodeContainerHostPort
-                            );
-                            
-                            Console.WriteLine($"[DllMod] Server fallback result: {result.GetSummary()}");
-                            
-                            // If DLL modification was required but failed, log warning but continue
-                            // (appsettings generation will still happen as a second fallback)
-                            if (result.RequiresDllModification && !result.Success)
-                            {
-                                Console.WriteLine($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
-                            }
-                            else if (result.RequiresDllModification && result.Success)
-                            {
-                                Console.WriteLine($"[DllMod] Server DLL successfully modified on HOST machine at: {result.DllPath}");
-                            }
+                            Directory.Delete(tempDir, recursive: true);
+                            Console.WriteLine($"[DllMod] Cleaned up temp staging directory: {tempDir}");
                         }
-                        
-                        // NOW copy the (potentially modified) files from HOST to container
-                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
-                        _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied server files from HOST {serverDir} to container {serverContainer}:/apps/{folderName}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Warning] Failed to copy server files: {ex.Message}");
+                        Console.WriteLine($"[DllMod] Warning: Failed to cleanup temp directory {tempDir}: {ex.Message}");
                     }
                 }
             }
-            
-            if (!string.IsNullOrEmpty(clientDllPath))
+        }
+        
+        /// <summary>
+        /// Recursively copies a directory and all its contents to a new location.
+        /// Used for creating temporary staging areas for DLL modification.
+        /// </summary>
+        private static void CopyDirectory(string sourceDir, string destDir)
+        {
+            var dir = new DirectoryInfo(sourceDir);
+            if (!dir.Exists)
             {
-                var clientDir = Path.GetDirectoryName(clientDllPath);
-                if (clientDir != null)
-                {
-                    var folderName = Path.GetFileName(clientDir);
-                    try
-                    {
-                        // Apply DLL modification fallback on HOST machine BEFORE copying
-                        if (config.UseDllModificationFallback)
-                        {
-                            Console.WriteLine($"[DllMod] Checking client directory on HOST: {clientDir}");
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                clientDir,
-                                config.ClientProjectName,
-                                isServer: false,
-                                targetPort: config.CodeContainerHostPort
-                            );
-                            
-                            Console.WriteLine($"[DllMod] Client fallback result: {result.GetSummary()}");
-                            
-                            // If DLL modification was required but failed, log warning but continue
-                            // (appsettings generation will still happen as a second fallback)
-                            if (result.RequiresDllModification && !result.Success)
-                            {
-                                Console.WriteLine($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
-                            }
-                            else if (result.RequiresDllModification && result.Success)
-                            {
-                                Console.WriteLine($"[DllMod] Client DLL successfully modified on HOST machine at: {result.DllPath}");
-                            }
-                        }
-                        
-                        // NOW copy the (potentially modified) files from HOST to container
-                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
-                        _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied client files from HOST {clientDir} to container {clientContainer}:/apps/{folderName}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Warning] Failed to copy client files: {ex.Message}");
-                    }
-                }
+                throw new DirectoryNotFoundException($"Source directory not found: {sourceDir}");
             }
             
-            await Task.Delay(500);
+            // Create destination directory
+            Directory.CreateDirectory(destDir);
+            
+            // Copy all files
+            foreach (FileInfo file in dir.GetFiles())
+            {
+                string targetFilePath = Path.Combine(destDir, file.Name);
+                file.CopyTo(targetFilePath, overwrite: true);
+            }
+            
+            // Recursively copy subdirectories
+            foreach (DirectoryInfo subDir in dir.GetDirectories())
+            {
+                string newDestDir = Path.Combine(destDir, subDir.Name);
+                CopyDirectory(subDir.FullName, newDestDir);
+            }
         }
         
         private void GenerateAppsettingsInContainers(
