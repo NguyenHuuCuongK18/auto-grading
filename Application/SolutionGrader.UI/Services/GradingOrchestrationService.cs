@@ -344,33 +344,35 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // Read MonitorPort from environment.xlsx in the QUESTION-SPECIFIC test kit folder
+                // Read port configuration from Environment.xlsx in the QUESTION-SPECIFIC test kit folder
                 // testKitPath points to the specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
-                // This is where environment.xlsx with MonitorPort configuration is located
-                int monitorPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
-                if (monitorPort <= 0)
+                // Environment.xlsx contains the Config sheet with:
+                // - Code_Container_Internal_Port: Port inside the container
+                // - Code_Container_Host_Port: Port exposed on the host
+                int configuredPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                if (configuredPort <= 0)
                 {
-                    monitorPort = 8000; // Fallback default if not found in environment.xlsx
-                    _logger.LogWarning($"[Port Config] Could not read MonitorPort from environment.xlsx, using default port {monitorPort}");
+                    configuredPort = 8000; // Fallback default if not found in Environment.xlsx
+                    _logger.LogWarning($"[Port Config] Could not read port from Environment.xlsx, using default port {configuredPort}");
                 }
                 else
                 {
-                    _logger.LogInfo($"[Port Config] Read MonitorPort {monitorPort} from environment.xlsx at: {testKitPath}");
+                    _logger.LogInfo($"[Port Config] Read port {configuredPort} from Environment.xlsx at: {testKitPath}");
                 }
                 
-                // CRITICAL: Use MonitorPort DIRECTLY for all components (container, DLL mod, network monitor)
+                // CRITICAL: Use configured port DIRECTLY for all components (container, DLL mod, network monitor)
                 // DO NOT use PortAllocator because it maintains a global counter that ignores test kit preferences.
                 // 
                 // For sequential grading (common case):
-                // - Each student uses the same port (e.g., 4001 from environment.xlsx)
+                // - Each student uses the same port (e.g., 8000 from Environment.xlsx)
                 // - No conflicts because students run one at a time
                 // - Container from student 1 is cleaned up before student 2 starts
                 // 
                 // For true parallel grading:
-                // - Use different test kits with different MonitorPorts
+                // - Use different test kits with different port configurations
                 // - OR implement staggered startup delays
                 // - Current sequential approach is sufficient for most use cases
-                int portToUse = monitorPort;
+                int portToUse = configuredPort;
                 
                 _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
                 
@@ -762,41 +764,74 @@ namespace SolutionGrader.UI.Services
         {
             try
             {
-                // Look for environment.xlsx in the question-specific test kit folder
-                var environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                // Look for Environment.xlsx in the question-specific test kit folder
+                // Note: The actual file is "Environment.xlsx" with capital E
+                var environmentPath = Path.Combine(testKitPath, "Environment.xlsx");
                 if (!File.Exists(environmentPath))
                 {
-                    _logger.LogWarning($"environment.xlsx not found at {environmentPath}. Container port will default to 8000.");
-                    return 0;
+                    // Try lowercase as fallback
+                    environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                    if (!File.Exists(environmentPath))
+                    {
+                        _logger.LogWarning($"Environment.xlsx not found at {testKitPath}. Container port will default to 8000.");
+                        return 0;
+                    }
                 }
 
-                _logger.LogInfo($"Reading MonitorPort from environment.xlsx: {environmentPath}");
+                _logger.LogInfo($"Reading port configuration from Environment.xlsx: {environmentPath}");
 
-                using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
+                using (var workbook = new ClosedXML.Excel.Excel.XLWorkbook(environmentPath))
                 {
-                    var worksheet = workbook.Worksheet(1); // First sheet
-                    
-                    // Find MonitorPort in the sheet (usually in column 1 for keys, column 2 for values)
-                    foreach (var row in worksheet.RowsUsed())
+                    // Look for "Config" sheet which contains port configuration
+                    var worksheet = workbook.Worksheet("Config");
+                    if (worksheet == null)
                     {
-                        var keyCell = row.Cell(1).Value.ToString().Trim();
-                        if (keyCell.Equals("MonitorPort", StringComparison.OrdinalIgnoreCase))
+                        _logger.LogWarning($"'Config' sheet not found in Environment.xlsx at {environmentPath}");
+                        return 0;
+                    }
+                    
+                    // Find Code_Container_Host_Port in the Config sheet (column 1 = Key, column 2 = Value)
+                    // The actual field names are:
+                    // - Code_Container_Internal_Port (port inside container)
+                    // - Code_Container_Host_Port (port exposed on host)
+                    foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
+                    {
+                        var keyCell = row.Cell(1).GetString().Trim();
+                        
+                        // Normalize key by removing underscores and making lowercase for comparison
+                        var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
+                        
+                        if (normalizedKey == "codecontainerhostport" || normalizedKey == "codecontainerinternalport")
                         {
-                            var valueCell = row.Cell(2).Value.ToString().Trim();
-                            if (int.TryParse(valueCell, out int port) && port > 0 && port <= 65535)
+                            var valueCell = row.Cell(2);
+                            int port = 0;
+                            
+                            // Try to get as integer first
+                            if (valueCell.TryGetValue<int>(out var intValue))
                             {
-                                _logger.LogInfo($"Successfully read MonitorPort={port} from environment.xlsx. Container creation will use this as starting port.");
+                                port = intValue;
+                            }
+                            else
+                            {
+                                // Fallback to string parsing
+                                var valueStr = valueCell.GetString().Trim();
+                                int.TryParse(valueStr, out port);
+                            }
+                            
+                            if (port > 0 && port <= 65535)
+                            {
+                                _logger.LogInfo($"Successfully read {keyCell}={port} from Environment.xlsx. Container will use this port.");
                                 return port;
                             }
                         }
                     }
                     
-                    _logger.LogWarning($"MonitorPort field not found in environment.xlsx at {environmentPath}");
+                    _logger.LogWarning($"Code_Container_Host_Port or Code_Container_Internal_Port not found in Environment.xlsx at {environmentPath}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error reading MonitorPort from environment.xlsx: {ex.Message}");
+                _logger.LogWarning($"Error reading port from Environment.xlsx: {ex.Message}");
             }
 
             return 0;
