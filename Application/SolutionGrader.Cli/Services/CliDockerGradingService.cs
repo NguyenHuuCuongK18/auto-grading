@@ -438,7 +438,15 @@ namespace SolutionGrader.Cli.Services
                         ClientDllPath = clientDllPath
                     });
 
-                    Console.WriteLine($"[CLI] Found student: {studentCode} (Server: {(serverDllPath != null ? "✓" : "✗")}, Client: {(clientDllPath != null ? "✓" : "✗")})");
+                    // Only log warnings for missing DLLs, not successful discoveries (expensive)
+                    if (serverDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
+                    {
+                        Console.WriteLine($"[CLI] WARNING: Student {studentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
+                    }
+                    if (clientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
+                    {
+                        Console.WriteLine($"[CLI] WARNING: Student {studentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
+                    }
                 }
             }
 
