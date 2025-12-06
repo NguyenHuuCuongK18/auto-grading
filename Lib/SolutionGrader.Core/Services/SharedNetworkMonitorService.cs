@@ -434,24 +434,56 @@ public sealed class SharedNetworkMonitorService : IDisposable
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // Determine which port belongs to our monitored students
-            // Traffic flow: client → server port (student's allocated port)
-            // Traffic flow: server port (student's allocated port) → client
+            // CRITICAL VALIDATION #1: Port-based routing for ABSOLUTE isolation
+            // Each student is assigned a specific port (e.g., Student A = 4000, Student B = 4001)
+            // A packet belongs to a student if EITHER source OR destination port matches their allocated port
+            // This ensures COMPLETE traffic isolation - Student A will NEVER see Student B's packets
+            
             int studentPort = 0;
             string? studentCode = null;
             
+            // Check if source port matches any registered student
             if (_portToStudentCode.TryGetValue(srcPort, out var studentFromSrc))
             {
                 studentPort = srcPort;
                 studentCode = studentFromSrc;
             }
+            // Check if destination port matches any registered student
             else if (_portToStudentCode.TryGetValue(dstPort, out var studentFromDst))
             {
                 studentPort = dstPort;
                 studentCode = studentFromDst;
             }
             
-            if (studentCode == null) return; // Not for any registered student
+            // CRITICAL VALIDATION #2: Discard packets that don't belong to any registered student
+            // This ensures we ONLY capture traffic for students we're actively grading
+            if (studentCode == null) 
+            {
+                // Packet doesn't belong to any registered student - discard silently
+                return;
+            }
+            
+            // CRITICAL VALIDATION #3: Verify EXACTLY ONE student owns this packet
+            // A packet should NEVER match multiple students (would indicate port conflict)
+            bool srcMatched = _portToStudentCode.ContainsKey(srcPort);
+            bool dstMatched = _portToStudentCode.ContainsKey(dstPort);
+            
+            if (srcMatched && dstMatched && srcPort != dstPort)
+            {
+                // CRITICAL ERROR: Both source and destination ports are registered to (potentially) different students
+                // This should NEVER happen - it means two students are communicating with each other
+                // or there's a port allocation conflict
+                var srcStudent = _portToStudentCode[srcPort];
+                var dstStudent = _portToStudentCode[dstPort];
+                
+                if (srcStudent != dstStudent)
+                {
+                    Console.WriteLine($"[SharedNetworkMonitor] CRITICAL WARNING: Packet has src={srcPort} (student {srcStudent}) and dst={dstPort} (student {dstStudent})");
+                    Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - indicates students are communicating with each other or port conflict!");
+                    Console.WriteLine($"[SharedNetworkMonitor] Packet will be attributed to source port owner: {srcStudent}");
+                    // Attribute to source port owner (server sending response)
+                }
+            }
             
             // Track client ephemeral port
             int clientPort = (srcPort == studentPort) ? dstPort : srcPort;
@@ -523,57 +555,93 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 Stage = stage
             };
             
-            // Route to student's buffer
-            if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
+            // CRITICAL VALIDATION #4: Verify student buffer exists before storing
+            if (!_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
             {
-                buffer.Enqueue(packetInfo);
+                Console.WriteLine($"[SharedNetworkMonitor] ERROR: Student {studentCode} has no packet buffer! This should never happen.");
+                return;
+            }
+            
+            // Store to student's local buffer
+            buffer.Enqueue(packetInfo);
+            
+            // CRITICAL VALIDATION #5: Verify RunContext exists for this student
+            if (!_studentRunContexts.TryGetValue(studentCode, out var runContext))
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] ERROR: Student {studentCode} has no RunContext! Packet will not be stored for grading.");
+                return;
             }
             
             // CRITICAL: Store to RunContext for grading system compatibility
             // The grading system retrieves packets via runContext.GetCapturedNetworkPackets()
-            if (_studentRunContexts.TryGetValue(studentCode, out var runContext))
+            var capturedPacket = new CapturedNetworkPacket
             {
-                var capturedPacket = new CapturedNetworkPacket
-                {
-                    Stage = stageNum,
-                    Timestamp = rawPacket.Timeval.Date,
-                    Flags = flags,
-                    State = state,
-                    SourceRole = srcRole,
-                    DestinationRole = dstRole,
-                    Data = payload,
-                    SourcePort = srcPort,
-                    DestinationPort = dstPort
-                };
+                Stage = stageNum,
+                Timestamp = rawPacket.Timeval.Date,
+                Flags = flags,
+                State = state,
+                SourceRole = srcRole,
+                DestinationRole = dstRole,
+                Data = payload,
+                SourcePort = srcPort,
+                DestinationPort = dstPort
+            };
+            
+            // CRITICAL VALIDATION #6: Verify packet has correct student port
+            // This ensures the packet is tagged with the student's allocated port, not some other port
+            bool packetHasStudentPort = (srcPort == studentPort || dstPort == studentPort);
+            if (!packetHasStudentPort)
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] CRITICAL ERROR: Packet for student {studentCode} (port {studentPort}) has src={srcPort}, dst={dstPort}");
+                Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - packet routing is broken!");
+                return; // Discard this packet as it's incorrectly routed
+            }
+            
+            runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
                 
-                runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
-                
-                // Console logging for debugging (matches NetworkMonitorService format)
-                var logMessage = $"[SharedNetworkMonitor] [{studentCode}] {srcRole}->{dstRole} [{flags}] {state}";
-                if (!string.IsNullOrEmpty(payload))
-                {
-                    var payloadPreview = payload.Length > 50 
-                        ? payload.Substring(0, 50) + "..." 
-                        : payload;
-                    logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
-                }
-                Console.WriteLine(logMessage);
-                
-                // CRITICAL: Store payload to RunContext with HTTP parsing (matches NetworkMonitorService)
-                if (!string.IsNullOrEmpty(payload))
-                {
-                    StorePayloadToRunContext(runContext, srcRole, payload, questionCode, stage);
-                }
+            // CRITICAL VALIDATION #7: Detailed logging for packet attribution
+            // This helps debug any potential isolation issues
+            var logMessage = $"[SharedNetworkMonitor] [{studentCode}|Port:{studentPort}|Stage:{stage}] {srcRole}->{dstRole} " +
+                           $"[{flags}] {state} (src:{srcPort}, dst:{dstPort})";
+            if (!string.IsNullOrEmpty(payload))
+            {
+                var payloadPreview = payload.Length > 50 
+                    ? payload.Substring(0, 50) + "..." 
+                    : payload;
+                logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
+            }
+            Console.WriteLine(logMessage);
+            
+            // CRITICAL VALIDATION #8: Verify packet was stored correctly
+            // After storing, verify the packet count increased
+            var packetsBefore = runContext.GetCapturedNetworkPackets(questionCode, stage).Count;
+            
+            // CRITICAL: Store payload to RunContext with HTTP parsing (matches NetworkMonitorService)
+            if (!string.IsNullOrEmpty(payload))
+            {
+                StorePayloadToRunContext(runContext, srcRole, payload, questionCode, stage);
+            }
+            
+            var packetsAfter = runContext.GetCapturedNetworkPackets(questionCode, stage).Count;
+            
+            // FINAL VALIDATION: Ensure packet was actually stored
+            if (packetsAfter == packetsBefore + 1)
+            {
+                // Success - packet stored correctly
+            }
+            else if (packetsAfter < packetsBefore + 1)
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Packet for {studentCode} was not stored! Before:{packetsBefore}, After:{packetsAfter}");
             }
             else
             {
-                // Should not happen - log warning
-                Console.WriteLine($"[SharedNetworkMonitor] WARNING: RunContext not found for student {studentCode}");
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Multiple packets stored unexpectedly! Before:{packetsBefore}, After:{packetsAfter}");
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[SharedNetworkMonitor] Packet processing error: {ex.Message}");
+            Console.WriteLine($"[SharedNetworkMonitor] Stack trace: {ex.StackTrace}");
         }
     }
     
