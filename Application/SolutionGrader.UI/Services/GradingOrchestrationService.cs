@@ -36,7 +36,6 @@ namespace SolutionGrader.UI.Services
         private GradingMessageLogger? _messageLogger;
         
         private CancellationTokenSource? _cancellationTokenSource;
-        private SolutionGrader.Core.Services.PortAllocator? _portAllocator;
         
         // Events for UI updates
         public event EventHandler<StudentSolution>? StudentGradingStarted;
@@ -142,56 +141,11 @@ namespace SolutionGrader.UI.Services
                     null, ex);
             }
 
-            // Initialize PortAllocator with starting port from Environment.xlsx
-            // This ensures each student gets a unique sequential port (no port reuse)
-            // User requirement: Never reuse ports to avoid waiting and potential issues
-            //
-            // CRITICAL: Clear tracking file at START of each grading session to ensure
-            // we always start from the port specified in Environment.xlsx.
-            // This fixes the issue where editing Environment.xlsx didn't take effect
-            // because the old tracking file was still present.
-            try
-            {
-                var firstStudent = students.FirstOrDefault();
-                if (firstStudent != null)
-                {
-                    var firstTestKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, firstStudent.PaperNo);
-                    if (!string.IsNullOrEmpty(firstTestKitPath))
-                    {
-                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
-                        if (startingPort <= 0)
-                        {
-                            startingPort = 8000; // Fallback default
-                            _logger.LogWarning($"[Port Config] Could not read starting port from Environment.xlsx, using default {startingPort}");
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"[Port Config] Read starting port {startingPort} from Environment.xlsx");
-                        }
-                        
-                        // CRITICAL FIX: Clear tracking file before creating PortAllocator
-                        // This ensures each UI grading session starts fresh from Environment.xlsx
-                        // User requirement: When Environment.xlsx is changed, use the new port
-                        try
-                        {
-                            SolutionGrader.Core.Services.PortAllocator.ClearAllAllocatedPorts();
-                            _logger.LogInfo($"[Port Config] Cleared port tracking file - session will start from Environment.xlsx port {startingPort}");
-                        }
-                        catch (Exception clearEx)
-                        {
-                            _logger.LogWarning($"[Port Config] Failed to clear port tracking file: {clearEx.Message}");
-                        }
-                        
-                        _portAllocator = new SolutionGrader.Core.Services.PortAllocator(startingPort);
-                        _logger.LogInfo($"[Port Config] Initialized PortAllocator with starting port {startingPort} - each student will get sequential unique port");
-                        _messageLogger.LogInfo($"Port allocation initialized at {startingPort} (sequential, no reuse within session)");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[Port Config] Failed to initialize PortAllocator: {ex.Message}. Will fallback to default port.");
-            }
+            // PORT ALLOCATION NOTE:
+            // Port allocation is now handled by the caller (GradingWindow) which creates a shared
+            // PortAllocator and allocates unique ports for each student before calling this service.
+            // The allocated ports are passed in via the GradingConfiguration parameter for each student.
+            // This service simply uses the ports provided in the configuration.
 
             try
             {
@@ -254,10 +208,6 @@ namespace SolutionGrader.UI.Services
                 // Dispose message logger - this will export all messages to Excel
                 _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
                 _messageLogger?.Dispose();
-                
-                // Dispose PortAllocator
-                _portAllocator?.Dispose();
-                _portAllocator = null;
                 
                 SessionStateChanged?.Invoke(this, sessionState);
                 _logger.LogInfo("Grading session completed");
@@ -400,49 +350,33 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // CRITICAL: Use PortAllocator for sequential port allocation (no port reuse)
-                // User requirement: Never reuse ports - each student gets a unique sequential port
-                // This avoids:
-                // - Waiting for ports to be released
-                // - Potential conflicts if cleanup fails
-                // - Issues when something unexpected happens
+                // PORT ALLOCATION FIX:
+                // Ports are allocated by the caller (GradingWindow) using a shared PortAllocator before
+                // this method is called. The allocated ports are already present in the config parameter:
+                // - config.CodeContainerInternalPort (port inside container)
+                // - config.CodeContainerHostPort (port exposed on host)
                 //
-                // Port allocation strategy:
-                // - PortAllocator initialized with starting port from Environment.xlsx (e.g., 8000)
-                // - Student 1: allocate port 8000 (no wait, no cleanup needed)
-                // - Student 2: allocate port 8001 (no wait, no cleanup needed)
-                // - Student 3: allocate port 8002 (no wait, no cleanup needed)
-                // - And so on...
-                //
-                // Benefits:
-                // - Fast: No waiting for port release or container cleanup
-                // - Reliable: No port conflicts even if previous cleanup fails
-                // - Scalable: Can grade hundreds of students without port exhaustion
-                int portToUse;
-                if (_portAllocator != null)
+                // We simply use these pre-allocated ports instead of allocating new ones here.
+                // This ensures:
+                // - Each student in batch grading gets a unique port (allocated by shared PortAllocator)
+                // - No port conflicts when grading multiple students in parallel
+                // - Sequential port allocation (8000, 8001, 8002, etc.) as intended
+                
+                int portToUse = config.CodeContainerHostPort;
+                
+                // Validate that port was provided
+                if (portToUse <= 0 || portToUse > 65535)
                 {
-                    portToUse = _portAllocator.AllocatePort();
-                    if (portToUse == -1)
-                    {
-                        // Port allocation failed (exhausted all ports)
-                        var errorMsg = "Failed to allocate port for grading - all ports exhausted";
-                        _logger.LogError(errorMsg);
-                        _messageLogger?.LogGraderError(errorMsg, student.StudentCode, null);
-                        student.Status = GradingStatus.Failed;
-                        student.StatusMessage = errorMsg;
-                        student.Mark = 0;
-                        return;
-                    }
-                    _logger.LogInfo($"[Port Config] [{student.StudentCode}] Allocated port {portToUse} via PortAllocator (sequential, no reuse)");
-                }
-                else
-                {
-                    // Fallback if PortAllocator failed to initialize
-                    portToUse = 8000;
-                    _logger.LogWarning($"[Port Config] [{student.StudentCode}] PortAllocator not initialized, using fallback port {portToUse}");
+                    var errorMsg = $"Invalid port configuration: {portToUse}. Port must be between 1-65535.";
+                    _logger.LogError(errorMsg);
+                    _messageLogger?.LogGraderError(errorMsg, student.StudentCode, null);
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = errorMsg;
+                    student.Mark = 0;
+                    return;
                 }
                 
-                _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
+                _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using pre-allocated port {portToUse} for container, DLL modification, and network monitoring");
                 
                 // Build Docker configuration from UI config
                 // The examiner sets HasClient/HasServer to indicate what the student should provide:
@@ -818,91 +752,6 @@ namespace SolutionGrader.UI.Services
             _libGrading.DisposeAllContainers(dockerConfig);
         }
 
-        /// <summary>
-        /// Reads the starting port from environment.xlsx in the question-specific test kit folder.
-        /// This determines the base port number from which sequential allocation begins.
-        /// 
-        /// IMPORTANT: This reads from the QUESTION-SPECIFIC test kit folder 
-        /// (e.g., C:\Testkit_Q1_PRN222\Q12\environment.xlsx), not the root.
-        /// Each question can have its own environment.xlsx with MonitorPort configuration.
-        /// </summary>
-        /// <param name="testKitPath">Path to question-specific test kit folder containing environment.xlsx</param>
-        /// <returns>Starting port number from MonitorPort field, or 0 if not found</returns>
-        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
-        {
-            try
-            {
-                // Look for Environment.xlsx in the question-specific test kit folder
-                // Note: The actual file is "Environment.xlsx" with capital E
-                var environmentPath = Path.Combine(testKitPath, "Environment.xlsx");
-                if (!File.Exists(environmentPath))
-                {
-                    // Try lowercase as fallback
-                    environmentPath = Path.Combine(testKitPath, "environment.xlsx");
-                    if (!File.Exists(environmentPath))
-                    {
-                        _logger.LogWarning($"Environment.xlsx not found at {testKitPath}. Container port will default to 8000.");
-                        return 0;
-                    }
-                }
 
-                _logger.LogInfo($"Reading port configuration from Environment.xlsx: {environmentPath}");
-
-                using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
-                {
-                    // Look for "Config" sheet which contains port configuration
-                    var worksheet = workbook.Worksheet("Config");
-                    if (worksheet == null)
-                    {
-                        _logger.LogWarning($"'Config' sheet not found in Environment.xlsx at {environmentPath}");
-                        return 0;
-                    }
-                    
-                    // Find Code_Container_Host_Port in the Config sheet (column 1 = Key, column 2 = Value)
-                    // The actual field names are:
-                    // - Code_Container_Internal_Port (port inside container)
-                    // - Code_Container_Host_Port (port exposed on host)
-                    foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
-                    {
-                        var keyCell = row.Cell(1).GetString().Trim();
-                        
-                        // Normalize key by removing underscores and making lowercase for comparison
-                        var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
-                        
-                        if (normalizedKey == "codecontainerhostport" || normalizedKey == "codecontainerinternalport")
-                        {
-                            var valueCell = row.Cell(2);
-                            int port = 0;
-                            
-                            // Try to get as integer first
-                            if (valueCell.TryGetValue<int>(out var intValue))
-                            {
-                                port = intValue;
-                            }
-                            else
-                            {
-                                // Fallback to string parsing
-                                var valueStr = valueCell.GetString().Trim();
-                                int.TryParse(valueStr, out port);
-                            }
-                            
-                            if (port > 0 && port <= 65535)
-                            {
-                                _logger.LogInfo($"Successfully read {keyCell}={port} from Environment.xlsx. Container will use this port.");
-                                return port;
-                            }
-                        }
-                    }
-                    
-                    _logger.LogWarning($"Code_Container_Host_Port or Code_Container_Internal_Port not found in Environment.xlsx at {environmentPath}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"Error reading port from Environment.xlsx: {ex.Message}");
-            }
-
-            return 0;
-        }
     }
 }
