@@ -136,10 +136,10 @@ namespace SolutionGrader.UI.Services
                         {
                             action();
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Ignore exceptions from individual actions
-                            // Don't let one failed update break the batch
+                            // Log exceptions but don't let one failed update break the batch
+                            System.Diagnostics.Debug.WriteLine($"[UIUpdateBatcher] Action failed: {ex.Message}");
                         }
                     }
                     
@@ -150,9 +150,10 @@ namespace SolutionGrader.UI.Services
                         {
                             action();
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Ignore exceptions from individual actions
+                            // Log exceptions for debugging failed log updates
+                            System.Diagnostics.Debug.WriteLine($"[UIUpdateBatcher] Log update failed: {ex.Message}");
                         }
                     }
                 }), DispatcherPriority.Render);

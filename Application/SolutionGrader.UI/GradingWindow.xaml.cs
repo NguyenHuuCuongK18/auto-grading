@@ -1063,23 +1063,35 @@ namespace SolutionGrader.UI
             // Format: SaveResultFolderPath/Logs/Log_{StudentCode}_{Date}_Paper{PaperNo}/
             try
             {
-                var logsFolder = Path.Combine(_configuration.SaveResultFolderPath, "Logs");
-                if (Directory.Exists(logsFolder))
+                // SECURITY: Validate student code to prevent directory traversal
+                // Student codes should not contain path separators or special characters
+                if (string.IsNullOrWhiteSpace(student.StudentCode) || 
+                    student.StudentCode.Contains("..") || 
+                    student.StudentCode.Contains(Path.DirectorySeparatorChar) ||
+                    student.StudentCode.Contains(Path.AltDirectorySeparatorChar))
                 {
-                    var studentLogPattern = $"Log_{student.StudentCode}_*";
-                    var studentLogFolders = Directory.GetDirectories(logsFolder, studentLogPattern);
-                    
-                    foreach (var logFolder in studentLogFolders)
+                    _logger.LogWarning($"Invalid student code format: {student.StudentCode}. Skipping log folder cleanup.");
+                }
+                else
+                {
+                    var logsFolder = Path.Combine(_configuration.SaveResultFolderPath, "Logs");
+                    if (Directory.Exists(logsFolder))
                     {
-                        try
+                        var studentLogPattern = $"Log_{student.StudentCode}_*";
+                        var studentLogFolders = Directory.GetDirectories(logsFolder, studentLogPattern);
+                    
+                        foreach (var logFolder in studentLogFolders)
                         {
-                            Directory.Delete(logFolder, true);
-                            foldersDeleted++;
-                            _logger.LogInfo($"Deleted log folder: {Path.GetFileName(logFolder)}");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning($"Failed to delete log folder {Path.GetFileName(logFolder)}: {ex.Message}");
+                            try
+                            {
+                                Directory.Delete(logFolder, true);
+                                foldersDeleted++;
+                                _logger.LogInfo($"Deleted log folder: {Path.GetFileName(logFolder)}");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning($"Failed to delete log folder {Path.GetFileName(logFolder)}: {ex.Message}");
+                            }
                         }
                     }
                 }
@@ -1093,19 +1105,26 @@ namespace SolutionGrader.UI
             // These might be created during grading but not cleaned up if canceled
             try
             {
-                var tempPattern = $"*{student.StudentCode}*.tmp";
-                var tempFiles = Directory.GetFiles(_configuration.SaveResultFolderPath, tempPattern, SearchOption.AllDirectories);
-                
-                foreach (var tempFile in tempFiles)
+                // SECURITY: Reuse student code validation from above
+                if (!string.IsNullOrWhiteSpace(student.StudentCode) && 
+                    !student.StudentCode.Contains("..") && 
+                    !student.StudentCode.Contains(Path.DirectorySeparatorChar) &&
+                    !student.StudentCode.Contains(Path.AltDirectorySeparatorChar))
                 {
-                    try
+                    var tempPattern = $"*{student.StudentCode}*.tmp";
+                    var tempFiles = Directory.GetFiles(_configuration.SaveResultFolderPath, tempPattern, SearchOption.AllDirectories);
+                
+                    foreach (var tempFile in tempFiles)
                     {
-                        File.Delete(tempFile);
-                        _logger.LogInfo($"Deleted temp file: {Path.GetFileName(tempFile)}");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning($"Failed to delete temp file {Path.GetFileName(tempFile)}: {ex.Message}");
+                        try
+                        {
+                            File.Delete(tempFile);
+                            _logger.LogInfo($"Deleted temp file: {Path.GetFileName(tempFile)}");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"Failed to delete temp file {Path.GetFileName(tempFile)}: {ex.Message}");
+                        }
                     }
                 }
             }
