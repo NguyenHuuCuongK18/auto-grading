@@ -34,6 +34,7 @@ namespace SolutionGrader.UI.Services
         private ResultWriterService? _resultWriter;
         private ExcelLogCoordinator? _excelCoordinator;
         private GradingMessageLogger? _messageLogger;
+        private bool _ownsMessageLogger; // True if we created the logger, false if it was shared
         
         private CancellationTokenSource? _cancellationTokenSource;
         
@@ -64,11 +65,13 @@ namespace SolutionGrader.UI.Services
         /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
         /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
+        /// <param name="sharedMessageLogger">Optional shared GradingMessageLogger for batch grading. If provided, uses this instead of creating a new instance. This prevents file access conflicts in parallel grading scenarios.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
             GradingSessionState sessionState,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            GradingMessageLogger? sharedMessageLogger = null)
         {
             // Use provided cancellation token, or create a new one if not provided
             if (ct == default)
@@ -87,8 +90,20 @@ namespace SolutionGrader.UI.Services
             _excelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
 
             // Initialize centralized message logger for structured error/message logging
-            _messageLogger = new GradingMessageLogger(resultPath);
-            _messageLogger.LogInfo($"Starting grading session for {students.Count} students");
+            // Use shared logger if provided (for batch grading), otherwise create a new one
+            if (sharedMessageLogger != null)
+            {
+                _messageLogger = sharedMessageLogger;
+                _ownsMessageLogger = false; // We don't own this logger, so don't dispose it
+                _logger.LogInfo($"[GradingOrchestrationService] Using shared GradingMessageLogger for batch grading");
+            }
+            else
+            {
+                _messageLogger = new GradingMessageLogger(resultPath);
+                _ownsMessageLogger = true; // We created this logger, so we must dispose it
+                _messageLogger.LogInfo($"Starting grading session for {students.Count} students");
+                _logger.LogInfo($"[GradingOrchestrationService] Created new GradingMessageLogger instance");
+            }
 
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
@@ -213,9 +228,18 @@ namespace SolutionGrader.UI.Services
                 
                 _excelCoordinator?.Dispose();
                 
-                // Dispose message logger - this will export all messages to Excel
-                _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
-                _messageLogger?.Dispose();
+                // Dispose message logger only if we created it (not shared)
+                // If shared, the owner (GradingWindow) will dispose it
+                if (_ownsMessageLogger)
+                {
+                    _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
+                    _messageLogger?.Dispose();
+                    _logger.LogInfo("[GradingOrchestrationService] Disposed owned GradingMessageLogger");
+                }
+                else
+                {
+                    _logger.LogInfo("[GradingOrchestrationService] Skipped disposal of shared GradingMessageLogger (owned by caller)");
+                }
                 
                 SessionStateChanged?.Invoke(this, sessionState);
                 _logger.LogInfo("Grading session completed");

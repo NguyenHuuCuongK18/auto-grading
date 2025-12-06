@@ -67,6 +67,12 @@ namespace SolutionGrader.UI
         // This prevents port conflicts when grading students in parallel batches
         private PortAllocator? _sharedPortAllocator;
         
+        // CRITICAL: Shared GradingMessageLogger for batch/parallel grading
+        // Each grading session needs ONE shared GradingMessageLogger that all parallel students use
+        // This prevents file access conflicts when multiple students try to write to the same log file
+        // The logger creates one timestamped file per session, not per student
+        private GradingMessageLogger? _sharedMessageLogger;
+        
         private CancellationTokenSource? _cancellationTokenSource;
         private DateTime? _sessionStartTime;
         private bool _isPaused;
@@ -455,6 +461,16 @@ namespace SolutionGrader.UI
                 _sharedPortAllocator = new PortAllocator(8000);
             }
             
+            // CRITICAL: Initialize shared GradingMessageLogger for THIS grading session
+            // All parallel students will use this SAME GradingMessageLogger instance
+            // to ensure thread-safe logging without file access conflicts
+            // The logger creates ONE log file per session with a unique timestamp
+            var resultPath = !string.IsNullOrEmpty(_configuration.SaveResultFolderPath) 
+                ? _configuration.SaveResultFolderPath 
+                : Path.Combine(_configuration.SubmitFolderPath, "Results");
+            _sharedMessageLogger = new GradingMessageLogger(resultPath);
+            _logger.LogInfo($"[Message Logger] Initialized SHARED GradingMessageLogger for batch grading session");
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -691,6 +707,13 @@ namespace SolutionGrader.UI
                 // Dispose shared PortAllocator when session ends
                 _sharedPortAllocator?.Dispose();
                 _sharedPortAllocator = null;
+                
+                // Dispose shared GradingMessageLogger when session ends
+                // This will export all messages to Excel and close the log file
+                _sharedMessageLogger?.LogInfo($"Grading session completed. Total students: {studentsToGrade.Count}");
+                _sharedMessageLogger?.Dispose();
+                _sharedMessageLogger = null;
+                _logger.LogInfo("[Message Logger] Shared GradingMessageLogger disposed and logs exported to Excel");
                 
                 // OPTIMIZATION: Clear shared network monitors
                 // This releases resources after grading session completes
@@ -935,12 +958,14 @@ namespace SolutionGrader.UI
                     // Pass the cancellation token so pause can abort the current grading
                     // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
                     // TRUE PARALLEL: Containers created simultaneously without any serialization or callbacks
+                    // Pass the shared message logger to prevent file access conflicts in parallel grading
                     var sessionState = new GradingSessionState();
                     await _gradingService.StartGradingAsync(
                         new System.Collections.Generic.List<StudentSolution> { student },
                         studentConfig,
                         sessionState,
-                        ct);
+                        ct,
+                        _sharedMessageLogger);
                 
                     // Update final status
                     student.ProgressPercent = 100;
