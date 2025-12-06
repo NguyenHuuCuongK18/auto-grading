@@ -76,63 +76,82 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // Find solution folder or zip file (LAZY EXTRACTION - don't extract during discovery)
-                    var questionFolder = Path.Combine(studentDir, "1");
-                    var solutionPath = Path.Combine(questionFolder, "solution");
+                    // OPTIMIZED: Don't search for DLLs during discovery - expensive and uses RAM
+                    // DLLs will be found during grading when actually needed
                     
-                    if (!Directory.Exists(questionFolder))
+                    // Check for solution structure: {studentCode}/1/ or {studentCode}/solution/1/
+                    var questionFolder1 = Path.Combine(studentDir, "1");
+                    var questionFolder2 = Path.Combine(studentDir, "solution", "1");
+                    
+                    string? solutionPath = null;
+                    bool hasZip = false;
+                    bool hasExtractedFiles = false;
+                    
+                    // Check first structure: {studentCode}/1/
+                    if (Directory.Exists(questionFolder1))
                     {
-                        logger?.Invoke($"No question folder for {studentCode}");
+                        solutionPath = questionFolder1;
+                        hasExtractedFiles = Directory.Exists(Path.Combine(questionFolder1, "bin")) ||
+                                          Directory.GetFiles(questionFolder1, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0;
+                        
+                        if (!hasExtractedFiles)
+                        {
+                            // Look for zip in question folder
+                            var zipFiles = Directory.GetFiles(questionFolder1, "*.zip");
+                            hasZip = zipFiles.Length > 0;
+                        }
+                    }
+                    // Check second structure: {studentCode}/solution/1/
+                    else if (Directory.Exists(questionFolder2))
+                    {
+                        solutionPath = questionFolder2;
+                        hasExtractedFiles = Directory.Exists(Path.Combine(questionFolder2, "bin")) ||
+                                          Directory.GetFiles(questionFolder2, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0;
+                        
+                        if (!hasExtractedFiles)
+                        {
+                            // Look for zip in question folder or parent solution folder
+                            var zipFiles = Directory.GetFiles(questionFolder2, "*.zip");
+                            if (zipFiles.Length == 0)
+                            {
+                                var parentSolutionFolder = Path.Combine(studentDir, "solution");
+                                if (Directory.Exists(parentSolutionFolder))
+                                {
+                                    zipFiles = Directory.GetFiles(parentSolutionFolder, "*.zip");
+                                }
+                            }
+                            hasZip = zipFiles.Length > 0;
+                        }
+                    }
+                    else
+                    {
+                        logger?.Invoke($"No question folder for {studentCode} (checked /1 and /solution/1)");
                         continue;
                     }
                     
-                    // Check if solution exists OR if there's a zip file we can extract later
-                    bool hasSolution = Directory.Exists(solutionPath);
-                    bool hasZip = false;
-                    
-                    if (!hasSolution)
+                    if (!hasExtractedFiles && !hasZip)
                     {
-                        var zipFiles = Directory.GetFiles(questionFolder, "*.zip");
-                        hasZip = zipFiles.Length > 0;
-                        
-                        if (!hasZip)
-                        {
-                            logger?.Invoke($"No solution folder and no zip file for {studentCode}");
-                            continue;
-                        }
-                        
-                        // Store zip path for lazy extraction later (during grading)
+                        logger?.Invoke($"No solution files and no zip file for {studentCode}");
+                        continue;
+                    }
+                    
+                    if (!hasExtractedFiles && hasZip)
+                    {
                         logger?.Invoke($"Found zip file for {studentCode} - will extract when grading starts");
                     }
 
-                    // Find server and client DLLs (only if solution is already extracted)
-                    string? serverDllPath = null;
-                    string? clientDllPath = null;
-                    
-                    if (Directory.Exists(solutionPath))
-                    {
-                        serverDllPath = FindDll(solutionPath, serverProjectName);
-                        clientDllPath = FindDll(solutionPath, clientProjectName);
-                        
-                        // At least one component should exist (for now, just log if none found)
-                        if (string.IsNullOrEmpty(serverDllPath) && string.IsNullOrEmpty(clientDllPath))
-                        {
-                            logger?.Invoke($"No DLLs found for {studentCode}");
-                        }
-                    }
-                    // If solution not extracted yet, DLL paths will be null - that's OK
-                    // They'll be found after extraction during grading
-
+                    // DON'T search for DLLs during discovery - too expensive!
+                    // DLL paths will be found during grading when actually needed
                     students.Add(new DiscoveredStudent
                     {
                         StudentCode = studentCode!,
                         PaperNo = paperNo!,
                         SolutionPath = solutionPath,
-                        ServerDllPath = serverDllPath,
-                        ClientDllPath = clientDllPath
+                        ServerDllPath = null, // Will be found during grading
+                        ClientDllPath = null  // Will be found during grading
                     });
 
-                    logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}, Server: {(serverDllPath != null ? "✓" : "✗")}, Client: {(clientDllPath != null ? "✓" : "✗")})");
+                    logger?.Invoke($"Found student: {studentCode} (Paper {paperNo})");
                 }
             }
 
@@ -223,38 +242,55 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Extracts solution zip file if not already extracted.
         /// This supports lazy extraction - zip files are only extracted when needed (during grading).
+        /// Supports two structures: {studentCode}/1/ or {studentCode}/solution/1/
         /// </summary>
-        /// <param name="solutionPath">Expected solution folder path</param>
+        /// <param name="solutionPath">Question folder path (either {studentCode}/1 or {studentCode}/solution/1)</param>
         /// <param name="logger">Optional action for logging messages</param>
         /// <returns>True if solution is ready (already exists or successfully extracted), false otherwise</returns>
         public static bool EnsureSolutionExtracted(string solutionPath, Action<string>? logger = null)
         {
-            // If solution already exists, nothing to do
-            if (Directory.Exists(solutionPath))
+            // Check if already extracted (has bin folder or project files)
+            bool hasExtractedFiles = Directory.Exists(Path.Combine(solutionPath, "bin")) ||
+                                    Directory.GetFiles(solutionPath, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0 ||
+                                    Directory.GetFiles(solutionPath, "*.sln", SearchOption.TopDirectoryOnly).Length > 0;
+            
+            if (hasExtractedFiles)
             {
                 return true;
             }
 
-            // Look for zip file in parent directory
-            var questionFolder = Path.GetDirectoryName(solutionPath);
-            if (string.IsNullOrEmpty(questionFolder) || !Directory.Exists(questionFolder))
+            // Look for zip file in the question folder
+            string? zipPath = null;
+            var zipFiles = Directory.GetFiles(solutionPath, "*.zip");
+            if (zipFiles.Length > 0)
             {
-                logger?.Invoke($"Question folder not found: {questionFolder}");
+                zipPath = zipFiles[0];
+            }
+            else
+            {
+                // If solutionPath is {studentCode}/solution/1, also check parent {studentCode}/solution folder
+                var parentDir = Path.GetDirectoryName(solutionPath);
+                if (parentDir != null && Path.GetFileName(parentDir) == "solution")
+                {
+                    zipFiles = Directory.GetFiles(parentDir, "*.zip");
+                    if (zipFiles.Length > 0)
+                    {
+                        zipPath = zipFiles[0];
+                    }
+                }
+            }
+            
+            if (string.IsNullOrEmpty(zipPath))
+            {
+                logger?.Invoke($"No zip file found for extraction in {solutionPath}");
                 return false;
             }
 
-            var zipFiles = Directory.GetFiles(questionFolder, "*.zip");
-            if (zipFiles.Length == 0)
-            {
-                logger?.Invoke($"No zip file found in {questionFolder}");
-                return false;
-            }
-
-            // Extract zip file to solution folder
+            // Extract zip file to the question folder (solutionPath)
             try
             {
-                logger?.Invoke($"Extracting solution from {Path.GetFileName(zipFiles[0])} to {solutionPath}");
-                FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
+                logger?.Invoke($"Extracting solution from {Path.GetFileName(zipPath)} to {solutionPath}");
+                FileExtractor.ExtractDestination(zipPath, solutionPath);
                 logger?.Invoke($"Successfully extracted solution");
                 return true;
             }
