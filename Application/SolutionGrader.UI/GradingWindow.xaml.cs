@@ -29,6 +29,12 @@ namespace SolutionGrader.UI
     /// - student/{StudentCode}/OverallSummary.xlsx: Per-student summary
     /// - student/{StudentCode}/{TC}/GradeDetail.xlsx: Per-test-case details
     /// - student/{StudentCode}/{TC}/{TC}_Result.xlsx: Raw test results
+    /// 
+    /// PERFORMANCE OPTIMIZATIONS:
+    /// - UI updates are batched via UIUpdateBatcher (250ms intervals) to prevent lag during parallel grading
+    /// - Progress updates are throttled to 500ms per student to avoid excessive DataGrid refreshes
+    /// - Log display uses smart auto-scroll that only activates when user is at bottom
+    /// - All optimizations preserve 100% grading accuracy - only UI rendering is affected
     /// </summary>
     public partial class GradingWindow : Window
     {
