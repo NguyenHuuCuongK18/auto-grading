@@ -104,6 +104,32 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine($"[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             Console.WriteLine();
 
+            // OPTIMIZATION: Pre-allocate shared network monitor for all students
+            // This dramatically reduces resource usage (97% reduction in monitor instances)
+            // Get starting port from first student's test kit
+            try
+            {
+                var firstStudent = students.FirstOrDefault();
+                if (firstStudent != null)
+                {
+                    var firstTestKitPath = GetTestKitForPaper(config.TestKitFolderPath, firstStudent.PaperNo);
+                    if (!string.IsNullOrEmpty(firstTestKitPath))
+                    {
+                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
+                        if (startingPort <= 0) startingPort = 8000;
+                        
+                        // Pre-allocate shared monitor for batch
+                        SharedNetworkMonitorManager.Instance.PreAllocateForBatch(startingPort, students.Count);
+                        Console.WriteLine($"[CLI] Shared network monitor pre-allocated for {students.Count} students starting from port {startingPort}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLI] WARNING: Failed to pre-allocate shared network monitor: {ex.Message}");
+                Console.WriteLine($"[CLI] Will fall back to per-student monitors if needed");
+            }
+
             // Create output directory
             Directory.CreateDirectory(config.SaveResultFolderPath);
 
@@ -431,7 +457,11 @@ namespace SolutionGrader.Cli.Services
 
                 // Create the SHARED services (same as SolutionGrader.UI)
                 IRunContext runContext = new RunContext();
-                INetworkMonitorService networkMonitor = new NetworkMonitorService(runContext);
+                
+                // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
+                // This uses a single shared monitor for all students instead of one per student
+                // 97% reduction in monitor instances (e.g., 1 monitor for 32 students instead of 32)
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(student.StudentCode);
 
                 // Create the SHARED DockerGradingService
                 var dockerGradingService = new DockerGradingService(networkMonitor, runContext);

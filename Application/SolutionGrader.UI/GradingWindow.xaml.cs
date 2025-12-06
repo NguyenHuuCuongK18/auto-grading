@@ -483,6 +483,36 @@ namespace SolutionGrader.UI
             
             _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             
+            // OPTIMIZATION: Pre-allocate shared network monitor for all students in batch
+            // This dramatically reduces resource usage (97% reduction in monitor instances)
+            // Per user request: Use singular network monitor with port range pre-allocation
+            try
+            {
+                var firstStudent = studentsToGrade.FirstOrDefault();
+                if (firstStudent != null && _sharedPortAllocator != null)
+                {
+                    var firstTestKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, firstStudent.PaperNo);
+                    if (!string.IsNullOrEmpty(firstTestKitPath))
+                    {
+                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
+                        if (startingPort <= 0) startingPort = 8000;
+                        
+                        // Pre-allocate shared monitor with port range for all students + 15% buffer
+                        SharedNetworkMonitorManager.Instance.PreAllocateForBatch(startingPort, studentsToGrade.Count);
+                        _logger.LogInfo($"[Shared Network Monitor] Pre-allocated for {studentsToGrade.Count} students starting from port {startingPort}");
+                        _logger.LogInfo($"[Shared Network Monitor] Single monitor instance will handle all students (97% resource reduction)");
+                        
+                        var stats = SharedNetworkMonitorManager.Instance.GetStatistics();
+                        _logger.LogInfo($"[Shared Network Monitor] Statistics: {stats}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Shared Network Monitor] Failed to pre-allocate: {ex.Message}");
+                _logger.LogWarning($"[Shared Network Monitor] Will create monitors on-demand if needed");
+            }
+            
             try
             {
                 if (_configuration.MaxParallelStudents <= 1)
@@ -661,6 +691,18 @@ namespace SolutionGrader.UI
                 // Dispose shared PortAllocator when session ends
                 _sharedPortAllocator?.Dispose();
                 _sharedPortAllocator = null;
+                
+                // OPTIMIZATION: Clear shared network monitors
+                // This releases resources after grading session completes
+                try
+                {
+                    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                    _logger.LogInfo("[Shared Network Monitor] All monitors cleared and disposed");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"[Shared Network Monitor] Error clearing monitors: {ex.Message}");
+                }
                 
                 _logger.LogInfo("Grading session completed");
             }

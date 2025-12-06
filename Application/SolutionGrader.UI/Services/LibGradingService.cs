@@ -100,8 +100,13 @@ namespace SolutionGrader.UI.Services
                 IRunContext runctx = new RunContext();
                 IExecutableManager proc = new ExecutableManager(runctx);
                 
-                // NetworkMonitorService passively sniffs packets
-                INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
+                // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
+                // This uses a single shared monitor for all students instead of one per student
+                // 97% reduction in monitor instances (e.g., 1 monitor for 32 students instead of 32)
+                // Per user request: Singular network monitor with port-based traffic isolation
+                // Extract student code from result root path (e.g., Results/GradeResult_20241206/StudentCode)
+                string extractedStudentCode = Path.GetFileName(resultRoot) ?? "UnknownStudent";
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(extractedStudentCode);
                 
                 IDataComparisonService cmp = new DataComparisonService(runctx);
                 IDetailLogService log = new ExcelDetailLogService(files, runctx);
@@ -250,7 +255,10 @@ namespace SolutionGrader.UI.Services
 
                 // Create services
                 IRunContext runctx = new RunContext();
-                INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
+                
+                // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
+                // Per user request: Singular network monitor with port-based traffic isolation
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(studentCode);
 
                 // Create DockerGradingService from Lib
                 var dockerGrading = new DockerGradingService(networkMonitor, runctx);
