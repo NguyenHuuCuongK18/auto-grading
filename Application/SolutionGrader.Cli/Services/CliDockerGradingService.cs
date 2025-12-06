@@ -621,7 +621,7 @@ namespace SolutionGrader.Cli.Services
                     // Try Code_Container_Host_Port first, then Code_Container_Internal_Port as fallback
                     foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
                     {
-                        var keyCell = row.Cell(1).GetString().Trim();
+                        var keyCell = row.Cell(1).GetValue<string>()?.Trim() ?? "";
                         
                         // Normalize key by removing underscores and making lowercase for comparison
                         var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
@@ -641,7 +641,7 @@ namespace SolutionGrader.Cli.Services
                             else
                             {
                                 // Fallback to string parsing
-                                var valueStr = valueCell.GetString().Trim();
+                                var valueStr = valueCell.GetValue<string>()?.Trim() ?? "";
                                 int.TryParse(valueStr, out port);
                             }
                             
