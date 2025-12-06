@@ -153,7 +153,13 @@ namespace DllMod
             var totalIpReplacements = 0;
             var totalPortReplacements = 0;
             var attemptedCombinations = new List<string>();
+            int? successfulPort = null;
 
+            // CRITICAL FIX: Try ALL IP addresses, not just stop after first success
+            // Student code may have MULTIPLE hardcoded IPs:
+            // - Server might use "0.0.0.0" for binding
+            // - Client might use "127.0.0.1" or "localhost" for connecting
+            // We need to replace ALL of them for client-server communication to work
             foreach (var oldIp in ipsToTry)
             {
                 var result = TryPatchWithCommonPorts(dllPath, oldIp, newIp, newPort, ports);
@@ -161,29 +167,25 @@ namespace DllMod
                 totalPortReplacements += result.PortReplacements;
                 attemptedCombinations.Add($"{oldIp} with ports: {string.Join(",", result.AttemptedPorts)}");
                 
-                // If we found replacements, return success
-                if (result.Success && result.PortReplacements > 0)
+                // Track the first successful port found
+                if (result.Success && result.SuccessfulPort.HasValue && !successfulPort.HasValue)
                 {
-                    return new DllModificationResult
-                    {
-                        Success = true,
-                        IpReplacements = totalIpReplacements,
-                        PortReplacements = totalPortReplacements,
-                        AttemptedPorts = result.AttemptedPorts,
-                        SuccessfulPort = result.SuccessfulPort,
-                        Message = $"Successfully patched DLL: {totalIpReplacements} IP replacements, {totalPortReplacements} port replacements"
-                    };
+                    successfulPort = result.SuccessfulPort;
                 }
+                
+                // IMPORTANT: Continue trying other IPs even if we found some replacements
+                // Don't return early - we need to catch all hardcoded IPs
             }
 
             return new DllModificationResult
             {
-                Success = totalIpReplacements > 0,
+                Success = totalIpReplacements > 0 || totalPortReplacements > 0,
                 IpReplacements = totalIpReplacements,
                 PortReplacements = totalPortReplacements,
                 AttemptedPorts = ports.ToList(),
-                Message = totalIpReplacements > 0
-                    ? $"Partially successful: {totalIpReplacements} IP replacements made, but no matching ports found"
+                SuccessfulPort = successfulPort,
+                Message = (totalIpReplacements > 0 || totalPortReplacements > 0)
+                    ? $"Successfully patched DLL: {totalIpReplacements} IP replacements, {totalPortReplacements} port replacements"
                     : $"No replacements made. Tried combinations: {string.Join("; ", attemptedCombinations)}"
             };
         }
