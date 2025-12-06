@@ -65,6 +65,11 @@ public class SharedNetworkMonitorAdapter : INetworkMonitorService
         _assignedMonitor?.SetStudentContext(_studentCode, questionCode, stage);
     }
     
+    public void EndCurrentContext(string questionCode, string stage)
+    {
+        _assignedMonitor?.EndStageContext(_studentCode, stage);
+    }
+    
     public void ClearCaptures()
     {
         _assignedMonitor?.ClearStudentCaptures(_studentCode);

@@ -105,7 +105,8 @@ namespace SolutionGrader.Core.Services
                             // Save the NEXT port for the next allocation (port + 1)
                             // This ensures no port is ever reused
                             SaveNextPort(port + 1);
-                            Console.WriteLine($"[PortAllocator] Allocated port {port} (next allocation will try {port + 1})");
+                            Console.WriteLine($"[PortAllocator] SUCCESS: Allocated port {port} (sequential, no reuse). Next allocation will try port {port + 1}");
+                            Console.WriteLine($"[PortAllocator] Port {port} validation: OS-level binding successful, port is available");
                             return port;
                         }
                         else

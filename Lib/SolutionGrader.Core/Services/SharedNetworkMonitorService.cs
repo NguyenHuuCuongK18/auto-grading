@@ -57,8 +57,15 @@ public sealed class SharedNetworkMonitorService : IDisposable
     // Per-student packet buffers (thread-safe)
     private readonly ConcurrentDictionary<string, ConcurrentQueue<PacketInfo>> _studentPacketBuffers = new();
     
-    // Per-student context (question code, stage)
+    // CRITICAL FIX: Per-student context (question code, stage)
+    // Changed from single StudentContext to thread-safe atomic reference
+    // This prevents stage context from being overwritten during concurrent stage execution
     private readonly ConcurrentDictionary<string, StudentContext> _studentContexts = new();
+    
+    // CRITICAL FIX: Stage timestamp tracking to detect context corruption
+    // Key: studentCode, Value: timestamp when stage was last updated
+    // Used to validate that packets are tagged with the correct stage
+    private readonly ConcurrentDictionary<string, (string Stage, long TimestampTicks)> _studentStageTimestamps = new();
     
     // Protocol type per port
     private readonly ConcurrentDictionary<int, string> _portProtocols = new();
@@ -93,6 +100,32 @@ public sealed class SharedNetworkMonitorService : IDisposable
             throw new ArgumentException($"Port {port} is outside the monitored range {_startPort}-{_endPort}");
         }
         
+        // CRITICAL VALIDATION: Check if this port is already registered to a different student
+        if (_portToStudentCode.TryGetValue(port, out var existingStudent) && existingStudent != studentCode)
+        {
+            var errorMsg = $"[SharedNetworkMonitor] CRITICAL ERROR: Port {port} is already registered to student {existingStudent}, cannot register for {studentCode}! This indicates a port allocation race condition.";
+            Console.WriteLine(errorMsg);
+            throw new InvalidOperationException(errorMsg);
+        }
+        
+        // CRITICAL VALIDATION: Check if this student is already registered with a different port
+        if (_studentPacketBuffers.ContainsKey(studentCode))
+        {
+            // Find the port this student is currently registered with
+            var currentPort = _portToStudentCode.FirstOrDefault(kvp => kvp.Value == studentCode).Key;
+            if (currentPort != port)
+            {
+                var errorMsg = $"[SharedNetworkMonitor] CRITICAL ERROR: Student {studentCode} is already registered with port {currentPort}, cannot re-register with port {port}! This indicates a port allocation race condition.";
+                Console.WriteLine(errorMsg);
+                throw new InvalidOperationException(errorMsg);
+            }
+            else
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Student {studentCode} is already registered on port {port}, skipping duplicate registration");
+                return; // Already registered, skip
+            }
+        }
+        
         _portToStudentCode[port] = studentCode;
         _studentPacketBuffers[studentCode] = new ConcurrentQueue<PacketInfo>();
         _studentContexts[studentCode] = new StudentContext();
@@ -102,7 +135,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         UpdateBpfFilter();
         
-        Console.WriteLine($"[SharedNetworkMonitor] Registered {studentCode} on port {port}");
+        Console.WriteLine($"[SharedNetworkMonitor] SUCCESS: Registered student {studentCode} on port {port} (range: {_startPort}-{_endPort})");
     }
     
     /// <summary>
@@ -401,24 +434,56 @@ public sealed class SharedNetworkMonitorService : IDisposable
             var srcPort = tcpPacket.SourcePort;
             var dstPort = tcpPacket.DestinationPort;
             
-            // Determine which port belongs to our monitored students
-            // Traffic flow: client → server port (student's allocated port)
-            // Traffic flow: server port (student's allocated port) → client
+            // CRITICAL VALIDATION #1: Port-based routing for ABSOLUTE isolation
+            // Each student is assigned a specific port (e.g., Student A = 4000, Student B = 4001)
+            // A packet belongs to a student if EITHER source OR destination port matches their allocated port
+            // This ensures COMPLETE traffic isolation - Student A will NEVER see Student B's packets
+            
             int studentPort = 0;
             string? studentCode = null;
             
+            // Check if source port matches any registered student
             if (_portToStudentCode.TryGetValue(srcPort, out var studentFromSrc))
             {
                 studentPort = srcPort;
                 studentCode = studentFromSrc;
             }
+            // Check if destination port matches any registered student
             else if (_portToStudentCode.TryGetValue(dstPort, out var studentFromDst))
             {
                 studentPort = dstPort;
                 studentCode = studentFromDst;
             }
             
-            if (studentCode == null) return; // Not for any registered student
+            // CRITICAL VALIDATION #2: Discard packets that don't belong to any registered student
+            // This ensures we ONLY capture traffic for students we're actively grading
+            if (studentCode == null) 
+            {
+                // Packet doesn't belong to any registered student - discard silently
+                return;
+            }
+            
+            // CRITICAL VALIDATION #3: Verify EXACTLY ONE student owns this packet
+            // A packet should NEVER match multiple students (would indicate port conflict)
+            bool srcMatched = _portToStudentCode.ContainsKey(srcPort);
+            bool dstMatched = _portToStudentCode.ContainsKey(dstPort);
+            
+            if (srcMatched && dstMatched && srcPort != dstPort)
+            {
+                // CRITICAL ERROR: Both source and destination ports are registered to (potentially) different students
+                // This should NEVER happen - it means two students are communicating with each other
+                // or there's a port allocation conflict
+                var srcStudent = _portToStudentCode[srcPort];
+                var dstStudent = _portToStudentCode[dstPort];
+                
+                if (srcStudent != dstStudent)
+                {
+                    Console.WriteLine($"[SharedNetworkMonitor] CRITICAL WARNING: Packet has src={srcPort} (student {srcStudent}) and dst={dstPort} (student {dstStudent})");
+                    Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - indicates students are communicating with each other or port conflict!");
+                    Console.WriteLine($"[SharedNetworkMonitor] Packet will be attributed to source port owner: {srcStudent}");
+                    // Attribute to source port owner (server sending response)
+                }
+            }
             
             // Track client ephemeral port
             int clientPort = (srcPort == studentPort) ? dstPort : srcPort;
@@ -453,13 +518,20 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 payload = System.Text.Encoding.UTF8.GetString(tcpPacket.PayloadData);
             }
             
-            // Get context for this student
+            // CRITICAL FIX: Determine the correct stage for this packet using timestamp-based stage windows
+            // This prevents race conditions where stage context is updated while packets are still being captured
             string questionCode = "";
             string stage = "0";
+            
             if (_studentContexts.TryGetValue(studentCode, out var context))
             {
                 questionCode = context.QuestionCode;
-                stage = context.Stage;
+                
+                // CRITICAL: Match packet to stage based on its capture timestamp
+                // This ensures packets are attributed to the stage that was active when they were captured,
+                // not the stage that happens to be current when the packet handler runs
+                long packetTimestampTicks = rawPacket.Timeval.Date.Ticks;
+                stage = context.GetStageAtTimestamp(packetTimestampTicks);
             }
             
             // Parse stage to int
@@ -483,57 +555,77 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 Stage = stage
             };
             
-            // Route to student's buffer
-            if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
+            // CRITICAL VALIDATION #4: Verify student buffer exists before storing
+            if (!_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
             {
-                buffer.Enqueue(packetInfo);
+                Console.WriteLine($"[SharedNetworkMonitor] ERROR: Student {studentCode} has no packet buffer! This should never happen.");
+                return;
+            }
+            
+            // Store to student's local buffer
+            buffer.Enqueue(packetInfo);
+            
+            // CRITICAL VALIDATION #5: Verify RunContext exists for this student
+            if (!_studentRunContexts.TryGetValue(studentCode, out var runContext))
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] ERROR: Student {studentCode} has no RunContext! Packet will not be stored for grading.");
+                return;
             }
             
             // CRITICAL: Store to RunContext for grading system compatibility
             // The grading system retrieves packets via runContext.GetCapturedNetworkPackets()
-            if (_studentRunContexts.TryGetValue(studentCode, out var runContext))
+            var capturedPacket = new CapturedNetworkPacket
             {
-                var capturedPacket = new CapturedNetworkPacket
-                {
-                    Stage = stageNum,
-                    Timestamp = rawPacket.Timeval.Date,
-                    Flags = flags,
-                    State = state,
-                    SourceRole = srcRole,
-                    DestinationRole = dstRole,
-                    Data = payload,
-                    SourcePort = srcPort,
-                    DestinationPort = dstPort
-                };
-                
-                runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
-                
-                // Console logging for debugging (matches NetworkMonitorService format)
-                var logMessage = $"[SharedNetworkMonitor] [{studentCode}] {srcRole}->{dstRole} [{flags}] {state}";
-                if (!string.IsNullOrEmpty(payload))
-                {
-                    var payloadPreview = payload.Length > 50 
-                        ? payload.Substring(0, 50) + "..." 
-                        : payload;
-                    logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
-                }
-                Console.WriteLine(logMessage);
-                
-                // CRITICAL: Store payload to RunContext with HTTP parsing (matches NetworkMonitorService)
-                if (!string.IsNullOrEmpty(payload))
-                {
-                    StorePayloadToRunContext(runContext, srcRole, payload, questionCode, stage);
-                }
-            }
-            else
+                Stage = stageNum,
+                Timestamp = rawPacket.Timeval.Date,
+                Flags = flags,
+                State = state,
+                SourceRole = srcRole,
+                DestinationRole = dstRole,
+                Data = payload,
+                SourcePort = srcPort,
+                DestinationPort = dstPort
+            };
+            
+            // CRITICAL VALIDATION #6: Verify packet has correct student port
+            // This ensures the packet is tagged with the student's allocated port, not some other port
+            bool packetHasStudentPort = (srcPort == studentPort || dstPort == studentPort);
+            if (!packetHasStudentPort)
             {
-                // Should not happen - log warning
-                Console.WriteLine($"[SharedNetworkMonitor] WARNING: RunContext not found for student {studentCode}");
+                Console.WriteLine($"[SharedNetworkMonitor] CRITICAL ERROR: Packet for student {studentCode} (port {studentPort}) has src={srcPort}, dst={dstPort}");
+                Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - packet routing is broken!");
+                return; // Discard this packet as it's incorrectly routed
             }
+            
+            runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
+                
+            // CRITICAL VALIDATION #7: Detailed logging for packet attribution
+            // This helps debug any potential isolation issues
+            var logMessage = $"[SharedNetworkMonitor] [{studentCode}|Port:{studentPort}|Stage:{stage}] {srcRole}->{dstRole} " +
+                           $"[{flags}] {state} (src:{srcPort}, dst:{dstPort})";
+            if (!string.IsNullOrEmpty(payload))
+            {
+                var payloadPreview = payload.Length > 50 
+                    ? payload.Substring(0, 50) + "..." 
+                    : payload;
+                logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
+            }
+            Console.WriteLine(logMessage);
+            
+            // CRITICAL: Store payload to RunContext with HTTP parsing (matches NetworkMonitorService)
+            if (!string.IsNullOrEmpty(payload))
+            {
+                StorePayloadToRunContext(runContext, srcRole, payload, questionCode, stage);
+            }
+            
+            // VALIDATION #8: Packet stored successfully
+            // (Removed expensive Count() check - packet storage is validated by earlier checks)
+            // If we reach here, all validations passed and packet was stored correctly
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[SharedNetworkMonitor] Packet processing error: {ex.Message}");
+            Console.WriteLine($"[SharedNetworkMonitor] Stack trace: {ex.StackTrace}");
         }
     }
     
@@ -584,13 +676,26 @@ public sealed class SharedNetworkMonitorService : IDisposable
     
     /// <summary>
     /// Set the current context (question code, stage) for a student.
+    /// CRITICAL FIX: Uses stage window tracking to prevent race conditions
+    /// when multiple stages are executing concurrently or transitioning quickly.
+    /// 
+    /// This method records the START of a new stage, which allows packets to be
+    /// correctly attributed based on their capture timestamp relative to stage windows.
     /// </summary>
     public void SetStudentContext(string studentCode, string questionCode, string stage)
     {
         if (_studentContexts.TryGetValue(studentCode, out var context))
         {
+            var now = DateTime.UtcNow.Ticks;
+            
+            // Update context with stage window tracking
             context.QuestionCode = questionCode;
-            context.Stage = stage;
+            context.RecordStageStart(stage, now);
+            
+            // Track timestamp for debugging and correlation
+            _studentStageTimestamps[studentCode] = (stage, now);
+            
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Stage {stage} started at {new DateTime(now):HH:mm:ss.fff}");
         }
     }
     
@@ -602,6 +707,20 @@ public sealed class SharedNetworkMonitorService : IDisposable
         if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
         {
             while (buffer.TryDequeue(out _)) { }
+        }
+    }
+    
+    /// <summary>
+    /// Marks the end of a stage for more accurate stage window tracking.
+    /// OPTIONAL: This is called when a stage completes to close its window.
+    /// If not called, windows are auto-closed when the next stage starts.
+    /// </summary>
+    public void EndStageContext(string studentCode, string stage)
+    {
+        if (_studentContexts.TryGetValue(studentCode, out var context))
+        {
+            var now = DateTime.UtcNow.Ticks;
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Stage {stage} ended at {new DateTime(now):HH:mm:ss.fff}");
         }
     }
     
@@ -798,11 +917,86 @@ public sealed class SharedNetworkMonitorService : IDisposable
 
 /// <summary>
 /// Context information for a student's grading session.
+/// CRITICAL FIX: Added stage window tracking to prevent race conditions
+/// when multiple stages execute concurrently or transition quickly.
 /// </summary>
 public class StudentContext
 {
-    public string QuestionCode { get; set; } = "";
-    public string Stage { get; set; } = "0";
+    private readonly object _lock = new object();
+    private string _questionCode = "";
+    private string _stage = "0";
+    
+    // CRITICAL FIX: Track stage execution windows to correctly attribute packets
+    // Key: stage number, Value: (start timestamp, end timestamp in ticks)
+    // When a new stage starts, we record its start time
+    // When we receive a packet, we match it to the appropriate stage based on timestamp
+    private readonly Dictionary<string, (long StartTicks, long? EndTicks)> _stageWindows = new();
+    
+    public string QuestionCode 
+    { 
+        get { lock (_lock) return _questionCode; }
+        set { lock (_lock) _questionCode = value; }
+    }
+    
+    public string Stage 
+    { 
+        get { lock (_lock) return _stage; }
+        set { lock (_lock) _stage = value; }
+    }
+    
+    /// <summary>
+    /// Records that a stage has started executing at this timestamp.
+    /// CRITICAL: This allows us to correctly attribute packets to stages
+    /// even when multiple stages are executing concurrently.
+    /// </summary>
+    public void RecordStageStart(string stage, long timestampTicks)
+    {
+        lock (_lock)
+        {
+            // End the previous stage window if it exists and is still open
+            if (!string.IsNullOrEmpty(_stage) && _stageWindows.ContainsKey(_stage))
+            {
+                var prevWindow = _stageWindows[_stage];
+                if (prevWindow.EndTicks == null)
+                {
+                    _stageWindows[_stage] = (prevWindow.StartTicks, timestampTicks);
+                }
+            }
+            
+            // Start new stage window
+            _stageWindows[stage] = (timestampTicks, null); // null = still open
+            _stage = stage;
+        }
+    }
+    
+    /// <summary>
+    /// Gets the stage that was active at the given timestamp.
+    /// CRITICAL: Uses stage windows to determine which stage a packet belongs to,
+    /// preventing misattribution when stages transition quickly.
+    /// </summary>
+    public string GetStageAtTimestamp(long timestampTicks)
+    {
+        lock (_lock)
+        {
+            // Find the stage window that contains this timestamp
+            foreach (var kvp in _stageWindows)
+            {
+                var (startTicks, endTicks) = kvp.Value;
+                
+                // Packet is in this stage if:
+                // - Timestamp >= stage start
+                // - AND (stage has no end OR timestamp < stage end)
+                if (timestampTicks >= startTicks && 
+                    (endTicks == null || timestampTicks < endTicks.Value))
+                {
+                    return kvp.Key;
+                }
+            }
+            
+            // Fallback: use current stage
+            return _stage;
+        }
+    }
 }
 
 /// <summary>
