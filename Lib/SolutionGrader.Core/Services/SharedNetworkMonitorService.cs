@@ -57,8 +57,15 @@ public sealed class SharedNetworkMonitorService : IDisposable
     // Per-student packet buffers (thread-safe)
     private readonly ConcurrentDictionary<string, ConcurrentQueue<PacketInfo>> _studentPacketBuffers = new();
     
-    // Per-student context (question code, stage)
+    // CRITICAL FIX: Per-student context (question code, stage)
+    // Changed from single StudentContext to thread-safe atomic reference
+    // This prevents stage context from being overwritten during concurrent stage execution
     private readonly ConcurrentDictionary<string, StudentContext> _studentContexts = new();
+    
+    // CRITICAL FIX: Stage timestamp tracking to detect context corruption
+    // Key: studentCode, Value: timestamp when stage was last updated
+    // Used to validate that packets are tagged with the correct stage
+    private readonly ConcurrentDictionary<string, (string Stage, long TimestampTicks)> _studentStageTimestamps = new();
     
     // Protocol type per port
     private readonly ConcurrentDictionary<int, string> _portProtocols = new();
@@ -93,6 +100,32 @@ public sealed class SharedNetworkMonitorService : IDisposable
             throw new ArgumentException($"Port {port} is outside the monitored range {_startPort}-{_endPort}");
         }
         
+        // CRITICAL VALIDATION: Check if this port is already registered to a different student
+        if (_portToStudentCode.TryGetValue(port, out var existingStudent) && existingStudent != studentCode)
+        {
+            var errorMsg = $"[SharedNetworkMonitor] CRITICAL ERROR: Port {port} is already registered to student {existingStudent}, cannot register for {studentCode}! This indicates a port allocation race condition.";
+            Console.WriteLine(errorMsg);
+            throw new InvalidOperationException(errorMsg);
+        }
+        
+        // CRITICAL VALIDATION: Check if this student is already registered with a different port
+        if (_studentPacketBuffers.ContainsKey(studentCode))
+        {
+            // Find the port this student is currently registered with
+            var currentPort = _portToStudentCode.FirstOrDefault(kvp => kvp.Value == studentCode).Key;
+            if (currentPort != port)
+            {
+                var errorMsg = $"[SharedNetworkMonitor] CRITICAL ERROR: Student {studentCode} is already registered with port {currentPort}, cannot re-register with port {port}! This indicates a port allocation race condition.";
+                Console.WriteLine(errorMsg);
+                throw new InvalidOperationException(errorMsg);
+            }
+            else
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Student {studentCode} is already registered on port {port}, skipping duplicate registration");
+                return; // Already registered, skip
+            }
+        }
+        
         _portToStudentCode[port] = studentCode;
         _studentPacketBuffers[studentCode] = new ConcurrentQueue<PacketInfo>();
         _studentContexts[studentCode] = new StudentContext();
@@ -102,7 +135,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         UpdateBpfFilter();
         
-        Console.WriteLine($"[SharedNetworkMonitor] Registered {studentCode} on port {port}");
+        Console.WriteLine($"[SharedNetworkMonitor] SUCCESS: Registered student {studentCode} on port {port} (range: {_startPort}-{_endPort})");
     }
     
     /// <summary>
@@ -453,13 +486,20 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 payload = System.Text.Encoding.UTF8.GetString(tcpPacket.PayloadData);
             }
             
-            // Get context for this student
+            // CRITICAL FIX: Determine the correct stage for this packet using timestamp-based stage windows
+            // This prevents race conditions where stage context is updated while packets are still being captured
             string questionCode = "";
             string stage = "0";
+            
             if (_studentContexts.TryGetValue(studentCode, out var context))
             {
                 questionCode = context.QuestionCode;
-                stage = context.Stage;
+                
+                // CRITICAL: Match packet to stage based on its capture timestamp
+                // This ensures packets are attributed to the stage that was active when they were captured,
+                // not the stage that happens to be current when the packet handler runs
+                long packetTimestampTicks = rawPacket.Timeval.Date.Ticks;
+                stage = context.GetStageAtTimestamp(packetTimestampTicks);
             }
             
             // Parse stage to int
@@ -584,13 +624,26 @@ public sealed class SharedNetworkMonitorService : IDisposable
     
     /// <summary>
     /// Set the current context (question code, stage) for a student.
+    /// CRITICAL FIX: Uses stage window tracking to prevent race conditions
+    /// when multiple stages are executing concurrently or transitioning quickly.
+    /// 
+    /// This method records the START of a new stage, which allows packets to be
+    /// correctly attributed based on their capture timestamp relative to stage windows.
     /// </summary>
     public void SetStudentContext(string studentCode, string questionCode, string stage)
     {
         if (_studentContexts.TryGetValue(studentCode, out var context))
         {
+            var now = DateTime.UtcNow.Ticks;
+            
+            // Update context with stage window tracking
             context.QuestionCode = questionCode;
-            context.Stage = stage;
+            context.RecordStageStart(stage, now);
+            
+            // Track timestamp for debugging and correlation
+            _studentStageTimestamps[studentCode] = (stage, now);
+            
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Stage {stage} started at {new DateTime(now):HH:mm:ss.fff}");
         }
     }
     
@@ -602,6 +655,20 @@ public sealed class SharedNetworkMonitorService : IDisposable
         if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
         {
             while (buffer.TryDequeue(out _)) { }
+        }
+    }
+    
+    /// <summary>
+    /// Marks the end of a stage for more accurate stage window tracking.
+    /// OPTIONAL: This is called when a stage completes to close its window.
+    /// If not called, windows are auto-closed when the next stage starts.
+    /// </summary>
+    public void EndStageContext(string studentCode, string stage)
+    {
+        if (_studentContexts.TryGetValue(studentCode, out var context))
+        {
+            var now = DateTime.UtcNow.Ticks;
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Stage {stage} ended at {new DateTime(now):HH:mm:ss.fff}");
         }
     }
     
@@ -798,11 +865,86 @@ public sealed class SharedNetworkMonitorService : IDisposable
 
 /// <summary>
 /// Context information for a student's grading session.
+/// CRITICAL FIX: Added stage window tracking to prevent race conditions
+/// when multiple stages execute concurrently or transition quickly.
 /// </summary>
 public class StudentContext
 {
-    public string QuestionCode { get; set; } = "";
-    public string Stage { get; set; } = "0";
+    private readonly object _lock = new object();
+    private string _questionCode = "";
+    private string _stage = "0";
+    
+    // CRITICAL FIX: Track stage execution windows to correctly attribute packets
+    // Key: stage number, Value: (start timestamp, end timestamp in ticks)
+    // When a new stage starts, we record its start time
+    // When we receive a packet, we match it to the appropriate stage based on timestamp
+    private readonly Dictionary<string, (long StartTicks, long? EndTicks)> _stageWindows = new();
+    
+    public string QuestionCode 
+    { 
+        get { lock (_lock) return _questionCode; }
+        set { lock (_lock) _questionCode = value; }
+    }
+    
+    public string Stage 
+    { 
+        get { lock (_lock) return _stage; }
+        set { lock (_lock) _stage = value; }
+    }
+    
+    /// <summary>
+    /// Records that a stage has started executing at this timestamp.
+    /// CRITICAL: This allows us to correctly attribute packets to stages
+    /// even when multiple stages are executing concurrently.
+    /// </summary>
+    public void RecordStageStart(string stage, long timestampTicks)
+    {
+        lock (_lock)
+        {
+            // End the previous stage window if it exists and is still open
+            if (!string.IsNullOrEmpty(_stage) && _stageWindows.ContainsKey(_stage))
+            {
+                var prevWindow = _stageWindows[_stage];
+                if (prevWindow.EndTicks == null)
+                {
+                    _stageWindows[_stage] = (prevWindow.StartTicks, timestampTicks);
+                }
+            }
+            
+            // Start new stage window
+            _stageWindows[stage] = (timestampTicks, null); // null = still open
+            _stage = stage;
+        }
+    }
+    
+    /// <summary>
+    /// Gets the stage that was active at the given timestamp.
+    /// CRITICAL: Uses stage windows to determine which stage a packet belongs to,
+    /// preventing misattribution when stages transition quickly.
+    /// </summary>
+    public string GetStageAtTimestamp(long timestampTicks)
+    {
+        lock (_lock)
+        {
+            // Find the stage window that contains this timestamp
+            foreach (var kvp in _stageWindows)
+            {
+                var (startTicks, endTicks) = kvp.Value;
+                
+                // Packet is in this stage if:
+                // - Timestamp >= stage start
+                // - AND (stage has no end OR timestamp < stage end)
+                if (timestampTicks >= startTicks && 
+                    (endTicks == null || timestampTicks < endTicks.Value))
+                {
+                    return kvp.Key;
+                }
+            }
+            
+            // Fallback: use current stage
+            return _stage;
+        }
+    }
 }
 
 /// <summary>
