@@ -344,8 +344,11 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // Read starting port from environment.xlsx in test kit folder
+                // Read starting port from OUTERMOST environment.xlsx in test kit ROOT folder
+                // NOT from the specific question's test kit folder
                 // This determines where port allocation starts (e.g., 8000, 5000, etc.)
+                // config.TestKitFolderPath points to the ROOT test kit folder (e.g., C:\Testkit_Q1_PRN222)
+                // testKitPath points to specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
                 int startingPort = ReadStartingPortFromEnvironmentXlsx(config.TestKitFolderPath);
                 if (startingPort <= 0)
                 {
@@ -766,21 +769,29 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Reads the starting port from environment.xlsx in the test kit folder.
+        /// Reads the starting port from OUTERMOST environment.xlsx in the test kit ROOT folder.
         /// This determines the base port number from which sequential allocation begins.
+        /// 
+        /// IMPORTANT: This reads from the TEST KIT ROOT folder (e.g., C:\Testkit_Q1_PRN222\environment.xlsx),
+        /// NOT from individual question folders (e.g., C:\Testkit_Q1_PRN222\Q12\environment.xlsx).
+        /// The outermost environment.xlsx contains global configuration like MonitorPort that applies
+        /// to all questions in the test kit.
         /// </summary>
-        /// <param name="testKitPath">Path to test kit folder containing environment.xlsx</param>
+        /// <param name="testKitRootPath">Path to test kit ROOT folder containing outermost environment.xlsx</param>
         /// <returns>Starting port number from MonitorPort field, or 0 if not found</returns>
-        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitRootPath)
         {
             try
             {
-                var environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                // Look for environment.xlsx at the ROOT level of test kit folder
+                var environmentPath = Path.Combine(testKitRootPath, "environment.xlsx");
                 if (!File.Exists(environmentPath))
                 {
-                    _logger.LogWarning($"environment.xlsx not found at {environmentPath}");
+                    _logger.LogWarning($"Outermost environment.xlsx not found at {environmentPath}. Container port will default to 8000.");
                     return 0;
                 }
+
+                _logger.LogInfo($"Reading MonitorPort from outermost environment.xlsx: {environmentPath}");
 
                 using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
                 {
@@ -795,16 +806,18 @@ namespace SolutionGrader.UI.Services
                             var valueCell = row.Cell(2).Value.ToString().Trim();
                             if (int.TryParse(valueCell, out int port) && port > 0 && port <= 65535)
                             {
-                                _logger.LogInfo($"Read MonitorPort={port} from environment.xlsx");
+                                _logger.LogInfo($"Successfully read MonitorPort={port} from outermost environment.xlsx. Container creation will use this as starting port.");
                                 return port;
                             }
                         }
                     }
+                    
+                    _logger.LogWarning($"MonitorPort field not found in outermost environment.xlsx at {environmentPath}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error reading MonitorPort from environment.xlsx: {ex.Message}");
+                _logger.LogWarning($"Error reading MonitorPort from outermost environment.xlsx: {ex.Message}");
             }
 
             return 0;
