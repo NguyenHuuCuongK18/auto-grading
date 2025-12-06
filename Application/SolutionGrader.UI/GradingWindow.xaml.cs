@@ -465,9 +465,7 @@ namespace SolutionGrader.UI
             // All parallel students will use this SAME GradingMessageLogger instance
             // to ensure thread-safe logging without file access conflicts
             // The logger creates ONE log file per session with a unique timestamp
-            var resultPath = !string.IsNullOrEmpty(_configuration.SaveResultFolderPath) 
-                ? _configuration.SaveResultFolderPath 
-                : Path.Combine(_configuration.SubmitFolderPath, "Results");
+            var resultPath = _configuration.GetEffectiveResultPath();
             _sharedMessageLogger = new GradingMessageLogger(resultPath);
             _logger.LogInfo($"[Message Logger] Initialized SHARED GradingMessageLogger for batch grading session");
             

@@ -81,9 +81,7 @@ namespace SolutionGrader.UI.Services
             }
 
             // Initialize result writer for saving StudentsSolution.xlsx
-            var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
-                ? config.SaveResultFolderPath 
-                : Path.Combine(config.SubmitFolderPath, "Results");
+            var resultPath = config.GetEffectiveResultPath();
             _resultWriter = new ResultWriterService(_logger, resultPath);
 
             // Initialize Excel log coordinator for centralized, thread-safe Excel updates
