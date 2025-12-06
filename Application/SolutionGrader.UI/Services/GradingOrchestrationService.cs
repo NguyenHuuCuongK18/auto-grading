@@ -345,7 +345,10 @@ namespace SolutionGrader.UI.Services
                     DatabaseUsername = config.DatabaseUsername ?? "sa",
                     DatabasePassword = config.DatabasePassword,
                     
-                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds,
+                    
+                    // DLL modification fallback setting
+                    UseDllModificationFallback = config.UseDllModificationFallback
                 };
                 
                 _logger.LogInfo($"[{student.StudentCode}] Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");

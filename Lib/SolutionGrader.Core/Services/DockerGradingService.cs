@@ -347,7 +347,7 @@ namespace SolutionGrader.Core.Services
                     
                     // Copy files to containers (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
-                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer);
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer, config);
                     
                     // Generate appsettings.json in containers
                     GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
@@ -656,8 +656,14 @@ namespace SolutionGrader.Core.Services
             string? serverDllPath,
             string? clientDllPath,
             string serverContainer,
-            string clientContainer)
+            string clientContainer,
+            DockerGradingConfig config)
         {
+            // CRITICAL: DLL modification MUST happen BEFORE copying to container
+            // We modify the DLL files on the HOST machine (where student submissions are)
+            // Then the modified DLL is copied into the Docker container
+            var dllModService = new DllModificationService();
+            
             if (!string.IsNullOrEmpty(serverDllPath))
             {
                 var serverDir = Path.GetDirectoryName(serverDllPath);
@@ -666,11 +672,35 @@ namespace SolutionGrader.Core.Services
                     var folderName = Path.GetFileName(serverDir);
                     try
                     {
-                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                        // Apply DLL modification fallback on HOST machine BEFORE copying
+                        if (config.UseDllModificationFallback)
+                        {
+                            Console.WriteLine($"[DllMod] Checking server directory on HOST: {serverDir}");
+                            var result = dllModService.CheckAndPatchIfNeeded(
+                                serverDir,
+                                config.ServerProjectName,
+                                isServer: true,
+                                targetPort: config.CodeContainerHostPort
+                            );
+                            
+                            Console.WriteLine($"[DllMod] Server fallback result: {result.GetSummary()}");
+                            
+                            // If DLL modification was required but failed, log warning but continue
+                            // (appsettings generation will still happen as a second fallback)
+                            if (result.RequiresDllModification && !result.Success)
+                            {
+                                Console.WriteLine($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
+                            }
+                            else if (result.RequiresDllModification && result.Success)
+                            {
+                                Console.WriteLine($"[DllMod] Server DLL successfully modified on HOST machine at: {result.DllPath}");
+                            }
+                        }
                         
-                        // Docker cp will overwrite existing files automatically
+                        // NOW copy the (potentially modified) files from HOST to container
+                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
                         _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
+                        Console.WriteLine($"[Docker] Copied server files from HOST {serverDir} to container {serverContainer}:/apps/{folderName}");
                     }
                     catch (Exception ex)
                     {
@@ -687,11 +717,35 @@ namespace SolutionGrader.Core.Services
                     var folderName = Path.GetFileName(clientDir);
                     try
                     {
-                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                        // Apply DLL modification fallback on HOST machine BEFORE copying
+                        if (config.UseDllModificationFallback)
+                        {
+                            Console.WriteLine($"[DllMod] Checking client directory on HOST: {clientDir}");
+                            var result = dllModService.CheckAndPatchIfNeeded(
+                                clientDir,
+                                config.ClientProjectName,
+                                isServer: false,
+                                targetPort: config.CodeContainerHostPort
+                            );
+                            
+                            Console.WriteLine($"[DllMod] Client fallback result: {result.GetSummary()}");
+                            
+                            // If DLL modification was required but failed, log warning but continue
+                            // (appsettings generation will still happen as a second fallback)
+                            if (result.RequiresDllModification && !result.Success)
+                            {
+                                Console.WriteLine($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
+                            }
+                            else if (result.RequiresDllModification && result.Success)
+                            {
+                                Console.WriteLine($"[DllMod] Client DLL successfully modified on HOST machine at: {result.DllPath}");
+                            }
+                        }
                         
-                        // Docker cp will overwrite existing files automatically
+                        // NOW copy the (potentially modified) files from HOST to container
+                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
                         _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
+                        Console.WriteLine($"[Docker] Copied client files from HOST {clientDir} to container {clientContainer}:/apps/{folderName}");
                     }
                     catch (Exception ex)
                     {
@@ -731,7 +785,37 @@ namespace SolutionGrader.Core.Services
             
             Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
-            if (!string.IsNullOrEmpty(serverDllPath))
+            // Check if DLL modification fallback is enabled and was used
+            var dllModService = new DllModificationService();
+            bool skipServerAppsettings = false;
+            bool skipClientAppsettings = false;
+            
+            if (config.UseDllModificationFallback)
+            {
+                // Check if appsettings exists for server
+                if (!string.IsNullOrEmpty(serverDllPath))
+                {
+                    var serverDir = Path.GetDirectoryName(serverDllPath);
+                    if (serverDir != null && !dllModService.AppsettingsExists(serverDir))
+                    {
+                        skipServerAppsettings = true;
+                        Console.WriteLine($"[Appsettings] Skipping server appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                    }
+                }
+                
+                // Check if appsettings exists for client
+                if (!string.IsNullOrEmpty(clientDllPath))
+                {
+                    var clientDir = Path.GetDirectoryName(clientDllPath);
+                    if (clientDir != null && !dllModService.AppsettingsExists(clientDir))
+                    {
+                        skipClientAppsettings = true;
+                        Console.WriteLine($"[Appsettings] Skipping client appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                    }
+                }
+            }
+            
+            if (!skipServerAppsettings && !string.IsNullOrEmpty(serverDllPath))
             {
                 var serverDir = Path.GetDirectoryName(serverDllPath);
                 if (serverDir != null)
@@ -769,7 +853,7 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            if (!string.IsNullOrEmpty(clientDllPath))
+            if (!skipClientAppsettings && !string.IsNullOrEmpty(clientDllPath))
             {
                 var clientDir = Path.GetDirectoryName(clientDllPath);
                 if (clientDir != null)
@@ -2204,6 +2288,14 @@ namespace SolutionGrader.Core.Services
         /// it is stopped and marked as failed. Default: 15 seconds.
         /// </summary>
         public int TestCaseTimeoutSeconds { get; set; } = 15;
+        
+        /// <summary>
+        /// Enables DLL modification fallback when appsettings.json is not found.
+        /// When enabled and appsettings.json doesn't exist, the system will attempt to 
+        /// directly patch the compiled DLL files to set correct IP addresses and ports.
+        /// Default: false (disabled).
+        /// </summary>
+        public bool UseDllModificationFallback { get; set; } = false;
     }
     
     /// <summary>

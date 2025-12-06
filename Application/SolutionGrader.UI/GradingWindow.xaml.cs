@@ -83,6 +83,9 @@ namespace SolutionGrader.UI
             // Initialize batch grading configuration control with default value
             txtMaxParallelStudents.Text = _configuration.MaxParallelStudents.ToString();
             
+            // Initialize DLL modification fallback checkbox
+            chkUseDllModFallback.IsChecked = _configuration.UseDllModificationFallback;
+            
             // Initialize index selection controls with 1-based defaults
             txtSelectStartIndex.Text = "1";
             txtSelectEndIndex.Text = "-1";
@@ -99,6 +102,7 @@ namespace SolutionGrader.UI
             
             _logger.LogInfo("Grading window initialized");
             _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}");
+            _logger.LogInfo($"DLL modification fallback: {(_configuration.UseDllModificationFallback ? "Enabled" : "Disabled")}");
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -347,6 +351,9 @@ namespace SolutionGrader.UI
             {
                 _configuration.MaxParallelStudents = Math.Max(1, maxParallel);
             }
+            
+            // Read DLL modification fallback setting from UI
+            _configuration.UseDllModificationFallback = chkUseDllModFallback.IsChecked == true;
             
             // FIXED: Enhanced logging and validation to debug selection issues
             _logger.LogInfo($"=== Starting Grading Session ===");
