@@ -344,57 +344,35 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // Read starting port from environment.xlsx in the QUESTION-SPECIFIC test kit folder
+                // Read MonitorPort from environment.xlsx in the QUESTION-SPECIFIC test kit folder
                 // testKitPath points to the specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
                 // This is where environment.xlsx with MonitorPort configuration is located
-                int startingPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
-                if (startingPort <= 0)
+                int monitorPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                if (monitorPort <= 0)
                 {
-                    startingPort = 8000; // Fallback default if not found in environment.xlsx
-                    _logger.LogWarning($"Could not read MonitorPort from environment.xlsx, using default starting port {startingPort}");
+                    monitorPort = 8000; // Fallback default if not found in environment.xlsx
+                    _logger.LogWarning($"Could not read MonitorPort from environment.xlsx, using default port {monitorPort}");
                 }
                 else
                 {
-                    _logger.LogInfo($"Read starting port {startingPort} from environment.xlsx");
+                    _logger.LogInfo($"Read MonitorPort {monitorPort} from environment.xlsx - using this port directly");
                 }
                 
-                // CRITICAL FIX: Allocate a unique port for this student using PortAllocator
-                // This prevents port conflicts in batch grading where multiple students run in parallel
-                // Each student MUST have their own dedicated port for client-server communication
-                // Port allocation is sequential and NEVER recycled:
-                // - Student 1: port startingPort
-                // - Student 2: port startingPort + 1
-                // - Student 1000: port startingPort + 999
-                // - Student 1001: port startingPort + 1000
-                // No reuse, unlimited students supported
-                using var portAllocator = new PortAllocator(startingPort);
-                int allocatedPort = portAllocator.AllocatePort();
+                // CRITICAL: Use MonitorPort DIRECTLY for all components (container, DLL mod, network monitor)
+                // DO NOT use PortAllocator because it maintains a global counter that ignores test kit preferences.
+                // 
+                // For sequential grading (common case):
+                // - Each student uses the same port (e.g., 4001 from environment.xlsx)
+                // - No conflicts because students run one at a time
+                // - Container from student 1 is cleaned up before student 2 starts
+                // 
+                // For true parallel grading:
+                // - Use different test kits with different MonitorPorts
+                // - OR implement staggered startup delays
+                // - Current sequential approach is sufficient for most use cases
+                int portToUse = monitorPort;
                 
-                if (allocatedPort == -1)
-                {
-                    var errorMsg = "Failed to allocate port for grading. All searched ports are in use. Try clearing port tracking file or wait for ports to become available.";
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = errorMsg;
-                    student.EndTime = DateTime.Now;
-                    _logger.LogError($"[{student.StudentCode}] {errorMsg}");
-                    _messageLogger?.LogGraderError(
-                        GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.UnexpectedError, errorMsg),
-                        student.StudentCode, null);
-                    
-                    // Update Excel: Student failed due to port allocation
-                    student.ProgressPercent = 100;
-                    _excelCoordinator?.UpdateStudentCompleted(
-                        student.StudentCode,
-                        student.PaperNo,
-                        DateTime.Now,
-                        0.0,
-                        GradingStatus.Failed);
-                    
-                    StudentGradingCompleted?.Invoke(this, student);
-                    return;
-                }
-                
-                _logger.LogInfo($"[{student.StudentCode}] Allocated port {allocatedPort} for student grading");
+                _logger.LogInfo($"[{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
                 
                 // Build Docker configuration from UI config
                 // The examiner sets HasClient/HasServer to indicate what the student should provide:
@@ -409,11 +387,12 @@ namespace SolutionGrader.UI.Services
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
-                    // Container settings - USE ALLOCATED PORT for both internal and host
+                    // Container settings - USE MONITOR PORT DIRECTLY from environment.xlsx
                     // CRITICAL: Both ports must be the same for network monitoring to work correctly
                     // The server binds to this port inside the container, and it's exposed to host on the same port
-                    CodeContainerInternalPort = allocatedPort,
-                    CodeContainerHostPort = allocatedPort,
+                    // DLL modification also uses this same port to patch hardcoded values
+                    CodeContainerInternalPort = portToUse,
+                    CodeContainerHostPort = portToUse,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
                     
                     // Database container settings
