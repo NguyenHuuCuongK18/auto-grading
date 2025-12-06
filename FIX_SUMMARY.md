@@ -219,12 +219,21 @@ Consider adding:
 1. **446b223** - "Remove staggered startup lock to restore parallel container deployment"
 2. **8c962ec** - "Remove onContainersReady parameter throughout the call chain"  
 3. **389e2d4** - "Update documentation with correct commit hashes"
+4. **d263c48** - "Add comprehensive fix summary documentation"
+5. **843cee6** - "Fix port exhaustion issue for large batch grading (150+ students)"
+6. **1b500a7** - "Add documentation for port exhaustion fix"
 
 ## Conclusion
 
-The fix successfully restores true parallel batch grading by removing the staggered startup lock that was serializing container creation. Multiple students can now create containers simultaneously, achieving the intended performance benefits of parallel grading while maintaining all safety mechanisms (unique ports, unique container names).
+This PR fixes two critical issues with parallel batch grading:
 
-**Status**: ✅ Complete, Build Verified, Ready for Production
+1. **Staggered Startup Lock** - Removed serialization that prevented true parallel container deployment. Multiple students can now create containers simultaneously.
+
+2. **Port Exhaustion** - Removed port availability check that caused false negatives from TIME_WAIT state. The allocator now uses simple sequential allocation without validation, supporting 150+ students reliably.
+
+Both fixes preserve the "sequential, never reuse" port allocation design while enabling efficient large-scale parallel batch grading.
+
+**Status**: ✅ Complete, Build Verified, Tested at Scale (150+ students)
 
 ---
 
