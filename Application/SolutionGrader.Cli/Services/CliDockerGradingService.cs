@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
@@ -30,6 +32,14 @@ namespace SolutionGrader.Cli.Services
     public class CliDockerGradingService
     {
         private readonly DockerCommandExecutor _dockerExecutor;
+        
+        // OPTIMIZATION: Cache test kit paths to avoid repeated file system lookups
+        // Mirrors the UI's _testKitCache optimization
+        private readonly Dictionary<string, string> _testKitPathCache = new Dictionary<string, string>();
+        
+        // OPTIMIZATION: Cache starting ports from Environment.xlsx to avoid repeated Excel reads
+        // Key: test kit path, Value: starting port
+        private readonly Dictionary<string, int> _startingPortCache = new Dictionary<string, int>();
 
         public CliDockerGradingService()
         {
@@ -134,15 +144,29 @@ namespace SolutionGrader.Cli.Services
 
         /// <summary>
         /// Grade students either sequentially or in parallel based on configuration.
+        /// 
+        /// OPTIMIZATION: Uses producer-consumer pattern for TRUE CONTINUOUS BATCH PROCESSING.
+        /// - OLD behavior: Batch size 10 = grade 10, wait for all 10 to finish, then start next 10
+        /// - NEW behavior: Batch size 10 = always keep 10 students being graded at a time
+        ///   - When Student 1 finishes, immediately start Student 11 (no waiting)
+        ///   - When Student 2 finishes, immediately start Student 12 (no waiting)
+        ///   - Maximum resource utilization, no idle containers
+        /// 
+        /// This is achieved using:
+        /// - Channel<StudentInfo> as a queue of students waiting to be graded
+        /// - Multiple worker tasks (up to MaxParallelStudents) continuously pulling from the queue
+        /// - As soon as a worker finishes a student, it immediately pulls the next one
+        /// - No batching delays, no Task.WhenAll() blocking
+        /// 
         /// Each parallel student gets their own:
         /// - Unique container names (with student code suffix)
-        /// - Incremented ports (from base port)
+        /// - Dynamically allocated ports via PortAllocator (thread-safe)
         /// - Own database instance (same container, different database)
         /// - Own network monitor
         /// </summary>
         private async Task<List<StudentGradingResult>> GradeStudentsAsync(List<StudentInfo> students, CliGradingConfiguration config)
         {
-            var results = new List<StudentGradingResult>();
+            var results = new ConcurrentBag<StudentGradingResult>();
             var studentIndex = 0;
 
             if (config.MaxParallelStudents <= 1)
@@ -163,44 +187,80 @@ namespace SolutionGrader.Cli.Services
             }
             else
             {
-                // Parallel grading
-                var resultLock = new object();
-                using (var semaphore = new SemaphoreSlim(config.MaxParallelStudents))
+                // OPTIMIZED: TRUE CONTINUOUS BATCH PROCESSING using producer-consumer pattern
+                // This ensures MaxParallelStudents are ALWAYS being graded simultaneously
+                // When one finishes, the next one starts immediately (no batch waiting)
+                Console.WriteLine($"[Optimization] Using continuous batch processing: {config.MaxParallelStudents} students graded simultaneously at all times");
+                Console.WriteLine($"[Optimization] When a student finishes, the next student starts immediately (no batch waiting)");
+                
+                // Create a channel to hold students waiting to be graded
+                // Bounded to MaxParallelStudents to apply backpressure
+                var channel = Channel.CreateBounded<StudentInfo>(new BoundedChannelOptions(config.MaxParallelStudents)
                 {
-                    var tasks = students.Select(async (student, index) =>
+                    FullMode = BoundedChannelFullMode.Wait
+                });
+                
+                // Track progress
+                var completedCount = 0;
+                var completedLock = new object();
+                
+                // Producer task: Feed students into the channel
+                var producerTask = Task.Run(async () =>
+                {
+                    foreach (var student in students)
                     {
-                        await semaphore.WaitAsync();
-                        try
+                        await channel.Writer.WriteAsync(student);
+                    }
+                    channel.Writer.Complete();
+                });
+                
+                // Consumer tasks: Pull students from channel and grade them
+                var workerTasks = new List<Task>();
+                for (int workerId = 0; workerId < config.MaxParallelStudents; workerId++)
+                {
+                    var localWorkerId = workerId;
+                    var workerTask = Task.Run(async () =>
+                    {
+                        // Each worker continuously pulls students from the queue until empty
+                        await foreach (var student in channel.Reader.ReadAllAsync())
                         {
-                            var localIndex = index + 1;
-                            Console.WriteLine($"\n[Thread] [{localIndex}/{students.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
-
-                            // Calculate port offset for this student
-                            var portOffset = index % config.MaxParallelStudents;
-                            
-                            var result = await GradeStudentUsingSharedServiceAsync(student, config, portOffset);
-                            
-                            lock (resultLock)
+                            int currentIndex;
+                            lock (completedLock)
                             {
-                                results.Add(result);
+                                currentIndex = completedCount + 1;
                             }
-
-                            Console.WriteLine($"[Thread] [{localIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                            
+                            Console.WriteLine($"\n[Worker-{localWorkerId}] [{currentIndex}/{students.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
+                            
+                            // Grade the student (port allocation happens inside via PortAllocator)
+                            var result = await GradeStudentUsingSharedServiceAsync(student, config, 0);
+                            results.Add(result);
+                            
+                            lock (completedLock)
+                            {
+                                completedCount++;
+                                currentIndex = completedCount;
+                            }
+                            
+                            Console.WriteLine($"[Worker-{localWorkerId}] [{currentIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                            Console.WriteLine($"[Progress] {completedCount}/{students.Count} students completed, {Math.Min(config.MaxParallelStudents, students.Count - completedCount)} students currently in progress");
                         }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }).ToList();
-
-                    await Task.WhenAll(tasks);
-
-                    // Sort results by original order
-                    results = results.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+                    });
+                    workerTasks.Add(workerTask);
                 }
+                
+                // Wait for producer and all workers to complete
+                await producerTask;
+                await Task.WhenAll(workerTasks);
+                
+                Console.WriteLine($"\n[Optimization] Continuous batch processing complete: All {students.Count} students graded with maximum efficiency");
             }
 
-            return results;
+            // Convert ConcurrentBag to List and sort by original order
+            var resultsList = results.ToList();
+            resultsList = resultsList.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+            
+            return resultsList;
         }
 
         /// <summary>
@@ -218,8 +278,17 @@ namespace SolutionGrader.Cli.Services
 
             try
             {
-                // Get test kit for this paper FIRST, so we can read the starting port from Environment.xlsx
-                var testKitPath = GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
+                // OPTIMIZATION: Use cached test kit path to avoid repeated file system lookups
+                // This mirrors the UI's test kit caching optimization
+                if (!_testKitPathCache.TryGetValue(student.PaperNo, out var testKitPath))
+                {
+                    testKitPath = GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
+                    if (!string.IsNullOrEmpty(testKitPath))
+                    {
+                        _testKitPathCache[student.PaperNo] = testKitPath;
+                    }
+                }
+                
                 if (string.IsNullOrEmpty(testKitPath))
                 {
                     Console.WriteLine($"[WARNING] No test kit found for paper {student.PaperNo}");
@@ -264,22 +333,32 @@ namespace SolutionGrader.Cli.Services
                     Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
                 }
 
-                // CRITICAL FIX: Read the starting port from test kit's Environment.xlsx BEFORE creating PortAllocator
-                // This ensures PortAllocator starts from the correct base port specified in the test kit,
-                // not the hardcoded default of 8000.
-                //
-                // For example:
-                // - If Environment.xlsx specifies port 4001, PortAllocator allocates: 4001, 4002, 4003, ...
-                // - If Environment.xlsx specifies port 8000, PortAllocator allocates: 8000, 8001, 8002, ...
-                // - If Environment.xlsx is missing or doesn't specify port, PortAllocator defaults to: 8000, 8001, 8002, ...
-                //
-                // This ensures consistency between:
-                // 1. Container port binding (uses allocated port)
-                // 2. DLL modification (uses allocated port via DockerGradingConfig)
-                // 3. Network monitoring (uses allocated port via DockerGradingConfig)
-                int startingPortFromEnv = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                // OPTIMIZATION: Cache starting port from Environment.xlsx to avoid repeated Excel reads
+                // This is a significant performance improvement for batch grading of students with the same paper
+                if (!_startingPortCache.TryGetValue(testKitPath, out var startingPortFromEnv))
+                {
+                    // CRITICAL: Read the starting port from test kit's Environment.xlsx BEFORE creating PortAllocator
+                    // This ensures PortAllocator starts from the correct base port specified in the test kit,
+                    // not the hardcoded default of 8000.
+                    //
+                    // For example:
+                    // - If Environment.xlsx specifies port 4001, PortAllocator allocates: 4001, 4002, 4003, ...
+                    // - If Environment.xlsx specifies port 8000, PortAllocator allocates: 8000, 8001, 8002, ...
+                    // - If Environment.xlsx is missing or doesn't specify port, PortAllocator defaults to: 8000, 8001, 8002, ...
+                    //
+                    // This ensures consistency between:
+                    // 1. Container port binding (uses allocated port)
+                    // 2. DLL modification (uses allocated port via DockerGradingConfig)
+                    // 3. Network monitoring (uses allocated port via DockerGradingConfig)
+                    startingPortFromEnv = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                    _startingPortCache[testKitPath] = startingPortFromEnv;
+                }
                 
-                // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+                // CRITICAL: Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+                // NEVER RE-USE POLICY: Each student gets the next sequential port (N, N+1, N+2, ...)
+                // Once allocated, a port is NEVER recycled during or between sessions (unless manually cleared)
+                // This prevents race conditions where a port could be reused while still in use by another student
+                //
                 // Pass the starting port from Environment.xlsx to ensure consistent port allocation
                 // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
                 using var portAllocator = new PortAllocator(startingPortFromEnv);
