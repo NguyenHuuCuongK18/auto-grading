@@ -347,7 +347,7 @@ namespace SolutionGrader.Core.Services
                     
                     // Copy files to containers (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
-                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer);
+                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer, config);
                     
                     // Generate appsettings.json in containers
                     GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
@@ -479,6 +479,8 @@ namespace SolutionGrader.Core.Services
             // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
             if (!string.IsNullOrEmpty(serverDllPath))
             {
+                Console.WriteLine($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+                
                 var serverBase = new DockerBase
                 {
                     ImageName = testKitConfig.CodeImageName,
@@ -492,6 +494,9 @@ namespace SolutionGrader.Core.Services
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
                     }
                 };
+                
+                Console.WriteLine($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
+                
                 _dockerExecutor.RunContainerWithTty(serverBase);
                 Console.WriteLine($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
             }
@@ -656,51 +661,202 @@ namespace SolutionGrader.Core.Services
             string? serverDllPath,
             string? clientDllPath,
             string serverContainer,
-            string clientContainer)
+            string clientContainer,
+            DockerGradingConfig config)
         {
-            if (!string.IsNullOrEmpty(serverDllPath))
+            // CRITICAL FIX: DLL modification must operate on TEMPORARY COPIES to prevent port value accumulation
+            // 
+            // Problem: Modifying student DLLs in-place caused port values to stack across sequential gradings:
+            // - Student 1: Modify DLL hardcoded → 8001, copy to container
+            // - Student 2: Modify SAME DLL (already has 8001) → adds 8003, creates port confusion
+            // - Result: Client connects to 8001, server on 8003 → MISMATCH!
+            //
+            // Solution: Copy student DLL folders to temp, modify temp copies, then copy temp to container
+            // - Each grading gets FRESH DLL files with correct single port
+            // - Original student files remain untouched (preserved for review)
+            // - No port value accumulation across students
+            //
+            // Flow: Student DLL → Temp Staging → Modify → Copy to Container
+            var dllModService = new DllModificationService();
+            var tempDirectories = new List<string>();  // Track temp dirs for cleanup
+            
+            try
             {
-                var serverDir = Path.GetDirectoryName(serverDllPath);
-                if (serverDir != null)
+                if (!string.IsNullOrEmpty(serverDllPath))
                 {
-                    var folderName = Path.GetFileName(serverDir);
+                    var serverDir = Path.GetDirectoryName(serverDllPath);
+                    if (serverDir != null)
+                    {
+                        var folderName = Path.GetFileName(serverDir);
+                        string dirToCopy = serverDir;  // Default: use original directory
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback using TEMP copy if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                // Create temporary staging directory for isolated modification
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_Server_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                Console.WriteLine($"[DllMod] Created temp staging directory for server: {tempStagingDir}");
+                                Console.WriteLine($"[DllMod] Copying server files from {serverDir} to temp for isolated modification...");
+                                
+                                // Copy entire server directory to temp
+                                CopyDirectory(serverDir, tempStagingDir);
+                                Console.WriteLine($"[DllMod] Server files copied to temp staging area");
+                                
+                                // NOW modify the TEMP copy, not the original student files
+                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ServerProjectName,
+                                    isServer: true,
+                                    targetPort: config.CodeContainerHostPort
+                                );
+                                
+                                Console.WriteLine($"[DllMod] Server fallback result: {result.GetSummary()}");
+                                
+                                if (result.RequiresDllModification && !result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
+                                }
+                                else if (result.RequiresDllModification && result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
+                                }
+                                
+                                // Use temp directory for container copy (contains modified DLL)
+                                dirToCopy = tempStagingDir;
+                                folderName = Path.GetFileName(tempStagingDir);
+                            }
+                            
+                            // Copy from temp staging (if modified) or original (if not) to container
+                            _dockerExecutor.MakeDirectory(serverContainer, "/apps");
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{serverContainer}:/apps/{folderName}");
+                            Console.WriteLine($"[Docker] Copied server files from {dirToCopy} to container {serverContainer}:/apps/{folderName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Warning] Failed to copy server files: {ex.Message}");
+                        }
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(clientDllPath))
+                {
+                    var clientDir = Path.GetDirectoryName(clientDllPath);
+                    if (clientDir != null)
+                    {
+                        var folderName = Path.GetFileName(clientDir);
+                        string dirToCopy = clientDir;  // Default: use original directory
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback using TEMP copy if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                // Create temporary staging directory for isolated modification
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_Client_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                Console.WriteLine($"[DllMod] Created temp staging directory for client: {tempStagingDir}");
+                                Console.WriteLine($"[DllMod] Copying client files from {clientDir} to temp for isolated modification...");
+                                
+                                // Copy entire client directory to temp
+                                CopyDirectory(clientDir, tempStagingDir);
+                                Console.WriteLine($"[DllMod] Client files copied to temp staging area");
+                                
+                                // NOW modify the TEMP copy, not the original student files
+                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ClientProjectName,
+                                    isServer: false,
+                                    targetPort: config.CodeContainerHostPort
+                                );
+                                
+                                Console.WriteLine($"[DllMod] Client fallback result: {result.GetSummary()}");
+                                
+                                if (result.RequiresDllModification && !result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
+                                }
+                                else if (result.RequiresDllModification && result.Success)
+                                {
+                                    Console.WriteLine($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
+                                }
+                                
+                                // Use temp directory for container copy (contains modified DLL)
+                                dirToCopy = tempStagingDir;
+                                folderName = Path.GetFileName(tempStagingDir);
+                            }
+                            
+                            // Copy from temp staging (if modified) or original (if not) to container
+                            _dockerExecutor.MakeDirectory(clientContainer, "/apps");
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{clientContainer}:/apps/{folderName}");
+                            Console.WriteLine($"[Docker] Copied client files from {dirToCopy} to container {clientContainer}:/apps/{folderName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Warning] Failed to copy client files: {ex.Message}");
+                        }
+                    }
+                }
+                
+                await Task.Delay(500);
+            }
+            finally
+            {
+                // ALWAYS cleanup temporary directories
+                foreach (var tempDir in tempDirectories)
+                {
                     try
                     {
-                        _dockerExecutor.MakeDirectory(serverContainer, "/apps");
-                        
-                        // Docker cp will overwrite existing files automatically
-                        _dockerExecutor.CopyFileToContainer(serverDir, $"{serverContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied server files to {serverContainer}:/apps/{folderName}");
+                        if (Directory.Exists(tempDir))
+                        {
+                            Directory.Delete(tempDir, recursive: true);
+                            Console.WriteLine($"[DllMod] Cleaned up temp staging directory: {tempDir}");
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Warning] Failed to copy server files: {ex.Message}");
+                        Console.WriteLine($"[DllMod] Warning: Failed to cleanup temp directory {tempDir}: {ex.Message}");
                     }
                 }
             }
-            
-            if (!string.IsNullOrEmpty(clientDllPath))
+        }
+        
+        /// <summary>
+        /// Recursively copies a directory and all its contents to a new location.
+        /// Used for creating temporary staging areas for DLL modification.
+        /// </summary>
+        private static void CopyDirectory(string sourceDir, string destDir)
+        {
+            var dir = new DirectoryInfo(sourceDir);
+            if (!dir.Exists)
             {
-                var clientDir = Path.GetDirectoryName(clientDllPath);
-                if (clientDir != null)
-                {
-                    var folderName = Path.GetFileName(clientDir);
-                    try
-                    {
-                        _dockerExecutor.MakeDirectory(clientContainer, "/apps");
-                        
-                        // Docker cp will overwrite existing files automatically
-                        _dockerExecutor.CopyFileToContainer(clientDir, $"{clientContainer}:/apps/{folderName}");
-                        Console.WriteLine($"[Docker] Copied client files to {clientContainer}:/apps/{folderName}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Warning] Failed to copy client files: {ex.Message}");
-                    }
-                }
+                throw new DirectoryNotFoundException($"Source directory not found: {sourceDir}");
             }
             
-            await Task.Delay(500);
+            // Create destination directory
+            Directory.CreateDirectory(destDir);
+            
+            // Copy all files
+            foreach (FileInfo file in dir.GetFiles())
+            {
+                string targetFilePath = Path.Combine(destDir, file.Name);
+                file.CopyTo(targetFilePath, overwrite: true);
+            }
+            
+            // Recursively copy subdirectories
+            foreach (DirectoryInfo subDir in dir.GetDirectories())
+            {
+                string newDestDir = Path.Combine(destDir, subDir.Name);
+                CopyDirectory(subDir.FullName, newDestDir);
+            }
         }
         
         private void GenerateAppsettingsInContainers(
@@ -731,7 +887,37 @@ namespace SolutionGrader.Core.Services
             
             Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
-            if (!string.IsNullOrEmpty(serverDllPath))
+            // Check if DLL modification fallback is enabled and was used
+            var dllModService = new DllModificationService();
+            bool skipServerAppsettings = false;
+            bool skipClientAppsettings = false;
+            
+            if (config.UseDllModificationFallback)
+            {
+                // Check if appsettings exists for server
+                if (!string.IsNullOrEmpty(serverDllPath))
+                {
+                    var serverDir = Path.GetDirectoryName(serverDllPath);
+                    if (serverDir != null && !dllModService.AppsettingsExists(serverDir))
+                    {
+                        skipServerAppsettings = true;
+                        Console.WriteLine($"[Appsettings] Skipping server appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                    }
+                }
+                
+                // Check if appsettings exists for client
+                if (!string.IsNullOrEmpty(clientDllPath))
+                {
+                    var clientDir = Path.GetDirectoryName(clientDllPath);
+                    if (clientDir != null && !dllModService.AppsettingsExists(clientDir))
+                    {
+                        skipClientAppsettings = true;
+                        Console.WriteLine($"[Appsettings] Skipping client appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                    }
+                }
+            }
+            
+            if (!skipServerAppsettings && !string.IsNullOrEmpty(serverDllPath))
             {
                 var serverDir = Path.GetDirectoryName(serverDllPath);
                 if (serverDir != null)
@@ -769,7 +955,7 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            if (!string.IsNullOrEmpty(clientDllPath))
+            if (!skipClientAppsettings && !string.IsNullOrEmpty(clientDllPath))
             {
                 var clientDir = Path.GetDirectoryName(clientDllPath);
                 if (clientDir != null)
@@ -1351,8 +1537,25 @@ namespace SolutionGrader.Core.Services
                 {
                     foreach (var row in markSheet.RowsUsed().Skip(1))
                     {
-                        var tcName = row.Cell(1).GetValue<string>()?.Trim();
-                        var mark = row.Cell(2).GetValue<double>();
+                        var tcName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double mark = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            mark = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out mark))
+                            {
+                                Console.WriteLine($"[Warning] Cannot parse mark value '{markStr}' for test case '{tcName}' - defaulting to 0");
+                                mark = 0.0;
+                            }
+                        }
+                        
                         if (!string.IsNullOrEmpty(tcName))
                             tkConfig.TestCaseMarks[tcName] = mark;
                     }
@@ -1362,8 +1565,8 @@ namespace SolutionGrader.Core.Services
                 {
                     foreach (var row in configSheet.RowsUsed().Skip(1))
                     {
-                        var key = row.Cell(1).GetValue<string>()?.Trim();
-                        var value = row.Cell(2).GetValue<string>()?.Trim();
+                        var key = row.Cell(1).GetString()?.Trim();
+                        var value = row.Cell(2).GetString()?.Trim();
                         if (key?.Equals("Protocol", StringComparison.OrdinalIgnoreCase) == true)
                             tkConfig.Protocol = value ?? "TCP";
                     }
@@ -1430,10 +1633,15 @@ namespace SolutionGrader.Core.Services
             }
             
             // Apply config overrides
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - Before override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - Config values: config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+            
             if (config.CodeContainerInternalPort > 0)
                 tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
             if (config.CodeContainerHostPort > 0)
                 tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
+            
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - After override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
             
             return tkConfig;
         }
@@ -2204,6 +2412,14 @@ namespace SolutionGrader.Core.Services
         /// it is stopped and marked as failed. Default: 15 seconds.
         /// </summary>
         public int TestCaseTimeoutSeconds { get; set; } = 15;
+        
+        /// <summary>
+        /// Enables DLL modification fallback when appsettings.json is not found.
+        /// When enabled and appsettings.json doesn't exist, the system will attempt to 
+        /// directly patch the compiled DLL files to set correct IP addresses and ports.
+        /// Default: false (disabled).
+        /// </summary>
+        public bool UseDllModificationFallback { get; set; } = false;
     }
     
     /// <summary>

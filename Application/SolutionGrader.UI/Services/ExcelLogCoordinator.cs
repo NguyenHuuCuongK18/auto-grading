@@ -95,6 +95,13 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(1, 7).Value = "StartTime";
                     worksheet.Cell(1, 8).Value = "EndTime";
                     worksheet.Cell(1, 9).Value = "Duration";
+                    worksheet.Cell(1, 10).Value = "ServerIP";
+                    worksheet.Cell(1, 11).Value = "ServerPort";
+                    worksheet.Cell(1, 12).Value = "ClientIP";
+                    worksheet.Cell(1, 13).Value = "ClientPort";
+                    worksheet.Cell(1, 14).Value = "ServerDLL";
+                    worksheet.Cell(1, 15).Value = "ClientDLL";
+                    worksheet.Cell(1, 16).Value = "DllModUsed";
 
                     // Style header
                     var headerRow = worksheet.Row(1);
@@ -119,6 +126,13 @@ namespace SolutionGrader.UI.Services
                         worksheet.Cell(row, 7).Value = ""; // Start time (filled when grading starts)
                         worksheet.Cell(row, 8).Value = ""; // End time (filled when grading completes)
                         worksheet.Cell(row, 9).Value = ""; // Duration
+                        worksheet.Cell(row, 10).Value = ""; // ServerIP (filled when grading starts)
+                        worksheet.Cell(row, 11).Value = ""; // ServerPort (filled when grading starts)
+                        worksheet.Cell(row, 12).Value = ""; // ClientIP (filled when grading starts)
+                        worksheet.Cell(row, 13).Value = ""; // ClientPort (filled when grading starts)
+                        worksheet.Cell(row, 14).Value = ""; // ServerDLL (filled when grading starts)
+                        worksheet.Cell(row, 15).Value = ""; // ClientDLL (filled when grading starts)
+                        worksheet.Cell(row, 16).Value = ""; // DllModUsed (filled when grading starts)
 
                         // Track row mapping for quick updates
                         _studentRowMap[GetStudentKey(student.StudentCode, student.PaperNo)] = new StudentRowInfo
@@ -170,6 +184,42 @@ namespace SolutionGrader.UI.Services
             });
 
             _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated start time: {startTime:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        /// <summary>
+        /// Updates a single student's configuration when grading configuration is determined.
+        /// This is called after containers are set up and before actual test execution begins.
+        /// Records the actual IP addresses, ports, and DLL paths being used for debugging.
+        /// </summary>
+        public void UpdateStudentConfiguration(
+            string studentCode, 
+            string paperNo, 
+            string serverIP, 
+            int serverPort,
+            string clientIP,
+            int clientPort,
+            string serverDllPath,
+            string clientDllPath,
+            bool dllModUsed)
+        {
+            if (!_isInitialized)
+            {
+                _logger.LogWarning($"[ExcelLogCoordinator] [{studentCode}] Excel not initialized, cannot update configuration");
+                return;
+            }
+
+            UpdateStudentRow(studentCode, paperNo, row =>
+            {
+                row.Cell(10).Value = serverIP;
+                row.Cell(11).Value = serverPort.ToString();
+                row.Cell(12).Value = clientIP;
+                row.Cell(13).Value = clientPort.ToString();
+                row.Cell(14).Value = Path.GetFileName(serverDllPath ?? "N/A");
+                row.Cell(15).Value = Path.GetFileName(clientDllPath ?? "N/A");
+                row.Cell(16).Value = dllModUsed ? "Yes" : "No";
+            });
+
+            _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated configuration: Server={serverIP}:{serverPort}, Client={clientIP}:{clientPort}, DllMod={dllModUsed}");
         }
 
         /// <summary>

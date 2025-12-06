@@ -245,8 +245,24 @@ namespace SolutionGrader.UI.Services
                     var rows = markSheet.RowsUsed().Skip(1); // Skip header row
                     foreach (var row in rows)
                     {
-                        var testCaseName = row.Cell(1).GetValue<string>()?.Trim();
-                        var markValue = row.Cell(2).GetValue<double>();
+                        var testCaseName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double markValue = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            markValue = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out markValue))
+                            {
+                                _logger.LogWarning($"Cannot parse mark value '{markStr}' for test case '{testCaseName}' - defaulting to 0");
+                                markValue = 0.0;
+                            }
+                        }
 
                         if (!string.IsNullOrEmpty(testCaseName))
                         {
@@ -261,8 +277,23 @@ namespace SolutionGrader.UI.Services
                     var rows = suiteSheet.RowsUsed().Skip(1); // Skip header row
                     foreach (var row in rows)
                     {
-                        var testCaseName = row.Cell(1).GetValue<string>()?.Trim();
-                        var markValue = row.Cell(2).GetValue<double>();
+                        var testCaseName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double markValue = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            markValue = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out markValue))
+                            {
+                                markValue = 0.0;
+                            }
+                        }
 
                         if (!string.IsNullOrEmpty(testCaseName))
                         {
