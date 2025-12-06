@@ -344,15 +344,34 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
+                // Read starting port from environment.xlsx in test kit folder
+                // This determines where port allocation starts (e.g., 8000, 5000, etc.)
+                int startingPort = ReadStartingPortFromEnvironmentXlsx(config.TestKitFolderPath);
+                if (startingPort <= 0)
+                {
+                    startingPort = 8000; // Fallback default if not found in environment.xlsx
+                    _logger.LogWarning($"Could not read MonitorPort from environment.xlsx, using default starting port {startingPort}");
+                }
+                else
+                {
+                    _logger.LogInfo($"Read starting port {startingPort} from environment.xlsx");
+                }
+                
                 // CRITICAL FIX: Allocate a unique port for this student using PortAllocator
                 // This prevents port conflicts in batch grading where multiple students run in parallel
                 // Each student MUST have their own dedicated port for client-server communication
-                using var portAllocator = new PortAllocator();
+                // Port allocation is sequential and NEVER recycled:
+                // - Student 1: port startingPort
+                // - Student 2: port startingPort + 1
+                // - Student 1000: port startingPort + 999
+                // - Student 1001: port startingPort + 1000
+                // No reuse, unlimited students supported
+                using var portAllocator = new PortAllocator(startingPort);
                 int allocatedPort = portAllocator.AllocatePort();
                 
                 if (allocatedPort == -1)
                 {
-                    var errorMsg = "Failed to allocate port for grading";
+                    var errorMsg = "Failed to allocate port for grading. All searched ports are in use. Try clearing port tracking file or wait for ports to become available.";
                     student.Status = GradingStatus.Failed;
                     student.StatusMessage = errorMsg;
                     student.EndTime = DateTime.Now;
@@ -744,6 +763,51 @@ namespace SolutionGrader.UI.Services
             };
             
             _libGrading.DisposeAllContainers(dockerConfig);
+        }
+
+        /// <summary>
+        /// Reads the starting port from environment.xlsx in the test kit folder.
+        /// This determines the base port number from which sequential allocation begins.
+        /// </summary>
+        /// <param name="testKitPath">Path to test kit folder containing environment.xlsx</param>
+        /// <returns>Starting port number from MonitorPort field, or 0 if not found</returns>
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
+        {
+            try
+            {
+                var environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                if (!File.Exists(environmentPath))
+                {
+                    _logger.LogWarning($"environment.xlsx not found at {environmentPath}");
+                    return 0;
+                }
+
+                using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
+                {
+                    var worksheet = workbook.Worksheet(1); // First sheet
+                    
+                    // Find MonitorPort in the sheet (usually in column 1 for keys, column 2 for values)
+                    foreach (var row in worksheet.RowsUsed())
+                    {
+                        var keyCell = row.Cell(1).Value.ToString().Trim();
+                        if (keyCell.Equals("MonitorPort", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var valueCell = row.Cell(2).Value.ToString().Trim();
+                            if (int.TryParse(valueCell, out int port) && port > 0 && port <= 65535)
+                            {
+                                _logger.LogInfo($"Read MonitorPort={port} from environment.xlsx");
+                                return port;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error reading MonitorPort from environment.xlsx: {ex.Message}");
+            }
+
+            return 0;
         }
     }
 }

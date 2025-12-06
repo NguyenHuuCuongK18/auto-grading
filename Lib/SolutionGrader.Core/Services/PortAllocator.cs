@@ -13,33 +13,23 @@ namespace SolutionGrader.Core.Services
     /// Uses a system-wide Mutex to ensure port allocation is synchronized across
     /// multiple parallel grading processes.
     /// 
-    /// CRITICAL DESIGN: Ports are tracked but NEVER MARKED AS RELEASED during a grading 
-    /// session to avoid race conditions in parallel grading. The actual port binding 
-    /// (OS level) is released when Docker containers are cleaned up, but our tracking
-    /// file keeps the port marked as "in use" to prevent reuse.
+    /// CRITICAL DESIGN: Ports are NEVER RECYCLED. Each student gets the next available port
+    /// in sequence. Student 1 gets port N, student 2 gets port N+1, student 1000 gets port N+999,
+    /// student 1001 gets port N+1000, etc.
     /// 
-    /// With 100 available ports (8000-8099), we have plenty of capacity without needing 
-    /// to reuse ports within a single grading session.
+    /// - Ports are tracked and NEVER marked as released
+    /// - No port reuse within or across grading sessions (unless tracking file is manually cleared)
+    /// - Supports unlimited students: 1, 2, 3... 1000, 1001... 10000, etc.
+    /// - Starting port comes from environment.xlsx, NOT hardcoded
     /// 
-    /// Example scenario that motivated this design:
-    /// - Student A starts with port 8001
-    /// - Student B starts with port 8000
-    /// - Student A finishes grading, Docker container is removed (OS releases port 8001)
-    /// - If we marked port 8001 as "released" in our tracking, the system might try to 
-    ///   reuse it while Student B is still being graded
-    /// - CONFLICT: Race condition between different grading processes!
+    /// The actual port binding (OS level) is released when Docker containers are cleaned up,
+    /// but our tracking keeps the port marked as "used" forever to prevent any reuse.
     /// 
-    /// Solution: 
-    /// - The actual port binding is released when Docker containers are cleaned up (normal)
-    /// - But our tracking file NEVER marks ports as released during a session
-    /// - Once a port is allocated for a student, it stays marked as "used" until the 
-    ///   entire grading session ends
+    /// To reset port allocation (start fresh from beginning), delete the port tracking file:
+    /// - Linux/macOS: /tmp/AutoGrading_NextPort.txt
+    /// - Windows: %TEMP%\AutoGrading_NextPort.txt
     /// 
-    /// To clear ports after a grading session ends, delete the port tracking file:
-    /// - Linux/macOS: /tmp/AutoGrading_AssignedPorts.txt
-    /// - Windows: %TEMP%\AutoGrading_AssignedPorts.txt
-    /// 
-    /// Or use ClearAllAllocatedPorts() at the START of a new grading session.
+    /// Or call ClearAllAllocatedPorts() to reset to starting port from environment.xlsx.
     /// 
     /// Based on test-grader reference implementation:
     /// https://github.com/NguyenHuuCuongK18/test-grader.git
@@ -47,22 +37,28 @@ namespace SolutionGrader.Core.Services
     public class PortAllocator : IDisposable
     {
         private const string SHARED_MUTEX_NAME = "AutoGrading_PortAllocator";
-        private const int PORT_RANGE_START = 8000;
-        private const int PORT_RANGE_END = 8099;  // Allow up to 100 parallel students
+        private const int DEFAULT_START_PORT = 8000;  // Fallback if environment.xlsx not found
+        private const int PORT_MAX = 65535;  // Maximum valid port number
         
-        private static readonly string PortFilePath = Path.Combine(
+        private static readonly string NextPortFilePath = Path.Combine(
             Path.GetTempPath(),
-            "AutoGrading_AssignedPorts.txt");
+            "AutoGrading_NextPort.txt");
         
         private readonly Mutex _mutex;
+        private readonly int _startingPort;
         private bool _disposed = false;
 
-        public PortAllocator()
+        /// <summary>
+        /// Creates a new PortAllocator with starting port from environment.xlsx
+        /// </summary>
+        /// <param name="startingPort">Starting port from environment.xlsx MonitorPort. If 0, uses default 8000.</param>
+        public PortAllocator(int startingPort = 0)
         {
             _mutex = new Mutex(false, SHARED_MUTEX_NAME);
+            _startingPort = startingPort > 0 ? startingPort : DEFAULT_START_PORT;
             
             // Ensure directory exists
-            string directoryPath = Path.GetDirectoryName(PortFilePath)!;
+            string directoryPath = Path.GetDirectoryName(NextPortFilePath)!;
             if (!Directory.Exists(directoryPath))
             {
                 Directory.CreateDirectory(directoryPath);
@@ -70,15 +66,19 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Allocates an available port for code containers (server/client).
+        /// Allocates the next available port for code containers (server/client).
         /// Uses Mutex to ensure thread-safe port allocation across parallel grading.
         /// 
-        /// CRITICAL: Ports are tracked but NEVER MARKED AS RELEASED during a session.
-        /// The actual port binding (OS level) is released when Docker containers are 
-        /// cleaned up, but our tracking file keeps the port marked as "in use" to 
-        /// prevent the grading system from reusing it within the same session.
+        /// CRITICAL: Ports are NEVER RECYCLED. Each call returns the next port in sequence:
+        /// - Student 1: port N
+        /// - Student 2: port N+1
+        /// - Student 1000: port N+999
+        /// - Student 1001: port N+1000
+        /// 
+        /// If a port is in use at OS level, automatically skips to next port.
+        /// No reuse, no recycling, unlimited students supported.
         /// </summary>
-        /// <returns>An available port number, or -1 if no ports available</returns>
+        /// <returns>An available port number, or -1 if exhausted all ports to max (65535)</returns>
         public int AllocatePort()
         {
             try
@@ -92,23 +92,31 @@ namespace SolutionGrader.Core.Services
 
                 try
                 {
-                    var assignedPorts = LoadAssignedPorts();
+                    // Load the next port to try (incrementing counter, never goes backwards)
+                    int nextPort = LoadNextPort();
 
-                    // Find first available port in range
-                    for (int port = PORT_RANGE_START; port <= PORT_RANGE_END; port++)
+                    // Find next available port starting from nextPort
+                    // If port is in use at OS level, skip to next one
+                    // Keep incrementing until we find an available port
+                    for (int port = nextPort; port <= PORT_MAX; port++)
                     {
-                        if (!assignedPorts.Contains(port) && IsPortAvailable(port))
+                        if (IsPortAvailable(port))
                         {
-                            assignedPorts.Add(port);
-                            SaveAssignedPorts(assignedPorts);
-                            Console.WriteLine($"[PortAllocator] Allocated port {port} (tracked - will NOT be marked as released during this session)");
+                            // Save the NEXT port for the next allocation (port + 1)
+                            // This ensures no port is ever reused
+                            SaveNextPort(port + 1);
+                            Console.WriteLine($"[PortAllocator] Allocated port {port} (next allocation will try {port + 1})");
                             return port;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[PortAllocator] Port {port} in use at OS level, trying next port {port + 1}");
                         }
                     }
 
-                    Console.WriteLine($"[PortAllocator] ERROR: No available ports in range {PORT_RANGE_START}-{PORT_RANGE_END}");
-                    Console.WriteLine($"[PortAllocator] TIP: Ports are tracked and never marked as released during grading to prevent race conditions.");
-                    Console.WriteLine($"[PortAllocator] TIP: To reset, delete {PortFilePath} or call ClearAllAllocatedPorts() at session start.");
+                    // This should virtually never happen - means we've exhausted all ports to 65535
+                    Console.WriteLine($"[PortAllocator] ERROR: Exhausted all ports from {nextPort} to {PORT_MAX}");
+                    Console.WriteLine($"[PortAllocator] TIP: Reset port allocation by deleting {NextPortFilePath} or calling ClearAllAllocatedPorts()");
                     return -1;
                 }
                 finally
@@ -130,15 +138,14 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Clears ALL allocated ports from the tracking file.
+        /// Clears the port allocation counter, resetting to starting port.
         /// 
-        /// IMPORTANT: Only call this at the START of a new grading session,
-        /// NEVER during an active grading session as it will cause port conflicts.
+        /// IMPORTANT: This resets port allocation back to the starting port from environment.xlsx.
+        /// Only call this when starting a completely new grading session after all previous
+        /// Docker containers have been cleaned up.
         /// 
-        /// This is useful to reset the port pool when:
-        /// - Starting a completely new grading session
-        /// - All previous grading processes have completed
-        /// - The port file has become stale
+        /// After calling this, the next allocation will start from the beginning again
+        /// (starting port from environment.xlsx).
         /// </summary>
         public static void ClearAllAllocatedPorts()
         {
@@ -153,10 +160,11 @@ namespace SolutionGrader.Core.Services
 
                 try
                 {
-                    if (File.Exists(PortFilePath))
+                    if (File.Exists(NextPortFilePath))
                     {
-                        File.Delete(PortFilePath);
-                        Console.WriteLine($"[PortAllocator] Cleared all port tracking (deleted {PortFilePath})");
+                        File.Delete(NextPortFilePath);
+                        Console.WriteLine($"[PortAllocator] Cleared port allocation counter (deleted {NextPortFilePath})");
+                        Console.WriteLine($"[PortAllocator] Next allocation will start from environment.xlsx port or default 8000");
                     }
                     else
                     {
@@ -175,24 +183,19 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Gets the current count of tracked (allocated) ports.
+        /// Gets the next port that will be allocated.
         /// Useful for monitoring and diagnostics.
         /// </summary>
-        public static int GetAllocatedPortCount()
+        public int GetNextPortToAllocate()
         {
             try
             {
-                if (File.Exists(PortFilePath))
-                {
-                    var lines = File.ReadAllLines(PortFilePath);
-                    return lines.Count(line => int.TryParse(line.Trim(), out _));
-                }
+                return LoadNextPort();
             }
             catch
             {
-                // Ignore errors for diagnostic method
+                return _startingPort;
             }
-            return 0;
         }
 
         /// <summary>
@@ -219,79 +222,59 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Loads currently tracked (allocated) ports from shared file.
+        /// Loads the next port to try allocating.
+        /// This is an incrementing counter that never goes backwards.
         /// </summary>
-        private HashSet<int> LoadAssignedPorts()
+        private int LoadNextPort()
         {
-            var assignedPorts = new HashSet<int>();
-            if (File.Exists(PortFilePath))
+            if (File.Exists(NextPortFilePath))
             {
                 try
                 {
-                    foreach (var line in File.ReadAllLines(PortFilePath).Where(l => !string.IsNullOrWhiteSpace(l)))
+                    string content = File.ReadAllText(NextPortFilePath).Trim();
+                    if (int.TryParse(content, out int nextPort))
                     {
-                        if (int.TryParse(line.Trim(), out int port))
-                        {
-                            assignedPorts.Add(port);
-                        }
+                        return nextPort;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[PortAllocator] WARNING: Error loading ports: {ex.Message}");
+                    Console.WriteLine($"[PortAllocator] WARNING: Error loading next port: {ex.Message}");
                 }
             }
-            return assignedPorts;
+            
+            // First time or error - start from configured starting port
+            return _startingPort;
         }
 
         /// <summary>
-        /// Saves currently tracked (allocated) ports to shared file.
+        /// Saves the next port to try allocating.
+        /// This ensures the counter only increments, never decreases.
         /// </summary>
-        private void SaveAssignedPorts(HashSet<int> assignedPorts)
+        private void SaveNextPort(int nextPort)
         {
             try
             {
-                File.WriteAllLines(PortFilePath, assignedPorts.Select(p => p.ToString()).ToArray());
+                File.WriteAllText(NextPortFilePath, nextPort.ToString());
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PortAllocator] WARNING: Error saving ports: {ex.Message}");
+                Console.WriteLine($"[PortAllocator] WARNING: Error saving next port: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Disposes the PortAllocator resources.
         /// 
-        /// IMPORTANT: This does NOT mark the port as "released" in our tracking file.
-        /// 
-        /// The actual port binding (OS level) is released when Docker containers are
-        /// cleaned up - this is normal and expected. However, our tracking file keeps
-        /// the port marked as "in use" to prevent the grading system from reusing it
-        /// within the same session.
-        /// 
-        /// This design prevents race conditions where:
-        /// - Student A finishes and their Docker containers are cleaned up
-        /// - The OS releases the port binding
-        /// - If we marked the port as "released", another student might get assigned the same port
-        /// - But the previous grading process might still have lingering processes/files
-        /// 
-        /// The port tracking will be cleared only when:
-        /// - ClearAllAllocatedPorts() is called at the start of a new session
-        /// - The port tracking file is manually deleted
+        /// The port counter in the tracking file continues to increment and is never
+        /// decremented. Ports are never recycled - each student gets the next sequential
+        /// port number (N, N+1, N+2, etc.).
         /// </summary>
         public void Dispose()
         {
             if (!_disposed)
             {
                 _disposed = true;
-                // NOTE: We intentionally do NOT mark the port as "released" in our tracking file.
-                // The actual port binding (OS level) will be released when Docker containers 
-                // are cleaned up - this is normal. But we keep the port tracked as "used" in
-                // our file to prevent the grading system from reusing it during this session.
-                // 
-                // This is the core fix for the multi-grading port reuse issue:
-                // - Port is released at OS level (Docker container cleanup) ✓
-                // - Port is NOT marked as released in tracking file (prevents reuse) ✓
                 _mutex?.Dispose();
             }
         }
