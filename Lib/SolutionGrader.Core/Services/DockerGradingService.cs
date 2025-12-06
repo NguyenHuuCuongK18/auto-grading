@@ -479,6 +479,8 @@ namespace SolutionGrader.Core.Services
             // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
             if (!string.IsNullOrEmpty(serverDllPath))
             {
+                Console.WriteLine($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+                
                 var serverBase = new DockerBase
                 {
                     ImageName = testKitConfig.CodeImageName,
@@ -492,6 +494,9 @@ namespace SolutionGrader.Core.Services
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
                     }
                 };
+                
+                Console.WriteLine($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
+                
                 _dockerExecutor.RunContainerWithTty(serverBase);
                 Console.WriteLine($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
             }
@@ -1628,10 +1633,15 @@ namespace SolutionGrader.Core.Services
             }
             
             // Apply config overrides
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - Before override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - Config values: config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+            
             if (config.CodeContainerInternalPort > 0)
                 tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
             if (config.CodeContainerHostPort > 0)
                 tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
+            
+            Console.WriteLine($"[Port Config] LoadTestKitConfig - After override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
             
             return tkConfig;
         }

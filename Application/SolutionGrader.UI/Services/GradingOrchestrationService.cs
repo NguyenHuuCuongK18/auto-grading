@@ -351,11 +351,11 @@ namespace SolutionGrader.UI.Services
                 if (monitorPort <= 0)
                 {
                     monitorPort = 8000; // Fallback default if not found in environment.xlsx
-                    _logger.LogWarning($"Could not read MonitorPort from environment.xlsx, using default port {monitorPort}");
+                    _logger.LogWarning($"[Port Config] Could not read MonitorPort from environment.xlsx, using default port {monitorPort}");
                 }
                 else
                 {
-                    _logger.LogInfo($"Read MonitorPort {monitorPort} from environment.xlsx - using this port directly");
+                    _logger.LogInfo($"[Port Config] Read MonitorPort {monitorPort} from environment.xlsx at: {testKitPath}");
                 }
                 
                 // CRITICAL: Use MonitorPort DIRECTLY for all components (container, DLL mod, network monitor)
@@ -372,13 +372,16 @@ namespace SolutionGrader.UI.Services
                 // - Current sequential approach is sufficient for most use cases
                 int portToUse = monitorPort;
                 
-                _logger.LogInfo($"[{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
+                _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
                 
                 // Build Docker configuration from UI config
                 // The examiner sets HasClient/HasServer to indicate what the student should provide:
                 // - HasClient=true, HasServer=true  → student provides both
                 // - HasClient=true, HasServer=false → student provides client, use golden server
                 // - HasClient=false, HasServer=true → student provides server, use golden client
+                
+                _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
+                
                 var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
                 {
                     // Examiner's component requirements
