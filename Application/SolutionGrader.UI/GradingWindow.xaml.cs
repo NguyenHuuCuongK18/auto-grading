@@ -558,8 +558,7 @@ namespace SolutionGrader.UI
                     _logger.LogInfo($"[Optimization] Using continuous batch processing: {_configuration.MaxParallelStudents} students graded simultaneously at all times");
                     _logger.LogInfo($"[Optimization] When a student finishes, the next student starts immediately (no batch waiting)");
                     _logger.LogInfo($"[Multi-Threading] Using {_configuration.MaxParallelStudents} worker threads across {Environment.ProcessorCount} CPU cores");
-                    
-                    var startupLock = new SemaphoreSlim(1, 1); // OPTIMIZATION: Stagger container startups
+                    _logger.LogInfo($"[Parallel Grading] All {_configuration.MaxParallelStudents} students will create containers simultaneously (true parallel execution)");
                     
                     // Create a channel to hold students waiting to be graded
                     // OPTIMIZATION: Set capacity to 2x MaxParallelStudents to reduce producer-consumer coordination overhead
@@ -619,7 +618,8 @@ namespace SolutionGrader.UI
                                     _logger.LogInfo($"[Worker-{localWorkerId}] [{currentStartIndex}/{studentsToGrade.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
                                     
                                     // Grade the student (port allocation happens inside via PortAllocator)
-                                    await GradeStudentAsync(student, _cancellationTokenSource.Token, startupLock);
+                                    // TRUE PARALLEL: No lock - multiple students can create containers simultaneously
+                                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
                                     
                                     // Write results after each student
                                     // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
@@ -715,10 +715,13 @@ namespace SolutionGrader.UI
         /// thread-safe, unique port allocation that never reuses ports within a session.
         /// This prevents race conditions in parallel grading where ports could be
         /// incorrectly reused while still in use by another student.
+        /// 
+        /// PARALLEL EXECUTION: Multiple students can create containers simultaneously
+        /// without any staggering or serialization, allowing true parallel batch grading.
         /// </summary>
         /// <param name="student">Student to grade</param>
         /// <param name="ct">Cancellation token</param>
-        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct, SemaphoreSlim? startupLock = null)
+        private async Task GradeStudentAsync(StudentSolution student, CancellationToken ct)
         {
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
@@ -924,45 +927,20 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {cachedTestKit.config.TotalMaxMark}");
                 _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
-                
-                // OPTIMIZATION: Stagger container startup to avoid Docker strain
-                // Acquire lock before starting containers, release when containers are actually ready
-                bool lockAcquired = false;
-                int lockReleasedFlag = 0; // 0 = not released, 1 = released (for Interlocked)
-                if (startupLock != null)
-                {
-                    await startupLock.WaitAsync(ct);
-                    lockAcquired = true;
-                    _logger.LogInfo($"[Staggered Startup] Starting container setup for {student.StudentCode}");
-                }
-                
-                // Callback to release lock as soon as containers are ready
-                Action? onContainersReady = null;
-                if (lockAcquired && startupLock != null)
-                {
-                    onContainersReady = () =>
-                    {
-                        // Use Interlocked to prevent race condition if callback is invoked multiple times
-                        if (Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0)
-                        {
-                            startupLock.Release();
-                            _logger.LogInfo($"[Staggered Startup] Containers ready for {student.StudentCode}, next student can start");
-                        }
-                    };
-                }
+                _logger.LogInfo($"[Parallel Grading] Starting container setup for {student.StudentCode} (no serialization)");
                 
                 try
                 {
                     // Execute grading using the orchestration service - it handles status changes internally
                     // Pass the cancellation token so pause can abort the current grading
                     // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
+                    // TRUE PARALLEL: Containers created simultaneously without any serialization or callbacks
                     var sessionState = new GradingSessionState();
                     await _gradingService.StartGradingAsync(
                         new System.Collections.Generic.List<StudentSolution> { student },
                         studentConfig,
                         sessionState,
-                        ct,
-                        onContainersReady);
+                        ct);
                 
                     // Update final status
                     student.ProgressPercent = 100;
@@ -987,15 +965,6 @@ namespace SolutionGrader.UI
                     student.EndTime = DateTime.Now;
                     _logger.LogError($"Grading failed for {student.StudentCode}", ex);
                     UpdateStudentInUI(student);
-                }
-                finally
-                {
-                    // Ensure lock is released if callback was never invoked
-                    if (lockAcquired && Interlocked.CompareExchange(ref lockReleasedFlag, 1, 0) == 0 && startupLock != null)
-                    {
-                        startupLock.Release();
-                        _logger.LogWarning($"[Staggered Startup] Released lock for {student.StudentCode} via fallback");
-                    }
                 }
             }
             finally
