@@ -216,26 +216,79 @@ namespace SolutionGrader.Cli.Services
                 PaperNo = student.PaperNo
             };
 
-            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
-            // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
-            using var portAllocator = new PortAllocator();
-            int allocatedPort = portAllocator.AllocatePort();
-            
-            if (allocatedPort == -1)
-            {
-                Console.WriteLine($"[ERROR] Failed to allocate port for student {student.StudentCode}");
-                result.ErrorMessage = "Failed to allocate port for grading";
-                return result;
-            }
-
             try
             {
-                // Get test kit for this paper
+                // Get test kit for this paper FIRST, so we can read the starting port from Environment.xlsx
                 var testKitPath = GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
                 if (string.IsNullOrEmpty(testKitPath))
                 {
                     Console.WriteLine($"[WARNING] No test kit found for paper {student.PaperNo}");
                     result.ErrorMessage = $"No test kit for paper {student.PaperNo}";
+                    return result;
+                }
+
+                // LAZY EXTRACTION: Extract zip file only when grading this student (not during discovery)
+                // This prevents extracting ALL students when we only need to grade a subset
+                var questionFolder = Path.GetDirectoryName(student.SolutionPath)!;
+                bool solutionReady = SharedDiscoveryServices.EnsureSolutionExtracted(
+                    questionFolder, 
+                    msg => Console.WriteLine($"[{student.StudentCode}] {msg}")
+                );
+                
+                if (!solutionReady)
+                {
+                    Console.WriteLine($"[ERROR] Failed to extract or find solution for {student.StudentCode}");
+                    result.ErrorMessage = "Failed to extract or find solution";
+                    return result;
+                }
+                
+                // NOW find DLLs after ensuring solution is extracted
+                student.ServerDllPath = FindDll(student.SolutionPath, config.ServerProjectName);
+                student.ClientDllPath = FindDll(student.SolutionPath, config.ClientProjectName);
+                
+                // Validate at least one component exists
+                if (string.IsNullOrEmpty(student.ServerDllPath) && string.IsNullOrEmpty(student.ClientDllPath))
+                {
+                    Console.WriteLine($"[ERROR] No DLLs found for {student.StudentCode} after extraction");
+                    result.ErrorMessage = "No DLLs found in solution";
+                    return result;
+                }
+                
+                // Log warnings for missing expected DLLs (only errors, not successes)
+                if (student.ServerDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
+                {
+                    Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
+                }
+                if (student.ClientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
+                {
+                    Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
+                }
+
+                // CRITICAL FIX: Read the starting port from test kit's Environment.xlsx BEFORE creating PortAllocator
+                // This ensures PortAllocator starts from the correct base port specified in the test kit,
+                // not the hardcoded default of 8000.
+                //
+                // For example:
+                // - If Environment.xlsx specifies port 4001, PortAllocator allocates: 4001, 4002, 4003, ...
+                // - If Environment.xlsx specifies port 8000, PortAllocator allocates: 8000, 8001, 8002, ...
+                // - If Environment.xlsx is missing or doesn't specify port, PortAllocator defaults to: 8000, 8001, 8002, ...
+                //
+                // This ensures consistency between:
+                // 1. Container port binding (uses allocated port)
+                // 2. DLL modification (uses allocated port via DockerGradingConfig)
+                // 3. Network monitoring (uses allocated port via DockerGradingConfig)
+                int startingPortFromEnv = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                
+                // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
+                // Pass the starting port from Environment.xlsx to ensure consistent port allocation
+                // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
+                using var portAllocator = new PortAllocator(startingPortFromEnv);
+                int allocatedPort = portAllocator.AllocatePort();
+                
+                if (allocatedPort == -1)
+                {
+                    Console.WriteLine($"[ERROR] Failed to allocate port for student {student.StudentCode}");
+                    result.ErrorMessage = "Failed to allocate port for grading";
                     return result;
                 }
 
@@ -266,7 +319,12 @@ namespace SolutionGrader.Cli.Services
                     DatabaseUsername = config.DatabaseUsername,
                     DatabasePassword = config.DatabasePassword,
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds,
-                    TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds
+                    TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds,
+                    
+                    // CRITICAL: Enable DLL modification for batch grading
+                    // This patches hardcoded ports (4000, 5000, etc.) to allocated port (8000, 8001, 8002)
+                    // Without this, students' hardcoded ports won't match container exposed ports
+                    UseDllModificationFallback = config.UseDllModificationFallback
                 };
 
                 Console.WriteLine($"[{student.StudentCode}] Using dynamically allocated port: {allocatedPort}");
@@ -361,63 +419,37 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // Find solution folder, or try to extract if missing
-                    var solutionPath = Path.Combine(studentDir, "1", "solution");
-                    if (!Directory.Exists(solutionPath))
+                    // OPTIMIZED: Don't extract during discovery - only check if solution exists or zip exists
+                    // This prevents extracting ALL students when we only need to grade a subset (based on index range)
+                    // Extraction will happen lazily when grading each student (in GradeStudentUsingSharedServiceAsync)
+                    
+                    var questionFolder = Path.Combine(studentDir, "1");
+                    if (!Directory.Exists(questionFolder))
                     {
-                        // Try to find and extract zip file (matching UI behavior)
-                        var questionFolder = Path.Combine(studentDir, "1");
-                        if (Directory.Exists(questionFolder))
-                        {
-                            var zipFiles = Directory.GetFiles(questionFolder, "*.zip");
-                            if (zipFiles.Length > 0)
-                            {
-                                try
-                                {
-                                    // Use FileMaster for consistent extraction with UI
-                                    FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
-                                    Console.WriteLine($"[CLI] Extracted solution from zip for {studentCode}");
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[ERROR] Failed to extract zip for {studentCode}: {ex.Message}");
-                                    continue;
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
-                                continue;
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[WARNING] No question folder for {studentCode}");
-                            continue;
-                        }
-                    }
-
-                    // Find server and client DLLs
-                    var serverDllPath = FindDll(solutionPath, config.ServerProjectName);
-                    var clientDllPath = FindDll(solutionPath, config.ClientProjectName);
-
-                    // At least one component should exist
-                    if (string.IsNullOrEmpty(serverDllPath) && string.IsNullOrEmpty(clientDllPath))
-                    {
-                        Console.WriteLine($"[WARNING] No DLLs found for {studentCode}");
+                        Console.WriteLine($"[WARNING] No question folder for {studentCode}");
                         continue;
                     }
-
+                    
+                    var solutionPath = Path.Combine(questionFolder, "solution");
+                    bool hasSolutionFolder = Directory.Exists(solutionPath);
+                    bool hasZipFile = Directory.GetFiles(questionFolder, "*.zip").Length > 0;
+                    
+                    if (!hasSolutionFolder && !hasZipFile)
+                    {
+                        Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
+                        continue;
+                    }
+                    
+                    // Don't find DLLs during discovery - this would require extraction for all students
+                    // DLLs will be found during grading when solution is ensured to be extracted
                     students.Add(new StudentInfo
                     {
                         StudentCode = studentCode!,
                         PaperNo = paperNo!,
                         SolutionPath = solutionPath,
-                        ServerDllPath = serverDllPath,
-                        ClientDllPath = clientDllPath
+                        ServerDllPath = null,  // Will be found during grading after extraction
+                        ClientDllPath = null   // Will be found during grading after extraction
                     });
-
-                    Console.WriteLine($"[CLI] Found student: {studentCode} (Server: {(serverDllPath != null ? "✓" : "✗")}, Client: {(clientDllPath != null ? "✓" : "✗")})");
                 }
             }
 
@@ -554,6 +586,99 @@ namespace SolutionGrader.Cli.Services
             wb.SaveAs(summaryPath);
 
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Reads the starting port for PortAllocator from the test kit's Environment.xlsx file.
+        /// This ensures that port allocation starts from the correct base port specified in the test kit.
+        /// 
+        /// Port Configuration Priority:
+        /// 1. Code_Container_Host_Port from Environment.xlsx (preferred)
+        /// 2. Code_Container_Internal_Port from Environment.xlsx (fallback)
+        /// 3. Default 8000 if not found
+        /// 
+        /// This method ensures consistency between:
+        /// - Port used for container creation (via PortAllocator)
+        /// - Port used for DLL modification (via DockerGradingConfig)
+        /// - Port used for network monitoring (via DockerGradingConfig)
+        /// </summary>
+        /// <param name="testKitPath">Path to the test kit folder (e.g., TestKit/Q12)</param>
+        /// <returns>Starting port for PortAllocator, or 0 if not found (will use PortAllocator default 8000)</returns>
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
+        {
+            try
+            {
+                // Look for Environment.xlsx in the test kit folder
+                var environmentPath = Path.Combine(testKitPath, "Environment.xlsx");
+                if (!File.Exists(environmentPath))
+                {
+                    // Try lowercase as fallback
+                    environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                    if (!File.Exists(environmentPath))
+                    {
+                        Console.WriteLine($"[Port Config] Environment.xlsx not found at {testKitPath}. PortAllocator will use default 8000.");
+                        return 0;
+                    }
+                }
+
+                Console.WriteLine($"[Port Config] Reading starting port from Environment.xlsx: {environmentPath}");
+
+                using (var workbook = new XLWorkbook(environmentPath))
+                {
+                    // Look for "Config" sheet which contains port configuration
+                    var worksheet = workbook.Worksheet("Config");
+                    if (worksheet == null)
+                    {
+                        Console.WriteLine($"[Port Config] 'Config' sheet not found in Environment.xlsx at {environmentPath}");
+                        return 0;
+                    }
+                    
+                    // Read port configuration from Config sheet (column 1 = Key, column 2 = Value)
+                    // Try Code_Container_Host_Port first, then Code_Container_Internal_Port as fallback
+                    foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
+                    {
+                        var keyCell = row.Cell(1).GetValue<string>()?.Trim() ?? "";
+                        
+                        // Normalize key by removing underscores and making lowercase for comparison
+                        var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
+                        
+                        // Prefer Code_Container_Host_Port (external port for host exposure)
+                        // This is what containers will actually bind to on the host
+                        if (normalizedKey == "codecontainerhostport" || normalizedKey == "codecontainerinternalport")
+                        {
+                            var valueCell = row.Cell(2);
+                            int port = 0;
+                            
+                            // Try to get as integer first
+                            if (valueCell.TryGetValue<int>(out var intValue))
+                            {
+                                port = intValue;
+                            }
+                            else
+                            {
+                                // Fallback to string parsing
+                                var valueStr = valueCell.GetValue<string>()?.Trim() ?? "";
+                                int.TryParse(valueStr, out port);
+                            }
+                            
+                            if (port > 0 && port <= 65535)
+                            {
+                                Console.WriteLine($"[Port Config] Successfully read {keyCell}={port} from Environment.xlsx.");
+                                Console.WriteLine($"[Port Config] PortAllocator will start from port {port} and allocate sequentially (N, N+1, N+2, ...)");
+                                return port;
+                            }
+                        }
+                    }
+                    
+                    Console.WriteLine($"[Port Config] Code_Container_Host_Port or Code_Container_Internal_Port not found in Environment.xlsx at {environmentPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Port Config] Error reading starting port from Environment.xlsx: {ex.Message}");
+            }
+
+            return 0;  // Will use PortAllocator default (8000)
         }
 
         #endregion

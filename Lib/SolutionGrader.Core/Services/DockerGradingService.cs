@@ -727,9 +727,12 @@ namespace SolutionGrader.Core.Services
                                     Console.WriteLine($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
-                                // Use temp directory for container copy (contains modified DLL)
+                                // CRITICAL FIX: Use temp directory content BUT keep original folder name
+                                // This ensures the path in container matches what STARTSERVER expects
+                                // Copy: tempDir/* -> container:/apps/originalFolderName/
                                 dirToCopy = tempStagingDir;
-                                folderName = Path.GetFileName(tempStagingDir);
+                                // DO NOT change folderName - keep it as original so path matches in STARTSERVER
+                                // folderName = Path.GetFileName(tempStagingDir);  // REMOVED - causes DLL not found error
                             }
                             
                             // Copy from temp staging (if modified) or original (if not) to container
@@ -789,9 +792,12 @@ namespace SolutionGrader.Core.Services
                                     Console.WriteLine($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
-                                // Use temp directory for container copy (contains modified DLL)
+                                // CRITICAL FIX: Use temp directory content BUT keep original folder name
+                                // This ensures the path in container matches what STARTCLIENT expects
+                                // Copy: tempDir/* -> container:/apps/originalFolderName/
                                 dirToCopy = tempStagingDir;
-                                folderName = Path.GetFileName(tempStagingDir);
+                                // DO NOT change folderName - keep it as original so path matches in STARTCLIENT
+                                // folderName = Path.GetFileName(tempStagingDir);  // REMOVED - causes DLL not found error
                             }
                             
                             // Copy from temp staging (if modified) or original (if not) to container
@@ -1136,16 +1142,55 @@ namespace SolutionGrader.Core.Services
                     networkCheckPassed = false;
                 }
                 
+                // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
+                // - If ANY flow has FAIL status, entire test FAILS
+                // - PARTIAL is treated as PASS (flags match, roles don't matter for passing)
+                // - Only flows recorded in Detail.xlsx are validated
+                // - Flows NOT in Detail.xlsx are ignored (even if captured)
+                
+                int totalNetworkFlows = networkComparisons.Count;
+                int passCount = networkComparisons.Count(c => c.Passed);
+                int partialCount = networkComparisons.Count(c => c.IsPartial);
+                int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
+                
+                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+                
+                // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
+                // PARTIAL counts as passing (flags matched correctly)
+                bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
+                
                 // Final result: must pass both output comparison AND network check
-                result.EarnedMark = (passed && networkCheckPassed) ? earnedMark : 0;
-                result.Passed = passed && networkCheckPassed;
+                // No partial credit - ALL or NOTHING
+                result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
+                result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
                 
+                // Build detailed error message for OverallSummary.xlsx
+                var errorMessages = new List<string>();
+                
                 if (!networkCheckPassed)
                 {
-                    result.ErrorMessage = "Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.";
+                    errorMessages.Add("Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.");
+                }
+                
+                if (!passed)
+                {
+                    int failedOutputs = comparisons.Count(c => !c.Passed);
+                    if (failedOutputs > 0)
+                        errorMessages.Add($"Console output: {failedOutputs} check(s) failed");
+                }
+                
+                if (totalNetworkFlows > 0 && failCount > 0)
+                {
+                    // Show detailed breakdown: which flows failed
+                    errorMessages.Add($"Network flows: {failCount} FAIL (ALL-OR-NOTHING: test FAILED), {partialCount} PARTIAL, {passCount} PASS");
+                }
+                
+                if (errorMessages.Any())
+                {
+                    result.ErrorMessage = string.Join("; ", errorMessages);
                 }
             }
             catch (Exception ex)
@@ -1391,11 +1436,20 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // ALL-OR-NOTHING policy
-            bool allPassed = passed == total && total > 0;
+            // ALL-OR-NOTHING policy for console output comparison
+            // CRITICAL FIX: If total == 0 (no console output expectations), treat as PASS
+            // Only enforce ALL-OR-NOTHING when there ARE expectations to check
+            bool allPassed = total == 0 || (passed == total && total > 0);
             double earnedMark = allPassed ? maxMark : 0;
             
-            Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
+            if (total == 0)
+            {
+                Console.WriteLine($"  Comparison summary: No console output expectations - PASS by default");
+            }
+            else
+            {
+                Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
+            }
             
             return (earnedMark, allPassed, comparisons);
         }
@@ -1408,25 +1462,61 @@ namespace SolutionGrader.Core.Services
             {
                 var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
                 
-                // Use lenient flag comparison - check if all expected flags are present
-                bool matched = capturedPackets.Any(p =>
-                    (string.IsNullOrEmpty(exp.Flags) || CompareTcpFlags(exp.Flags, p.Flags)) &&
-                    (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
-                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
+                // Find matching packet by flags
+                var matchingPacket = capturedPackets.FirstOrDefault(p =>
+                    !string.IsNullOrEmpty(exp.Flags) && 
+                    NormalizeFlags(exp.Flags) == NormalizeFlags(p.Flags));
                 
-                results.Add(new ComparisonResult
+                if (matchingPacket != null)
                 {
-                    Source = "Network",
-                    Stage = exp.Stage,
-                    Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                    Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
-                    Passed = matched
-                });
+                    // Check if it's an exact match (PASS) or partial match (PARTIAL)
+                    bool exactMatch = true;
+                    
+                    // Compare flags - exact match required (but order-normalized)
+                    if (!string.IsNullOrEmpty(exp.Flags) && NormalizeFlags(exp.Flags) != NormalizeFlags(matchingPacket.Flags))
+                        exactMatch = false;
+                    
+                    // Compare roles exactly
+                    if (!string.IsNullOrEmpty(exp.SourceRole) && matchingPacket.SourceRole != exp.SourceRole)
+                        exactMatch = false;
+                    if (!string.IsNullOrEmpty(exp.DestinationRole) && matchingPacket.DestinationRole != exp.DestinationRole)
+                        exactMatch = false;
+                    
+                    // CRITICAL FIX: Track PASS vs PARTIAL in ComparisonResult
+                    // PASS = exact match (flags + roles match)
+                    // PARTIAL = flags match but roles don't match
+                    results.Add(new ComparisonResult
+                    {
+                        Source = "Network",
+                        Stage = exp.Stage,
+                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
+                        Actual = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}",
+                        Passed = exactMatch,  // true for PASS, false for PARTIAL
+                        IsPartial = !exactMatch && true  // PARTIAL if matched flags but not exact
+                    });
+                }
+                else
+                {
+                    // No matching packet found - FAIL
+                    results.Add(new ComparisonResult
+                    {
+                        Source = "Network",
+                        Stage = exp.Stage,
+                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
+                        Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
+                        Passed = false,
+                        IsPartial = false  // Complete FAIL - missing packet
+                    });
+                }
             }
             
             return results;
         }
         
+        /// <summary>
+        /// Simple string contains check with basic normalization for line endings.
+        /// For more robust comparison, use DataComparisonService.CompareText().
+        /// </summary>
         private bool NormalizeAndContains(string actual, string expected)
         {
             if (string.IsNullOrEmpty(expected)) return true;
@@ -1436,47 +1526,20 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Compares TCP flags in a lenient way - checks if all expected flags are present
-        /// regardless of order. TCP flags are bits (SYN, ACK, PSH, FIN, RST, URG) and their
-        /// order may differ between Windows/Linux or packet capture tools.
+        /// Normalize TCP flags for comparison - sorts flags alphabetically and removes whitespace.
+        /// REUSES logic from Executor.NormalizeFlags() to avoid code duplication.
         /// 
         /// Examples:
-        /// - "PSH, ACK" matches "ACK, PSH" -> true
-        /// - "SYN" matches "SYN" -> true
-        /// - "ACK" matches "ACK, RST" -> true (actual has ACK plus extra RST)
-        /// - "SYN, ACK" matches "SYN" -> false (missing ACK)
+        /// - "PSH, ACK" -> "ACK, PSH"
+        /// - "SYN" -> "SYN"
+        /// - "ACK, RST" -> "ACK, RST"
         /// </summary>
-        private bool CompareTcpFlags(string expectedFlags, string actualFlags)
+        private static string NormalizeFlags(string flags)
         {
-            if (string.IsNullOrEmpty(expectedFlags)) return true;
-            if (string.IsNullOrEmpty(actualFlags)) return false;
+            if (string.IsNullOrWhiteSpace(flags)) return "";
             
-            // Split flags and normalize (trim whitespace, convert to uppercase)
-            var expectedSet = expectedFlags.Split(',')
+            var flagList = flags.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
-                .ToHashSet();
-            
-            var actualSet = actualFlags.Split(',')
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
-                .ToHashSet();
-            
-            // Check if all expected flags are present in actual flags
-            // (actual may have additional flags, which is acceptable)
-            return expectedSet.IsSubsetOf(actualSet);
-        }
-        
-        /// <summary>
-        /// Normalize flags for exact comparison - sorts flags alphabetically and removes whitespace
-        /// </summary>
-        private string NormalizeFlags(string flags)
-        {
-            if (string.IsNullOrEmpty(flags)) return "";
-            
-            var flagList = flags.Split(',')
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
                 .OrderBy(f => f)
                 .ToList();
             
@@ -2544,6 +2607,12 @@ namespace SolutionGrader.Core.Services
         public string? Expected { get; set; }
         public string? Actual { get; set; }
         public bool Passed { get; set; }
+        
+        /// <summary>
+        /// Indicates if this is a PARTIAL match (flags match but roles don't).
+        /// PARTIAL matches should count as passing with partial credit.
+        /// </summary>
+        public bool IsPartial { get; set; }
         
         // Additional fields for SampleLogging format
         public double PointsAwarded { get; set; }
