@@ -269,16 +269,33 @@ namespace SolutionGrader.Core.Services
 
                     foreach (var row in ws.RowsUsed().Skip(1)) // Skip header
                     {
-                        var paper = row.Cell(1).GetValue<string>();
-                        var question = row.Cell(2).GetValue<string>();
-
-                        if (paper == paperNo && !string.IsNullOrEmpty(question))
+                        var paperNoCell = row.Cell(1).GetValue<string>();
+                        
+                        // Parse paper number (could be string "1" or int 1)
+                        if (string.IsNullOrEmpty(paperNoCell))
+                            continue;
+                            
+                        // Support both string and numeric paper numbers
+                        var paperMatch = paperNoCell.Trim() == paperNo.Trim();
+                        
+                        if (paperMatch)
                         {
-                            var questionPath = Path.Combine(testKitRoot, question);
-                            if (Directory.Exists(questionPath))
+                            // Column 2 is Question (Q1, Q2, etc.) - not used for folder lookup
+                            // Column 3 is QuestionKit (Q11, Q12, Q21, Q22, etc.) - this is the folder name
+                            var questionKitFolder = row.Cell(3).GetValue<string>();
+                            
+                            if (!string.IsNullOrEmpty(questionKitFolder))
                             {
-                                logger?.Invoke($"Found test kit via Mapping.xlsx: {question} for paper {paperNo}");
-                                return questionPath;
+                                var questionPath = Path.Combine(testKitRoot, questionKitFolder);
+                                if (Directory.Exists(questionPath))
+                                {
+                                    logger?.Invoke($"Found test kit via Mapping.xlsx: {questionKitFolder} for paper {paperNo}");
+                                    return questionPath;
+                                }
+                                else
+                                {
+                                    logger?.Invoke($"Mapping found {questionKitFolder} for paper {paperNo}, but folder doesn't exist");
+                                }
                             }
                         }
                     }
