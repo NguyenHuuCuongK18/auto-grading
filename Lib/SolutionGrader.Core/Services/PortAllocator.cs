@@ -66,7 +66,7 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Allocates the next available port for code containers (server/client).
+        /// Allocates the next sequential port for code containers (server/client).
         /// Uses Mutex to ensure thread-safe port allocation across parallel grading.
         /// 
         /// CRITICAL: Ports are NEVER RECYCLED. Each call returns the next port in sequence:
@@ -75,10 +75,10 @@ namespace SolutionGrader.Core.Services
         /// - Student 1000: port N+999
         /// - Student 1001: port N+1000
         /// 
-        /// If a port is in use at OS level, automatically skips to next port.
+        /// No availability checking - Docker handles port binding when containers start.
         /// No reuse, no recycling, unlimited students supported.
         /// </summary>
-        /// <returns>An available port number, or -1 if exhausted all ports to max (65535)</returns>
+        /// <returns>Next sequential port number, or -1 if exhausted all ports to max (65535)</returns>
         public int AllocatePort()
         {
             try
