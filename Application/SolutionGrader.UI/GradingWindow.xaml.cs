@@ -934,6 +934,20 @@ namespace SolutionGrader.UI
                 return;
             }
             
+            // Confirm reset action with user since it deletes result folders
+            var result = System.Windows.MessageBox.Show(
+                $"This will reset all {_students.Count} student(s) and DELETE their result folders.\n\n" +
+                "This ensures a clean re-grade without interference from previous attempts.\n\n" +
+                "Are you sure you want to continue?",
+                "Confirm Reset All",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            
+            if (result == MessageBoxResult.No)
+                return;
+            
+            _logger.LogInfo($"Resetting all {_students.Count} students and deleting result folders...");
+            
             foreach (var student in _students)
             {
                 ResetStudent(student);
@@ -941,7 +955,13 @@ namespace SolutionGrader.UI
             
             dgStudents.Items.Refresh();
             UpdateStatusBar();
-            _logger.LogInfo("All statuses reset");
+            
+            _logger.LogInfo($"All {_students.Count} student statuses reset and result folders deleted");
+            System.Windows.MessageBox.Show(
+                $"Reset complete!\n\n{_students.Count} student(s) are ready for re-grading.",
+                "Reset Complete",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         private void ResetSelected_Click(object sender, RoutedEventArgs e)
@@ -952,14 +972,42 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            foreach (var student in _students.Where(s => s.IsSelected))
+            var selectedStudents = _students.Where(s => s.IsSelected).ToList();
+            
+            if (selectedStudents.Count == 0)
+            {
+                System.Windows.MessageBox.Show("No students selected.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            
+            // Confirm reset action with user since it deletes result folders
+            var result = System.Windows.MessageBox.Show(
+                $"This will reset {selectedStudents.Count} selected student(s) and DELETE their result folders.\n\n" +
+                "This ensures a clean re-grade without interference from previous attempts.\n\n" +
+                "Are you sure you want to continue?",
+                "Confirm Reset Selected",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            
+            if (result == MessageBoxResult.No)
+                return;
+            
+            _logger.LogInfo($"Resetting {selectedStudents.Count} selected students and deleting result folders...");
+            
+            foreach (var student in selectedStudents)
             {
                 ResetStudent(student);
             }
             
             dgStudents.Items.Refresh();
             UpdateStatusBar();
-            _logger.LogInfo("Selected statuses reset");
+            
+            _logger.LogInfo($"{selectedStudents.Count} selected student statuses reset and result folders deleted");
+            System.Windows.MessageBox.Show(
+                $"Reset complete!\n\n{selectedStudents.Count} student(s) are ready for re-grading.",
+                "Reset Complete",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         private void ResetStudent(StudentSolution student)
@@ -971,34 +1019,108 @@ namespace SolutionGrader.UI
             student.StatusMessage = null;
             student.ProgressPercent = 0;
             
-            // Delete associated result files if they exist - organized by paper
-            // Try paper-organized path first
+            // COMPREHENSIVE CLEANUP: Delete all result folders for this student
+            // This is critical when grading was canceled/paused to prevent interference with re-grading
+            // We need to clean up all possible locations where results might be stored
+            
+            int foldersDeleted = 0;
+            
+            // 1. Delete paper-organized result folder (current structure)
+            // Format: SaveResultFolderPath/{PaperNo}/student/{StudentCode}/
             var paperResultFolder = Path.Combine(_configuration.SaveResultFolderPath, student.PaperNo, "student", student.StudentCode);
             if (Directory.Exists(paperResultFolder))
             {
                 try
                 {
                     Directory.Delete(paperResultFolder, true);
-                    _logger.LogInfo($"Deleted result folder for {student.StudentCode} (Paper {student.PaperNo})");
+                    foldersDeleted++;
+                    _logger.LogInfo($"Deleted paper-organized result folder for {student.StudentCode} (Paper {student.PaperNo})");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to delete result folder for {student.StudentCode}: {ex.Message}");
+                    _logger.LogWarning($"Failed to delete paper-organized result folder for {student.StudentCode}: {ex.Message}");
                 }
             }
 
-            // Also try legacy non-paper-organized path
+            // 2. Delete legacy non-paper-organized result folder (old structure)
+            // Format: SaveResultFolderPath/student/{StudentCode}/
             var legacyResultFolder = Path.Combine(_configuration.SaveResultFolderPath, "student", student.StudentCode);
             if (Directory.Exists(legacyResultFolder))
             {
                 try
                 {
                     Directory.Delete(legacyResultFolder, true);
+                    foldersDeleted++;
+                    _logger.LogInfo($"Deleted legacy result folder for {student.StudentCode}");
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning($"Failed to delete legacy result folder for {student.StudentCode}: {ex.Message}");
                 }
+            }
+            
+            // 3. Delete student-specific log folders that might contain partial results
+            // Format: SaveResultFolderPath/Logs/Log_{StudentCode}_{Date}_Paper{PaperNo}/
+            try
+            {
+                var logsFolder = Path.Combine(_configuration.SaveResultFolderPath, "Logs");
+                if (Directory.Exists(logsFolder))
+                {
+                    var studentLogPattern = $"Log_{student.StudentCode}_*";
+                    var studentLogFolders = Directory.GetDirectories(logsFolder, studentLogPattern);
+                    
+                    foreach (var logFolder in studentLogFolders)
+                    {
+                        try
+                        {
+                            Directory.Delete(logFolder, true);
+                            foldersDeleted++;
+                            _logger.LogInfo($"Deleted log folder: {Path.GetFileName(logFolder)}");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"Failed to delete log folder {Path.GetFileName(logFolder)}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to search for student log folders: {ex.Message}");
+            }
+            
+            // 4. Delete any temp/intermediate files for this student
+            // These might be created during grading but not cleaned up if canceled
+            try
+            {
+                var tempPattern = $"*{student.StudentCode}*.tmp";
+                var tempFiles = Directory.GetFiles(_configuration.SaveResultFolderPath, tempPattern, SearchOption.AllDirectories);
+                
+                foreach (var tempFile in tempFiles)
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                        _logger.LogInfo($"Deleted temp file: {Path.GetFileName(tempFile)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to delete temp file {Path.GetFileName(tempFile)}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Failed to search for temp files: {ex.Message}");
+            }
+            
+            if (foldersDeleted > 0)
+            {
+                _logger.LogInfo($"Reset complete for {student.StudentCode}: Deleted {foldersDeleted} folder(s). Student is ready for re-grading.");
+            }
+            else
+            {
+                _logger.LogInfo($"Reset complete for {student.StudentCode}: No existing result folders found.");
             }
         }
 
