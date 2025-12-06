@@ -1436,11 +1436,20 @@ namespace SolutionGrader.Core.Services
                 }
             }
             
-            // ALL-OR-NOTHING policy
-            bool allPassed = passed == total && total > 0;
+            // ALL-OR-NOTHING policy for console output comparison
+            // CRITICAL FIX: If total == 0 (no console output expectations), treat as PASS
+            // Only enforce ALL-OR-NOTHING when there ARE expectations to check
+            bool allPassed = total == 0 || (passed == total && total > 0);
             double earnedMark = allPassed ? maxMark : 0;
             
-            Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
+            if (total == 0)
+            {
+                Console.WriteLine($"  Comparison summary: No console output expectations - PASS by default");
+            }
+            else
+            {
+                Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
+            }
             
             return (earnedMark, allPassed, comparisons);
         }
