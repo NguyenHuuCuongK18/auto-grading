@@ -934,14 +934,13 @@ namespace SolutionGrader.UI
                     // Execute grading using the orchestration service - it handles status changes internally
                     // Pass the cancellation token so pause can abort the current grading
                     // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
-                    // TRUE PARALLEL: No callback needed - containers created simultaneously without waiting
+                    // TRUE PARALLEL: Containers created simultaneously without any serialization or callbacks
                     var sessionState = new GradingSessionState();
                     await _gradingService.StartGradingAsync(
                         new System.Collections.Generic.List<StudentSolution> { student },
                         studentConfig,
                         sessionState,
-                        ct,
-                        null); // onContainersReady callback removed - not needed for parallel execution
+                        ct);
                 
                     // Update final status
                     student.ProgressPercent = 100;

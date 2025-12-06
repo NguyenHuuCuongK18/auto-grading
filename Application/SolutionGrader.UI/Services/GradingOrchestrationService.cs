@@ -64,13 +64,11 @@ namespace SolutionGrader.UI.Services
         /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
         /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
-        /// <param name="onContainersReady">Optional callback when containers are ready (for staggered startup)</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
             GradingSessionState sessionState,
-            CancellationToken ct = default,
-            Action? onContainersReady = null)
+            CancellationToken ct = default)
         {
             // Use provided cancellation token, or create a new one if not provided
             if (ct == default)
@@ -169,7 +167,7 @@ namespace SolutionGrader.UI.Services
                     sessionState.CurrentStudentCode = student.StudentCode;
                     SessionStateChanged?.Invoke(this, sessionState);
 
-                    await GradeStudentAsync(student, config, resultPath, ct, onContainersReady);
+                    await GradeStudentAsync(student, config, resultPath, ct);
 
                     // Update session state with single-pass counting for better performance
                     sessionState.GradedStudents++;
@@ -244,8 +242,7 @@ namespace SolutionGrader.UI.Services
             StudentSolution student, 
             GradingConfiguration config,
             string resultPath,
-            CancellationToken ct,
-            Action? onContainersReady = null)
+            CancellationToken ct)
         {
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
@@ -436,8 +433,7 @@ namespace SolutionGrader.UI.Services
                     clientDllPath,
                     student.StudentCode,
                     dockerConfig,
-                    ct,
-                    onContainersReady);
+                    ct);
 
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
