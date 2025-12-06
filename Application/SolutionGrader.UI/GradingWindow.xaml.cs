@@ -52,6 +52,11 @@ namespace SolutionGrader.UI
         // Only loaded during grading, NOT during discovery
         private readonly Dictionary<string, (string testKitPath, TestKitConfigService.TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfigService.TestKitConfig)>();
         
+        // CRITICAL: Shared PortAllocator for batch/parallel grading
+        // Each grading session needs ONE shared PortAllocator that all parallel students use
+        // This prevents port conflicts when grading students in parallel batches
+        private PortAllocator? _sharedPortAllocator;
+        
         private CancellationTokenSource? _cancellationTokenSource;
         private DispatcherTimer? _elapsedTimer;
         private DateTime? _sessionStartTime;
@@ -398,6 +403,45 @@ namespace SolutionGrader.UI
             _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
             PortAllocator.ClearAllAllocatedPorts();
             
+            // CRITICAL: Initialize shared PortAllocator for THIS grading session
+            // All parallel students will use this SAME PortAllocator instance
+            // to ensure thread-safe, unique port allocation without conflicts
+            try
+            {
+                var firstStudent = studentsToGrade.FirstOrDefault();
+                if (firstStudent != null)
+                {
+                    var firstTestKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, firstStudent.PaperNo);
+                    if (!string.IsNullOrEmpty(firstTestKitPath))
+                    {
+                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
+                        if (startingPort <= 0)
+                        {
+                            startingPort = 8000; // Fallback default
+                            _logger.LogWarning($"[Port Config] Could not read starting port from Environment.xlsx, using default {startingPort}");
+                        }
+                        else
+                        {
+                            _logger.LogInfo($"[Port Config] Read starting port {startingPort} from Environment.xlsx");
+                        }
+                        
+                        _sharedPortAllocator = new PortAllocator(startingPort);
+                        _logger.LogInfo($"[Port Config] Initialized SHARED PortAllocator with starting port {startingPort} for batch grading");
+                    }
+                }
+                
+                if (_sharedPortAllocator == null)
+                {
+                    _sharedPortAllocator = new PortAllocator(8000); // Fallback
+                    _logger.LogWarning("[Port Config] Using fallback PortAllocator with port 8000");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Port Config] Failed to initialize PortAllocator: {ex.Message}. Using fallback.");
+                _sharedPortAllocator = new PortAllocator(8000);
+            }
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -529,6 +573,10 @@ namespace SolutionGrader.UI
                     _gradingService.DisposeAllContainers(_configuration);
                 }
                 
+                // Dispose shared PortAllocator when session ends
+                _sharedPortAllocator?.Dispose();
+                _sharedPortAllocator = null;
+                
                 _logger.LogInfo("Grading session completed");
             }
         }
@@ -536,7 +584,7 @@ namespace SolutionGrader.UI
         /// <summary>
         /// Grades a single student using Docker-based grading.
         /// 
-        /// Port allocation is handled dynamically using PortAllocator to ensure
+        /// Port allocation is handled dynamically using SHARED PortAllocator to ensure
         /// thread-safe, unique port allocation that never reuses ports within a session.
         /// This prevents race conditions in parallel grading where ports could be
         /// incorrectly reused while still in use by another student.
@@ -548,18 +596,22 @@ namespace SolutionGrader.UI
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
-            // Allocate a port dynamically using PortAllocator (thread-safe for parallel grading)
-            // This replaces the old portOffset-based approach which could lead to race conditions
-            // when students finish at different times and ports get reused incorrectly.
-            //
-            // CRITICAL: The PortAllocator ensures ports are NEVER reused within a grading session.
-            // This prevents the scenario where:
-            // - Student A starts with port 8001
-            // - Student B starts with port 8000  
-            // - Student A finishes and releases port 8001
-            // - The system incorrectly reuses port 8000 (still in use by Student B)
-            using var portAllocator = new PortAllocator();
-            int allocatedPort = portAllocator.AllocatePort();
+            // CRITICAL: Use the SHARED PortAllocator for this grading session
+            // This ensures all parallel students get unique ports without conflicts
+            // DO NOT create a new PortAllocator here - that would break parallel grading!
+            if (_sharedPortAllocator == null)
+            {
+                _logger.LogError($"[UI] Shared PortAllocator not initialized for student {student.StudentCode}");
+                student.Status = GradingStatus.Failed;
+                student.StatusMessage = "Port allocator not initialized";
+                student.EndTime = DateTime.Now;
+                UpdateStudentInUI(student);
+                return;
+            }
+            
+            // Allocate a port dynamically using the SHARED PortAllocator (thread-safe)
+            // This replaces the old per-student PortAllocator approach which caused port conflicts
+            int allocatedPort = _sharedPortAllocator.AllocatePort();
             
             if (allocatedPort == -1)
             {
@@ -571,7 +623,7 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            _logger.LogInfo($"[UI] Allocated port {allocatedPort} for student {student.StudentCode}");
+            _logger.LogInfo($"[UI] Allocated port {allocatedPort} for student {student.StudentCode} (from shared allocator)");
             
             try
             {
@@ -1067,6 +1119,76 @@ namespace SolutionGrader.UI
         private void dgStudents_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
 
+        }
+        
+        /// <summary>
+        /// Reads the starting port from Environment.xlsx in the test kit folder.
+        /// Returns 0 if not found or error occurs (caller should use default port).
+        /// </summary>
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
+        {
+            try
+            {
+                // Look for Environment.xlsx in the question-specific test kit folder
+                var environmentPath = Path.Combine(testKitPath, "Environment.xlsx");
+                if (!File.Exists(environmentPath))
+                {
+                    // Try lowercase as fallback
+                    environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                    if (!File.Exists(environmentPath))
+                    {
+                        _logger.LogWarning($"Environment.xlsx not found at {testKitPath}");
+                        return 0;
+                    }
+                }
+
+                _logger.LogInfo($"Reading port configuration from: {environmentPath}");
+
+                using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
+                {
+                    // Look for "Config" sheet which contains port configuration
+                    var worksheet = workbook.Worksheet("Config");
+                    if (worksheet == null)
+                    {
+                        _logger.LogWarning($"'Config' sheet not found in Environment.xlsx");
+                        return 0;
+                    }
+                    
+                    // Find Code_Container_Host_Port in the Config sheet
+                    foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
+                    {
+                        var keyCell = row.Cell(1).GetString().Trim();
+                        var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
+                        
+                        if (normalizedKey == "codecontainerhostport" || normalizedKey == "codecontainerinternalport")
+                        {
+                            var valueCell = row.Cell(2);
+                            int port = 0;
+                            
+                            if (valueCell.TryGetValue<int>(out var intValue))
+                            {
+                                port = intValue;
+                            }
+                            else if (int.TryParse(valueCell.GetString(), out var parsedValue))
+                            {
+                                port = parsedValue;
+                            }
+                            
+                            if (port > 0)
+                            {
+                                _logger.LogInfo($"Found starting port {port} in Environment.xlsx (key: {keyCell})");
+                                return port;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error reading port from Environment.xlsx: {ex.Message}");
+            }
+            
+            return 0; // Not found or error
         }
     }
 }
