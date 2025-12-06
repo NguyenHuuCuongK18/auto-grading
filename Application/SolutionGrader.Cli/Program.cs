@@ -109,7 +109,11 @@ public class Program
             // Parallel grading and index range settings
             MaxParallelStudents = int.TryParse(map.GetValueOrDefault("parallel"), out var parallel) ? Math.Max(1, parallel) : 1,
             StartIndex = int.TryParse(map.GetValueOrDefault("start-index"), out var si) ? Math.Max(0, si) : 0,
-            EndIndex = int.TryParse(map.GetValueOrDefault("end-index"), out var ei) ? ei : -1
+            EndIndex = int.TryParse(map.GetValueOrDefault("end-index"), out var ei) ? ei : -1,
+            
+            // DLL modification fallback (default: enabled for batch grading)
+            // Patches hardcoded ports in student DLLs to match allocated container ports
+            UseDllModificationFallback = !map.ContainsKey("no-dll-mod") && ParseBool(map.GetValueOrDefault("dll-mod", "true"))
         };
 
         // Optional: filter by paper or student

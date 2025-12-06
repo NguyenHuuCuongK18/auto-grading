@@ -128,5 +128,22 @@ namespace SolutionGrader.Cli.Services
         /// -1 means grade all students from StartIndex to the end.
         /// </summary>
         public int EndIndex { get; set; } = -1;
+
+        /// <summary>
+        /// Enable DLL modification fallback when appsettings.json is not found.
+        /// 
+        /// CRITICAL for batch grading: When enabled, this feature patches hardcoded ports
+        /// in student DLLs (e.g., 4000, 5000, 8080) with the correct allocated port
+        /// (e.g., 8000 for student 1, 8001 for student 2, etc.).
+        /// 
+        /// Without this:
+        /// - Student hardcodes port 4000 in DLL → container runs on 8001 → client can't connect
+        /// 
+        /// With this enabled:
+        /// - Student hardcodes port 4000 in DLL → DLL patched to 8001 → client connects correctly
+        /// 
+        /// Default: true (enabled for batch grading to ensure port consistency)
+        /// </summary>
+        public bool UseDllModificationFallback { get; set; } = true;
     }
 }

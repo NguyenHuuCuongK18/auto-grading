@@ -282,7 +282,12 @@ namespace SolutionGrader.Cli.Services
                     DatabaseUsername = config.DatabaseUsername,
                     DatabasePassword = config.DatabasePassword,
                     GradingTimeoutSeconds = config.GradingTimeoutSeconds,
-                    TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds
+                    TestCaseTimeoutSeconds = config.TestCaseTimeoutSeconds,
+                    
+                    // CRITICAL: Enable DLL modification for batch grading
+                    // This patches hardcoded ports (4000, 5000, etc.) to allocated port (8000, 8001, 8002)
+                    // Without this, students' hardcoded ports won't match container exposed ports
+                    UseDllModificationFallback = config.UseDllModificationFallback
                 };
 
                 Console.WriteLine($"[{student.StudentCode}] Using dynamically allocated port: {allocatedPort}");
