@@ -353,32 +353,31 @@ namespace SolutionGrader.Cli.Services
                 
                 if (!solutionReady)
                 {
-                    Console.WriteLine($"[ERROR] Failed to extract or find solution for {student.StudentCode}");
-                    result.ErrorMessage = "Failed to extract or find solution";
-                    return result;
+                    Console.WriteLine($"[WARNING] Failed to extract or find solution for {student.StudentCode} - will attempt to continue with grading");
+                    // Don't return early - let the grading service handle this and report appropriate errors
+                    // The DockerGradingService will fail gracefully if files are truly missing
                 }
                 
                 // NOW find DLLs after ensuring solution is extracted
                 student.ServerDllPath = FindDll(student.SolutionPath, config.ServerProjectName);
                 student.ClientDllPath = FindDll(student.SolutionPath, config.ClientProjectName);
                 
-                // Validate at least one component exists
-                if (string.IsNullOrEmpty(student.ServerDllPath) && string.IsNullOrEmpty(student.ClientDllPath))
-                {
-                    Console.WriteLine($"[ERROR] No DLLs found for {student.StudentCode} after extraction");
-                    result.ErrorMessage = "No DLLs found in solution";
-                    return result;
-                }
-                
-                // Log warnings for missing expected DLLs (only errors, not successes)
+                // Log warnings for missing expected DLLs but continue with grading
+                // The grading service will handle missing DLLs and use golden DLLs as fallback if configured
                 if (student.ServerDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
                 {
                     Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
+                    Console.WriteLine($"[INFO] Student {student.StudentCode} - Will attempt to continue grading with available components");
                 }
                 if (student.ClientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
                 {
                     Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
+                    Console.WriteLine($"[INFO] Student {student.StudentCode} - Will attempt to continue grading with available components");
                 }
+                
+                // Note: We no longer fail early if both DLLs are missing
+                // The grading service (DockerGradingService) will determine if it can proceed
+                // based on the test kit configuration (e.g., using golden server/client)
 
                 // OPTIMIZATION: Cache starting port from Environment.xlsx to avoid repeated Excel reads
                 // This is a significant performance improvement for batch grading of students with the same paper
@@ -550,29 +549,24 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // OPTIMIZED: Don't extract during discovery - only check if solution exists or zip exists
-                    // This prevents extracting ALL students when we only need to grade a subset (based on index range)
+                    // NEW APPROACH: Load ALL students during discovery, regardless of missing files.
+                    // Let the grading phase handle validation and log appropriate error messages.
+                    // This ensures we have a complete list of all students for tracking purposes.
                     // Extraction will happen lazily when grading each student (in GradeStudentUsingSharedServiceAsync)
                     
                     var questionFolder = Path.Combine(studentDir, "1");
+                    var solutionPath = Path.Combine(questionFolder, "solution");
+                    
                     if (!Directory.Exists(questionFolder))
                     {
-                        Console.WriteLine($"[WARNING] No question folder for {studentCode}");
-                        continue;
+                        // Student doesn't have expected folder structure, but still add them
+                        // The grading phase will handle this and log appropriate error message
+                        Console.WriteLine($"[INFO] Found student {studentCode} - WARNING: No question folder /1 found, will handle during grading");
+                        solutionPath = studentDir; // Use student dir as fallback
                     }
                     
-                    var solutionPath = Path.Combine(questionFolder, "solution");
-                    bool hasSolutionFolder = Directory.Exists(solutionPath);
-                    bool hasZipFile = Directory.GetFiles(questionFolder, "*.zip").Length > 0;
-                    
-                    if (!hasSolutionFolder && !hasZipFile)
-                    {
-                        Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
-                        continue;
-                    }
-                    
-                    // Don't find DLLs during discovery - this would require extraction for all students
-                    // DLLs will be found during grading when solution is ensured to be extracted
+                    // Add ALL students - don't filter based on file existence
+                    // The grading phase will validate files and log errors as needed
                     students.Add(new StudentInfo
                     {
                         StudentCode = studentCode!,

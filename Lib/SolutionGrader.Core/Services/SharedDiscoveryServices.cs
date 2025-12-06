@@ -76,72 +76,38 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // OPTIMIZED: Don't search for DLLs during discovery - expensive and uses RAM
-                    // DLLs will be found during grading when actually needed
+                    // NEW APPROACH: Load ALL students during discovery, regardless of missing files.
+                    // Let the grading phase handle validation and log appropriate error messages.
+                    // This ensures we have a complete list of all students for tracking purposes.
                     
                     // Check for solution structure: {studentCode}/1/ or {studentCode}/solution/1/
                     var questionFolder1 = Path.Combine(studentDir, "1");
                     var questionFolder2 = Path.Combine(studentDir, "solution", "1");
                     
                     string? solutionPath = null;
-                    bool hasZip = false;
-                    bool hasExtractedFiles = false;
                     
                     // Check first structure: {studentCode}/1/
                     if (Directory.Exists(questionFolder1))
                     {
                         solutionPath = questionFolder1;
-                        hasExtractedFiles = Directory.Exists(Path.Combine(questionFolder1, "bin")) ||
-                                          Directory.GetFiles(questionFolder1, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0;
-                        
-                        if (!hasExtractedFiles)
-                        {
-                            // Look for zip in question folder
-                            var zipFiles = Directory.GetFiles(questionFolder1, "*.zip");
-                            hasZip = zipFiles.Length > 0;
-                        }
+                        logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}) - using structure /1");
                     }
                     // Check second structure: {studentCode}/solution/1/
                     else if (Directory.Exists(questionFolder2))
                     {
                         solutionPath = questionFolder2;
-                        hasExtractedFiles = Directory.Exists(Path.Combine(questionFolder2, "bin")) ||
-                                          Directory.GetFiles(questionFolder2, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0;
-                        
-                        if (!hasExtractedFiles)
-                        {
-                            // Look for zip in question folder or parent solution folder
-                            var zipFiles = Directory.GetFiles(questionFolder2, "*.zip");
-                            if (zipFiles.Length == 0)
-                            {
-                                var parentSolutionFolder = Path.Combine(studentDir, "solution");
-                                if (Directory.Exists(parentSolutionFolder))
-                                {
-                                    zipFiles = Directory.GetFiles(parentSolutionFolder, "*.zip");
-                                }
-                            }
-                            hasZip = zipFiles.Length > 0;
-                        }
+                        logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}) - using structure /solution/1");
                     }
                     else
                     {
-                        logger?.Invoke($"No question folder for {studentCode} (checked /1 and /solution/1)");
-                        continue;
-                    }
-                    
-                    if (!hasExtractedFiles && !hasZip)
-                    {
-                        logger?.Invoke($"No solution files and no zip file for {studentCode}");
-                        continue;
-                    }
-                    
-                    if (!hasExtractedFiles && hasZip)
-                    {
-                        logger?.Invoke($"Found zip file for {studentCode} - will extract when grading starts");
+                        // Student doesn't have expected folder structure, but still add them
+                        // The grading phase will handle this and log appropriate error message
+                        solutionPath = studentDir; // Use student dir as fallback
+                        logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}) - WARNING: No question folder /1 or /solution/1 found, will handle during grading");
                     }
 
-                    // DON'T search for DLLs during discovery - too expensive!
-                    // DLL paths will be found during grading when actually needed
+                    // Add ALL students - don't filter based on file existence
+                    // The grading phase will validate files and log errors as needed
                     students.Add(new DiscoveredStudent
                     {
                         StudentCode = studentCode!,
@@ -150,8 +116,6 @@ namespace SolutionGrader.Core.Services
                         ServerDllPath = null, // Will be found during grading
                         ClientDllPath = null  // Will be found during grading
                     });
-
-                    logger?.Invoke($"Found student: {studentCode} (Paper {paperNo})");
                 }
             }
 

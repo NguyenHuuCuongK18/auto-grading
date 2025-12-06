@@ -322,14 +322,16 @@ namespace SolutionGrader.UI.Services
                     
                     if (!solutionReady)
                     {
-                        var errorMsg = $"Failed to extract or locate solution folder";
-                        student.Status = GradingStatus.Failed;
-                        student.StatusMessage = errorMsg;
-                        _logger.LogError($"[{student.StudentCode}] {errorMsg}");
+                        var errorMsg = $"Failed to extract or locate solution folder - will attempt to continue with grading";
+                        _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
                         _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
-                        return;
+                        // Don't return early - let the grading service handle this and report appropriate errors
+                        // The DockerGradingService will fail gracefully if files are truly missing
                     }
-                    _logger.LogInfo($"[{student.StudentCode}] Solution ready at: {student.SolutionPath}");
+                    else
+                    {
+                        _logger.LogInfo($"[{student.StudentCode}] Solution ready at: {student.SolutionPath}");
+                    }
                 }
 
                 // Step 3: Build paths for Docker grading
