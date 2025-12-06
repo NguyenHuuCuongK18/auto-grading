@@ -171,11 +171,21 @@ namespace SolutionGrader.UI.Services
 
                     await GradeStudentAsync(student, config, resultPath, ct, onContainersReady);
 
-                    // Update session state
+                    // Update session state with single-pass counting for better performance
                     sessionState.GradedStudents++;
-                    sessionState.NotRunCount = students.Count(s => s.Status == GradingStatus.Not_Run);
-                    sessionState.SuccessCount = students.Count(s => s.Status == GradingStatus.Success);
-                    sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
+                    
+                    // OPTIMIZED: Count statuses in single pass instead of 3 separate iterations
+                    int notRun = 0, success = 0, failed = 0;
+                    foreach (var s in students)
+                    {
+                        if (s.Status == GradingStatus.Not_Run) notRun++;
+                        else if (s.Status == GradingStatus.Success) success++;
+                        else if (s.Status == GradingStatus.Failed) failed++;
+                    }
+                    
+                    sessionState.NotRunCount = notRun;
+                    sessionState.SuccessCount = success;
+                    sessionState.FailedCount = failed;
                     SessionStateChanged?.Invoke(this, sessionState);
 
                     // NO LONGER NEEDED: Old approach that recreated entire Excel file on each update

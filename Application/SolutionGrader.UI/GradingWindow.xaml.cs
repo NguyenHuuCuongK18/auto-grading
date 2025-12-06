@@ -1163,19 +1163,41 @@ namespace SolutionGrader.UI
 
         private void UpdateStatusBar()
         {
-            // OPTIMIZED: Pre-compute on worker thread, batch UI update
-            // Reduces status bar update frequency from 100s/sec to 4/sec during parallel grading
+            // OPTIMIZED: Single-pass iteration through students collection
+            // Previously iterated 4-5 times, now only once for better performance
             var total = _students.Count;
-            var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
-            var success = _students.Count(s => s.Status == GradingStatus.Success);
-            var failed = _students.Count(s => s.Status == GradingStatus.Failed);
-            var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
+            int success = 0, failed = 0, notRun = 0;
+            DateTime? latestEndTime = null;
+            
+            foreach (var student in _students)
+            {
+                switch (student.Status)
+                {
+                    case GradingStatus.Success:
+                        success++;
+                        break;
+                    case GradingStatus.Failed:
+                        failed++;
+                        break;
+                    case GradingStatus.Not_Run:
+                        notRun++;
+                        break;
+                }
+                
+                // Track latest end time for session duration calculation
+                if (student.EndTime.HasValue && (!latestEndTime.HasValue || student.EndTime.Value > latestEndTime.Value))
+                {
+                    latestEndTime = student.EndTime;
+                }
+            }
+            
+            var graded = success + failed;
             
             // Calculate session duration (only when session has started)
             string sessionDuration = "-";
             if (_sessionStartTime.HasValue)
             {
-                var endTime = _isRunning ? DateTime.Now : (_students.Where(s => s.EndTime.HasValue).Max(s => s.EndTime) ?? DateTime.Now);
+                var endTime = _isRunning ? DateTime.Now : (latestEndTime ?? DateTime.Now);
                 var elapsed = endTime - _sessionStartTime.Value;
                 
                 sessionDuration = elapsed.TotalHours >= 1
@@ -1199,15 +1221,15 @@ namespace SolutionGrader.UI
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            // OPTIMIZED: Batch DataGrid refresh to reduce UI thrashing
-            // During parallel grading, this prevents excessive refresh operations
-            // The batching automatically deduplicates refresh calls
-            _uiUpdateBatcher.QueueUpdate(() =>
+            // IMMEDIATE UPDATE: Refresh individual student row immediately when they start/finish
+            // Since students take time to grade, immediate updates provide better UX feedback
+            // Performance sacrifice is acceptable as updates are infrequent (only start/end per student)
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-            });
+            }), System.Windows.Threading.DispatcherPriority.Render);
             
-            // Update status bar using batching as well
+            // Status bar can still be batched for efficiency
             UpdateStatusBar();
         }
 
