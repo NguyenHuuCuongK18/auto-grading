@@ -45,6 +45,9 @@ namespace SolutionGrader.UI
         private StringBuilder _logBuffer = new StringBuilder();
         private int _estimatedLogCapacity = 8192; // Default for unknown student count
         
+        // Cache test kit configurations by paper number to avoid repeated Excel file reads
+        private readonly Dictionary<string, (string testKitPath, TestKitConfigService.TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfigService.TestKitConfig)>();
+        
         private CancellationTokenSource? _cancellationTokenSource;
         private DispatcherTimer? _elapsedTimer;
         private DateTime? _sessionStartTime;
@@ -139,6 +142,7 @@ namespace SolutionGrader.UI
                 
                 _students.Clear();
                 _filteredStudents.Clear();
+                _testKitCache.Clear(); // Clear cache when reloading students
                 cmbPaperSelection.Items.Clear();
                 cmbPaperSelection.Items.Add("-- Select Paper --");
                 cmbPaperSelection.SelectedIndex = 0;
@@ -153,19 +157,31 @@ namespace SolutionGrader.UI
                     // assign 1-based Id
                     student.Id = idx++;
                     
-                    // Get test kit config for this paper to set max mark
-                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
-                    if (!string.IsNullOrEmpty(testKitPath))
+                    // Use cached test kit config to avoid repeated Excel file reads
+                    // With 150 students on same paper, this reduces 150 Excel reads to just 1!
+                    if (!_testKitCache.TryGetValue(student.PaperNo, out var cachedTestKit))
                     {
-                        var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
-                        if (testKitConfig != null)
+                        // First student for this paper - load and cache test kit config
+                        var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                        if (!string.IsNullOrEmpty(testKitPath))
                         {
-                            student.MaxMark = testKitConfig.TotalMaxMark;
-                            
-                            // Also update configuration with port settings from first test kit
-                            _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
-                            _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
+                            var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
+                            if (testKitConfig != null)
+                            {
+                                cachedTestKit = (testKitPath, testKitConfig);
+                                _testKitCache[student.PaperNo] = cachedTestKit;
+                                
+                                // Also update configuration with port settings from first test kit
+                                _configuration.CodeContainerInternalPort = testKitConfig.CodeContainerInternalPort;
+                                _configuration.CodeContainerHostPort = testKitConfig.CodeContainerHostPort;
+                            }
                         }
+                    }
+                    
+                    // Apply test kit config to student
+                    if (cachedTestKit.config != null)
+                    {
+                        student.MaxMark = cachedTestKit.config.TotalMaxMark;
                     }
                     else
                     {
@@ -179,7 +195,7 @@ namespace SolutionGrader.UI
                 
                 UpdateStatusBar();
                 
-                _logger.LogInfo($"Loaded {students.Count} students");
+                _logger.LogInfo($"Loaded {students.Count} students (using {_testKitCache.Count} unique test kits)");
             }
             catch (Exception ex)
             {
@@ -611,9 +627,38 @@ namespace SolutionGrader.UI
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
-                // Check if test kit exists for this paper
-                var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
-                if (string.IsNullOrEmpty(testKitPath))
+                // Use cached test kit path and config to avoid repeated Excel file reads
+                if (!_testKitCache.TryGetValue(student.PaperNo, out var cachedTestKit))
+                {
+                    // Not in cache (shouldn't happen if LoadStudents ran), load it now
+                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                    if (string.IsNullOrEmpty(testKitPath))
+                    {
+                        student.Status = GradingStatus.Not_Run;
+                        student.StatusMessage = $"No test kit for paper {student.PaperNo}";
+                        student.EndTime = DateTime.Now;
+                        _logger.LogWarning(student.StatusMessage);
+                        UpdateStudentInUI(student);
+                        return;
+                    }
+                    
+                    var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
+                    if (testKitConfig == null)
+                    {
+                        student.Status = GradingStatus.Failed;
+                        student.StatusMessage = "Failed to load test kit configuration";
+                        student.EndTime = DateTime.Now;
+                        _logger.LogError(student.StatusMessage);
+                        UpdateStudentInUI(student);
+                        return;
+                    }
+                    
+                    cachedTestKit = (testKitPath, testKitConfig);
+                    _testKitCache[student.PaperNo] = cachedTestKit;
+                }
+                
+                // Check if test kit exists
+                if (string.IsNullOrEmpty(cachedTestKit.testKitPath) || cachedTestKit.config == null)
                 {
                     student.Status = GradingStatus.Not_Run;
                     student.StatusMessage = $"No test kit for paper {student.PaperNo}";
@@ -623,19 +668,7 @@ namespace SolutionGrader.UI
                     return;
                 }
                 
-                // Load test kit config
-                var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
-                if (testKitConfig == null)
-                {
-                    student.Status = GradingStatus.Failed;
-                    student.StatusMessage = "Failed to load test kit configuration";
-                    student.EndTime = DateTime.Now;
-                    _logger.LogError(student.StatusMessage);
-                    UpdateStudentInUI(student);
-                    return;
-                }
-                
-                student.MaxMark = testKitConfig.TotalMaxMark;
+                student.MaxMark = cachedTestKit.config.TotalMaxMark;
                 student.ProgressPercent = 10;
                 UpdateStudentInUI(student);
                 
@@ -720,19 +753,22 @@ namespace SolutionGrader.UI
                     CodeContainerInternalPort = allocatedPort,
                     CodeContainerHostPort = allocatedPort,
                     
-                    // Database settings from test kit
-                    DatabaseImageName = testKitConfig.DatabaseImageName,
-                    DatabaseContainerName = testKitConfig.DatabaseContainerName,
-                    DatabaseContainerInternalPort = testKitConfig.DatabaseContainerInternalPort,
-                    DatabaseContainerHostPort = testKitConfig.DatabaseContainerHostPort,
-                    DatabaseUsername = testKitConfig.DatabaseUsername,
-                    DatabasePassword = testKitConfig.DatabasePassword
+                    // Database settings from cached test kit
+                    DatabaseImageName = cachedTestKit.config.DatabaseImageName,
+                    DatabaseContainerName = cachedTestKit.config.DatabaseContainerName,
+                    DatabaseContainerInternalPort = cachedTestKit.config.DatabaseContainerInternalPort,
+                    DatabaseContainerHostPort = cachedTestKit.config.DatabaseContainerHostPort,
+                    DatabaseUsername = cachedTestKit.config.DatabaseUsername,
+                    DatabasePassword = cachedTestKit.config.DatabasePassword,
+                    
+                    // DLL modification fallback setting
+                    UseDllModificationFallback = _configuration.UseDllModificationFallback
                 };
                 
                 _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
                 
                 _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
-                _logger.LogInfo($"Max mark from Header.xlsx: {testKitConfig.TotalMaxMark}");
+                _logger.LogInfo($"Max mark from Header.xlsx: {cachedTestKit.config.TotalMaxMark}");
                 _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 
                 // OPTIMIZATION: Stagger container startup to avoid Docker strain
