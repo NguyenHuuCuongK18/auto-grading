@@ -1142,16 +1142,58 @@ namespace SolutionGrader.Core.Services
                     networkCheckPassed = false;
                 }
                 
+                // CRITICAL FIX: Count PARTIAL as passing with partial credit
+                // Calculate network grading: PASS=100%, PARTIAL=50%, FAIL=0%
+                int totalNetworkFlows = networkComparisons.Count;
+                int passCount = networkComparisons.Count(c => c.Passed);
+                int partialCount = networkComparisons.Count(c => c.IsPartial);
+                int failCount = totalNetworkFlows - passCount - partialCount;
+                
+                // Network score: PASS=1.0, PARTIAL=0.5, FAIL=0.0
+                double networkScore = totalNetworkFlows > 0 
+                    ? (passCount * 1.0 + partialCount * 0.5) / totalNetworkFlows
+                    : 1.0;  // No network flows expected = perfect score
+                
+                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}, Score={networkScore:P0}");
+                
+                // Network check passed if we have at least some matches (PASS or PARTIAL)
+                bool networkFlowsPassed = networkScore >= 0.5 || totalNetworkFlows == 0;
+                
                 // Final result: must pass both output comparison AND network check
-                result.EarnedMark = (passed && networkCheckPassed) ? earnedMark : 0;
-                result.Passed = passed && networkCheckPassed;
+                // Apply network score to earned mark
+                double finalEarnedMark = passed && networkCheckPassed 
+                    ? earnedMark * networkScore 
+                    : 0;
+                
+                result.EarnedMark = finalEarnedMark;
+                result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
                 
+                // Build detailed error message
+                var errorMessages = new List<string>();
+                
                 if (!networkCheckPassed)
                 {
-                    result.ErrorMessage = "Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.";
+                    errorMessages.Add("Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.");
+                }
+                
+                if (!passed)
+                {
+                    int failedOutputs = comparisons.Count(c => !c.Passed);
+                    if (failedOutputs > 0)
+                        errorMessages.Add($"Console output: {failedOutputs} check(s) failed");
+                }
+                
+                if (totalNetworkFlows > 0 && !networkFlowsPassed)
+                {
+                    errorMessages.Add($"Network flows: {failCount} FAIL, {partialCount} PARTIAL (50% credit), {passCount} PASS - Score: {networkScore:P0}");
+                }
+                
+                if (errorMessages.Any())
+                {
+                    result.ErrorMessage = string.Join("; ", errorMessages);
                 }
             }
             catch (Exception ex)
@@ -1414,20 +1456,52 @@ namespace SolutionGrader.Core.Services
             {
                 var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
                 
-                // Use lenient flag comparison - check if all expected flags are present
-                bool matched = capturedPackets.Any(p =>
-                    (string.IsNullOrEmpty(exp.Flags) || CompareTcpFlags(exp.Flags, p.Flags)) &&
-                    (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
-                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
+                // Find matching packet by flags
+                var matchingPacket = capturedPackets.FirstOrDefault(p =>
+                    !string.IsNullOrEmpty(exp.Flags) && 
+                    NormalizeFlags(exp.Flags) == NormalizeFlags(p.Flags));
                 
-                results.Add(new ComparisonResult
+                if (matchingPacket != null)
                 {
-                    Source = "Network",
-                    Stage = exp.Stage,
-                    Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                    Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
-                    Passed = matched
-                });
+                    // Check if it's an exact match (PASS) or partial match (PARTIAL)
+                    bool exactMatch = true;
+                    
+                    // Compare flags - exact match required (but order-normalized)
+                    if (!string.IsNullOrEmpty(exp.Flags) && NormalizeFlags(exp.Flags) != NormalizeFlags(matchingPacket.Flags))
+                        exactMatch = false;
+                    
+                    // Compare roles exactly
+                    if (!string.IsNullOrEmpty(exp.SourceRole) && matchingPacket.SourceRole != exp.SourceRole)
+                        exactMatch = false;
+                    if (!string.IsNullOrEmpty(exp.DestinationRole) && matchingPacket.DestinationRole != exp.DestinationRole)
+                        exactMatch = false;
+                    
+                    // CRITICAL FIX: Track PASS vs PARTIAL in ComparisonResult
+                    // PASS = exact match (flags + roles match)
+                    // PARTIAL = flags match but roles don't match
+                    results.Add(new ComparisonResult
+                    {
+                        Source = "Network",
+                        Stage = exp.Stage,
+                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
+                        Actual = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}",
+                        Passed = exactMatch,  // true for PASS, false for PARTIAL
+                        IsPartial = !exactMatch && true  // PARTIAL if matched flags but not exact
+                    });
+                }
+                else
+                {
+                    // No matching packet found - FAIL
+                    results.Add(new ComparisonResult
+                    {
+                        Source = "Network",
+                        Stage = exp.Stage,
+                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
+                        Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
+                        Passed = false,
+                        IsPartial = false  // Complete FAIL - missing packet
+                    });
+                }
             }
             
             return results;
@@ -2550,6 +2624,12 @@ namespace SolutionGrader.Core.Services
         public string? Expected { get; set; }
         public string? Actual { get; set; }
         public bool Passed { get; set; }
+        
+        /// <summary>
+        /// Indicates if this is a PARTIAL match (flags match but roles don't).
+        /// PARTIAL matches should count as passing with partial credit.
+        /// </summary>
+        public bool IsPartial { get; set; }
         
         // Additional fields for SampleLogging format
         public double PointsAwarded { get; set; }
