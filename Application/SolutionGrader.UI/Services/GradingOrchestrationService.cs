@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Services;
 
 namespace SolutionGrader.UI.Services
 {
@@ -269,7 +270,31 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"[{student.StudentCode}] Using test kit: {testKitPath}");
 
-                // Step 2: Build paths for Docker grading
+                // Step 2: Ensure solution is extracted (lazy extraction)
+                // This happens here, right before grading, to avoid UI lag during student discovery
+                student.ProgressPercent = 15;
+                StudentProgressUpdated?.Invoke(this, student);
+                
+                if (!string.IsNullOrEmpty(student.SolutionPath))
+                {
+                    _logger.LogInfo($"[{student.StudentCode}] Ensuring solution is extracted from zip if needed...");
+                    bool solutionReady = SharedDiscoveryServices.EnsureSolutionExtracted(
+                        student.SolutionPath,
+                        msg => _logger.LogDebug($"[{student.StudentCode}] {msg}"));
+                    
+                    if (!solutionReady)
+                    {
+                        var errorMsg = $"Failed to extract or locate solution folder";
+                        student.Status = GradingStatus.Failed;
+                        student.StatusMessage = errorMsg;
+                        _logger.LogError($"[{student.StudentCode}] {errorMsg}");
+                        _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                        return;
+                    }
+                    _logger.LogInfo($"[{student.StudentCode}] Solution ready at: {student.SolutionPath}");
+                }
+
+                // Step 3: Build paths for Docker grading
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
