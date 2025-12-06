@@ -527,12 +527,15 @@ namespace SolutionGrader.UI
                     
                     _logger.LogInfo($"[Optimization] Using continuous batch processing: {_configuration.MaxParallelStudents} students graded simultaneously at all times");
                     _logger.LogInfo($"[Optimization] When a student finishes, the next student starts immediately (no batch waiting)");
+                    _logger.LogInfo($"[Multi-Threading] Using {_configuration.MaxParallelStudents} worker threads across {Environment.ProcessorCount} CPU cores");
                     
                     var startupLock = new SemaphoreSlim(1, 1); // OPTIMIZATION: Stagger container startups
                     
                     // Create a channel to hold students waiting to be graded
-                    // Bounded to MaxParallelStudents to apply backpressure
-                    var channel = Channel.CreateBounded<StudentSolution>(new BoundedChannelOptions(_configuration.MaxParallelStudents)
+                    // OPTIMIZATION: Set capacity to 2x MaxParallelStudents to reduce producer-consumer coordination overhead
+                    // This allows producer to queue work ahead while workers are busy, reducing wait times
+                    var channelCapacity = Math.Max(_configuration.MaxParallelStudents * 2, 10);
+                    var channel = Channel.CreateBounded<StudentSolution>(new BoundedChannelOptions(channelCapacity)
                     {
                         FullMode = BoundedChannelFullMode.Wait
                     });

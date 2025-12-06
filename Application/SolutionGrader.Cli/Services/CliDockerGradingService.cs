@@ -59,6 +59,9 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine("[CLI] Starting Docker grading using SHARED DockerGradingService...");
             Console.WriteLine("[CLI] This ensures IDENTICAL behavior between CLI and UI.");
             Console.WriteLine();
+            
+            // OPTIMIZATION: Configure ThreadPool for optimal multi-threading performance
+            ConfigureThreadPoolForParallelGrading(config.MaxParallelStudents);
 
             // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
             // This prevents port exhaustion from previous runs while ensuring no port reuse
@@ -192,10 +195,13 @@ namespace SolutionGrader.Cli.Services
                 // When one finishes, the next one starts immediately (no batch waiting)
                 Console.WriteLine($"[Optimization] Using continuous batch processing: {config.MaxParallelStudents} students graded simultaneously at all times");
                 Console.WriteLine($"[Optimization] When a student finishes, the next student starts immediately (no batch waiting)");
+                Console.WriteLine($"[Multi-Threading] Using {config.MaxParallelStudents} worker threads across {Environment.ProcessorCount} CPU cores");
                 
                 // Create a channel to hold students waiting to be graded
-                // Bounded to MaxParallelStudents to apply backpressure
-                var channel = Channel.CreateBounded<StudentInfo>(new BoundedChannelOptions(config.MaxParallelStudents)
+                // OPTIMIZATION: Set capacity to 2x MaxParallelStudents to reduce producer-consumer coordination overhead
+                // This allows producer to queue work ahead while workers are busy, reducing wait times
+                var channelCapacity = Math.Max(config.MaxParallelStudents * 2, 10);
+                var channel = Channel.CreateBounded<StudentInfo>(new BoundedChannelOptions(channelCapacity)
                 {
                     FullMode = BoundedChannelFullMode.Wait
                 });
@@ -257,8 +263,12 @@ namespace SolutionGrader.Cli.Services
             }
 
             // Convert ConcurrentBag to List and sort by original order
+            // OPTIMIZATION: Use dictionary for O(n) lookup instead of O(n²) FindIndex
+            var studentIndexMap = students.Select((s, i) => new { s.StudentCode, Index = i })
+                .ToDictionary(x => x.StudentCode, x => x.Index);
+            
             var resultsList = results.ToList();
-            resultsList = resultsList.OrderBy(r => students.FindIndex(s => s.StudentCode == r.StudentCode)).ToList();
+            resultsList = resultsList.OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue).ToList();
             
             return resultsList;
         }
@@ -625,6 +635,66 @@ namespace SolutionGrader.Cli.Services
                 return qPath;
 
             return null;
+        }
+
+        #endregion
+
+        #region Multi-Threading Optimization
+
+        /// <summary>
+        /// Configure .NET ThreadPool for optimal parallel grading performance.
+        /// 
+        /// Auto-grading is I/O-bound (Docker operations, file I/O, network monitoring),
+        /// so we configure ThreadPool to handle higher concurrency than CPU count.
+        /// 
+        /// Benefits:
+        /// - Reduces thread creation latency (pre-allocates minimum threads)
+        /// - Allows higher concurrency for I/O-bound workload
+        /// - Improves throughput for parallel student grading
+        /// </summary>
+        /// <param name="maxParallelStudents">Maximum students to grade in parallel</param>
+        private void ConfigureThreadPoolForParallelGrading(int maxParallelStudents)
+        {
+            // Get current ThreadPool settings
+            ThreadPool.GetMinThreads(out int currentMinWorker, out int currentMinIO);
+            ThreadPool.GetMaxThreads(out int currentMaxWorker, out int currentMaxIO);
+            
+            // OPTIMIZATION: Set minimum threads to reduce spin-up latency
+            // Auto-grading is I/O-bound, so we need more threads than CPU cores
+            // Formula: Max(maxParallelStudents * 2, CPU_cores * 2)
+            // This ensures threads are pre-created and ready for work
+            int minWorkerThreads = Math.Max(
+                maxParallelStudents * 2,
+                Environment.ProcessorCount * 2
+            );
+            int minIOThreads = Math.Max(
+                maxParallelStudents * 2,
+                Environment.ProcessorCount * 2
+            );
+            
+            // OPTIMIZATION: Set maximum threads for I/O-bound workload
+            // Allow up to 4x parallelism for async I/O operations (Docker, files, network)
+            int maxWorkerThreads = Math.Max(
+                maxParallelStudents * 4,
+                Environment.ProcessorCount * 4
+            );
+            int maxIOThreads = Math.Max(
+                maxParallelStudents * 4,
+                Environment.ProcessorCount * 4
+            );
+            
+            // Apply ThreadPool configuration
+            ThreadPool.SetMinThreads(minWorkerThreads, minIOThreads);
+            ThreadPool.SetMaxThreads(maxWorkerThreads, maxIOThreads);
+            
+            // Log configuration
+            Console.WriteLine($"[ThreadPool Configuration]");
+            Console.WriteLine($"  CPU Cores: {Environment.ProcessorCount}");
+            Console.WriteLine($"  MaxParallelStudents: {maxParallelStudents}");
+            Console.WriteLine($"  Parallelism Ratio: {maxParallelStudents / (double)Environment.ProcessorCount:F2}x CPU cores");
+            Console.WriteLine($"  Worker Threads: Min={minWorkerThreads} (was {currentMinWorker}), Max={maxWorkerThreads} (was {currentMaxWorker})");
+            Console.WriteLine($"  I/O Threads: Min={minIOThreads} (was {currentMinIO}), Max={maxIOThreads} (was {currentMaxIO})");
+            Console.WriteLine($"[ThreadPool] Configured for optimal I/O-bound workload performance");
         }
 
         #endregion
