@@ -382,11 +382,17 @@ namespace SolutionGrader.UI.Models
         /// otherwise defaulting to Results subfolder in SubmitFolderPath.
         /// This ensures consistent result path calculation across the application.
         /// </summary>
+        /// <returns>The effective result path, or empty string if both paths are not configured</returns>
         public string GetEffectiveResultPath()
         {
-            return !string.IsNullOrEmpty(SaveResultFolderPath) 
-                ? SaveResultFolderPath 
-                : Path.Combine(SubmitFolderPath, "Results");
+            if (!string.IsNullOrEmpty(SaveResultFolderPath))
+                return SaveResultFolderPath;
+            
+            if (!string.IsNullOrEmpty(SubmitFolderPath))
+                return Path.Combine(SubmitFolderPath, "Results");
+            
+            // Both paths are empty - return empty string to signal error
+            return string.Empty;
         }
     }
 }

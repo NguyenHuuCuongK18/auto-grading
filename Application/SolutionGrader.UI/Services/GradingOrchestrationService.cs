@@ -65,7 +65,10 @@ namespace SolutionGrader.UI.Services
         /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
         /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
-        /// <param name="sharedMessageLogger">Optional shared GradingMessageLogger for batch grading. If provided, uses this instead of creating a new instance. This prevents file access conflicts in parallel grading scenarios.</param>
+        /// <param name="sharedMessageLogger">Optional shared GradingMessageLogger for batch grading. 
+        /// If provided, uses this instead of creating a new instance, preventing file access conflicts in parallel grading scenarios. 
+        /// IMPORTANT: When providing a shared logger, the CALLER retains ownership and is responsible for disposal. 
+        /// This service will NOT dispose a shared logger. The shared logger MUST be thread-safe for concurrent writes.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,

@@ -465,9 +465,25 @@ namespace SolutionGrader.UI
             // All parallel students will use this SAME GradingMessageLogger instance
             // to ensure thread-safe logging without file access conflicts
             // The logger creates ONE log file per session with a unique timestamp
-            var resultPath = _configuration.GetEffectiveResultPath();
-            _sharedMessageLogger = new GradingMessageLogger(resultPath);
-            _logger.LogInfo($"[Message Logger] Initialized SHARED GradingMessageLogger for batch grading session");
+            try
+            {
+                var resultPath = _configuration.GetEffectiveResultPath();
+                if (string.IsNullOrEmpty(resultPath))
+                {
+                    _logger.LogWarning("[Message Logger] Result path is not configured, message logging will be disabled");
+                    _sharedMessageLogger = null;
+                }
+                else
+                {
+                    _sharedMessageLogger = new GradingMessageLogger(resultPath);
+                    _logger.LogInfo($"[Message Logger] Initialized SHARED GradingMessageLogger for batch grading session");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[Message Logger] Failed to initialize GradingMessageLogger: {ex.Message}. Message logging will be disabled.", ex);
+                _sharedMessageLogger = null;
+            }
             
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
