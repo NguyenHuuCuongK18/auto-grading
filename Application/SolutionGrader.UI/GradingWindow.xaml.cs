@@ -52,12 +52,9 @@ namespace SolutionGrader.UI
         private readonly ObservableCollection<StudentSolution> _students = new ObservableCollection<StudentSolution>();
         private System.Windows.Data.CollectionViewSource? _studentsViewSource;
         
-        private StringBuilder _logBuffer = new StringBuilder();
-        private int _estimatedLogCapacity = 8192; // Default for unknown student count
-        
-        // Throttling for progress updates per student
-        private readonly Dictionary<string, DateTime> _lastProgressUpdate = new Dictionary<string, DateTime>();
-        private readonly TimeSpan _progressUpdateThrottle = TimeSpan.FromMilliseconds(500);
+        // Log file paths for display (logs written to files, not shown in UI for performance)
+        private string? _systemLogPath;
+        private string? _currentStudentLogPath;
         
         // Cache test kit configurations by paper number to avoid repeated Excel file reads
         // Only loaded during grading, NOT during discovery
@@ -69,7 +66,6 @@ namespace SolutionGrader.UI
         private PortAllocator? _sharedPortAllocator;
         
         private CancellationTokenSource? _cancellationTokenSource;
-        private DispatcherTimer? _elapsedTimer;
         private DateTime? _sessionStartTime;
         private bool _isPaused;
         private bool _isRunning;
@@ -91,11 +87,9 @@ namespace SolutionGrader.UI
             _gradingService = new GradingOrchestrationService(_logger);
             _resultWriter = new ResultWriterService(_logger, _configuration.SaveResultFolderPath);
             
-            // Wire up events
-            _logger.LogAdded += Logger_LogAdded;
+            // Wire up events - OPTIMIZED: Only essential events, no log display or progress updates
             _gradingService.StudentGradingStarted += GradingService_StudentGradingStarted;
             _gradingService.StudentGradingCompleted += GradingService_StudentGradingCompleted;
-            _gradingService.StudentProgressUpdated += GradingService_StudentProgressUpdated;
             _gradingService.SessionStateChanged += GradingService_SessionStateChanged;
             
             // Setup CollectionViewSource for memory-efficient filtering
@@ -124,12 +118,11 @@ namespace SolutionGrader.UI
             // Load students
             LoadStudents();
             
-            // Setup elapsed timer
-            _elapsedTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(1)
-            };
-            _elapsedTimer.Tick += ElapsedTimer_Tick;
+            // Display log file paths
+            var logsFolder = Path.Combine(_configuration.SaveResultFolderPath, "Logs");
+            _systemLogPath = Path.Combine(logsFolder, $"System_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+            txtSystemLogPath.Text = _systemLogPath;
+            txtStudentLogPath.Text = $"{logsFolder}/Log_{{StudentCode}}_{{Date}}_Paper{{N}}/";
             
             _logger.LogInfo("Grading window initialized");
             _logger.LogInfo($"Batch grading configuration: Number of Solutions={_configuration.MaxParallelStudents}");
@@ -155,8 +148,6 @@ namespace SolutionGrader.UI
                 _cancellationTokenSource?.Cancel();
                 _cancellationTokenSource?.Dispose();
             }
-            
-            _elapsedTimer?.Stop();
             
             // Flush any pending UI updates before closing
             _uiUpdateBatcher?.Flush();
@@ -466,14 +457,6 @@ namespace SolutionGrader.UI
             _isRunning = true;
             _isPaused = false;
             _sessionStartTime = DateTime.Now;
-            _elapsedTimer?.Start();
-            
-            // OPTIMIZATION: Pre-allocate log buffer based on known student count
-            // Estimate ~2KB per student (includes test cases, setup, cleanup logs)
-            // This reduces memory allocations during grading
-            _estimatedLogCapacity = studentsToGrade.Count * 2048;
-            _logBuffer = new StringBuilder(_estimatedLogCapacity);
-            _logger.LogInfo($"Pre-allocated log buffer capacity: {_estimatedLogCapacity / 1024}KB for {studentsToGrade.Count} students");
             
             UpdateButtonStates();
             _logger.LogInfo($"Starting grading for {studentsToGrade.Count} {(selectedOnly ? "selected" : "")} students");
@@ -580,7 +563,6 @@ namespace SolutionGrader.UI
             finally
             {
                 _isRunning = false;
-                _elapsedTimer?.Stop();
                 UpdateButtonStates();
                 
                 // CRITICAL: Flush any pending UI updates before finalizing
@@ -1189,6 +1171,20 @@ namespace SolutionGrader.UI
             var failed = _students.Count(s => s.Status == GradingStatus.Failed);
             var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
             
+            // Calculate session duration (only when session has started)
+            string sessionDuration = "-";
+            if (_sessionStartTime.HasValue)
+            {
+                var endTime = _isRunning ? DateTime.Now : (_students.Where(s => s.EndTime.HasValue).Max(s => s.EndTime) ?? DateTime.Now);
+                var elapsed = endTime - _sessionStartTime.Value;
+                
+                sessionDuration = elapsed.TotalHours >= 1
+                    ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes}m {elapsed.Seconds}s"
+                    : elapsed.TotalMinutes >= 1
+                        ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s"
+                        : $"{elapsed.Seconds}s";
+            }
+            
             _uiUpdateBatcher.QueueUpdate(() =>
             {
                 runTotal.Text = total.ToString();
@@ -1197,6 +1193,7 @@ namespace SolutionGrader.UI
                 runSuccess.Text = success.ToString();
                 runFailed.Text = failed.ToString();
                 runNotRun.Text = notRun.ToString();
+                txtSessionDuration.Text = sessionDuration;
             });
         }
 
@@ -1214,106 +1211,37 @@ namespace SolutionGrader.UI
             UpdateStatusBar();
         }
 
-        private void ElapsedTimer_Tick(object? sender, EventArgs e)
-        {
-            if (_sessionStartTime.HasValue)
-            {
-                var elapsed = DateTime.Now - _sessionStartTime.Value;
-                runElapsed.Text = elapsed.TotalHours >= 1
-                    ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes}m {elapsed.Seconds}s"
-                    : elapsed.TotalMinutes >= 1
-                        ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s"
-                        : $"{elapsed.Seconds}s";
-            }
-        }
-
         #region Event Handlers
-
-        private void Logger_LogAdded(object? sender, LogEventArgs e)
-        {
-            // CRITICAL OPTIMIZATION: Batch log updates to prevent UI freezing
-            // During parallel grading, hundreds of log entries per second can cause severe UI lag
-            // Batching reduces update frequency from 100+/sec to 4/sec while preserving all logs
-            var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
-            
-            // Queue log update for batched processing
-            // Use dedicated log queue to preserve ordering
-            _uiUpdateBatcher.QueueLogUpdate(() =>
-            {
-                _logBuffer.Append(logLine);
-                
-                // OPTIMIZATION: Keep log buffer manageable with dynamic threshold
-                // Use 2x estimated capacity as max to allow for overhead
-                var maxCapacity = Math.Max(50000, _estimatedLogCapacity * 2);
-                if (_logBuffer.Length > maxCapacity)
-                {
-                    // Trim to 80% of max capacity to reduce frequent trimming
-                    var targetLength = (int)(maxCapacity * 0.8);
-                    var trimmed = _logBuffer.ToString().Substring(_logBuffer.Length - targetLength);
-                    _logBuffer.Clear();
-                    _logBuffer.Append(trimmed);
-                    _logger.LogDebug($"Log buffer trimmed to {targetLength / 1024}KB");
-                }
-                
-                txtLog.Text = _logBuffer.ToString();
-                
-                // OPTIMIZATION: Only auto-scroll if user is already at the bottom
-                // This prevents jarring scrolling if user is reviewing earlier logs
-                // Check if we're within 100 pixels of the bottom
-                var verticalOffset = txtLog.VerticalOffset;
-                var scrollableHeight = txtLog.ExtentHeight - txtLog.ViewportHeight;
-                bool isNearBottom = scrollableHeight <= 0 || (scrollableHeight - verticalOffset) < 100;
-                
-                if (isNearBottom)
-                {
-                    txtLog.ScrollToEnd();
-                }
-            });
-        }
 
         private void GradingService_StudentGradingStarted(object? sender, StudentSolution student)
         {
-            // Always update when student starts (important milestone)
+            // OPTIMIZED: Only update when student starts (important milestone)
+            // No intermediate progress updates needed - we only care about start/end
             UpdateStudentInUI(student);
+            
+            // Update student log path display
+            if (!string.IsNullOrEmpty(student.StudentCode) && !string.IsNullOrEmpty(student.PaperNo))
+            {
+                var logsFolder = Path.Combine(_configuration.SaveResultFolderPath, "Logs");
+                _currentStudentLogPath = Path.Combine(logsFolder, $"Log_{student.StudentCode}_{DateTime.Now:yyyyMMdd}_Paper{student.PaperNo}");
+                
+                _uiUpdateBatcher.QueueUpdate(() =>
+                {
+                    txtStudentLogPath.Text = _currentStudentLogPath;
+                });
+            }
         }
 
         private void GradingService_StudentGradingCompleted(object? sender, StudentSolution student)
         {
-            // Always update when student completes (important milestone)
+            // OPTIMIZED: Only update when student completes (important milestone)
+            // Time elapsed is calculated on-demand via Duration property, no timer needed
             UpdateStudentInUI(student);
-            
-            // Clear throttle tracking for this student
-            lock (_lastProgressUpdate)
-            {
-                _lastProgressUpdate.Remove(student.StudentCode);
-            }
-        }
-
-        private void GradingService_StudentProgressUpdated(object? sender, StudentSolution student)
-        {
-            // OPTIMIZATION: Throttle progress updates to avoid excessive UI refreshes
-            // Each student can trigger many progress updates (10%, 20%, 30%...)
-            // We only update UI at most once per 500ms per student
-            bool shouldUpdate = false;
-            
-            lock (_lastProgressUpdate)
-            {
-                if (!_lastProgressUpdate.TryGetValue(student.StudentCode, out var lastUpdate) ||
-                    DateTime.Now - lastUpdate >= _progressUpdateThrottle)
-                {
-                    _lastProgressUpdate[student.StudentCode] = DateTime.Now;
-                    shouldUpdate = true;
-                }
-            }
-            
-            if (shouldUpdate)
-            {
-                UpdateStudentInUI(student);
-            }
         }
 
         private void GradingService_SessionStateChanged(object? sender, GradingSessionState state)
         {
+            // Update status bar for session-level changes
             UpdateStatusBar();
         }
 
