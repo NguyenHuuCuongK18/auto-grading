@@ -165,7 +165,7 @@ namespace SolutionGrader.Core.Services
         /// <param name="solutionPath">Root path to search</param>
         /// <param name="projectName">Project name to match</param>
         /// <returns>Path to DLL if found, null otherwise</returns>
-        private static string? FindDll(string solutionPath, string projectName)
+        private static string? FindDll(string questionFolderPath, string projectName)
         {
             if (string.IsNullOrEmpty(projectName))
                 return null;
@@ -175,19 +175,28 @@ namespace SolutionGrader.Core.Services
             // OPTIMIZED: Instead of recursive AllDirectories search, check common paths directly
             // This is 10-100x faster than recursive searches for large solution folders
             
+            // The actual solution folder is at: {studentCode}/1/solution/
+            var solutionFolderPath = Path.Combine(questionFolderPath, "solution");
+            
             // Common .NET project structure patterns to check (most to least common):
             var commonPaths = new[]
             {
-                // .NET Core/5+/6+ Debug
-                Path.Combine(solutionPath, projectName, "bin", "Debug"),
-                // .NET Core/5+/6+ Release
-                Path.Combine(solutionPath, projectName, "bin", "Release"),
-                // Root bin Debug
-                Path.Combine(solutionPath, "bin", "Debug"),
-                // Root bin Release  
-                Path.Combine(solutionPath, "bin", "Release"),
-                // Direct in solution root
-                solutionPath
+                // .NET Core/5+/6+ Debug in solution folder
+                Path.Combine(solutionFolderPath, projectName, "bin", "Debug"),
+                // .NET Core/5+/6+ Release in solution folder
+                Path.Combine(solutionFolderPath, projectName, "bin", "Release"),
+                // Root bin Debug in solution folder
+                Path.Combine(solutionFolderPath, "bin", "Debug"),
+                // Root bin Release in solution folder
+                Path.Combine(solutionFolderPath, "bin", "Release"),
+                // Direct in solution folder root
+                solutionFolderPath,
+                // Legacy: also check question folder directly (for backward compatibility)
+                Path.Combine(questionFolderPath, projectName, "bin", "Debug"),
+                Path.Combine(questionFolderPath, projectName, "bin", "Release"),
+                Path.Combine(questionFolderPath, "bin", "Debug"),
+                Path.Combine(questionFolderPath, "bin", "Release"),
+                questionFolderPath
             };
             
             foreach (var basePath in commonPaths)
@@ -220,17 +229,24 @@ namespace SolutionGrader.Core.Services
             
             // Fallback: Only if common paths fail, do a limited recursive search in bin folders
             // This handles unusual project structures but is slower
-            try
+            // Search in solution folder first, then question folder
+            foreach (var searchRoot in new[] { solutionFolderPath, questionFolderPath })
             {
-                var binFolders = Directory.GetDirectories(solutionPath, "bin", SearchOption.AllDirectories);
-                foreach (var binFolder in binFolders)
+                if (!Directory.Exists(searchRoot))
+                    continue;
+                    
+                try
                 {
-                    var dllFiles = Directory.GetFiles(binFolder, searchPattern, SearchOption.AllDirectories);
-                    if (dllFiles.Length > 0)
-                        return dllFiles[0];
+                    var binFolders = Directory.GetDirectories(searchRoot, "bin", SearchOption.AllDirectories);
+                    foreach (var binFolder in binFolders)
+                    {
+                        var dllFiles = Directory.GetFiles(binFolder, searchPattern, SearchOption.AllDirectories);
+                        if (dllFiles.Length > 0)
+                            return dllFiles[0];
+                    }
                 }
+                catch { /* Ignore access errors */ }
             }
-            catch { /* Ignore access errors */ }
 
             return null;
         }
@@ -242,56 +258,61 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Extracts solution zip file if not already extracted.
         /// This supports lazy extraction - zip files are only extracted when needed (during grading).
-        /// Supports two structures: {studentCode}/1/ or {studentCode}/solution/1/
+        /// 
+        /// Supports structure: {studentCode}/1/solution/
+        /// - /1 is the question number folder
+        /// - /solution is where the actual project files are (or where zip extracts to)
         /// </summary>
-        /// <param name="solutionPath">Question folder path (either {studentCode}/1 or {studentCode}/solution/1)</param>
+        /// <param name="questionFolderPath">Question folder path ({studentCode}/1)</param>
         /// <param name="logger">Optional action for logging messages</param>
         /// <returns>True if solution is ready (already exists or successfully extracted), false otherwise</returns>
-        public static bool EnsureSolutionExtracted(string solutionPath, Action<string>? logger = null)
+        public static bool EnsureSolutionExtracted(string questionFolderPath, Action<string>? logger = null)
         {
-            // Check if already extracted (has bin folder or project files)
-            bool hasExtractedFiles = Directory.Exists(Path.Combine(solutionPath, "bin")) ||
-                                    Directory.GetFiles(solutionPath, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0 ||
-                                    Directory.GetFiles(solutionPath, "*.sln", SearchOption.TopDirectoryOnly).Length > 0;
+            // The actual solution folder is inside the question folder: {studentCode}/1/solution
+            var solutionFolderPath = Path.Combine(questionFolderPath, "solution");
             
-            if (hasExtractedFiles)
+            // Check if solution folder already exists with extracted files
+            if (Directory.Exists(solutionFolderPath))
             {
-                return true;
+                bool hasExtractedFiles = Directory.Exists(Path.Combine(solutionFolderPath, "bin")) ||
+                                        Directory.GetFiles(solutionFolderPath, "*.csproj", SearchOption.TopDirectoryOnly).Length > 0 ||
+                                        Directory.GetFiles(solutionFolderPath, "*.sln", SearchOption.TopDirectoryOnly).Length > 0;
+                
+                if (hasExtractedFiles)
+                {
+                    logger?.Invoke($"Solution folder already exists with extracted files: {solutionFolderPath}");
+                    return true;
+                }
             }
 
-            // Look for zip file in the question folder
+            // Look for zip file in the question folder ({studentCode}/1/)
             string? zipPath = null;
-            var zipFiles = Directory.GetFiles(solutionPath, "*.zip");
+            var zipFiles = Directory.GetFiles(questionFolderPath, "*.zip", SearchOption.TopDirectoryOnly);
             if (zipFiles.Length > 0)
             {
                 zipPath = zipFiles[0];
-            }
-            else
-            {
-                // If solutionPath is {studentCode}/solution/1, also check parent {studentCode}/solution folder
-                var parentDir = Path.GetDirectoryName(solutionPath);
-                if (parentDir != null && Path.GetFileName(parentDir) == "solution")
-                {
-                    zipFiles = Directory.GetFiles(parentDir, "*.zip");
-                    if (zipFiles.Length > 0)
-                    {
-                        zipPath = zipFiles[0];
-                    }
-                }
+                logger?.Invoke($"Found zip file in question folder: {Path.GetFileName(zipPath)}");
             }
             
             if (string.IsNullOrEmpty(zipPath))
             {
-                logger?.Invoke($"No zip file found for extraction in {solutionPath}");
+                logger?.Invoke($"No zip file found for extraction in {questionFolderPath}");
                 return false;
             }
 
-            // Extract zip file to the question folder (solutionPath)
+            // Extract zip file to the solution folder ({studentCode}/1/solution)
+            // Create the solution folder if it doesn't exist
             try
             {
-                logger?.Invoke($"Extracting solution from {Path.GetFileName(zipPath)} to {solutionPath}");
-                FileExtractor.ExtractDestination(zipPath, solutionPath);
-                logger?.Invoke($"Successfully extracted solution");
+                if (!Directory.Exists(solutionFolderPath))
+                {
+                    Directory.CreateDirectory(solutionFolderPath);
+                    logger?.Invoke($"Created solution folder: {solutionFolderPath}");
+                }
+                
+                logger?.Invoke($"Extracting {Path.GetFileName(zipPath)} to {solutionFolderPath}");
+                FileExtractor.ExtractDestination(zipPath, solutionFolderPath);
+                logger?.Invoke($"Successfully extracted solution to solution folder");
                 return true;
             }
             catch (Exception ex)

@@ -516,38 +516,48 @@ namespace SolutionGrader.UI.Services
 
             // Fallback: Search recursively for the DLL (same logic as StudentDiscoveryService)
             // This handles cases where the DLL might not have been found during initial discovery
+            // The actual solution folder is at: {studentCode}/1/solution/
             if (!string.IsNullOrEmpty(projectName) && Directory.Exists(student.SolutionPath))
             {
                 try
                 {
-                    // Search for the DLL recursively, excluding runtime folders
-                    var dllFiles = Directory.GetFiles(student.SolutionPath, $"{projectName}.dll", SearchOption.AllDirectories)
-                        .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
-                        .ToArray();
-
-                    if (dllFiles.Length > 0)
+                    // Priority 1: Search in solution subfolder ({studentCode}/1/solution/)
+                    var solutionSubfolder = Path.Combine(student.SolutionPath, "solution");
+                    var searchFolders = Directory.Exists(solutionSubfolder) 
+                        ? new[] { solutionSubfolder, student.SolutionPath } 
+                        : new[] { student.SolutionPath };
+                    
+                    foreach (var searchFolder in searchFolders)
                     {
-                        var result = dllFiles[0];
-                        _logger.LogDebug($"Found {type} DLL via recursive search: {result}");
-                        return result;
-                    }
-
-                    // Try alternate names (Q11, Q12) for compatibility
-                    var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
-                        ? new[] { "Q12.dll", "Project12.dll" }
-                        : new[] { "Q11.dll", "Project11.dll" };
-
-                    foreach (var altName in altNames)
-                    {
-                        dllFiles = Directory.GetFiles(student.SolutionPath, altName, SearchOption.AllDirectories)
+                        // Search for the DLL recursively, excluding runtime folders
+                        var dllFiles = Directory.GetFiles(searchFolder, $"{projectName}.dll", SearchOption.AllDirectories)
                             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
                             .ToArray();
 
                         if (dllFiles.Length > 0)
                         {
                             var result = dllFiles[0];
-                            _logger.LogDebug($"Found {type} DLL via fallback search ({altName}): {result}");
+                            _logger.LogDebug($"Found {type} DLL via recursive search in {Path.GetFileName(searchFolder)}: {result}");
                             return result;
+                        }
+
+                        // Try alternate names (Q11, Q12) for compatibility
+                        var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                            ? new[] { "Q12.dll", "Project12.dll" }
+                            : new[] { "Q11.dll", "Project11.dll" };
+
+                        foreach (var altName in altNames)
+                        {
+                            dllFiles = Directory.GetFiles(searchFolder, altName, SearchOption.AllDirectories)
+                                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                                .ToArray();
+
+                            if (dllFiles.Length > 0)
+                            {
+                                var result = dllFiles[0];
+                                _logger.LogDebug($"Found {type} DLL via fallback search ({altName}) in {Path.GetFileName(searchFolder)}: {result}");
+                                return result;
+                            }
                         }
                     }
                 }
