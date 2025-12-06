@@ -39,6 +39,7 @@ namespace SolutionGrader.UI
         private readonly TestKitConfigService _testKitConfigService;
         private readonly GradingOrchestrationService _gradingService;
         private readonly ResultWriterService _resultWriter;
+        private readonly UIUpdateBatcher _uiUpdateBatcher;
         
         // Use single collection with CollectionViewSource for memory efficiency
         // With 150 students, this saves ~50% memory vs duplicate collections
@@ -47,6 +48,10 @@ namespace SolutionGrader.UI
         
         private StringBuilder _logBuffer = new StringBuilder();
         private int _estimatedLogCapacity = 8192; // Default for unknown student count
+        
+        // Throttling for progress updates per student
+        private readonly Dictionary<string, DateTime> _lastProgressUpdate = new Dictionary<string, DateTime>();
+        private readonly TimeSpan _progressUpdateThrottle = TimeSpan.FromMilliseconds(500);
         
         // Cache test kit configurations by paper number to avoid repeated Excel file reads
         // Only loaded during grading, NOT during discovery
@@ -67,6 +72,10 @@ namespace SolutionGrader.UI
         {
             InitializeComponent();
             _configuration = configuration;
+            
+            // Initialize UI update batcher for optimal performance
+            // 250ms interval provides good balance between responsiveness and performance
+            _uiUpdateBatcher = new UIUpdateBatcher(Dispatcher, batchIntervalMs: 250);
             
             // Initialize services
             _logger = new LoggingService(_configuration.SaveResultFolderPath);
@@ -142,6 +151,11 @@ namespace SolutionGrader.UI
             }
             
             _elapsedTimer?.Stop();
+            
+            // Flush any pending UI updates before closing
+            _uiUpdateBatcher?.Flush();
+            _uiUpdateBatcher?.Dispose();
+            
             _logger.Dispose();
         }
 
@@ -563,6 +577,10 @@ namespace SolutionGrader.UI
                 _elapsedTimer?.Stop();
                 UpdateButtonStates();
                 
+                // CRITICAL: Flush any pending UI updates before finalizing
+                // This ensures all student statuses, logs, and stats are visible to user
+                _uiUpdateBatcher.Flush();
+                
                 // CRITICAL: Flush any pending result writes to ensure all data is saved
                 _resultWriter.FlushPendingWrites();
                 
@@ -633,23 +651,20 @@ namespace SolutionGrader.UI
                 student.ProgressPercent = 0;
                 UpdateStudentInUI(student);
                 
-                // CRITICAL FIX: Update UI element from UI thread to avoid cross-thread access issues
-                // Use BeginInvoke (async) instead of Invoke (blocking) to prevent deadlocks when
-                // batch size equals student pool size (all students start simultaneously)
-                // Show "Multiple students" for batch grading to avoid constant UI thrashing
-                // BALANCED: Use Render priority to update current student display
-                // This ensures user sees which student is being graded without blocking workers
+                // OPTIMIZED: Batch current student display update
+                // For batch grading, show "Multiple students..." to avoid UI thrashing
+                // For sequential grading, show actual student code
                 if (_configuration.MaxParallelStudents > 1)
                 {
-                    Dispatcher.BeginInvoke(new Action(() => {
+                    _uiUpdateBatcher.QueueUpdate(() => {
                         runCurrentStudent.Text = "Multiple students...";
-                    }), System.Windows.Threading.DispatcherPriority.Render);
+                    });
                 }
                 else
                 {
-                    Dispatcher.BeginInvoke(new Action(() => {
+                    _uiUpdateBatcher.QueueUpdate(() => {
                         runCurrentStudent.Text = student.StudentCode;
-                    }), System.Windows.Threading.DispatcherPriority.Render);
+                    });
                 }
                 
                 // Brief yield to reduce thread contention on UI thread
@@ -1004,9 +1019,9 @@ namespace SolutionGrader.UI
 
         private void UpdateButtonStates()
         {
-            // BALANCED: Use BeginInvoke with Normal priority for responsive UI without blocking
-            // Normal priority ensures UI updates happen promptly while not blocking worker threads
-            Dispatcher.BeginInvoke(new Action(() =>
+            // OPTIMIZED: Use batching to reduce UI thread contention
+            // During parallel grading, this prevents hundreds of redundant button state updates
+            _uiUpdateBatcher.QueueUpdate(() =>
             {
                 btnStartAll.IsEnabled = !_isRunning || _isPaused;
                 btnStartSelected.IsEnabled = !_isRunning || _isPaused;
@@ -1014,20 +1029,20 @@ namespace SolutionGrader.UI
                 btnResume.IsEnabled = _isPaused;
                 btnResetAll.IsEnabled = !_isRunning;
                 btnResetSelected.IsEnabled = !_isRunning;
-            }), System.Windows.Threading.DispatcherPriority.Normal);
+            });
         }
 
         private void UpdateStatusBar()
         {
-            // BALANCED: Pre-compute on worker thread, update UI with Normal priority
-            // Ensures statistics are visible while maintaining performance
+            // OPTIMIZED: Pre-compute on worker thread, batch UI update
+            // Reduces status bar update frequency from 100s/sec to 4/sec during parallel grading
             var total = _students.Count;
             var graded = _students.Count(s => s.Status == GradingStatus.Success || s.Status == GradingStatus.Failed);
             var success = _students.Count(s => s.Status == GradingStatus.Success);
             var failed = _students.Count(s => s.Status == GradingStatus.Failed);
             var notRun = _students.Count(s => s.Status == GradingStatus.Not_Run);
             
-            Dispatcher.BeginInvoke(new Action(() =>
+            _uiUpdateBatcher.QueueUpdate(() =>
             {
                 runTotal.Text = total.ToString();
                 runGraded.Text = graded.ToString();
@@ -1035,19 +1050,20 @@ namespace SolutionGrader.UI
                 runSuccess.Text = success.ToString();
                 runFailed.Text = failed.ToString();
                 runNotRun.Text = notRun.ToString();
-            }), System.Windows.Threading.DispatcherPriority.Normal);
+            });
         }
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            // BALANCED: Use Render priority for DataGrid refresh (visible to user)
-            // Render priority ensures user sees updates without blocking workers
-            Dispatcher.BeginInvoke(new Action(() =>
+            // OPTIMIZED: Batch DataGrid refresh to reduce UI thrashing
+            // During parallel grading, this prevents excessive refresh operations
+            // The batching automatically deduplicates refresh calls
+            _uiUpdateBatcher.QueueUpdate(() =>
             {
                 dgStudents.Items.Refresh();
-            }), System.Windows.Threading.DispatcherPriority.Render);
+            });
             
-            // Update status bar with Normal priority
+            // Update status bar using batching as well
             UpdateStatusBar();
         }
 
@@ -1068,11 +1084,14 @@ namespace SolutionGrader.UI
 
         private void Logger_LogAdded(object? sender, LogEventArgs e)
         {
-            // BALANCED: Use Background priority for logging (less critical than grid updates)
-            // Logs update without impacting more important UI elements
+            // CRITICAL OPTIMIZATION: Batch log updates to prevent UI freezing
+            // During parallel grading, hundreds of log entries per second can cause severe UI lag
+            // Batching reduces update frequency from 100+/sec to 4/sec while preserving all logs
             var logLine = $"[{e.Timestamp:HH:mm:ss}] [{e.Level}] {e.Message}\n";
             
-            Dispatcher.BeginInvoke(new Action(() =>
+            // Queue log update for batched processing
+            // Use dedicated log queue to preserve ordering
+            _uiUpdateBatcher.QueueLogUpdate(() =>
             {
                 _logBuffer.Append(logLine);
                 
@@ -1090,23 +1109,60 @@ namespace SolutionGrader.UI
                 }
                 
                 txtLog.Text = _logBuffer.ToString();
-                txtLog.ScrollToEnd();
-            }), System.Windows.Threading.DispatcherPriority.Background);
+                
+                // OPTIMIZATION: Only auto-scroll if user is already at the bottom
+                // This prevents jarring scrolling if user is reviewing earlier logs
+                // Check if we're within 100 pixels of the bottom
+                var verticalOffset = txtLog.VerticalOffset;
+                var scrollableHeight = txtLog.ExtentHeight - txtLog.ViewportHeight;
+                bool isNearBottom = scrollableHeight <= 0 || (scrollableHeight - verticalOffset) < 100;
+                
+                if (isNearBottom)
+                {
+                    txtLog.ScrollToEnd();
+                }
+            });
         }
 
         private void GradingService_StudentGradingStarted(object? sender, StudentSolution student)
         {
+            // Always update when student starts (important milestone)
             UpdateStudentInUI(student);
         }
 
         private void GradingService_StudentGradingCompleted(object? sender, StudentSolution student)
         {
+            // Always update when student completes (important milestone)
             UpdateStudentInUI(student);
+            
+            // Clear throttle tracking for this student
+            lock (_lastProgressUpdate)
+            {
+                _lastProgressUpdate.Remove(student.StudentCode);
+            }
         }
 
         private void GradingService_StudentProgressUpdated(object? sender, StudentSolution student)
         {
-            UpdateStudentInUI(student);
+            // OPTIMIZATION: Throttle progress updates to avoid excessive UI refreshes
+            // Each student can trigger many progress updates (10%, 20%, 30%...)
+            // We only update UI at most once per 500ms per student
+            bool shouldUpdate = false;
+            
+            lock (_lastProgressUpdate)
+            {
+                if (!_lastProgressUpdate.TryGetValue(student.StudentCode, out var lastUpdate) ||
+                    DateTime.Now - lastUpdate >= _progressUpdateThrottle)
+                {
+                    _lastProgressUpdate[student.StudentCode] = DateTime.Now;
+                    shouldUpdate = true;
+                }
+            }
+            
+            if (shouldUpdate)
+            {
+                UpdateStudentInUI(student);
+            }
         }
 
         private void GradingService_SessionStateChanged(object? sender, GradingSessionState state)
