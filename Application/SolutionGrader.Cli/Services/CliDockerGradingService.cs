@@ -227,6 +227,43 @@ namespace SolutionGrader.Cli.Services
                     return result;
                 }
 
+                // LAZY EXTRACTION: Extract zip file only when grading this student (not during discovery)
+                // This prevents extracting ALL students when we only need to grade a subset
+                var questionFolder = Path.GetDirectoryName(student.SolutionPath)!;
+                bool solutionReady = SharedDiscoveryServices.EnsureSolutionExtracted(
+                    questionFolder, 
+                    msg => Console.WriteLine($"[{student.StudentCode}] {msg}")
+                );
+                
+                if (!solutionReady)
+                {
+                    Console.WriteLine($"[ERROR] Failed to extract or find solution for {student.StudentCode}");
+                    result.ErrorMessage = "Failed to extract or find solution";
+                    return result;
+                }
+                
+                // NOW find DLLs after ensuring solution is extracted
+                student.ServerDllPath = FindDll(student.SolutionPath, config.ServerProjectName);
+                student.ClientDllPath = FindDll(student.SolutionPath, config.ClientProjectName);
+                
+                // Validate at least one component exists
+                if (string.IsNullOrEmpty(student.ServerDllPath) && string.IsNullOrEmpty(student.ClientDllPath))
+                {
+                    Console.WriteLine($"[ERROR] No DLLs found for {student.StudentCode} after extraction");
+                    result.ErrorMessage = "No DLLs found in solution";
+                    return result;
+                }
+                
+                // Log warnings for missing expected DLLs (only errors, not successes)
+                if (student.ServerDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
+                {
+                    Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
+                }
+                if (student.ClientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
+                {
+                    Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
+                }
+
                 // CRITICAL FIX: Read the starting port from test kit's Environment.xlsx BEFORE creating PortAllocator
                 // This ensures PortAllocator starts from the correct base port specified in the test kit,
                 // not the hardcoded default of 8000.
@@ -382,71 +419,37 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // Find solution folder, or try to extract if missing
-                    var solutionPath = Path.Combine(studentDir, "1", "solution");
-                    if (!Directory.Exists(solutionPath))
+                    // OPTIMIZED: Don't extract during discovery - only check if solution exists or zip exists
+                    // This prevents extracting ALL students when we only need to grade a subset (based on index range)
+                    // Extraction will happen lazily when grading each student (in GradeStudentUsingSharedServiceAsync)
+                    
+                    var questionFolder = Path.Combine(studentDir, "1");
+                    if (!Directory.Exists(questionFolder))
                     {
-                        // Try to find and extract zip file (matching UI behavior)
-                        var questionFolder = Path.Combine(studentDir, "1");
-                        if (Directory.Exists(questionFolder))
-                        {
-                            var zipFiles = Directory.GetFiles(questionFolder, "*.zip");
-                            if (zipFiles.Length > 0)
-                            {
-                                try
-                                {
-                                    // Use FileMaster for consistent extraction with UI
-                                    FileExtractor.ExtractDestination(zipFiles[0], solutionPath);
-                                    Console.WriteLine($"[CLI] Extracted solution from zip for {studentCode}");
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[ERROR] Failed to extract zip for {studentCode}: {ex.Message}");
-                                    continue;
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
-                                continue;
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[WARNING] No question folder for {studentCode}");
-                            continue;
-                        }
-                    }
-
-                    // Find server and client DLLs
-                    var serverDllPath = FindDll(solutionPath, config.ServerProjectName);
-                    var clientDllPath = FindDll(solutionPath, config.ClientProjectName);
-
-                    // At least one component should exist
-                    if (string.IsNullOrEmpty(serverDllPath) && string.IsNullOrEmpty(clientDllPath))
-                    {
-                        Console.WriteLine($"[WARNING] No DLLs found for {studentCode}");
+                        Console.WriteLine($"[WARNING] No question folder for {studentCode}");
                         continue;
                     }
-
+                    
+                    var solutionPath = Path.Combine(questionFolder, "solution");
+                    bool hasSolutionFolder = Directory.Exists(solutionPath);
+                    bool hasZipFile = Directory.GetFiles(questionFolder, "*.zip").Length > 0;
+                    
+                    if (!hasSolutionFolder && !hasZipFile)
+                    {
+                        Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
+                        continue;
+                    }
+                    
+                    // Don't find DLLs during discovery - this would require extraction for all students
+                    // DLLs will be found during grading when solution is ensured to be extracted
                     students.Add(new StudentInfo
                     {
                         StudentCode = studentCode!,
                         PaperNo = paperNo!,
                         SolutionPath = solutionPath,
-                        ServerDllPath = serverDllPath,
-                        ClientDllPath = clientDllPath
+                        ServerDllPath = null,  // Will be found during grading after extraction
+                        ClientDllPath = null   // Will be found during grading after extraction
                     });
-
-                    // Only log warnings for missing DLLs, not successful discoveries (expensive)
-                    if (serverDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
-                    {
-                        Console.WriteLine($"[CLI] WARNING: Student {studentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
-                    }
-                    if (clientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
-                    {
-                        Console.WriteLine($"[CLI] WARNING: Student {studentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
-                    }
                 }
             }
 
