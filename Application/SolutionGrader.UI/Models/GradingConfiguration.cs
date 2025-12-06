@@ -66,6 +66,9 @@ namespace SolutionGrader.UI.Models
         private int _maxParallelStudents = 1;
         private int _startIndex = 0;
         private int _endIndex = -1; // -1 means grade all students
+        
+        // DLL modification fallback settings
+        private bool _useDllModificationFallback = false;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -306,6 +309,20 @@ namespace SolutionGrader.UI.Models
             set { _endIndex = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// Enables DLL modification fallback when appsettings.json is not found.
+        /// When enabled, the system will attempt to directly modify the compiled DLL files
+        /// to patch hardcoded IP addresses and port numbers instead of relying on appsettings.json.
+        /// 
+        /// This is useful for grading students who hardcode connection settings instead of
+        /// using configuration files. The system will try common localhost addresses and ports.
+        /// </summary>
+        public bool UseDllModificationFallback
+        {
+            get => _useDllModificationFallback;
+            set { _useDllModificationFallback = value; OnPropertyChanged(); }
+        }
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -338,7 +355,8 @@ namespace SolutionGrader.UI.Models
                 DatabasePassword = this.DatabasePassword,
                 MaxParallelStudents = this.MaxParallelStudents,
                 StartIndex = this.StartIndex,
-                EndIndex = this.EndIndex
+                EndIndex = this.EndIndex,
+                UseDllModificationFallback = this.UseDllModificationFallback
             };
         }
     }

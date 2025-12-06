@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Services;
 
 namespace SolutionGrader.UI.Services
 {
@@ -269,7 +270,31 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"[{student.StudentCode}] Using test kit: {testKitPath}");
 
-                // Step 2: Build paths for Docker grading
+                // Step 2: Ensure solution is extracted (lazy extraction)
+                // This happens here, right before grading, to avoid UI lag during student discovery
+                student.ProgressPercent = 15;
+                StudentProgressUpdated?.Invoke(this, student);
+                
+                if (!string.IsNullOrEmpty(student.SolutionPath))
+                {
+                    _logger.LogInfo($"[{student.StudentCode}] Ensuring solution is extracted from zip if needed...");
+                    bool solutionReady = SharedDiscoveryServices.EnsureSolutionExtracted(
+                        student.SolutionPath,
+                        msg => _logger.LogDebug($"[{student.StudentCode}] {msg}"));
+                    
+                    if (!solutionReady)
+                    {
+                        var errorMsg = $"Failed to extract or locate solution folder";
+                        student.Status = GradingStatus.Failed;
+                        student.StatusMessage = errorMsg;
+                        _logger.LogError($"[{student.StudentCode}] {errorMsg}");
+                        _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                        return;
+                    }
+                    _logger.LogInfo($"[{student.StudentCode}] Solution ready at: {student.SolutionPath}");
+                }
+
+                // Step 3: Build paths for Docker grading
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
@@ -319,11 +344,46 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
+                // Read port configuration from Environment.xlsx in the QUESTION-SPECIFIC test kit folder
+                // testKitPath points to the specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
+                // Environment.xlsx contains the Config sheet with:
+                // - Code_Container_Internal_Port: Port inside the container
+                // - Code_Container_Host_Port: Port exposed on the host
+                int configuredPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
+                if (configuredPort <= 0)
+                {
+                    configuredPort = 8000; // Fallback default if not found in Environment.xlsx
+                    _logger.LogWarning($"[Port Config] Could not read port from Environment.xlsx, using default port {configuredPort}");
+                }
+                else
+                {
+                    _logger.LogInfo($"[Port Config] Read port {configuredPort} from Environment.xlsx at: {testKitPath}");
+                }
+                
+                // CRITICAL: Use configured port DIRECTLY for all components (container, DLL mod, network monitor)
+                // DO NOT use PortAllocator because it maintains a global counter that ignores test kit preferences.
+                // 
+                // For sequential grading (common case):
+                // - Each student uses the same port (e.g., 8000 from Environment.xlsx)
+                // - No conflicts because students run one at a time
+                // - Container from student 1 is cleaned up before student 2 starts
+                // 
+                // For true parallel grading:
+                // - Use different test kits with different port configurations
+                // - OR implement staggered startup delays
+                // - Current sequential approach is sufficient for most use cases
+                int portToUse = configuredPort;
+                
+                _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using port {portToUse} for container, DLL modification, and network monitoring");
+                
                 // Build Docker configuration from UI config
                 // The examiner sets HasClient/HasServer to indicate what the student should provide:
                 // - HasClient=true, HasServer=true  → student provides both
                 // - HasClient=true, HasServer=false → student provides client, use golden server
                 // - HasClient=false, HasServer=true → student provides server, use golden client
+                
+                _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
+                
                 var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
                 {
                     // Examiner's component requirements
@@ -332,9 +392,12 @@ namespace SolutionGrader.UI.Services
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
-                    // Container settings
-                    CodeContainerInternalPort = config.CodeContainerInternalPort,
-                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    // Container settings - USE MONITOR PORT DIRECTLY from environment.xlsx
+                    // CRITICAL: Both ports must be the same for network monitoring to work correctly
+                    // The server binds to this port inside the container, and it's exposed to host on the same port
+                    // DLL modification also uses this same port to patch hardcoded values
+                    CodeContainerInternalPort = portToUse,
+                    CodeContainerHostPort = portToUse,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
                     
                     // Database container settings
@@ -345,7 +408,10 @@ namespace SolutionGrader.UI.Services
                     DatabaseUsername = config.DatabaseUsername ?? "sa",
                     DatabasePassword = config.DatabasePassword,
                     
-                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds,
+                    
+                    // DLL modification fallback setting
+                    UseDllModificationFallback = config.UseDllModificationFallback
                 };
                 
                 _logger.LogInfo($"[{student.StudentCode}] Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
@@ -488,38 +554,48 @@ namespace SolutionGrader.UI.Services
 
             // Fallback: Search recursively for the DLL (same logic as StudentDiscoveryService)
             // This handles cases where the DLL might not have been found during initial discovery
+            // The actual solution folder is at: {studentCode}/1/solution/
             if (!string.IsNullOrEmpty(projectName) && Directory.Exists(student.SolutionPath))
             {
                 try
                 {
-                    // Search for the DLL recursively, excluding runtime folders
-                    var dllFiles = Directory.GetFiles(student.SolutionPath, $"{projectName}.dll", SearchOption.AllDirectories)
-                        .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
-                        .ToArray();
-
-                    if (dllFiles.Length > 0)
+                    // Priority 1: Search in solution subfolder ({studentCode}/1/solution/)
+                    var solutionSubfolder = Path.Combine(student.SolutionPath, "solution");
+                    var searchFolders = Directory.Exists(solutionSubfolder) 
+                        ? new[] { solutionSubfolder, student.SolutionPath } 
+                        : new[] { student.SolutionPath };
+                    
+                    foreach (var searchFolder in searchFolders)
                     {
-                        var result = dllFiles[0];
-                        _logger.LogDebug($"Found {type} DLL via recursive search: {result}");
-                        return result;
-                    }
-
-                    // Try alternate names (Q11, Q12) for compatibility
-                    var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
-                        ? new[] { "Q12.dll", "Project12.dll" }
-                        : new[] { "Q11.dll", "Project11.dll" };
-
-                    foreach (var altName in altNames)
-                    {
-                        dllFiles = Directory.GetFiles(student.SolutionPath, altName, SearchOption.AllDirectories)
+                        // Search for the DLL recursively, excluding runtime folders
+                        var dllFiles = Directory.GetFiles(searchFolder, $"{projectName}.dll", SearchOption.AllDirectories)
                             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
                             .ToArray();
 
                         if (dllFiles.Length > 0)
                         {
                             var result = dllFiles[0];
-                            _logger.LogDebug($"Found {type} DLL via fallback search ({altName}): {result}");
+                            _logger.LogDebug($"Found {type} DLL via recursive search in {Path.GetFileName(searchFolder)}: {result}");
                             return result;
+                        }
+
+                        // Try alternate names (Q11, Q12) for compatibility
+                        var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                            ? new[] { "Q12.dll", "Project12.dll" }
+                            : new[] { "Q11.dll", "Project11.dll" };
+
+                        foreach (var altName in altNames)
+                        {
+                            dllFiles = Directory.GetFiles(searchFolder, altName, SearchOption.AllDirectories)
+                                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                                .ToArray();
+
+                            if (dllFiles.Length > 0)
+                            {
+                                var result = dllFiles[0];
+                                _logger.LogDebug($"Found {type} DLL via fallback search ({altName}) in {Path.GetFileName(searchFolder)}: {result}");
+                                return result;
+                            }
                         }
                     }
                 }
@@ -672,6 +748,93 @@ namespace SolutionGrader.UI.Services
             };
             
             _libGrading.DisposeAllContainers(dockerConfig);
+        }
+
+        /// <summary>
+        /// Reads the starting port from environment.xlsx in the question-specific test kit folder.
+        /// This determines the base port number from which sequential allocation begins.
+        /// 
+        /// IMPORTANT: This reads from the QUESTION-SPECIFIC test kit folder 
+        /// (e.g., C:\Testkit_Q1_PRN222\Q12\environment.xlsx), not the root.
+        /// Each question can have its own environment.xlsx with MonitorPort configuration.
+        /// </summary>
+        /// <param name="testKitPath">Path to question-specific test kit folder containing environment.xlsx</param>
+        /// <returns>Starting port number from MonitorPort field, or 0 if not found</returns>
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
+        {
+            try
+            {
+                // Look for Environment.xlsx in the question-specific test kit folder
+                // Note: The actual file is "Environment.xlsx" with capital E
+                var environmentPath = Path.Combine(testKitPath, "Environment.xlsx");
+                if (!File.Exists(environmentPath))
+                {
+                    // Try lowercase as fallback
+                    environmentPath = Path.Combine(testKitPath, "environment.xlsx");
+                    if (!File.Exists(environmentPath))
+                    {
+                        _logger.LogWarning($"Environment.xlsx not found at {testKitPath}. Container port will default to 8000.");
+                        return 0;
+                    }
+                }
+
+                _logger.LogInfo($"Reading port configuration from Environment.xlsx: {environmentPath}");
+
+                using (var workbook = new ClosedXML.Excel.Excel.XLWorkbook(environmentPath))
+                {
+                    // Look for "Config" sheet which contains port configuration
+                    var worksheet = workbook.Worksheet("Config");
+                    if (worksheet == null)
+                    {
+                        _logger.LogWarning($"'Config' sheet not found in Environment.xlsx at {environmentPath}");
+                        return 0;
+                    }
+                    
+                    // Find Code_Container_Host_Port in the Config sheet (column 1 = Key, column 2 = Value)
+                    // The actual field names are:
+                    // - Code_Container_Internal_Port (port inside container)
+                    // - Code_Container_Host_Port (port exposed on host)
+                    foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
+                    {
+                        var keyCell = row.Cell(1).GetString().Trim();
+                        
+                        // Normalize key by removing underscores and making lowercase for comparison
+                        var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
+                        
+                        if (normalizedKey == "codecontainerhostport" || normalizedKey == "codecontainerinternalport")
+                        {
+                            var valueCell = row.Cell(2);
+                            int port = 0;
+                            
+                            // Try to get as integer first
+                            if (valueCell.TryGetValue<int>(out var intValue))
+                            {
+                                port = intValue;
+                            }
+                            else
+                            {
+                                // Fallback to string parsing
+                                var valueStr = valueCell.GetString().Trim();
+                                int.TryParse(valueStr, out port);
+                            }
+                            
+                            if (port > 0 && port <= 65535)
+                            {
+                                _logger.LogInfo($"Successfully read {keyCell}={port} from Environment.xlsx. Container will use this port.");
+                                return port;
+                            }
+                        }
+                    }
+                    
+                    _logger.LogWarning($"Code_Container_Host_Port or Code_Container_Internal_Port not found in Environment.xlsx at {environmentPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Error reading port from Environment.xlsx: {ex.Message}");
+            }
+
+            return 0;
         }
     }
 }

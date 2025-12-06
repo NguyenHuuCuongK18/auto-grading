@@ -141,6 +141,20 @@
                                 </StackPanel>
 
                                 <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+                                
+                                <!-- DLL Modification Fallback Checkbox -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                    <CheckBox x:Name="chkUseDllModFallback" 
+                                              VerticalAlignment="Center" 
+                                              Margin="0,0,5,0"
+                                              ToolTip="Enable DLL modification fallback when appsettings.json is missing"/>
+                                    <TextBlock Text="DLL modification fallback" 
+                                               VerticalAlignment="Center" 
+                                               Foreground="#444"
+                                               ToolTip="When enabled, the system will patch DLL files directly if appsettings.json is not found"/>
+                                </StackPanel>
+
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
 
                                 <!-- Start Buttons -->
                                 <Button x:Name="btnStartAll" Content="▶ Start All" Background="#28A745" Foreground="White" Padding="12,4" Margin="0,0,5,0" Height="26" Click="StartAll_Click" BorderThickness="0"/>

@@ -196,8 +196,25 @@ namespace SolutionGrader.UI.Services
                     double totalMark = 0.0;
                     foreach (var row in markSheet.RowsUsed().Skip(1)) // Skip header
                     {
-                        var mark = row.Cell(2).GetValue<double>();
-                        totalMark += mark;
+                        // Use TryGetValue to safely handle non-numeric values
+                        if (row.Cell(2).TryGetValue<double>(out var mark))
+                        {
+                            totalMark += mark;
+                        }
+                        else
+                        {
+                            // Try parsing as string if direct conversion fails
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (double.TryParse(markStr, System.Globalization.NumberStyles.Any, 
+                                System.Globalization.CultureInfo.InvariantCulture, out var parsedMark))
+                            {
+                                totalMark += parsedMark;
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"Cannot parse mark value '{markStr}' at row {row.RowNumber()} in {headerPath}");
+                            }
+                        }
                     }
                     return totalMark;
                 }
