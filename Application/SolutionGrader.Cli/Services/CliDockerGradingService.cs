@@ -549,11 +549,7 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // NEW APPROACH: Load ALL students during discovery, regardless of missing files.
-                    // Let the grading phase handle validation and log appropriate error messages.
-                    // This ensures we have a complete list of all students for tracking purposes.
                     // Extraction will happen lazily when grading each student (in GradeStudentUsingSharedServiceAsync)
-                    
                     var questionFolder = Path.Combine(studentDir, "1");
                     var solutionPath = Path.Combine(questionFolder, "solution");
                     
@@ -565,8 +561,7 @@ namespace SolutionGrader.Cli.Services
                         solutionPath = studentDir; // Use student dir as fallback
                     }
                     
-                    // Add ALL students - don't filter based on file existence
-                    // The grading phase will validate files and log errors as needed
+                    // Load ALL students - grading phase will validate files and log errors as needed
                     students.Add(new StudentInfo
                     {
                         StudentCode = studentCode!,
