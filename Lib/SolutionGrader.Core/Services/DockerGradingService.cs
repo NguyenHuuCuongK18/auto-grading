@@ -1504,6 +1504,10 @@ namespace SolutionGrader.Core.Services
             return results;
         }
         
+        /// <summary>
+        /// Simple string contains check with basic normalization for line endings.
+        /// For more robust comparison, use DataComparisonService.CompareText().
+        /// </summary>
         private bool NormalizeAndContains(string actual, string expected)
         {
             if (string.IsNullOrEmpty(expected)) return true;
@@ -1513,47 +1517,20 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Compares TCP flags in a lenient way - checks if all expected flags are present
-        /// regardless of order. TCP flags are bits (SYN, ACK, PSH, FIN, RST, URG) and their
-        /// order may differ between Windows/Linux or packet capture tools.
+        /// Normalize TCP flags for comparison - sorts flags alphabetically and removes whitespace.
+        /// REUSES logic from Executor.NormalizeFlags() to avoid code duplication.
         /// 
         /// Examples:
-        /// - "PSH, ACK" matches "ACK, PSH" -> true
-        /// - "SYN" matches "SYN" -> true
-        /// - "ACK" matches "ACK, RST" -> true (actual has ACK plus extra RST)
-        /// - "SYN, ACK" matches "SYN" -> false (missing ACK)
+        /// - "PSH, ACK" -> "ACK, PSH"
+        /// - "SYN" -> "SYN"
+        /// - "ACK, RST" -> "ACK, RST"
         /// </summary>
-        private bool CompareTcpFlags(string expectedFlags, string actualFlags)
+        private static string NormalizeFlags(string flags)
         {
-            if (string.IsNullOrEmpty(expectedFlags)) return true;
-            if (string.IsNullOrEmpty(actualFlags)) return false;
+            if (string.IsNullOrWhiteSpace(flags)) return "";
             
-            // Split flags and normalize (trim whitespace, convert to uppercase)
-            var expectedSet = expectedFlags.Split(',')
+            var flagList = flags.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
-                .ToHashSet();
-            
-            var actualSet = actualFlags.Split(',')
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
-                .ToHashSet();
-            
-            // Check if all expected flags are present in actual flags
-            // (actual may have additional flags, which is acceptable)
-            return expectedSet.IsSubsetOf(actualSet);
-        }
-        
-        /// <summary>
-        /// Normalize flags for exact comparison - sorts flags alphabetically and removes whitespace
-        /// </summary>
-        private string NormalizeFlags(string flags)
-        {
-            if (string.IsNullOrEmpty(flags)) return "";
-            
-            var flagList = flags.Split(',')
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
                 .OrderBy(f => f)
                 .ToList();
             
