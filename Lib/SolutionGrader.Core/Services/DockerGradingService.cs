@@ -1142,36 +1142,32 @@ namespace SolutionGrader.Core.Services
                     networkCheckPassed = false;
                 }
                 
-                // CRITICAL FIX: Count PARTIAL as passing with partial credit
-                // Calculate network grading: PASS=100%, PARTIAL=50%, FAIL=0%
+                // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
+                // - If ANY flow has FAIL status, entire test FAILS
+                // - PARTIAL is treated as PASS (flags match, roles don't matter for passing)
+                // - Only flows recorded in Detail.xlsx are validated
+                // - Flows NOT in Detail.xlsx are ignored (even if captured)
+                
                 int totalNetworkFlows = networkComparisons.Count;
                 int passCount = networkComparisons.Count(c => c.Passed);
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
-                int failCount = totalNetworkFlows - passCount - partialCount;
+                int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
-                // Network score: PASS=1.0, PARTIAL=0.5, FAIL=0.0
-                double networkScore = totalNetworkFlows > 0 
-                    ? (passCount * 1.0 + partialCount * 0.5) / totalNetworkFlows
-                    : 1.0;  // No network flows expected = perfect score
+                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
                 
-                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}, Score={networkScore:P0}");
-                
-                // Network check passed if we have at least some matches (PASS or PARTIAL)
-                bool networkFlowsPassed = networkScore >= 0.5 || totalNetworkFlows == 0;
+                // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
+                // PARTIAL counts as passing (flags matched correctly)
+                bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
                 // Final result: must pass both output comparison AND network check
-                // Apply network score to earned mark
-                double finalEarnedMark = passed && networkCheckPassed 
-                    ? earnedMark * networkScore 
-                    : 0;
-                
-                result.EarnedMark = finalEarnedMark;
+                // No partial credit - ALL or NOTHING
+                result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
                 
-                // Build detailed error message
+                // Build detailed error message for OverallSummary.xlsx
                 var errorMessages = new List<string>();
                 
                 if (!networkCheckPassed)
@@ -1186,9 +1182,10 @@ namespace SolutionGrader.Core.Services
                         errorMessages.Add($"Console output: {failedOutputs} check(s) failed");
                 }
                 
-                if (totalNetworkFlows > 0 && !networkFlowsPassed)
+                if (totalNetworkFlows > 0 && failCount > 0)
                 {
-                    errorMessages.Add($"Network flows: {failCount} FAIL, {partialCount} PARTIAL (50% credit), {passCount} PASS - Score: {networkScore:P0}");
+                    // Show detailed breakdown: which flows failed
+                    errorMessages.Add($"Network flows: {failCount} FAIL (ALL-OR-NOTHING: test FAILED), {partialCount} PARTIAL, {passCount} PASS");
                 }
                 
                 if (errorMessages.Any())
