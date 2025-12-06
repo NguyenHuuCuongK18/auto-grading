@@ -344,12 +344,10 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // Read starting port from OUTERMOST environment.xlsx in test kit ROOT folder
-                // NOT from the specific question's test kit folder
-                // This determines where port allocation starts (e.g., 8000, 5000, etc.)
-                // config.TestKitFolderPath points to the ROOT test kit folder (e.g., C:\Testkit_Q1_PRN222)
-                // testKitPath points to specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
-                int startingPort = ReadStartingPortFromEnvironmentXlsx(config.TestKitFolderPath);
+                // Read starting port from environment.xlsx in the QUESTION-SPECIFIC test kit folder
+                // testKitPath points to the specific question folder (e.g., C:\Testkit_Q1_PRN222\Q12)
+                // This is where environment.xlsx with MonitorPort configuration is located
+                int startingPort = ReadStartingPortFromEnvironmentXlsx(testKitPath);
                 if (startingPort <= 0)
                 {
                     startingPort = 8000; // Fallback default if not found in environment.xlsx
@@ -769,29 +767,28 @@ namespace SolutionGrader.UI.Services
         }
 
         /// <summary>
-        /// Reads the starting port from OUTERMOST environment.xlsx in the test kit ROOT folder.
+        /// Reads the starting port from environment.xlsx in the question-specific test kit folder.
         /// This determines the base port number from which sequential allocation begins.
         /// 
-        /// IMPORTANT: This reads from the TEST KIT ROOT folder (e.g., C:\Testkit_Q1_PRN222\environment.xlsx),
-        /// NOT from individual question folders (e.g., C:\Testkit_Q1_PRN222\Q12\environment.xlsx).
-        /// The outermost environment.xlsx contains global configuration like MonitorPort that applies
-        /// to all questions in the test kit.
+        /// IMPORTANT: This reads from the QUESTION-SPECIFIC test kit folder 
+        /// (e.g., C:\Testkit_Q1_PRN222\Q12\environment.xlsx), not the root.
+        /// Each question can have its own environment.xlsx with MonitorPort configuration.
         /// </summary>
-        /// <param name="testKitRootPath">Path to test kit ROOT folder containing outermost environment.xlsx</param>
+        /// <param name="testKitPath">Path to question-specific test kit folder containing environment.xlsx</param>
         /// <returns>Starting port number from MonitorPort field, or 0 if not found</returns>
-        private int ReadStartingPortFromEnvironmentXlsx(string testKitRootPath)
+        private int ReadStartingPortFromEnvironmentXlsx(string testKitPath)
         {
             try
             {
-                // Look for environment.xlsx at the ROOT level of test kit folder
-                var environmentPath = Path.Combine(testKitRootPath, "environment.xlsx");
+                // Look for environment.xlsx in the question-specific test kit folder
+                var environmentPath = Path.Combine(testKitPath, "environment.xlsx");
                 if (!File.Exists(environmentPath))
                 {
-                    _logger.LogWarning($"Outermost environment.xlsx not found at {environmentPath}. Container port will default to 8000.");
+                    _logger.LogWarning($"environment.xlsx not found at {environmentPath}. Container port will default to 8000.");
                     return 0;
                 }
 
-                _logger.LogInfo($"Reading MonitorPort from outermost environment.xlsx: {environmentPath}");
+                _logger.LogInfo($"Reading MonitorPort from environment.xlsx: {environmentPath}");
 
                 using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
                 {
@@ -806,18 +803,18 @@ namespace SolutionGrader.UI.Services
                             var valueCell = row.Cell(2).Value.ToString().Trim();
                             if (int.TryParse(valueCell, out int port) && port > 0 && port <= 65535)
                             {
-                                _logger.LogInfo($"Successfully read MonitorPort={port} from outermost environment.xlsx. Container creation will use this as starting port.");
+                                _logger.LogInfo($"Successfully read MonitorPort={port} from environment.xlsx. Container creation will use this as starting port.");
                                 return port;
                             }
                         }
                     }
                     
-                    _logger.LogWarning($"MonitorPort field not found in outermost environment.xlsx at {environmentPath}");
+                    _logger.LogWarning($"MonitorPort field not found in environment.xlsx at {environmentPath}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error reading MonitorPort from outermost environment.xlsx: {ex.Message}");
+                _logger.LogWarning($"Error reading MonitorPort from environment.xlsx: {ex.Message}");
             }
 
             return 0;
