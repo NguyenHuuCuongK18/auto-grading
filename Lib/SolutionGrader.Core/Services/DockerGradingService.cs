@@ -372,14 +372,14 @@ namespace SolutionGrader.Core.Services
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
                         // Test case timed out (not overall cancellation)
-                        OnProgress($"Test case {testCase.Name} timed out after {testCaseTimeout}s");
+                        OnProgress($"Student timed out during {testCase.Name} (timeout: {testCaseTimeout}s)");
                         tcResult = new TestCaseResult
                         {
                             TestCaseName = testCase.Name,
                             MaxMark = testCase.MaxMark,
                             EarnedMark = 0,
                             Passed = false,
-                            ErrorMessage = $"Test case timed out after {testCaseTimeout} seconds"
+                            ErrorMessage = $"Student timed out during {testCase.Name} (timeout: {testCaseTimeout}s)"
                         };
                     }
                     
