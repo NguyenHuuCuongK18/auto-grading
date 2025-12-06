@@ -2428,12 +2428,16 @@ namespace SolutionGrader.Core.Services
                     
                     if (matchingPacket != null)
                     {
-                        // Found matching packet - write actual data (columns 11-15)
+                        // Found matching packet - write actual data (columns 11-17)
                         netWs.Cell(netRow, 11).Value = matchingPacket.Flags;  // ActualFlags
                         netWs.Cell(netRow, 12).Value = matchingPacket.State;  // ActualState
                         netWs.Cell(netRow, 13).Value = matchingPacket.SourceRole;  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = matchingPacket.DestinationRole;  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
+                        
+                        // CRITICAL FIX: Write source and destination ports for debugging
+                        netWs.Cell(netRow, 16).Value = matchingPacket.SourcePort;  // ActualSourcePort
+                        netWs.Cell(netRow, 17).Value = matchingPacket.DestinationPort;  // ActualDestPort
                         
                         // Check if it's an exact match or just partial
                         // Flags must match exactly (but order doesn't matter - normalize both)
@@ -2449,8 +2453,8 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
                             exactMatch = false;
                         
-                        netWs.Cell(netRow, 16).Value = exactMatch ? "PASS" : "PARTIAL";
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        netWs.Cell(netRow, 18).Value = exactMatch ? "PASS" : "PARTIAL";
+                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
                         
                         // Remove from list so we can identify extra packets later
                         actualPacketsForStage.Remove(matchingPacket);
@@ -2463,8 +2467,10 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = "";  // ActualData
-                        netWs.Cell(netRow, 16).Value = "FAIL";
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        netWs.Cell(netRow, 16).Value = "";  // ActualSourcePort
+                        netWs.Cell(netRow, 17).Value = "";  // ActualDestPort
+                        netWs.Cell(netRow, 18).Value = "FAIL";
+                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightPink;
                         
                         Console.WriteLine($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
@@ -2497,14 +2503,19 @@ namespace SolutionGrader.Core.Services
                         for (int i = 3; i <= 10; i++) 
                             netWs.Cell(netRow, i).Value = "";
                         
-                        // Write actual packet data (columns 11-15)
+                        // Write actual packet data (columns 11-17)
                         netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
                         netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
                         netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
                         netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
                         netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
-                        netWs.Cell(netRow, 16).Value = "INFO";  // Informational - not validated
-                        netWs.Cell(netRow, 16).Style.Fill.BackgroundColor = XLColor.LightGray;
+                        
+                        // CRITICAL FIX: Write source and destination ports for debugging
+                        netWs.Cell(netRow, 16).Value = packet.SourcePort;  // ActualSourcePort
+                        netWs.Cell(netRow, 17).Value = packet.DestinationPort;  // ActualDestPort
+                        
+                        netWs.Cell(netRow, 18).Value = "INFO";  // Informational - not validated
+                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightGray;
                         
                         netRow++;
                     }
@@ -2581,12 +2592,14 @@ namespace SolutionGrader.Core.Services
         {
             // Network sheet format matching ExcelDetailLogService naming convention (NO underscores).
             // Format: Stage, expected columns (Time, Flags, etc.), then Actual* columns, then NetworkResult.
+            // CRITICAL FIX: Added SourcePort and DestPort columns for debugging network traffic
             // This ensures consistency across both Docker and regular grading flows.
             var headers = new[] { 
                 "Stage",  // Test stage number
                 "Time", "Info", "Source", "Destination", 
                 "Flags", "State", "Data", "SourceRole", "DestinationRole",
                 "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData",
+                "ActualSourcePort", "ActualDestPort",  // CRITICAL FIX: Added port columns for debugging
                 "NetworkResult"  // PASS or FAIL for network flow matching
             };
             for (int i = 0; i < headers.Length; i++)
