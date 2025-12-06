@@ -92,33 +92,37 @@ namespace SolutionGrader.Core.Services
 
                 try
                 {
-                    // Load the next port to try (incrementing counter, never goes backwards)
+                    // Load the next port to allocate (incrementing counter, never goes backwards)
                     int nextPort = LoadNextPort();
 
-                    // Find next available port starting from nextPort
-                    // If port is in use at OS level, skip to next one
-                    // Keep incrementing until we find an available port
-                    for (int port = nextPort; port <= PORT_MAX; port++)
+                    // CRITICAL FIX: Allocate ports sequentially WITHOUT checking availability
+                    // Since we NEVER reuse ports, we don't need to check if they're available.
+                    // Docker will handle port binding when containers are created.
+                    // This prevents false negatives from TIME_WAIT state causing port exhaustion.
+                    //
+                    // OLD BEHAVIOR: Check IsPortAvailable() which fails for TIME_WAIT ports
+                    // NEW BEHAVIOR: Simply return the next port in sequence
+                    //
+                    // Benefits:
+                    // - No false negatives from TIME_WAIT state
+                    // - Faster allocation (no socket binding test)
+                    // - Supports unlimited students (1, 2, 3... 10000+)
+                    // - Simpler code, clearer intent
+                    
+                    if (nextPort > PORT_MAX)
                     {
-                        if (IsPortAvailable(port))
-                        {
-                            // Save the NEXT port for the next allocation (port + 1)
-                            // This ensures no port is ever reused
-                            SaveNextPort(port + 1);
-                            Console.WriteLine($"[PortAllocator] SUCCESS: Allocated port {port} (sequential, no reuse). Next allocation will try port {port + 1}");
-                            Console.WriteLine($"[PortAllocator] Port {port} validation: OS-level binding successful, port is available");
-                            return port;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[PortAllocator] Port {port} in use at OS level, trying next port {port + 1}");
-                        }
+                        // This should virtually never happen - means we've exhausted all ports to 65535
+                        Console.WriteLine($"[PortAllocator] ERROR: Exhausted all ports from {_startingPort} to {PORT_MAX}");
+                        Console.WriteLine($"[PortAllocator] TIP: Reset port allocation by deleting {NextPortFilePath} or calling ClearAllAllocatedPorts()");
+                        return -1;
                     }
-
-                    // This should virtually never happen - means we've exhausted all ports to 65535
-                    Console.WriteLine($"[PortAllocator] ERROR: Exhausted all ports from {nextPort} to {PORT_MAX}");
-                    Console.WriteLine($"[PortAllocator] TIP: Reset port allocation by deleting {NextPortFilePath} or calling ClearAllAllocatedPorts()");
-                    return -1;
+                    
+                    // Allocate the port and save the next one
+                    int allocatedPort = nextPort;
+                    SaveNextPort(allocatedPort + 1);
+                    Console.WriteLine($"[PortAllocator] Allocated port {allocatedPort} (sequential, no reuse, no availability check)");
+                    Console.WriteLine($"[PortAllocator] Next allocation will use port {allocatedPort + 1}");
+                    return allocatedPort;
                 }
                 finally
                 {
