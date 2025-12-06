@@ -29,6 +29,10 @@ namespace SolutionGrader.Core.Services;
 /// - Pre-allocate ports for all selected students + 10-20% buffer
 /// - Only create new monitor instance when exceeding upper port limit
 /// - Example: 50 students → allocate ports 4000-4059 (50 + 20% buffer)
+/// 
+/// CRITICAL: Integrates with IRunContext for grading system compatibility.
+/// Packets are stored both in local buffers (for retrieval) and in RunContext
+/// (for grading logic that depends on _runContext.GetCapturedNetworkPackets()).
 /// </summary>
 public sealed class SharedNetworkMonitorService : IDisposable
 {
@@ -42,6 +46,10 @@ public sealed class SharedNetworkMonitorService : IDisposable
     // Port range covered by this monitor instance
     private readonly int _startPort;
     private readonly int _endPort;
+    
+    // CRITICAL: RunContext mapping for storing packets to grading system
+    // Key: studentCode, Value: IRunContext for that student
+    private readonly ConcurrentDictionary<string, IRunContext> _studentRunContexts = new();
     
     // Port-to-Student mapping (thread-safe)
     private readonly ConcurrentDictionary<int, string> _portToStudentCode = new();
@@ -74,7 +82,11 @@ public sealed class SharedNetworkMonitorService : IDisposable
     /// Register a student's port for monitoring.
     /// This student will receive all packets involving their port.
     /// </summary>
-    public void RegisterStudent(string studentCode, int port, string protocolType = "TCP")
+    /// <param name="studentCode">Student identifier</param>
+    /// <param name="port">Port to monitor for this student</param>
+    /// <param name="protocolType">Protocol type (TCP/HTTP)</param>
+    /// <param name="runContext">RunContext for storing packets (required for grading)</param>
+    public void RegisterStudent(string studentCode, int port, string protocolType, IRunContext runContext)
     {
         if (port < _startPort || port > _endPort)
         {
@@ -86,6 +98,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
         _studentContexts[studentCode] = new StudentContext();
         _portProtocols[port] = protocolType;
         _portRoleMap[port] = NetworkKeywords.Role_Server; // Server is the listening port
+        _studentRunContexts[studentCode] = runContext; // CRITICAL: Store RunContext for packet storage
         
         UpdateBpfFilter();
         
@@ -112,6 +125,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         _studentPacketBuffers.TryRemove(studentCode, out _);
         _studentContexts.TryRemove(studentCode, out _);
+        _studentRunContexts.TryRemove(studentCode, out _); // Remove RunContext mapping
         
         UpdateBpfFilter();
         
@@ -413,7 +427,48 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 _portRoleMap.TryAdd(clientPort, NetworkKeywords.Role_Client);
             }
             
-            // Create packet info
+            // Determine roles for this packet
+            string srcRole, dstRole;
+            if (srcPort == studentPort)
+            {
+                srcRole = NetworkKeywords.Role_Server;
+                dstRole = NetworkKeywords.Role_Client;
+            }
+            else
+            {
+                srcRole = NetworkKeywords.Role_Client;
+                dstRole = NetworkKeywords.Role_Server;
+            }
+            
+            // Extract TCP flags in correct order (matches NetworkMonitorService)
+            var flags = GetTcpFlags(tcpPacket);
+            
+            // Determine connection state
+            var state = DetermineConnectionState(flags, srcRole);
+            
+            // Extract payload for PSH packets
+            string? payload = null;
+            if (tcpPacket.Push && tcpPacket.PayloadData != null && tcpPacket.PayloadData.Length > 0)
+            {
+                payload = System.Text.Encoding.UTF8.GetString(tcpPacket.PayloadData);
+            }
+            
+            // Get context for this student
+            string questionCode = "";
+            string stage = "0";
+            if (_studentContexts.TryGetValue(studentCode, out var context))
+            {
+                questionCode = context.QuestionCode;
+                stage = context.Stage;
+            }
+            
+            // Parse stage to int
+            if (!int.TryParse(stage, out int stageNum))
+            {
+                stageNum = 0;
+            }
+            
+            // Create packet info for local buffer
             var packetInfo = new PacketInfo
             {
                 Timestamp = DateTime.UtcNow,
@@ -421,22 +476,59 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 DestPort = dstPort,
                 SourceIp = ipPacket.SourceAddress.ToString(),
                 DestIp = ipPacket.DestinationAddress.ToString(),
-                Flags = GetTcpFlags(tcpPacket),
+                Flags = flags,
                 PayloadLength = tcpPacket.PayloadData?.Length ?? 0,
-                Payload = tcpPacket.PayloadData
+                Payload = tcpPacket.PayloadData,
+                QuestionCode = questionCode,
+                Stage = stage
             };
-            
-            // Add context if available
-            if (_studentContexts.TryGetValue(studentCode, out var context))
-            {
-                packetInfo.QuestionCode = context.QuestionCode;
-                packetInfo.Stage = context.Stage;
-            }
             
             // Route to student's buffer
             if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
             {
                 buffer.Enqueue(packetInfo);
+            }
+            
+            // CRITICAL: Store to RunContext for grading system compatibility
+            // The grading system retrieves packets via runContext.GetCapturedNetworkPackets()
+            if (_studentRunContexts.TryGetValue(studentCode, out var runContext))
+            {
+                var capturedPacket = new CapturedNetworkPacket
+                {
+                    Stage = stageNum,
+                    Timestamp = rawPacket.Timeval.Date,
+                    Flags = flags,
+                    State = state,
+                    SourceRole = srcRole,
+                    DestinationRole = dstRole,
+                    Data = payload,
+                    SourcePort = srcPort,
+                    DestinationPort = dstPort
+                };
+                
+                runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
+                
+                // Console logging for debugging (matches NetworkMonitorService format)
+                var logMessage = $"[SharedNetworkMonitor] [{studentCode}] {srcRole}->{dstRole} [{flags}] {state}";
+                if (!string.IsNullOrEmpty(payload))
+                {
+                    var payloadPreview = payload.Length > 50 
+                        ? payload.Substring(0, 50) + "..." 
+                        : payload;
+                    logMessage += $" Data: {payloadPreview.Replace("\n", "\\n").Replace("\r", "")}";
+                }
+                Console.WriteLine(logMessage);
+                
+                // CRITICAL: Store payload to RunContext with HTTP parsing (matches NetworkMonitorService)
+                if (!string.IsNullOrEmpty(payload))
+                {
+                    StorePayloadToRunContext(runContext, srcRole, payload, questionCode, stage);
+                }
+            }
+            else
+            {
+                // Should not happen - log warning
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: RunContext not found for student {studentCode}");
             }
         }
         catch (Exception ex)
@@ -448,12 +540,34 @@ public sealed class SharedNetworkMonitorService : IDisposable
     private string GetTcpFlags(TcpPacket tcp)
     {
         var flags = new List<string>();
-        if (tcp.Synchronize) flags.Add("SYN");
-        if (tcp.Acknowledgment) flags.Add("ACK");
-        if (tcp.Push) flags.Add("PSH");
+        // CRITICAL: Order matters for TestKit comparison (matches NetworkMonitorService)
         if (tcp.Finished) flags.Add("FIN");
+        if (tcp.Synchronize) flags.Add("SYN");
         if (tcp.Reset) flags.Add("RST");
-        return flags.Count > 0 ? string.Join(",", flags) : "";
+        if (tcp.Push) flags.Add("PSH");
+        if (tcp.Acknowledgment) flags.Add("ACK");
+        if (tcp.Urgent) flags.Add("URG");
+        return string.Join(", ", flags);
+    }
+    
+    private string DetermineConnectionState(string flags, string srcRole)
+    {
+        // Standard TCP handshake states (matches NetworkMonitorService)
+        if (flags == "SYN" && srcRole == NetworkKeywords.Role_Client)
+            return "Client connecting to server (SYN)";
+        if ((flags == "SYN, ACK" || flags == "ACK, SYN") && srcRole == NetworkKeywords.Role_Server)
+            return "Server responding (SYN-ACK)";
+        if (flags == "ACK")
+            return "Connection acknowledged (ACK)";
+        if (flags.Contains("PSH") && flags.Contains("ACK"))
+            return srcRole == NetworkKeywords.Role_Client ? "Client sending data" : "Server sending data";
+        if (flags.Contains("FIN") && flags.Contains("ACK"))
+            return srcRole == NetworkKeywords.Role_Client ? "Client closing connection" : "Server closing connection";
+        if (flags == "FIN")
+            return "Connection termination initiated";
+        if (flags == "RST")
+            return "Connection reset";
+        return "Unknown state";
     }
     
     /// <summary>
@@ -496,6 +610,189 @@ public sealed class SharedNetworkMonitorService : IDisposable
     public void Dispose()
     {
         StopAsync().Wait();
+    }
+    
+    /// <summary>
+    /// Stores payload to RunContext with HTTP parsing if protocol is HTTP.
+    /// Matches NetworkMonitorService.StoreInRunContext() logic exactly.
+    /// </summary>
+    private void StorePayloadToRunContext(IRunContext runContext, string srcRole, string payload, string questionCode, string stage)
+    {
+        // Get protocol type for this port (default to TCP if not found)
+        string protocolType = NetworkKeywords.Protocol_TCP;
+        
+        // Parse HTTP data if this is HTTP protocol
+        if (protocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
+        {
+            var httpData = ParseHttpData(payload);
+            
+            // Client -> Server is a request
+            if (srcRole == NetworkKeywords.Role_Client)
+            {
+                // Store the full request payload
+                runContext.SetServerRequest(questionCode, stage, payload);
+                
+                if (!string.IsNullOrEmpty(httpData.Method))
+                {
+                    // Store method and request body separately for easier comparison
+                    runContext.SetHttpMetadata(questionCode, stage, httpData.Method, 0, 
+                        System.Text.Encoding.UTF8.GetByteCount(payload));
+                    
+                    // Store HTTP body if present (for request payload comparison)
+                    if (!string.IsNullOrEmpty(httpData.Body))
+                    {
+                        runContext.SetCapturedOutput($"network.{stage}.req.body", httpData.Body);
+                    }
+                }
+            }
+            // Server -> Client is a response
+            else if (srcRole == NetworkKeywords.Role_Server)
+            {
+                // Store the full response payload
+                runContext.SetServerResponse(questionCode, stage, payload);
+                
+                if (!string.IsNullOrEmpty(httpData.Status))
+                {
+                    // Parse status code from status line (e.g., "200 OK" -> 200)
+                    var statusCode = ExtractStatusCode(httpData.Status);
+                    runContext.SetHttpMetadata(questionCode, stage, "", statusCode,
+                        System.Text.Encoding.UTF8.GetByteCount(payload));
+                    
+                    // Store HTTP body separately for response payload comparison
+                    if (!string.IsNullOrEmpty(httpData.Body))
+                    {
+                        runContext.SetCapturedOutput($"network.{stage}.res.body", httpData.Body);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // TCP protocol - store raw data
+            if (srcRole == NetworkKeywords.Role_Client)
+            {
+                runContext.SetServerRequest(questionCode, stage, payload);
+                runContext.SetCapturedOutput($"network.{stage}.req.data", payload);
+            }
+            else if (srcRole == NetworkKeywords.Role_Server)
+            {
+                runContext.SetServerResponse(questionCode, stage, payload);
+                runContext.SetCapturedOutput($"network.{stage}.res.data", payload);
+            }
+        }
+    }
+    
+    // Regex patterns for HTTP parsing (matches NetworkMonitorService)
+    private static readonly System.Text.RegularExpressions.Regex HttpRequestRegex = 
+        new System.Text.RegularExpressions.Regex(@"^(\S+)\s+(\S+)\s+HTTP/([0-9.]+)", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex HttpResponseRegex = 
+        new System.Text.RegularExpressions.Regex(@"^HTTP/([0-9.]+)\s+(\d+)\s*(.*)", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    
+    private static HttpData ParseHttpData(string? payload)
+    {
+        var httpData = new HttpData();
+        
+        if (string.IsNullOrEmpty(payload))
+            return httpData;
+        
+        try
+        {
+            var lines = payload.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0)
+                return httpData;
+            
+            var firstLine = lines[0];
+            
+            if (firstLine.StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase))
+            {
+                // HTTP Response
+                var responseMatch = HttpResponseRegex.Match(firstLine);
+                if (responseMatch.Success)
+                {
+                    httpData.HttpVersion = $"HTTP/{responseMatch.Groups[1].Value}";
+                    httpData.Status = $"{responseMatch.Groups[2].Value} {responseMatch.Groups[3].Value}".Trim();
+                }
+                ParseHeadersAndBody(lines, httpData);
+            }
+            else
+            {
+                // HTTP Request
+                var requestMatch = HttpRequestRegex.Match(firstLine);
+                if (requestMatch.Success)
+                {
+                    httpData.Method = requestMatch.Groups[1].Value;
+                    httpData.Uri = requestMatch.Groups[2].Value;
+                    httpData.HttpVersion = $"HTTP/{requestMatch.Groups[3].Value}";
+                }
+                ParseHeadersAndBody(lines, httpData);
+            }
+        }
+        catch { }
+        
+        return httpData;
+    }
+    
+    private static void ParseHeadersAndBody(string[] lines, HttpData httpData)
+    {
+        var bodyLines = new List<string>();
+        bool inBody = false;
+        
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            
+            if (!inBody)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    inBody = true;
+                    continue;
+                }
+                
+                if (line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))
+                {
+                    int colonIndex = line.IndexOf(':');
+                    if (colonIndex >= 0 && colonIndex < line.Length - 1)
+                    {
+                        httpData.Host = line.Substring(colonIndex + 1).Trim();
+                    }
+                }
+            }
+            else
+            {
+                bodyLines.Add(line);
+            }
+        }
+        
+        if (bodyLines.Count > 0)
+        {
+            httpData.Body = string.Join("\n", bodyLines);
+        }
+    }
+    
+    private static int ExtractStatusCode(string status)
+    {
+        if (string.IsNullOrEmpty(status))
+            return 0;
+        
+        var parts = status.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 0 && int.TryParse(parts[0], out int code))
+        {
+            return code;
+        }
+        return 0;
+    }
+    
+    private class HttpData
+    {
+        public string Method { get; set; } = "";
+        public string Uri { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string HttpVersion { get; set; } = "";
+        public string Host { get; set; } = "";
+        public string Body { get; set; } = "";
     }
 }
 

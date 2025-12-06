@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using SolutionGrader.Core.Abstractions;
 
 namespace SolutionGrader.Core.Services;
 
@@ -81,7 +82,11 @@ public class SharedNetworkMonitorManager
     /// Register a student's port and get the appropriate monitor instance.
     /// If the port exceeds all existing monitor ranges, creates a new monitor.
     /// </summary>
-    public SharedNetworkMonitorService RegisterStudent(string studentCode, int port, string protocolType)
+    /// <param name="studentCode">Student identifier</param>
+    /// <param name="port">Port to monitor</param>
+    /// <param name="protocolType">Protocol type</param>
+    /// <param name="runContext">RunContext for storing packets (required)</param>
+    public SharedNetworkMonitorService RegisterStudent(string studentCode, int port, string protocolType, IRunContext runContext)
     {
         lock (_lock)
         {
@@ -108,8 +113,8 @@ public class SharedNetworkMonitorManager
                 _monitors.Add(monitor);
             }
             
-            // Register student with this monitor
-            monitor.Monitor.RegisterStudent(studentCode, port, protocolType);
+            // Register student with this monitor (pass RunContext)
+            monitor.Monitor.RegisterStudent(studentCode, port, protocolType, runContext);
             _studentToMonitor[studentCode] = monitor;
             
             return monitor.Monitor;

@@ -461,7 +461,8 @@ namespace SolutionGrader.Cli.Services
                 // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
                 // This uses a single shared monitor for all students instead of one per student
                 // 97% reduction in monitor instances (e.g., 1 monitor for 32 students instead of 32)
-                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(student.StudentCode);
+                // CRITICAL: Pass runContext so packets are stored for grading system
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(student.StudentCode, runContext);
 
                 // Create the SHARED DockerGradingService
                 var dockerGradingService = new DockerGradingService(networkMonitor, runContext);

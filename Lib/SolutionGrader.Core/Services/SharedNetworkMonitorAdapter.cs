@@ -16,25 +16,32 @@ namespace SolutionGrader.Core.Services;
 /// - Creating shared monitor instances with pre-allocated port ranges
 /// - Routing students to appropriate monitor instances
 /// - Per-student packet isolation
+/// 
+/// CRITICAL: Requires IRunContext for integration with grading system.
+/// Packets are stored to RunContext so grading logic can retrieve them.
 /// </summary>
 public class SharedNetworkMonitorAdapter : INetworkMonitorService
 {
     private readonly string _studentCode;
+    private readonly IRunContext _runContext;
     private SharedNetworkMonitorService? _assignedMonitor;
     
     public int MonitorPort { get; set; }
     public string ProtocolType { get; set; } = NetworkKeywords.Protocol_TCP;
     public bool IsCapturing => _assignedMonitor?.IsCapturing ?? false;
     
-    public SharedNetworkMonitorAdapter(string studentCode)
+    public SharedNetworkMonitorAdapter(string studentCode, IRunContext runContext)
     {
         _studentCode = studentCode;
+        _runContext = runContext;
     }
     
     public async Task StartAsync(CancellationToken ct = default)
     {
         // Register this student's port with the shared monitor manager
-        _assignedMonitor = SharedNetworkMonitorManager.Instance.RegisterStudent(_studentCode, MonitorPort, ProtocolType);
+        // Pass RunContext so packets can be stored for grading system
+        _assignedMonitor = SharedNetworkMonitorManager.Instance.RegisterStudent(
+            _studentCode, MonitorPort, ProtocolType, _runContext);
         
         // Ensure the assigned monitor is started
         await _assignedMonitor.StartAsync(ct);

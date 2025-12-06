@@ -106,7 +106,7 @@ namespace SolutionGrader.UI.Services
                 // Per user request: Singular network monitor with port-based traffic isolation
                 // Extract student code from result root path (e.g., Results/GradeResult_20241206/StudentCode)
                 string extractedStudentCode = Path.GetFileName(resultRoot) ?? "UnknownStudent";
-                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(extractedStudentCode);
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(extractedStudentCode, runctx);
                 
                 IDataComparisonService cmp = new DataComparisonService(runctx);
                 IDetailLogService log = new ExcelDetailLogService(files, runctx);
@@ -258,7 +258,7 @@ namespace SolutionGrader.UI.Services
                 
                 // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
                 // Per user request: Singular network monitor with port-based traffic isolation
-                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(studentCode);
+                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(studentCode, runctx);
 
                 // Create DockerGradingService from Lib
                 var dockerGrading = new DockerGradingService(networkMonitor, runctx);
