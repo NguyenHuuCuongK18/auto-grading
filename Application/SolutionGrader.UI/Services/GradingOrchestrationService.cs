@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using ClosedXML.Excel;
 using SolutionGrader.UI.Models;
 using SolutionGrader.Core.Services;
 
@@ -781,7 +780,7 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"Reading port configuration from Environment.xlsx: {environmentPath}");
 
-                using (var workbook = new XLWorkbook(environmentPath))
+                using (var workbook = new ClosedXML.Excel.XLWorkbook(environmentPath))
                 {
                     // Look for "Config" sheet which contains port configuration
                     var worksheet = workbook.Worksheet("Config");
@@ -797,7 +796,7 @@ namespace SolutionGrader.UI.Services
                     // - Code_Container_Host_Port (port exposed on host)
                     foreach (var row in worksheet.RowsUsed().Skip(1)) // Skip header row
                     {
-                        var keyCell = row.Cell(1).GetValue<string>()?.Trim() ?? "";
+                        var keyCell = row.Cell(1).GetString().Trim();
                         
                         // Normalize key by removing underscores and making lowercase for comparison
                         var normalizedKey = keyCell.Replace("_", "").ToLowerInvariant();
@@ -815,7 +814,7 @@ namespace SolutionGrader.UI.Services
                             else
                             {
                                 // Fallback to string parsing
-                                var valueStr = valueCell.GetValue<string>()?.Trim() ?? "";
+                                var valueStr = valueCell.GetString().Trim();
                                 int.TryParse(valueStr, out port);
                             }
                             
