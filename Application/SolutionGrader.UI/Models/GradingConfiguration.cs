@@ -68,7 +68,9 @@ namespace SolutionGrader.UI.Models
         private int _endIndex = -1; // -1 means grade all students
         
         // DLL modification fallback settings
-        private bool _useDllModificationFallback = false;
+        // CRITICAL: Default to true for batch grading to ensure port overrides work
+        // This patches hardcoded ports in student DLLs to match allocated container ports
+        private bool _useDllModificationFallback = true;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -314,8 +316,22 @@ namespace SolutionGrader.UI.Models
         /// When enabled, the system will attempt to directly modify the compiled DLL files
         /// to patch hardcoded IP addresses and port numbers instead of relying on appsettings.json.
         /// 
-        /// This is useful for grading students who hardcode connection settings instead of
-        /// using configuration files. The system will try common localhost addresses and ports.
+        /// CRITICAL for batch grading: This patches student-hardcoded values like:
+        /// - IP addresses: localhost, 127.0.0.1 → host.docker.internal (client) or 0.0.0.0 (server)
+        /// - Ports: 4000, 5000, 8080, etc. → allocated port (8000, 8001, 8002, ...)
+        /// 
+        /// Without this, students who hardcode ports will fail because:
+        /// - Student hardcodes port 4000 in DLL
+        /// - Container runs on port 8001 (dynamically allocated)
+        /// - Client tries port 4000 → connection fails
+        /// 
+        /// With this enabled:
+        /// - Student hardcodes port 4000 in DLL
+        /// - DLL patched: 4000 → 8001
+        /// - Container runs on port 8001
+        /// - Client connects to 8001 → success!
+        /// 
+        /// Default: true (enabled for reliable batch grading)
         /// </summary>
         public bool UseDllModificationFallback
         {
