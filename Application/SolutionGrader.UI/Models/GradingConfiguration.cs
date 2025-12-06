@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace SolutionGrader.UI.Models
@@ -374,6 +375,24 @@ namespace SolutionGrader.UI.Models
                 EndIndex = this.EndIndex,
                 UseDllModificationFallback = this.UseDllModificationFallback
             };
+        }
+        
+        /// <summary>
+        /// Gets the effective result path, using SaveResultFolderPath if specified,
+        /// otherwise defaulting to Results subfolder in SubmitFolderPath.
+        /// This ensures consistent result path calculation across the application.
+        /// </summary>
+        /// <returns>The effective result path, or empty string if both paths are not configured</returns>
+        public string GetEffectiveResultPath()
+        {
+            if (!string.IsNullOrEmpty(SaveResultFolderPath))
+                return SaveResultFolderPath;
+            
+            if (!string.IsNullOrEmpty(SubmitFolderPath))
+                return Path.Combine(SubmitFolderPath, "Results");
+            
+            // Both paths are empty - return empty string to signal error
+            return string.Empty;
         }
     }
 }
