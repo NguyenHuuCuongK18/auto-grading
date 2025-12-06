@@ -1435,8 +1435,25 @@ namespace SolutionGrader.Core.Services
                 {
                     foreach (var row in markSheet.RowsUsed().Skip(1))
                     {
-                        var tcName = row.Cell(1).GetValue<string>()?.Trim();
-                        var mark = row.Cell(2).GetValue<double>();
+                        var tcName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double mark = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            mark = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out mark))
+                            {
+                                Console.WriteLine($"[Warning] Cannot parse mark value '{markStr}' for test case '{tcName}' - defaulting to 0");
+                                mark = 0.0;
+                            }
+                        }
+                        
                         if (!string.IsNullOrEmpty(tcName))
                             tkConfig.TestCaseMarks[tcName] = mark;
                     }
@@ -1446,8 +1463,8 @@ namespace SolutionGrader.Core.Services
                 {
                     foreach (var row in configSheet.RowsUsed().Skip(1))
                     {
-                        var key = row.Cell(1).GetValue<string>()?.Trim();
-                        var value = row.Cell(2).GetValue<string>()?.Trim();
+                        var key = row.Cell(1).GetString()?.Trim();
+                        var value = row.Cell(2).GetString()?.Trim();
                         if (key?.Equals("Protocol", StringComparison.OrdinalIgnoreCase) == true)
                             tkConfig.Protocol = value ?? "TCP";
                     }
