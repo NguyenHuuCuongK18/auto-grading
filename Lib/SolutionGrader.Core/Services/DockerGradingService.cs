@@ -727,9 +727,12 @@ namespace SolutionGrader.Core.Services
                                     Console.WriteLine($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
-                                // Use temp directory for container copy (contains modified DLL)
+                                // CRITICAL FIX: Use temp directory content BUT keep original folder name
+                                // This ensures the path in container matches what STARTSERVER expects
+                                // Copy: tempDir/* -> container:/apps/originalFolderName/
                                 dirToCopy = tempStagingDir;
-                                folderName = Path.GetFileName(tempStagingDir);
+                                // DO NOT change folderName - keep it as original so path matches in STARTSERVER
+                                // folderName = Path.GetFileName(tempStagingDir);  // REMOVED - causes DLL not found error
                             }
                             
                             // Copy from temp staging (if modified) or original (if not) to container
@@ -789,9 +792,12 @@ namespace SolutionGrader.Core.Services
                                     Console.WriteLine($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
-                                // Use temp directory for container copy (contains modified DLL)
+                                // CRITICAL FIX: Use temp directory content BUT keep original folder name
+                                // This ensures the path in container matches what STARTCLIENT expects
+                                // Copy: tempDir/* -> container:/apps/originalFolderName/
                                 dirToCopy = tempStagingDir;
-                                folderName = Path.GetFileName(tempStagingDir);
+                                // DO NOT change folderName - keep it as original so path matches in STARTCLIENT
+                                // folderName = Path.GetFileName(tempStagingDir);  // REMOVED - causes DLL not found error
                             }
                             
                             // Copy from temp staging (if modified) or original (if not) to container
