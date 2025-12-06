@@ -35,11 +35,13 @@ namespace SolutionGrader.Cli.Services
         
         // OPTIMIZATION: Cache test kit paths to avoid repeated file system lookups
         // Mirrors the UI's _testKitCache optimization
-        private readonly Dictionary<string, string> _testKitPathCache = new Dictionary<string, string>();
+        // Using ConcurrentDictionary for thread-safe access during parallel grading
+        private readonly ConcurrentDictionary<string, string> _testKitPathCache = new ConcurrentDictionary<string, string>();
         
         // OPTIMIZATION: Cache starting ports from Environment.xlsx to avoid repeated Excel reads
         // Key: test kit path, Value: starting port
-        private readonly Dictionary<string, int> _startingPortCache = new Dictionary<string, int>();
+        // Using ConcurrentDictionary for thread-safe access during parallel grading
+        private readonly ConcurrentDictionary<string, int> _startingPortCache = new ConcurrentDictionary<string, int>();
 
         public CliDockerGradingService()
         {
@@ -213,11 +215,18 @@ namespace SolutionGrader.Cli.Services
                 // Producer task: Feed students into the channel
                 var producerTask = Task.Run(async () =>
                 {
-                    foreach (var student in students)
+                    try
                     {
-                        await channel.Writer.WriteAsync(student);
+                        foreach (var student in students)
+                        {
+                            // WriteAsync with cancellation token for responsive shutdown
+                            await channel.Writer.WriteAsync(student, CancellationToken.None);
+                        }
                     }
-                    channel.Writer.Complete();
+                    finally
+                    {
+                        channel.Writer.Complete();
+                    }
                 });
                 
                 // Consumer tasks: Pull students from channel and grade them
@@ -264,11 +273,13 @@ namespace SolutionGrader.Cli.Services
 
             // Convert ConcurrentBag to List and sort by original order
             // OPTIMIZATION: Use dictionary for O(n) lookup instead of O(n²) FindIndex
+            // Single-pass conversion and ordering to avoid double list allocation
             var studentIndexMap = students.Select((s, i) => new { s.StudentCode, Index = i })
                 .ToDictionary(x => x.StudentCode, x => x.Index);
             
-            var resultsList = results.ToList();
-            resultsList = resultsList.OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue).ToList();
+            var resultsList = results
+                .OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue)
+                .ToList();
             
             return resultsList;
         }

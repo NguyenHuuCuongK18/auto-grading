@@ -570,22 +570,23 @@ namespace SolutionGrader.UI
                             {
                                 await foreach (var student in channel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
                                 {
-                                    // Wait while paused
+                                    // Wait while paused - pass cancellation token for responsive shutdown
                                     while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
                                     {
-                                        await Task.Delay(500);
+                                        await Task.Delay(500, _cancellationTokenSource.Token);
                                     }
                                     
                                     if (_cancellationTokenSource.Token.IsCancellationRequested)
                                         break;
                                     
-                                    int currentIndex;
+                                    int currentStartIndex;
                                     lock (completedLock)
                                     {
-                                        currentIndex = completedCount + 1;
+                                        // Index for the student we're about to start (completedCount + 1)
+                                        currentStartIndex = completedCount + 1;
                                     }
                                     
-                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentIndex}/{studentsToGrade.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
+                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentStartIndex}/{studentsToGrade.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
                                     
                                     // Grade the student (port allocation happens inside via PortAllocator)
                                     await GradeStudentAsync(student, _cancellationTokenSource.Token, startupLock);
@@ -595,14 +596,15 @@ namespace SolutionGrader.UI
                                     // No need for lock - the ResultWriter handles thread safety internally
                                     _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
                                     
+                                    int currentCompletedIndex;
                                     lock (completedLock)
                                     {
                                         completedCount++;
-                                        currentIndex = completedCount;
+                                        currentCompletedIndex = completedCount;
                                     }
                                     
-                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentIndex}/{studentsToGrade.Count}] Completed: {student.StudentCode}");
-                                    _logger.LogInfo($"[Progress] {completedCount}/{studentsToGrade.Count} students completed, {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count - completedCount)} students currently in progress");
+                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentCompletedIndex}/{studentsToGrade.Count}] Completed: {student.StudentCode}");
+                                    _logger.LogInfo($"[Progress] {currentCompletedIndex}/{studentsToGrade.Count} students completed, {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count - currentCompletedIndex)} students currently in progress");
                                     
                                     // Update UI on UI thread
                                     await Dispatcher.InvokeAsync(() => UpdateStatusBar());
