@@ -224,6 +224,10 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Loads the next port to try allocating.
         /// This is an incrementing counter that never goes backwards.
+        /// 
+        /// CRITICAL: Respects the starting port from Environment.xlsx.
+        /// If the tracking file has a port lower than the starting port, uses the starting port instead.
+        /// This handles the case where Environment.xlsx is updated to a different port.
         /// </summary>
         private int LoadNextPort()
         {
@@ -234,6 +238,14 @@ namespace SolutionGrader.Core.Services
                     string content = File.ReadAllText(NextPortFilePath).Trim();
                     if (int.TryParse(content, out int nextPort))
                     {
+                        // CRITICAL FIX: Respect starting port from Environment.xlsx
+                        // If tracking file has a port less than starting port, use starting port
+                        // This handles when Environment.xlsx is changed to a different port
+                        if (nextPort < _startingPort)
+                        {
+                            Console.WriteLine($"[PortAllocator] Tracking file has port {nextPort}, but starting port is {_startingPort}. Using starting port.");
+                            return _startingPort;
+                        }
                         return nextPort;
                     }
                 }
