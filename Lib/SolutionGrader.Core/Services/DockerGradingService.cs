@@ -188,12 +188,31 @@ namespace SolutionGrader.Core.Services
             // Container names
             var serverContainer = $"ag-server-{studentCode}";
             var clientContainer = $"ag-client-{studentCode}";
+            var databaseContainer = config.DatabaseContainerName; // Database container name from config
+            
+            // CRITICAL FIX: Check Docker container count before starting
+            // This prevents hitting Docker daemon limits when grading 200+ students
+            CheckDockerContainerLimit();
+            
+            // CRITICAL FIX: Each student needs a unique database instance name
+            // Format: {BaseDatabaseName}_{studentCode} (e.g., Library_student1, Library_student2)
+            // This allows multiple students to share the same container without data conflicts
+            string studentDatabaseName = "";
             
             try
             {
                 OnProgress($"Loading test kit configuration from {testKitPath}...");
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
+                
+                // CRITICAL FIX: Create unique database name for this student
+                // Format: {BaseName}_{StudentCode} to ensure isolation
+                var baseDatabaseName = testKitConfig.DatabaseName ?? "Library";
+                studentDatabaseName = $"{baseDatabaseName}_{studentCode}";
+                testKitConfig.DatabaseName = studentDatabaseName;
+                
+                Console.WriteLine($"[Database] Student {studentCode} will use database instance: {studentDatabaseName}");
+                Console.WriteLine($"[Database] Database container {databaseContainer} is shared, but instance is unique per student");
                 
                 // INITIAL DLL DISCOVERY: Find what DLLs the student provided
                 // This logic discovers which DLLs exist in the student's submission.
@@ -420,8 +439,13 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor stopped for student {studentCode}");
                 }
                 
-                // Cleanup containers
+                // Cleanup code containers (server and client only, database is shared)
                 await CleanupContainersAsync(serverContainer, clientContainer);
+                
+                // CRITICAL FIX: Cleanup the student's database INSTANCE within the shared container
+                // This drops the database (e.g., Library_student1) but keeps the container running
+                var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
+                await CleanupDatabaseInstanceAsync(databaseContainer, studentDatabaseName, databasePassword);
                 
                 // Clear student context
                 _currentStudentCode = null;
@@ -616,12 +640,38 @@ namespace SolutionGrader.Core.Services
                 if (!_dockerExecutor.IsContainerExist(containerName))
                 {
                     // Container is gone - return immediately
+                    Console.WriteLine($"[Docker Cleanup] Container {containerName} successfully removed (waited {i * 100}ms)");
                     return;
                 }
                 await Task.Delay(100); // Check every 100ms without logging
             }
-            // If we get here, container still exists but proceed anyway
-            Console.WriteLine($"[Docker] Warning: Container {containerName} still exists after {maxWaitSeconds}s");
+            
+            // CRITICAL: Container still exists after max wait - this is a zombie container
+            Console.WriteLine($"[Docker Cleanup] WARNING: Container {containerName} still exists after {maxWaitSeconds}s - attempting force removal");
+            
+            // Try force removal with -f flag
+            try
+            {
+                var forceCommand = $"rm -f {containerName}";
+                _dockerExecutor.ExecDockerCommand(forceCommand, 5000);
+                Console.WriteLine($"[Docker Cleanup] Force removal attempted for {containerName}");
+                
+                // Wait a bit more to see if force removal worked
+                await Task.Delay(1000);
+                
+                if (!_dockerExecutor.IsContainerExist(containerName))
+                {
+                    Console.WriteLine($"[Docker Cleanup] Force removal successful for {containerName}");
+                }
+                else
+                {
+                    Console.WriteLine($"[Docker Cleanup] CRITICAL: Container {containerName} is a zombie - cannot be removed. This may cause resource exhaustion!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker Cleanup] ERROR: Force removal failed for {containerName}: {ex.Message}");
+            }
         }
         
         /// <summary>
@@ -629,6 +679,89 @@ namespace SolutionGrader.Core.Services
         /// Checks every 50ms up to maxWaitMs. Returns immediately when no target processes remain.
         /// Much faster than fixed waits - typically returns in 0-100ms vs 100ms+ fixed delay.
         /// </summary>
+        /// <summary>
+        /// Checks Docker container count and warns if approaching limits.
+        /// CRITICAL for batch grading 200+ students to prevent resource exhaustion.
+        /// </summary>
+        private void CheckDockerContainerLimit()
+        {
+            try
+            {
+                // Count total containers (running + stopped)
+                var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput("ps -a -q", 5000);
+                if (success)
+                {
+                    var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    var totalContainers = containerIds.Length;
+                    
+                    Console.WriteLine($"[Docker Resource Monitor] Total containers: {totalContainers}");
+                    
+                    // Docker default limit is typically 256-512 containers per daemon
+                    // Warn at 50% and 75% thresholds
+                    if (totalContainers > 380) // 75% of 512
+                    {
+                        Console.WriteLine($"[Docker Resource Monitor] CRITICAL WARNING: {totalContainers} containers exist! Approaching Docker daemon limit. Container creation may fail soon!");
+                    }
+                    else if (totalContainers > 256) // 50% of 512
+                    {
+                        Console.WriteLine($"[Docker Resource Monitor] WARNING: {totalContainers} containers exist. Consider aggressive cleanup to prevent exhaustion.");
+                    }
+                    else if (totalContainers > 128) // 25% of 512
+                    {
+                        Console.WriteLine($"[Docker Resource Monitor] Info: {totalContainers} containers exist. Monitoring for potential exhaustion.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker Resource Monitor] Warning: Could not check container count: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Aggressively cleans up old auto-grading containers that may have been left behind.
+        /// CRITICAL for batch grading 200+ students to prevent Docker exhaustion.
+        /// </summary>
+        private void AggressiveCleanupOldContainers()
+        {
+            Console.WriteLine("[Docker Aggressive Cleanup] Starting cleanup of old auto-grading containers...");
+            
+            try
+            {
+                // Find all auto-grading containers (ag-server-*, ag-client-*)
+                var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-server-' --filter 'name=ag-client-' -q", 5000);
+                
+                if (success && !string.IsNullOrWhiteSpace(output))
+                {
+                    var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    Console.WriteLine($"[Docker Aggressive Cleanup] Found {containerIds.Length} old auto-grading containers to remove");
+                    
+                    foreach (var containerId in containerIds)
+                    {
+                        try
+                        {
+                            _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000);
+                        }
+                        catch
+                        {
+                            // Ignore individual failures, continue with cleanup
+                        }
+                    }
+                    
+                    Console.WriteLine($"[Docker Aggressive Cleanup] Cleanup complete. Removed {containerIds.Length} containers.");
+                }
+                else
+                {
+                    Console.WriteLine("[Docker Aggressive Cleanup] No old containers found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Docker Aggressive Cleanup] Warning: Cleanup encountered errors: {ex.Message}");
+            }
+        }
+        
         private async Task WaitForProcessesKilledAsync(string containerName, string processPattern, int maxWaitMs = 500)
         {
             var maxAttempts = maxWaitMs / 50; // Check every 50ms
@@ -2064,15 +2197,97 @@ namespace SolutionGrader.Core.Services
             Console.WriteLine($"[Database] Database container reset complete");
         }
         
+        /// <summary>
+        /// Cleans up code containers (server, client) after each student.
+        /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
+        /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
+        /// </summary>
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
         {
             _consoleManager.RemoveAllAttachments();
-            try { _dockerExecutor.RemoveContainer(serverContainer); } catch { }
-            try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
             
-            // OPTIMIZATION: Wait for containers to be fully removed (dynamic check vs fixed 50ms)
-            await WaitForContainerRemovedAsync(serverContainer, maxWaitSeconds: 3);
-            await WaitForContainerRemovedAsync(clientContainer, maxWaitSeconds: 3);
+            // CRITICAL FIX: Aggressive container cleanup to prevent Docker exhaustion
+            // When grading 200+ students, containers MUST be fully removed before limit is reached
+            Console.WriteLine($"[Docker Cleanup] Starting cleanup for {serverContainer} and {clientContainer}");
+            
+            // Remove server container
+            try 
+            { 
+                _dockerExecutor.RemoveContainer(serverContainer); 
+                Console.WriteLine($"[Docker Cleanup] Removed {serverContainer}");
+            } 
+            catch (Exception ex)
+            { 
+                Console.WriteLine($"[Docker Cleanup] Warning: Failed to remove {serverContainer}: {ex.Message}");
+            }
+            
+            // Remove client container
+            try 
+            { 
+                _dockerExecutor.RemoveContainer(clientContainer); 
+                Console.WriteLine($"[Docker Cleanup] Removed {clientContainer}");
+            } 
+            catch (Exception ex)
+            { 
+                Console.WriteLine($"[Docker Cleanup] Warning: Failed to remove {clientContainer}: {ex.Message}");
+            }
+            
+            // NOTE: Database container is NOT removed here - it's shared between students
+            // Each student uses a unique database INSTANCE within the shared container
+            // Database instances are cleaned up separately via CleanupDatabaseInstanceAsync
+            
+            // CRITICAL FIX: Increased wait time from 3s to 10s to ensure complete removal
+            // Under heavy load (200 students), Docker needs more time to clean up resources
+            await WaitForContainerRemovedAsync(serverContainer, maxWaitSeconds: 10);
+            await WaitForContainerRemovedAsync(clientContainer, maxWaitSeconds: 10);
+            
+            Console.WriteLine($"[Docker Cleanup] Cleanup complete for code containers (database container kept running)");
+        }
+        
+        /// <summary>
+        /// Cleans up a specific database INSTANCE within the shared database container.
+        /// CRITICAL FIX: Each student uses a unique database instance (e.g., Library_student1).
+        /// After grading, we DROP that specific database to free up resources within the container.
+        /// The container itself stays running and is shared across all students.
+        /// </summary>
+        private async Task CleanupDatabaseInstanceAsync(string databaseContainer, string databaseName, string databasePassword)
+        {
+            if (string.IsNullOrEmpty(databaseName))
+            {
+                Console.WriteLine("[Database Cleanup] No database name provided, skipping instance cleanup");
+                return;
+            }
+            
+            Console.WriteLine($"[Database Cleanup] Dropping database instance '{databaseName}' in container {databaseContainer}");
+            
+            try
+            {
+                // Use sqlcmd to drop the database instance
+                // First, we need to kill any active connections to the database
+                var killConnectionsSql = $"USE master; ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}];";
+                
+                // Execute SQL command inside the container
+                var sqlCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"{databasePassword}\" -Q \"{killConnectionsSql}\"";
+                
+                var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(sqlCommand, 10000);
+                
+                if (success)
+                {
+                    Console.WriteLine($"[Database Cleanup] Successfully dropped database instance '{databaseName}'");
+                    Console.WriteLine($"[Database Cleanup] Output: {output}");
+                }
+                else
+                {
+                    Console.WriteLine($"[Database Cleanup] Warning: Failed to drop database instance '{databaseName}': {output}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Database Cleanup] Warning: Exception dropping database instance '{databaseName}': {ex.Message}");
+                // Don't throw - this is cleanup, we want to continue even if it fails
+            }
+            
+            await Task.CompletedTask;
         }
         
         #endregion
