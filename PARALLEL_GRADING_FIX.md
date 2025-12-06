@@ -376,4 +376,6 @@ Add monitoring for:
 
 **Fixed By**: GitHub Copilot  
 **Date**: 2025-12-06  
-**Commit**: 446b223 - "Remove staggered startup lock to restore parallel container deployment"
+**Commits**:
+- 446b223 - "Remove staggered startup lock to restore parallel container deployment"
+- 8c962ec - "Remove onContainersReady parameter throughout the call chain"
