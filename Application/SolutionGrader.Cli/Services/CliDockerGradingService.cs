@@ -307,6 +307,18 @@ namespace SolutionGrader.Cli.Services
                 .OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue)
                 .ToList();
             
+            // CRITICAL FIX: Clear all shared network monitors after grading session completes
+            // This prevents resource leaks and ensures clean state for subsequent grading sessions
+            try
+            {
+                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                Console.WriteLine("[CLI] Shared network monitors cleared successfully");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLI] WARNING: Error clearing shared network monitors: {ex.Message}");
+            }
+            
             return resultsList;
         }
 
