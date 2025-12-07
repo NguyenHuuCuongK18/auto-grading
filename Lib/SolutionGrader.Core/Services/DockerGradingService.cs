@@ -69,7 +69,6 @@ namespace SolutionGrader.Core.Services
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
         private string? _currentStudentCode; // Track current student for logging
-        private string? _currentStudentResultPath; // Track result path for debug logging
         
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -184,23 +183,8 @@ namespace SolutionGrader.Core.Services
             var result = new DockerGradingResult { StudentCode = studentCode };
             Directory.CreateDirectory(studentResultPath);
             
-            // TRIPLE REDUNDANT DEBUG LOGGING - Entry point
-            var debugPath1 = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-            var debugPath2 = Path.Combine(studentResultPath, "DEBUG_Scoring.txt");
-            try {
-                var entryMsg = $"[{DateTime.Now:HH:mm:ss}] ==================== DEBUG-ENTRY ====================\n" +
-                              $"[{DateTime.Now:HH:mm:ss}] GradeStudentAsync called for student: {studentCode}\n" +
-                              $"[{DateTime.Now:HH:mm:ss}] Result path: {studentResultPath}\n" +
-                              $"[{DateTime.Now:HH:mm:ss}] Test kit: {testKitPath}\n" +
-                              $"[{DateTime.Now:HH:mm:ss}] ===================================================\n";
-                File.AppendAllText(debugPath1, entryMsg);
-                File.AppendAllText(debugPath2, entryMsg);
-                Console.WriteLine(entryMsg);
-            } catch { }
-            
-            // Set current student code and result path for logging
+            // Set current student code for logging
             _currentStudentCode = studentCode;
-            _currentStudentResultPath = studentResultPath;
             
             // Container names
             var serverContainer = $"ag-server-{studentCode}";
@@ -1306,14 +1290,10 @@ namespace SolutionGrader.Core.Services
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
-                // TRIPLE REDUNDANT DEBUG LOGGING
-                var debugPath1 = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-                var debugPath2 = Path.Combine(_currentStudentResultPath ?? Path.GetTempPath(), "DEBUG_Scoring.txt");
-                var scoringMsg = $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n";
+                // DIRECT FILE LOGGING FOR DEBUGGING
+                var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
                 try {
-                    File.AppendAllText(debugPath1, scoringMsg);
-                    File.AppendAllText(debugPath2, scoringMsg);
-                    Console.WriteLine(scoringMsg);
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
                 } catch { }
                 
                 OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
@@ -1322,12 +1302,9 @@ namespace SolutionGrader.Core.Services
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
-                var decisionMsg = $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n" +
-                                 $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n";
                 try {
-                    File.AppendAllText(debugPath1, decisionMsg);
-                    File.AppendAllText(debugPath2, decisionMsg);
-                    Console.WriteLine(decisionMsg);
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n");
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n");
                 } catch { }
                 
                 OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
@@ -1338,14 +1315,8 @@ namespace SolutionGrader.Core.Services
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 
-                var finalMsg = $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n";
                 try {
-                    File.AppendAllText(debugPath1, finalMsg);
-                    File.AppendAllText(debugPath2, finalMsg);
-                    Console.WriteLine(finalMsg);
-                } catch { }
-                
-                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n");
                     if (!result.Passed) {
                         File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Test FAILED: output={passed}, netCheck={networkCheckPassed}, netFlows={networkFlowsPassed}\n");
                     }
@@ -1655,16 +1626,12 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
             
-            // TRIPLE REDUNDANT DEBUG LOGGING
-            var debugPath1 = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-            var debugPath2 = Path.Combine(_currentStudentResultPath ?? Path.GetTempPath(), "DEBUG_Scoring.txt");
-            var msg = $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n" +
-                     $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n" +
-                     $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n";
+            // DIRECT FILE LOGGING - Bypass OnProgress to ensure messages are written
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
             try {
-                File.AppendAllText(debugPath1, msg);
-                File.AppendAllText(debugPath2, msg);
-                Console.WriteLine(msg);
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n");
             } catch { }
             
             // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
@@ -1739,17 +1706,13 @@ namespace SolutionGrader.Core.Services
             int partialCount = results.Count(r => r.IsPartial);
             int failCount = results.Count(r => !r.Passed && !r.IsPartial);
             
-            // TRIPLE REDUNDANT DEBUG LOGGING
-            var debugPath1 = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-            var debugPath2 = Path.Combine(_currentStudentResultPath ?? Path.GetTempPath(), "DEBUG_Scoring.txt");
-            var resultMsg = $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n";
-            if (failCount > 0) {
-                resultMsg += $"[{DateTime.Now:HH:mm:ss}] WARNING: {failCount} FAIL flows - test should FAIL!\n";
-            }
+            // DIRECT FILE LOGGING
+            debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
             try {
-                File.AppendAllText(debugPath1, resultMsg);
-                File.AppendAllText(debugPath2, resultMsg);
-                Console.WriteLine(resultMsg);
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
+                if (failCount > 0) {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: {failCount} FAIL flows - test should FAIL!\n");
+                }
             } catch { }
             
             OnProgress($"[CompareNetwork] RESULTS: {results.Count} total comparisons - PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
