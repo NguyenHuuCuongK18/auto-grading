@@ -1357,15 +1357,18 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
-                // - If ANY flow has FAIL status, entire test FAILS
-                // - PARTIAL is treated as PASS (flags match, roles don't matter for passing)
+                // - If ANY flow has FAIL or PARTIAL status, entire test FAILS
+                // - CRITICAL FIX: PARTIAL is now treated as FAIL (flags match but roles don't - wrong packet source/dest)
+                // - Only EXACT matches (flags + roles) count as PASS
                 // - Only flows recorded in Detail.xlsx are validated
                 // - Flows NOT in Detail.xlsx are ignored (even if captured)
                 
                 int totalNetworkFlows = networkComparisons.Count;
                 int passCount = networkComparisons.Count(c => c.Passed);
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
-                int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
+                // CRITICAL FIX: Count BOTH !Passed items AND IsPartial items as failures
+                // This prevents NGINX proxy from passing tests with correct flags but wrong roles
+                int failCount = networkComparisons.Count(c => !c.Passed);
                 
                 // DIRECT FILE LOGGING FOR DEBUGGING
                 var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
