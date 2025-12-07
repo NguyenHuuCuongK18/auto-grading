@@ -26,6 +26,14 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         // Read datetime format from DataPattern sheet in header.xlsx
         var dateTimeFormat = ReadDateTimeFormatFromHeader(headerPath);
         
+        // CRITICAL: Read Grade_Content from outer Header.xlsx
+        // This determines whether students provide Server or Client
+        var suiteGradeContent = ReadGradeContentFromHeader(headerPath);
+        if (!string.IsNullOrEmpty(suiteGradeContent))
+        {
+            Console.WriteLine($"[Suite] Grade_Content from outer Header.xlsx: {suiteGradeContent}");
+        }
+        
         // Read environment configuration from outermost environment.xlsx
         Console.WriteLine($"[Environment] Looking for environment config in: {suiteRoot}");
         var envConfig = ReadEnvironmentConfig(suiteRoot);
@@ -38,7 +46,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
         
         // Build test cases from directories
-        var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment);
+        var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment, suiteGradeContent);
         
         return new SuiteDefinition
         {
@@ -234,6 +242,35 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
 
         return result;
+    }
+
+    private static string? ReadGradeContentFromHeader(string headerPath)
+    {
+        try
+        {
+            using var wb = new XLWorkbook(headerPath);
+            // Look in the first sheet (Config/Header sheet)
+            var ws = wb.Worksheets.FirstOrDefault();
+            if (ws == null) return null;
+
+            // Look for Grade_Content key in key-value pairs
+            for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+            {
+                var key = ws.Cell(r, 1).GetString().Trim();
+                if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = ws.Cell(r, 2).GetString().Trim();
+                    return string.IsNullOrEmpty(value) ? null : value;
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Could not read Grade_Content from header: {ex.Message}");
+            return null;
+        }
     }
 
     private static string? ReadDateTimeFormatFromHeader(string headerPath)
@@ -441,7 +478,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         }
     }
 
-    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks, EnvironmentConfiguration? suiteEnv, bool useInnerTestCaseEnvironment)
+    private static IReadOnlyList<TestCaseDefinition> BuildCasesFromDirectory(string root, Dictionary<string, double> marks, EnvironmentConfiguration? suiteEnv, bool useInnerTestCaseEnvironment, string? suiteGradeContent)
     {
         var list = new List<TestCaseDefinition>();
 
@@ -464,9 +501,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
             marks.TryGetValue(name, out var mark);
             
-            // Read test case specific header for GradeContent
+            // CRITICAL: Read Grade_Content with fallback hierarchy
+            // 1. Per-test-case Header.xlsx (if exists, overrides suite level)
+            // 2. Suite-level Header.xlsx (passed from outer context)
             var tcHeaderPath = Path.Combine(dir, "header.xlsx");
-            string? gradeContent = null;
+            string? gradeContent = suiteGradeContent; // Default to suite level
             EnvironmentConfiguration? tcEnv = null;
             
             if (File.Exists(tcHeaderPath))
@@ -477,13 +516,18 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                     var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Testcase_Property", StringComparison.OrdinalIgnoreCase));
                     if (ws != null)
                     {
-                        // Look for Grade_Content
+                        // Look for Grade_Content (overrides suite level if found)
                         for (int r = 1; r <= Math.Min(20, ws.RowCount()); r++)
                         {
                             var key = ws.Cell(r, 1).GetString().Trim();
                             if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
                             {
-                                gradeContent = ws.Cell(r, 2).GetString().Trim();
+                                var tcGradeContent = ws.Cell(r, 2).GetString().Trim();
+                                if (!string.IsNullOrEmpty(tcGradeContent))
+                                {
+                                    gradeContent = tcGradeContent;
+                                    Console.WriteLine($"[TestCase {name}] Grade_Content override from test case header: {gradeContent}");
+                                }
                                 break;
                             }
                         }
