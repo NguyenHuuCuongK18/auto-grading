@@ -1289,21 +1289,25 @@ namespace SolutionGrader.Core.Services
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
-                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+                OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
                 
                 // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
-                Console.WriteLine($"[Network Grading] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
-                Console.WriteLine($"[Network Grading] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
+                OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
+                OnProgress($"[Network Scoring] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
                 
                 // Final result: must pass both output comparison AND network check
                 // No partial credit - ALL or NOTHING
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 
-                Console.WriteLine($"[Network Grading] FINAL RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
+                OnProgress($"[Network Scoring] FINAL TEST RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
+                if (!result.Passed)
+                {
+                    OnProgress($"[Network Scoring] Test FAILED because: outputPassed={passed}, networkCheckPassed={networkCheckPassed}, networkFlowsPassed={networkFlowsPassed}");
+                }
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
@@ -1603,16 +1607,16 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
             
-            // DIAGNOSTIC LOGGING
-            Console.WriteLine($"[CompareNetwork] Expected network flows: {expected.Count}");
-            Console.WriteLine($"[CompareNetwork] Total captured packets: {allCapturedPackets.Count}");
+            // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
+            OnProgress($"[CompareNetwork] Expected network flows from Detail.xlsx: {expected.Count}");
+            OnProgress($"[CompareNetwork] Total captured packets in RunContext: {allCapturedPackets.Count}");
             if (expected.Count > 0)
             {
-                Console.WriteLine($"[CompareNetwork] Expected stages: {string.Join(", ", expected.Select(e => e.Stage).Distinct())}");
+                OnProgress($"[CompareNetwork] Expected stages: {string.Join(", ", expected.Select(e => e.Stage).Distinct().OrderBy(s => s))}");
             }
             if (allCapturedPackets.Count > 0)
             {
-                Console.WriteLine($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct())}");
+                OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
             foreach (var exp in expected)
@@ -1620,7 +1624,7 @@ namespace SolutionGrader.Core.Services
                 // Filter packets by stage from the complete set
                 var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
                 
-                Console.WriteLine($"[CompareNetwork] Stage {exp.Stage}: Expected flags='{exp.Flags}', Found {capturedPackets.Count} packets for this stage");
+                OnProgress($"[CompareNetwork] Stage {exp.Stage}: Expected flags='{exp.Flags}' from '{exp.SourceRole}' to '{exp.DestinationRole}', Found {capturedPackets.Count} packets for this stage");
                 
                 // Find matching packet by flags
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
@@ -1668,6 +1672,16 @@ namespace SolutionGrader.Core.Services
                         IsPartial = false  // Complete FAIL - missing packet
                     });
                 }
+            }
+            
+            // DIAGNOSTIC LOGGING - Summary of comparison results
+            int passCount = results.Count(r => r.Passed);
+            int partialCount = results.Count(r => r.IsPartial);
+            int failCount = results.Count(r => !r.Passed && !r.IsPartial);
+            OnProgress($"[CompareNetwork] RESULTS: {results.Count} total comparisons - PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+            if (failCount > 0)
+            {
+                OnProgress($"[CompareNetwork] WARNING: {failCount} FAIL network flows detected - test should FAIL!");
             }
             
             return results;
