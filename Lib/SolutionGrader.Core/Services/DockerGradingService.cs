@@ -2040,10 +2040,20 @@ namespace SolutionGrader.Core.Services
         private List<ExpectedNetworkFlow> ReadExpectedNetwork(string detailPath)
         {
             var flows = new List<ExpectedNetworkFlow>();
+            
+            // DIAGNOSTIC LOGGING - Written to GradingLogs files via OnProgress
+            OnProgress($"[ReadExpectedNetwork] Called with Detail.xlsx path: {detailPath}");
+            OnProgress($"[ReadExpectedNetwork] File exists: {File.Exists(detailPath)}");
+            
             using var wb = new XLWorkbook(detailPath);
+            
+            OnProgress($"[ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet");
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
+                var rowCount = ws.RowsUsed().Count();
+                OnProgress($"[ReadExpectedNetwork] 'Network' worksheet found with {rowCount} rows");
+                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
@@ -2065,6 +2075,13 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
+            else
+            {
+                OnProgress($"[ReadExpectedNetwork] WARNING: 'Network' worksheet NOT FOUND in Detail.xlsx!");
+                OnProgress($"[ReadExpectedNetwork] Available worksheets: {string.Join(", ", wb.Worksheets.Select(w => w.Name))}");
+            }
+            
+            OnProgress($"[ReadExpectedNetwork] Returning {flows.Count} flows");
             
             return flows;
         }
