@@ -427,18 +427,30 @@ namespace SolutionGrader.UI.Services
                 _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using pre-allocated port {portToUse} for container, DLL modification, and network monitoring");
                 
                 // Build Docker configuration from UI config
-                // The examiner sets HasClient/HasServer to indicate what the student should provide:
-                // - HasClient=true, HasServer=true  → student provides both
-                // - HasClient=true, HasServer=false → student provides client, use golden server
-                // - HasClient=false, HasServer=true → student provides server, use golden client
+                // CRITICAL FIX: Always discover BOTH client and server from student's solution
+                // The Grade_Content field in each test case's Header.xlsx will determine which one to actually use
+                // This prevents the global UI checkbox from overriding the per-test-case Grade_Content setting
+                //
+                // Old behavior (BUGGY):
+                // - If UI checkbox HasServer=false, actualServerDllPath becomes golden server
+                // - Then Grade_Content='Server' tries to use student server, but it's actually golden!
+                // - Student's broken code gets full marks because golden server runs
+                //
+                // New behavior (CORRECT):
+                // - Always discover both student server and client (HasServer=true, HasClient=true)
+                // - Grade_Content in each test case decides which to use (student vs golden)
+                // - Original UI checkboxes are ignored - test kit controls the grading
                 
+                _logger.LogInfo($"[UI Grade Config] Original UI settings: HasClient={config.HasClient}, HasServer={config.HasServer}");
+                _logger.LogInfo($"[UI Grade Config] OVERRIDE: Setting both to TRUE - Grade_Content in test kit will control which DLL to use");
                 _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
                 
                 var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
                 {
-                    // Examiner's component requirements
-                    HasClient = config.HasClient,
-                    HasServer = config.HasServer,
+                    // CRITICAL FIX: Always set to true so both are discovered
+                    // Grade_Content per test case will determine which to use
+                    HasClient = true,  // Always discover student's client
+                    HasServer = true,  // Always discover student's server
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
