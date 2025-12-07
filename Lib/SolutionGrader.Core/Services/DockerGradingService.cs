@@ -1263,15 +1263,18 @@ namespace SolutionGrader.Core.Services
                 
                 // CRITICAL: Validate network monitoring is working
                 // If we expected network data but got none, this indicates a problem with network monitoring
+                // OR the student's server exited immediately without accepting connections
                 bool networkCheckPassed = true;
                 if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                 {
-                    Console.WriteLine("[NetworkMonitor] WARNING: Expected network traffic but captured NONE!");
+                    Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
+                    Console.WriteLine("[NetworkMonitor] Expected {0} network flows, but captured 0 packets", expectedNetwork.Count);
                     Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Network monitor was not running with proper permissions (sudo on Linux)");
-                    Console.WriteLine("  2. libpcap is not installed (Linux) or NPcap is not installed (Windows)");
-                    Console.WriteLine("  3. The loopback interface was not found");
-                    Console.WriteLine("[NetworkMonitor] Network monitoring is MANDATORY - marking test case as FAILED");
+                    Console.WriteLine("  1. Student's server exited immediately without accepting connections");
+                    Console.WriteLine("  2. Network monitor was not running with proper permissions (sudo on Linux)");
+                    Console.WriteLine("  3. libpcap is not installed (Linux) or NPcap is not installed (Windows)");
+                    Console.WriteLine("  4. The loopback interface was not found");
+                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
                     networkCheckPassed = false;
                 }
                 
@@ -1292,10 +1295,15 @@ namespace SolutionGrader.Core.Services
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
+                Console.WriteLine($"[Network Grading] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
+                Console.WriteLine($"[Network Grading] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
+                
                 // Final result: must pass both output comparison AND network check
                 // No partial credit - ALL or NOTHING
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
+                
+                Console.WriteLine($"[Network Grading] FINAL RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
