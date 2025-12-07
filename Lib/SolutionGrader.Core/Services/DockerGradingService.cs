@@ -1707,7 +1707,7 @@ namespace SolutionGrader.Core.Services
             int failCount = results.Count(r => !r.Passed && !r.IsPartial);
             
             // DIRECT FILE LOGGING
-            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
             try {
                 File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
                 if (failCount > 0) {
