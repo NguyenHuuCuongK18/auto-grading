@@ -516,6 +516,21 @@ namespace SolutionGrader.UI
             // OPTIMIZATION: Pre-allocate shared network monitor for all students in batch
             // This dramatically reduces resource usage (97% reduction in monitor instances)
             // Per user request: Use singular network monitor with port range pre-allocation
+            // CRITICAL FIX: Clear shared network monitors from previous grading session
+            // This is essential when rerunning tests in the UI, as the SharedNetworkMonitorManager
+            // is a singleton that persists across sessions. Without this cleanup, stale monitors
+            // and student registrations from previous runs can cause cross-contamination.
+            try
+            {
+                _logger.LogInfo("[Shared Network Monitor] Clearing monitors from previous session...");
+                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                _logger.LogInfo("[Shared Network Monitor] Previous session monitors cleared");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Shared Network Monitor] Error clearing previous monitors: {ex.Message}");
+            }
+            
             try
             {
                 var firstStudent = studentsToGrade.FirstOrDefault();
