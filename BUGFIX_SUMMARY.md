@@ -190,15 +190,54 @@ sudo dotnet run --project Application/SolutionGrader.Cli -- dockergrade \
 - **Isolation:** Each student's grading is properly isolated from others
 - **Transparency:** Clear error messages explain why tests fail
 
+## Bug #4: UI Rerun Issue (Additional Fix)
+
+**Problem:**
+After implementing the fixes above, testing from the CLI worked correctly, but the user reported that the issue persisted when rerunning tests from the UI.
+
+**Root Cause:**
+The `SharedNetworkMonitorManager` is a singleton that persists across grading sessions. The original fix only cleared monitors at the **END** of a grading session (in the finally block). When the user clicked "Grade" again in the UI:
+1. Old SharedNetworkMonitorManager still had monitors from previous session
+2. Old student registrations and packet buffers still existed
+3. PreAllocateForBatch() was called without clearing the old state first
+4. This caused cross-contamination from the previous run
+
+**Fix Applied:**
+Added `ClearAllAsync()` call at the **START** of the grading session in `GradingWindow.xaml.cs` (line 519):
+
+```csharp
+// CRITICAL FIX: Clear shared network monitors from previous grading session
+// This is essential when rerunning tests in the UI
+try
+{
+    _logger.LogInfo("[Shared Network Monitor] Clearing monitors from previous session...");
+    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+    _logger.LogInfo("[Shared Network Monitor] Previous session monitors cleared");
+}
+catch (Exception ex)
+{
+    _logger.LogWarning($"[Shared Network Monitor] Error clearing previous monitors: {ex.Message}");
+}
+
+// THEN proceed with PreAllocateForBatch()
+```
+
+**Result:**
+- UI now properly clears ALL state before starting a new grading session
+- Both CLI and UI produce consistent, correct results
+- Rerunning tests in the UI no longer shows cross-contamination
+
 ## Recommendations
 
 1. **Always run with sudo on Linux** for network monitoring
 2. **Use sequential grading first** (parallel=1) when debugging
 3. **Check GradingLogs** for detailed network flow information
 4. **Monitor port allocation** in logs to detect conflicts
+5. **When rerunning tests in UI**, the system now automatically clears previous session state
 
 ## Credits
 
 - Bug reported by: User
 - Analyzed and fixed by: Copilot Agent
 - Test subject: dungtdhe186461 (Paper 1)
+- UI rerun issue: Reported by @bstHoang
