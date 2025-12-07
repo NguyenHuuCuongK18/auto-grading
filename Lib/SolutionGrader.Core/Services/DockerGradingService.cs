@@ -232,6 +232,7 @@ namespace SolutionGrader.Core.Services
                 string? actualClientDllPath = null;
                 
                 // Server discovery
+                OnProgress($"[SERVER DISCOVERY] config.HasServer={config.HasServer}, serverDllPath={serverDllPath ?? "(null)"}");
                 if (config.HasServer)
                 {
                     // Examiner expects student to provide server - use discovered path
@@ -239,10 +240,12 @@ namespace SolutionGrader.Core.Services
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"WARNING: Student should provide server ({config.ServerProjectName}) but none found!");
+                        OnProgress($"[SERVER DISCOVERY] actualServerDllPath will be NULL - test should FAIL");
                     }
                     else
                     {
                         OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using STUDENT's server: {actualServerDllPath}");
                     }
                 }
                 else
@@ -252,6 +255,7 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using GOLDEN server: {actualServerDllPath}");
                     }
                     else
                     {
