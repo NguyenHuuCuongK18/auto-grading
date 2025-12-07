@@ -2040,10 +2040,28 @@ namespace SolutionGrader.Core.Services
         private List<ExpectedNetworkFlow> ReadExpectedNetwork(string detailPath)
         {
             var flows = new List<ExpectedNetworkFlow>();
+            
+            // DEBUG LOGGING
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] ReadExpectedNetwork called\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Detail.xlsx path: {detailPath}\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] File exists: {File.Exists(detailPath)}\n");
+            } catch { }
+            
             using var wb = new XLWorkbook(detailPath);
+            
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Workbook loaded, checking for 'Network' worksheet\n");
+            } catch { }
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
+                try {
+                    var rowCount = ws.RowsUsed().Count();
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] 'Network' worksheet found with {rowCount} rows\n");
+                } catch { }
+                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
@@ -2065,6 +2083,17 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
+            else
+            {
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: 'Network' worksheet NOT FOUND in Detail.xlsx!\n");
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Available worksheets: {string.Join(", ", wb.Worksheets.Select(w => w.Name))}\n");
+                } catch { }
+            }
+            
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] ReadExpectedNetwork returning {flows.Count} flows\n");
+            } catch { }
             
             return flows;
         }
