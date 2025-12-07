@@ -436,18 +436,18 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Stopping monitor for student {studentCode}...");
+                    OnProgress($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor stopped for student {studentCode}");
+                    OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
                     
                     // CRITICAL FIX: Add delay after stopping monitor to ensure:
                     // 1. All in-flight packets are processed
                     // 2. Student is properly unregistered from SharedNetworkMonitor
                     // 3. Port is fully released before next student uses it
                     // This prevents cross-contamination between students
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Waiting for monitor cleanup to complete...");
+                    OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
                     await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor cleanup complete");
+                    OnProgress($"[NetworkMonitor] Monitor cleanup complete");
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
@@ -1238,7 +1238,7 @@ namespace SolutionGrader.Core.Services
                 // 
                 // CRITICAL FIX: Clear captures multiple times with delays to ensure
                 // any in-flight packets from previous tests are flushed
-                Console.WriteLine($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
                 
@@ -1249,7 +1249,7 @@ namespace SolutionGrader.Core.Services
                 // Clear again to catch any packets that arrived during the delay
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
-                Console.WriteLine($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
                 
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
@@ -1310,17 +1310,17 @@ namespace SolutionGrader.Core.Services
                 // The test MUST FAIL in this case.
                 if (expectedNetwork.Count == 0 && capturedPackets.Count > 0)
                 {
-                    Console.WriteLine($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
-                    Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Student's code is creating network connections when it shouldn't (check student code)");
-                    Console.WriteLine("  2. Packets from previous test or another student (cross-contamination bug)");
-                    Console.WriteLine("  3. Stale packets not properly cleared between tests");
-                    Console.WriteLine("[NetworkMonitor] Captured packets details:");
+                    OnProgress($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
+                    OnProgress("[NetworkMonitor] This usually means:");
+                    OnProgress("  1. Student's code is creating network connections when it shouldn't (check student code)");
+                    OnProgress("  2. Packets from previous test or another student (cross-contamination bug)");
+                    OnProgress("  3. Stale packets not properly cleared between tests");
+                    OnProgress("[NetworkMonitor] Captured packets details:");
                     foreach (var pkt in capturedPackets.Take(10))
                     {
-                        Console.WriteLine($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                        OnProgress($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
                     }
-                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
+                    OnProgress("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
                     networkCheckPassed = false;
                 }
                 

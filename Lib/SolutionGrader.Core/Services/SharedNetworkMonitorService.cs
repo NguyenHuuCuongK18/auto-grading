@@ -170,10 +170,8 @@ public sealed class SharedNetworkMonitorService : IDisposable
         // Clear all packets for this student before unregistering
         if (_studentPacketBuffers.TryRemove(studentCode, out var buffer))
         {
-            var remainingCount = buffer.Count;
             // CRITICAL FIX: Drain the entire buffer to ensure no stale packets
             while (buffer.TryDequeue(out _)) { }
-            Console.WriteLine($"[SharedNetworkMonitor] Removed and drained packet buffer for {studentCode} (had {remainingCount} packets)");
         }
         
         // CRITICAL FIX: Clear stage timestamps to prevent stale stage tracking
@@ -186,12 +184,6 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         var remainingStudents = _portToStudentCode.Count;
         Console.WriteLine($"[SharedNetworkMonitor] Unregistered {studentCode}. Remaining students: {remainingStudents}");
-        
-        // CRITICAL FIX: Log the freed ports to help diagnose port reuse issues
-        if (portsToRemove.Any())
-        {
-            Console.WriteLine($"[SharedNetworkMonitor] Ports {string.Join(", ", portsToRemove)} are now free for reuse");
-        }
     }
     
     /// <summary>
@@ -779,12 +771,10 @@ public sealed class SharedNetworkMonitorService : IDisposable
     /// </summary>
     public void ClearPortBuffers(int port)
     {
-        Console.WriteLine($"[SharedNetworkMonitor] Clearing all buffers for port {port}...");
-        
         // Find if any student is currently registered on this port
         if (_portToStudentCode.TryGetValue(port, out var studentCode))
         {
-            Console.WriteLine($"[SharedNetworkMonitor] WARNING: Port {port} is still registered to {studentCode} during buffer clear!");
+            // Port is still registered - clear captures for that student
             ClearStudentCaptures(studentCode);
         }
         
@@ -799,13 +789,6 @@ public sealed class SharedNetworkMonitorService : IDisposable
         {
             _portRoleMap.TryRemove(clientPort, out _);
         }
-        
-        if (associatedClientPorts.Any())
-        {
-            Console.WriteLine($"[SharedNetworkMonitor] Cleared {associatedClientPorts.Count} ephemeral client port mappings");
-        }
-        
-        Console.WriteLine($"[SharedNetworkMonitor] Port {port} buffers cleared and ready for reuse");
     }
     
     /// <summary>
