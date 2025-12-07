@@ -1268,7 +1268,7 @@ namespace SolutionGrader.Core.Services
                 if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                 {
                     Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
-                    Console.WriteLine("[NetworkMonitor] Expected {0} network flows, but captured 0 packets", expectedNetwork.Count);
+                    Console.WriteLine($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
                     Console.WriteLine("[NetworkMonitor] This usually means:");
                     Console.WriteLine("  1. Student's server exited immediately without accepting connections");
                     Console.WriteLine("  2. Network monitor was not running with proper permissions (sudo on Linux)");

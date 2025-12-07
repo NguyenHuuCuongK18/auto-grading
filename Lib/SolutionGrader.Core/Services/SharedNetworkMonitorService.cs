@@ -624,7 +624,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
             
             runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
                 
-            // CRITICAL VALIDATION #8: Detailed logging for packet attribution with ownership verification
+            // DETAILED LOGGING: Packet attribution with ownership verification
             // This helps debug any potential isolation issues
             var registeredStudentsCount = _portToStudentCode.Count;
             var logMessage = $"[SharedNetworkMonitor] [{studentCode}|Port:{studentPort}|Stage:{stage}|Students:{registeredStudentsCount}] " +
