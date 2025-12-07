@@ -1290,12 +1290,10 @@ namespace SolutionGrader.Core.Services
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
-                // DIRECT FILE LOGGING TO STUDENT RESULT FOLDER
-                var debugPath = Path.Combine(resultPath, "DEBUG_Scoring.txt");
-                var debugMsg = $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n";
-                Console.WriteLine(debugMsg.TrimEnd());
+                // DIRECT FILE LOGGING FOR DEBUGGING
+                var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
                 try {
-                    File.AppendAllText(debugPath, debugMsg);
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
                 } catch { }
                 
                 OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
@@ -1304,11 +1302,9 @@ namespace SolutionGrader.Core.Services
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
-                debugMsg = $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n" +
-                          $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n";
-                Console.WriteLine(debugMsg.TrimEnd());
                 try {
-                    File.AppendAllText(debugPath, debugMsg);
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n");
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n");
                 } catch { }
                 
                 OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
@@ -1319,10 +1315,8 @@ namespace SolutionGrader.Core.Services
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 
-                debugMsg = $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n";
-                Console.WriteLine(debugMsg.TrimEnd());
                 try {
-                    File.AppendAllText(debugPath, debugMsg);
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n");
                     if (!result.Passed) {
                         File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Test FAILED: output={passed}, netCheck={networkCheckPassed}, netFlows={networkFlowsPassed}\n");
                     }
@@ -1632,11 +1626,13 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
             
-            // DIRECT FILE LOGGING TO RESULT FOLDER
-            var debugMsg = $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n" +
-                          $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n" +
-                          $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n";
-            Console.WriteLine(debugMsg.TrimEnd());
+            // DIRECT FILE LOGGING - Bypass OnProgress to ensure messages are written
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n");
+            } catch { }
             
             // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
             OnProgress($"[CompareNetwork] Expected network flows from Detail.xlsx: {expected.Count}");
@@ -2044,22 +2040,10 @@ namespace SolutionGrader.Core.Services
         private List<ExpectedNetworkFlow> ReadExpectedNetwork(string detailPath)
         {
             var flows = new List<ExpectedNetworkFlow>();
-            
-            // DEBUG LOGGING TO CONSOLE
-            var debugMsg = $"[{DateTime.Now:HH:mm:ss}] ReadExpectedNetwork called\n" +
-                          $"[{DateTime.Now:HH:mm:ss}] Detail.xlsx path: {detailPath}\n" +
-                          $"[{DateTime.Now:HH:mm:ss}] File exists: {File.Exists(detailPath)}\n";
-            Console.WriteLine(debugMsg.TrimEnd());
-            
             using var wb = new XLWorkbook(detailPath);
-            
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Workbook loaded, checking for 'Network' worksheet");
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
-                var rowCount = ws.RowsUsed().Count();
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] 'Network' worksheet found with {rowCount} rows");
-                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
@@ -2081,13 +2065,6 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
-            else
-            {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] WARNING: 'Network' worksheet NOT FOUND in Detail.xlsx!");
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Available worksheets: {string.Join(", ", wb.Worksheets.Select(w => w.Name))}");
-            }
-            
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] ReadExpectedNetwork returning {flows.Count} flows");
             
             return flows;
         }
