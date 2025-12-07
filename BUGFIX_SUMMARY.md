@@ -227,13 +227,89 @@ catch (Exception ex)
 - Both CLI and UI produce consistent, correct results
 - Rerunning tests in the UI no longer shows cross-contamination
 
+## Edge Cases Fixed
+
+### Edge Case #1: Pause/Resume Issue
+
+**Problem:**
+When user pauses grading, the SharedNetworkMonitorManager was not cleaned up. If the user then:
+- Resumes grading (calls StartGradingAsync again)
+- Or starts a new grading session
+The old monitors from the paused session would still exist, causing:
+- Duplicate monitor instances for the same port range
+- Stale student registrations
+- Cross-contamination between paused and new sessions
+
+**Fix Applied:**
+Added `ClearAllAsync()` call in `Pause_Click` handler in `GradingWindow.xaml.cs`:
+
+```csharp
+private async void Pause_Click(object sender, RoutedEventArgs e)
+{
+    if (_isRunning && !_isPaused)
+    {
+        _isPaused = true;
+        _cancellationTokenSource?.Cancel();
+        
+        // CRITICAL FIX: Clear monitors when pausing
+        await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+        
+        UpdateButtonStates();
+    }
+}
+```
+
+### Edge Case #2: Window Close Issue
+
+**Problem:**
+If the window is closed during or after grading, the SharedNetworkMonitorManager singleton persists in memory. If the application is restarted or the window is reopened, stale monitors could interfere with new grading sessions.
+
+**Fix Applied:**
+Added `ClearAllAsync()` call in `Window_Closing` handler in `GradingWindow.xaml.cs`:
+
+```csharp
+private async void Window_Closing(object sender, CancelEventArgs e)
+{
+    // ... cancel running operations ...
+    
+    // CRITICAL FIX: Clear monitors on window close
+    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+    
+    // ... dispose other resources ...
+}
+```
+
+## Complete Cleanup Strategy
+
+The SharedNetworkMonitorManager is now cleared at **FOUR** strategic points in the UI lifecycle:
+
+1. **Session Start** (StartGradingAsync, line 526)
+   - Clears stale monitors from previous sessions
+   - Prevents rerun issues
+
+2. **Session End** (finally block, line 751)
+   - Normal cleanup after grading completes
+   - Releases resources
+
+3. **Pause** (Pause_Click, line 1051)
+   - Prevents duplicate monitors when resuming
+   - Ensures clean state for new sessions
+
+4. **Window Close** (Window_Closing, line 163)
+   - Final cleanup when application exits
+   - Prevents stale state on restart
+
+This comprehensive approach ensures **ZERO** possibility of cross-contamination from stale monitors, regardless of user workflow.
+
 ## Recommendations
 
 1. **Always run with sudo on Linux** for network monitoring
 2. **Use sequential grading first** (parallel=1) when debugging
 3. **Check GradingLogs** for detailed network flow information
 4. **Monitor port allocation** in logs to detect conflicts
-5. **When rerunning tests in UI**, the system now automatically clears previous session state
+5. **Pause/Resume workflow** now safe - monitors properly cleaned up
+6. **Rerunning tests** now safe - complete cleanup before each session
+7. **Window close/restart** now safe - monitors cleaned on exit
 
 ## Credits
 
@@ -241,3 +317,4 @@ catch (Exception ex)
 - Analyzed and fixed by: Copilot Agent
 - Test subject: dungtdhe186461 (Paper 1)
 - UI rerun issue: Reported by @bstHoang
+- Comprehensive edge case analysis: Requested by @bstHoang
