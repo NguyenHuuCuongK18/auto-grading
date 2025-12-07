@@ -1603,10 +1603,24 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
             
+            // DIAGNOSTIC LOGGING
+            Console.WriteLine($"[CompareNetwork] Expected network flows: {expected.Count}");
+            Console.WriteLine($"[CompareNetwork] Total captured packets: {allCapturedPackets.Count}");
+            if (expected.Count > 0)
+            {
+                Console.WriteLine($"[CompareNetwork] Expected stages: {string.Join(", ", expected.Select(e => e.Stage).Distinct())}");
+            }
+            if (allCapturedPackets.Count > 0)
+            {
+                Console.WriteLine($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct())}");
+            }
+            
             foreach (var exp in expected)
             {
                 // Filter packets by stage from the complete set
                 var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
+                
+                Console.WriteLine($"[CompareNetwork] Stage {exp.Stage}: Expected flags='{exp.Flags}', Found {capturedPackets.Count} packets for this stage");
                 
                 // Find matching packet by flags
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
