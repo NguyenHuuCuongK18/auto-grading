@@ -135,11 +135,16 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         UpdateBpfFilter();
         
+        var totalStudents = _portToStudentCode.Count;
+        var allPorts = string.Join(", ", _portToStudentCode.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
         Console.WriteLine($"[SharedNetworkMonitor] SUCCESS: Registered student {studentCode} on port {port} (range: {_startPort}-{_endPort})");
+        Console.WriteLine($"[SharedNetworkMonitor] Total registered students: {totalStudents}, Port mappings: [{allPorts}]");
     }
     
     /// <summary>
     /// Unregister a student's port (when grading completes).
+    /// CRITICAL: This removes the student from port mapping to prevent any future packets
+    /// from being attributed to this student.
     /// </summary>
     public void UnregisterStudent(string studentCode)
     {
@@ -149,6 +154,8 @@ public sealed class SharedNetworkMonitorService : IDisposable
             .Select(kvp => kvp.Key)
             .ToList();
         
+        Console.WriteLine($"[SharedNetworkMonitor] Unregistering student {studentCode}, releasing ports: {string.Join(", ", portsToRemove)}");
+        
         foreach (var port in portsToRemove)
         {
             _portToStudentCode.TryRemove(port, out _);
@@ -156,13 +163,20 @@ public sealed class SharedNetworkMonitorService : IDisposable
             _portRoleMap.TryRemove(port, out _);
         }
         
-        _studentPacketBuffers.TryRemove(studentCode, out _);
+        // Clear all packets for this student before unregistering
+        if (_studentPacketBuffers.TryRemove(studentCode, out var buffer))
+        {
+            var remainingCount = buffer.Count;
+            Console.WriteLine($"[SharedNetworkMonitor] Removed packet buffer for {studentCode} (had {remainingCount} packets)");
+        }
+        
         _studentContexts.TryRemove(studentCode, out _);
         _studentRunContexts.TryRemove(studentCode, out _); // Remove RunContext mapping
         
         UpdateBpfFilter();
         
-        Console.WriteLine($"[SharedNetworkMonitor] Unregistered {studentCode}");
+        var remainingStudents = _portToStudentCode.Count;
+        Console.WriteLine($"[SharedNetworkMonitor] Unregistered {studentCode}. Remaining students: {remainingStudents}");
     }
     
     /// <summary>
@@ -572,6 +586,27 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 return;
             }
             
+            // CRITICAL VALIDATION #6: Verify packet has correct student port
+            // This ensures the packet is tagged with the student's allocated port, not some other port
+            bool packetHasStudentPort = (srcPort == studentPort || dstPort == studentPort);
+            if (!packetHasStudentPort)
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] CRITICAL ERROR: Packet for student {studentCode} (port {studentPort}) has src={srcPort}, dst={dstPort}");
+                Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - packet routing is broken!");
+                return; // Discard this packet as it's incorrectly routed
+            }
+            
+            // CRITICAL VALIDATION #7: Double-check student ownership before storing
+            // This prevents any possibility of cross-contamination
+            var expectedStudent = _portToStudentCode.TryGetValue(studentPort, out var verifyStudent) ? verifyStudent : null;
+            if (expectedStudent != studentCode)
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] CRITICAL ERROR: Port {studentPort} ownership mismatch!");
+                Console.WriteLine($"[SharedNetworkMonitor] Expected student: {expectedStudent}, Got: {studentCode}");
+                Console.WriteLine($"[SharedNetworkMonitor] DISCARDING PACKET to prevent cross-contamination");
+                return;
+            }
+            
             // CRITICAL: Store to RunContext for grading system compatibility
             // The grading system retrieves packets via runContext.GetCapturedNetworkPackets()
             var capturedPacket = new CapturedNetworkPacket
@@ -587,22 +622,13 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 DestinationPort = dstPort
             };
             
-            // CRITICAL VALIDATION #6: Verify packet has correct student port
-            // This ensures the packet is tagged with the student's allocated port, not some other port
-            bool packetHasStudentPort = (srcPort == studentPort || dstPort == studentPort);
-            if (!packetHasStudentPort)
-            {
-                Console.WriteLine($"[SharedNetworkMonitor] CRITICAL ERROR: Packet for student {studentCode} (port {studentPort}) has src={srcPort}, dst={dstPort}");
-                Console.WriteLine($"[SharedNetworkMonitor] This should NEVER happen - packet routing is broken!");
-                return; // Discard this packet as it's incorrectly routed
-            }
-            
             runContext.AddCapturedNetworkPacket(questionCode, stage, capturedPacket);
                 
-            // CRITICAL VALIDATION #7: Detailed logging for packet attribution
+            // CRITICAL VALIDATION #8: Detailed logging for packet attribution with ownership verification
             // This helps debug any potential isolation issues
-            var logMessage = $"[SharedNetworkMonitor] [{studentCode}|Port:{studentPort}|Stage:{stage}] {srcRole}->{dstRole} " +
-                           $"[{flags}] {state} (src:{srcPort}, dst:{dstPort})";
+            var registeredStudentsCount = _portToStudentCode.Count;
+            var logMessage = $"[SharedNetworkMonitor] [{studentCode}|Port:{studentPort}|Stage:{stage}|Students:{registeredStudentsCount}] " +
+                           $"{srcRole}->{dstRole} [{flags}] {state} (src:{srcPort}, dst:{dstPort})";
             if (!string.IsNullOrEmpty(payload))
             {
                 var payloadPreview = payload.Length > 50 
@@ -706,7 +732,17 @@ public sealed class SharedNetworkMonitorService : IDisposable
     {
         if (_studentPacketBuffers.TryGetValue(studentCode, out var buffer))
         {
-            while (buffer.TryDequeue(out _)) { }
+            var clearedCount = 0;
+            while (buffer.TryDequeue(out _)) { clearedCount++; }
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Cleared {clearedCount} packets from local buffer");
+        }
+        
+        // CRITICAL FIX: Also clear packets from the student's RunContext
+        // This ensures packets don't carry over between test cases
+        if (_studentRunContexts.TryGetValue(studentCode, out var runContext))
+        {
+            runContext.ClearNetworkCaptures();
+            Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Cleared packets from RunContext");
         }
     }
     
