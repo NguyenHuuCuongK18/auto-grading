@@ -1,0 +1,63 @@
+﻿====================================================================================================
+GRADING SESSION LOG - 2025-12-07 14:37:05
+====================================================================================================
+
+[2025-12-07 14:37:05.906] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.913] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.921] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.930] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.933] [Info] [anlpvhe187047] Started grading for student: anlpvhe187047 (Paper 1)
+
+[2025-12-07 14:37:05.941] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.942] [Info] [duyldhe176352] Started grading for student: duyldhe176352 (Paper 1)
+
+[2025-12-07 14:37:05.942] [Info] [AnhDThe187386] Started grading for student: AnhDThe187386 (Paper 1)
+
+[2025-12-07 14:37:05.965] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.965] [Info] [ducnthe180869] Started grading for student: ducnthe180869 (Paper 1)
+
+[2025-12-07 14:37:05.980] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:05.980] [StudentError] [ducnthe180869] Failed to extract or locate solution folder - will attempt to continue with grading
+
+[2025-12-07 14:37:05.981] [Info] [DuyCNHE187327] Started grading for student: DuyCNHE187327 (Paper 1)
+
+[2025-12-07 14:37:05.982] [StudentError] [ducnthe180869] Student did not provide required client DLL (Q1)
+
+[2025-12-07 14:37:05.982] [StudentError] [ducnthe180869] Student did not provide required server DLL (Q1)
+
+[2025-12-07 14:37:06.000] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-07 14:37:06.000] [Info] [duynthe180374] Started grading for student: duynthe180374 (Paper 1)
+
+[2025-12-07 14:37:06.000] [Info] [duongnthe186310] Started grading for student: duongnthe186310 (Paper 1)
+
+[2025-12-07 14:37:06.001] [Info] [dungdvhe181404] Started grading for student: dungdvhe181404 (Paper 1)
+
+[2025-12-07 14:39:43.840] [Info] [duynthe180374] Completed grading for student: duynthe180374 - Score: 5/5
+
+[2025-12-07 14:39:44.502] [Info] [dungdvhe181404] Completed grading for student: dungdvhe181404 - Score: 5/5
+
+[2025-12-07 14:39:44.937] [Info] [anlpvhe187047] Completed grading for student: anlpvhe187047 - Score: 5/5
+
+[2025-12-07 14:39:48.351] [Info] [DuyCNHE187327] Completed grading for student: DuyCNHE187327 - Score: 5/5
+
+[2025-12-07 14:39:48.528] [Info] [duyldhe176352] Completed grading for student: duyldhe176352 - Score: 5/5
+
+[2025-12-07 14:39:48.847] [Info] [duongnthe186310] Completed grading for student: duongnthe186310 - Score: 5/5
+
+[2025-12-07 14:39:49.455] [Info] [AnhDThe187386] Completed grading for student: AnhDThe187386 - Score: 5/5
+
+[2025-12-07 14:39:50.630] [Info] [SYSTEM] Grading session completed. Total students: 10
+
+
+====================================================================================================
+SESSION ENDED - 2025-12-07 14:39:50
+Total messages: 27
+====================================================================================================
