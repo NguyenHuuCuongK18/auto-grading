@@ -307,6 +307,18 @@ namespace SolutionGrader.Cli.Services
                 .OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue)
                 .ToList();
             
+            // CRITICAL FIX: Clear all shared network monitors after grading session completes
+            // This prevents resource leaks and ensures clean state for subsequent grading sessions
+            try
+            {
+                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                Console.WriteLine("[CLI] Shared network monitors cleared successfully");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLI] WARNING: Error clearing shared network monitors: {ex.Message}");
+            }
+            
             return resultsList;
         }
 
@@ -353,32 +365,31 @@ namespace SolutionGrader.Cli.Services
                 
                 if (!solutionReady)
                 {
-                    Console.WriteLine($"[ERROR] Failed to extract or find solution for {student.StudentCode}");
-                    result.ErrorMessage = "Failed to extract or find solution";
-                    return result;
+                    Console.WriteLine($"[WARNING] Failed to extract or find solution for {student.StudentCode} - will attempt to continue with grading");
+                    // Don't return early - let the grading service handle this and report appropriate errors
+                    // The DockerGradingService will fail gracefully if files are truly missing
                 }
                 
                 // NOW find DLLs after ensuring solution is extracted
                 student.ServerDllPath = FindDll(student.SolutionPath, config.ServerProjectName);
                 student.ClientDllPath = FindDll(student.SolutionPath, config.ClientProjectName);
                 
-                // Validate at least one component exists
-                if (string.IsNullOrEmpty(student.ServerDllPath) && string.IsNullOrEmpty(student.ClientDllPath))
-                {
-                    Console.WriteLine($"[ERROR] No DLLs found for {student.StudentCode} after extraction");
-                    result.ErrorMessage = "No DLLs found in solution";
-                    return result;
-                }
-                
-                // Log warnings for missing expected DLLs (only errors, not successes)
+                // Log warnings for missing expected DLLs but continue with grading
+                // The grading service will handle missing DLLs and use golden DLLs as fallback if configured
                 if (student.ServerDllPath == null && !string.IsNullOrEmpty(config.ServerProjectName))
                 {
                     Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected server DLL '{config.ServerProjectName}.dll' not found in solution folder");
+                    Console.WriteLine($"[INFO] Student {student.StudentCode} - Will attempt to continue grading with available components");
                 }
                 if (student.ClientDllPath == null && !string.IsNullOrEmpty(config.ClientProjectName))
                 {
                     Console.WriteLine($"[WARNING] Student {student.StudentCode} - Expected client DLL '{config.ClientProjectName}.dll' not found in solution folder");
+                    Console.WriteLine($"[INFO] Student {student.StudentCode} - Will attempt to continue grading with available components");
                 }
+                
+                // Note: We no longer fail early if both DLLs are missing
+                // The grading service (DockerGradingService) will determine if it can proceed
+                // based on the test kit configuration (e.g., using golden server/client)
 
                 // OPTIMIZATION: Cache starting port from Environment.xlsx to avoid repeated Excel reads
                 // This is a significant performance improvement for batch grading of students with the same paper
@@ -550,29 +561,19 @@ namespace SolutionGrader.Cli.Services
                     if (!string.IsNullOrEmpty(studentFilter) && studentCode != studentFilter)
                         continue;
 
-                    // OPTIMIZED: Don't extract during discovery - only check if solution exists or zip exists
-                    // This prevents extracting ALL students when we only need to grade a subset (based on index range)
                     // Extraction will happen lazily when grading each student (in GradeStudentUsingSharedServiceAsync)
-                    
                     var questionFolder = Path.Combine(studentDir, "1");
+                    var solutionPath = Path.Combine(questionFolder, "solution");
+                    
                     if (!Directory.Exists(questionFolder))
                     {
-                        Console.WriteLine($"[WARNING] No question folder for {studentCode}");
-                        continue;
+                        // Student doesn't have expected folder structure, but still add them
+                        // The grading phase will handle this and log appropriate error message
+                        Console.WriteLine($"[INFO] Found student {studentCode} - WARNING: No question folder /1 found, will handle during grading");
+                        solutionPath = studentDir; // Use student dir as fallback
                     }
                     
-                    var solutionPath = Path.Combine(questionFolder, "solution");
-                    bool hasSolutionFolder = Directory.Exists(solutionPath);
-                    bool hasZipFile = Directory.GetFiles(questionFolder, "*.zip").Length > 0;
-                    
-                    if (!hasSolutionFolder && !hasZipFile)
-                    {
-                        Console.WriteLine($"[WARNING] No solution folder and no zip file for {studentCode}");
-                        continue;
-                    }
-                    
-                    // Don't find DLLs during discovery - this would require extraction for all students
-                    // DLLs will be found during grading when solution is ensured to be extracted
+                    // Load ALL students - grading phase will validate files and log errors as needed
                     students.Add(new StudentInfo
                     {
                         StudentCode = studentCode!,
@@ -592,7 +593,9 @@ namespace SolutionGrader.Cli.Services
         /// </summary>
         private string? FindDll(string solutionPath, string projectName)
         {
-            // Common folder patterns
+            // Strategy: Try specific project name first, then fallback to ANY .dll file
+            
+            // Common folder patterns for specific project name
             var patterns = new[]
             {
                 $"{projectName}*",
@@ -633,6 +636,26 @@ namespace SolutionGrader.Cli.Services
                     return dlls[0];
             }
 
+            // FALLBACK: If specific project name not found, search for ANY .dll in solution folder
+            // This handles cases where students use different project names (e.g., Q1.dll instead of Project11.dll)
+            Console.WriteLine($"[DLL Discovery] Specific DLL '{projectName}.dll' not found, searching for any .dll...");
+            var allFolders = Directory.GetDirectories(solutionPath, "*", SearchOption.TopDirectoryOnly);
+            foreach (var folder in allFolders)
+            {
+                var allDlls = Directory.GetFiles(folder, "*.dll", SearchOption.AllDirectories)
+                    .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                    .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") && 
+                               !Path.GetFileName(f).StartsWith("System.") &&
+                               !Path.GetFileName(f).StartsWith("netstandard"))
+                    .ToList();
+
+                if (allDlls.Count > 0)
+                {
+                    Console.WriteLine($"[DLL Discovery] Found DLL: {Path.GetFileName(allDlls[0])} in {Path.GetFileName(folder)}");
+                    return allDlls[0];
+                }
+            }
+
             return null;
         }
 
@@ -643,40 +666,19 @@ namespace SolutionGrader.Cli.Services
         /// <summary>
         /// Get the test kit path for a specific paper using Mapping.xlsx.
         /// </summary>
+        /// <summary>
+        /// Gets the test kit path for a specific paper number.
+        /// 
+        /// REFACTORED: Now uses SharedDiscoveryServices to eliminate code duplication
+        /// with UI and ensure consistent Mapping.xlsx reading (column 3 for folder names).
+        /// </summary>
         private string? GetTestKitForPaper(string testKitRoot, string paperNo)
         {
-            // Try to find mapping
-            var mappingPath = Path.Combine(testKitRoot, "Mapping.xlsx");
-            if (File.Exists(mappingPath))
-            {
-                using var wb = new XLWorkbook(mappingPath);
-                var ws = wb.Worksheet(1);
-
-                foreach (var row in ws.RowsUsed().Skip(1))
-                {
-                    var paper = row.Cell(1).GetValue<string>();
-                    var question = row.Cell(2).GetValue<string>();
-
-                    if (paper == paperNo && !string.IsNullOrEmpty(question))
-                    {
-                        var questionPath = Path.Combine(testKitRoot, question);
-                        if (Directory.Exists(questionPath))
-                            return questionPath;
-                    }
-                }
-            }
-
-            // Fallback: try direct folder matching
-            var directPath = Path.Combine(testKitRoot, paperNo);
-            if (Directory.Exists(directPath))
-                return directPath;
-
-            // Try Q1, Q2, etc.
-            var qPath = Path.Combine(testKitRoot, $"Q{paperNo}");
-            if (Directory.Exists(qPath))
-                return qPath;
-
-            return null;
+            // Use shared discovery service to ensure consistent behavior with UI
+            return SharedDiscoveryServices.GetTestKitForPaper(
+                testKitRoot,
+                paperNo,
+                logger: msg => Console.WriteLine($"[TestKit Discovery] {msg}"));
         }
 
         #endregion

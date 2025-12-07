@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -414,7 +415,8 @@ namespace SolutionGrader.Core.Services
                 
                 // Calculate totals
                 result.TotalMark = result.TestCaseResults.Sum(tc => tc.EarnedMark);
-                result.Passed = result.TestCaseResults.Any(tc => tc.Passed);
+                // CRITICAL FIX: Student passes ONLY if ALL test cases pass (not ANY)
+                result.Passed = result.TestCaseResults.All(tc => tc.Passed);
                 
                 // Write overall summary
                 await WriteOverallSummaryAsync(studentResultPath, result.TestCaseResults);
@@ -1263,15 +1265,18 @@ namespace SolutionGrader.Core.Services
                 
                 // CRITICAL: Validate network monitoring is working
                 // If we expected network data but got none, this indicates a problem with network monitoring
+                // OR the student's server exited immediately without accepting connections
                 bool networkCheckPassed = true;
                 if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                 {
-                    Console.WriteLine("[NetworkMonitor] WARNING: Expected network traffic but captured NONE!");
+                    Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
+                    Console.WriteLine($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
                     Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Network monitor was not running with proper permissions (sudo on Linux)");
-                    Console.WriteLine("  2. libpcap is not installed (Linux) or NPcap is not installed (Windows)");
-                    Console.WriteLine("  3. The loopback interface was not found");
-                    Console.WriteLine("[NetworkMonitor] Network monitoring is MANDATORY - marking test case as FAILED");
+                    Console.WriteLine("  1. Student's server exited immediately without accepting connections (check server process logs)");
+                    Console.WriteLine("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
+                    Console.WriteLine("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
+                    Console.WriteLine("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
+                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
                     networkCheckPassed = false;
                 }
                 
@@ -1286,16 +1291,43 @@ namespace SolutionGrader.Core.Services
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
-                Console.WriteLine($"[Network Grading] Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+                // DIRECT FILE LOGGING FOR DEBUGGING
+                var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
+                } catch { }
+                
+                OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
                 
                 // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n");
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n");
+                } catch { }
+                
+                OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
+                OnProgress($"[Network Scoring] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
+                
                 // Final result: must pass both output comparison AND network check
                 // No partial credit - ALL or NOTHING
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
+                
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n");
+                    if (!result.Passed) {
+                        File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Test FAILED: output={passed}, netCheck={networkCheckPassed}, netFlows={networkFlowsPassed}\n");
+                    }
+                } catch { }
+                
+                OnProgress($"[Network Scoring] FINAL TEST RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
+                if (!result.Passed)
+                {
+                    OnProgress($"[Network Scoring] Test FAILED because: outputPassed={passed}, networkCheckPassed={networkCheckPassed}, networkFlowsPassed={networkFlowsPassed}");
+                }
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
@@ -1591,9 +1623,36 @@ namespace SolutionGrader.Core.Services
         {
             var results = new List<ComparisonResult>();
             
+            // CRITICAL FIX: Get ALL captured packets for this stage (regardless of questionCode)
+            // because packets may be stored with various questionCode values or empty string
+            var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
+            
+            // DIRECT FILE LOGGING - Bypass OnProgress to ensure messages are written
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n");
+            } catch { }
+            
+            // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
+            OnProgress($"[CompareNetwork] Expected network flows from Detail.xlsx: {expected.Count}");
+            OnProgress($"[CompareNetwork] Total captured packets in RunContext: {allCapturedPackets.Count}");
+            if (expected.Count > 0)
+            {
+                OnProgress($"[CompareNetwork] Expected stages: {string.Join(", ", expected.Select(e => e.Stage).Distinct().OrderBy(s => s))}");
+            }
+            if (allCapturedPackets.Count > 0)
+            {
+                OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
+            }
+            
             foreach (var exp in expected)
             {
-                var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
+                // Filter packets by stage from the complete set
+                var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
+                
+                OnProgress($"[CompareNetwork] Stage {exp.Stage}: Expected flags='{exp.Flags}' from '{exp.SourceRole}' to '{exp.DestinationRole}', Found {capturedPackets.Count} packets for this stage");
                 
                 // Find matching packet by flags
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
@@ -1641,6 +1700,26 @@ namespace SolutionGrader.Core.Services
                         IsPartial = false  // Complete FAIL - missing packet
                     });
                 }
+            }
+            
+            // DIAGNOSTIC LOGGING - Summary of comparison results
+            int passCount = results.Count(r => r.Passed);
+            int partialCount = results.Count(r => r.IsPartial);
+            int failCount = results.Count(r => !r.Passed && !r.IsPartial);
+            
+            // DIRECT FILE LOGGING
+            debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
+                if (failCount > 0) {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: {failCount} FAIL flows - test should FAIL!\n");
+                }
+            } catch { }
+            
+            OnProgress($"[CompareNetwork] RESULTS: {results.Count} total comparisons - PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+            if (failCount > 0)
+            {
+                OnProgress($"[CompareNetwork] WARNING: {failCount} FAIL network flows detected - test should FAIL!");
             }
             
             return results;
@@ -1962,13 +2041,32 @@ namespace SolutionGrader.Core.Services
         private List<ExpectedNetworkFlow> ReadExpectedNetwork(string detailPath)
         {
             var flows = new List<ExpectedNetworkFlow>();
+            
+            // DIAGNOSTIC LOGGING - Written to GradingLogs files via OnProgress
+            OnProgress($"[ReadExpectedNetwork] Called with Detail.xlsx path: {detailPath}");
+            OnProgress($"[ReadExpectedNetwork] File exists: {File.Exists(detailPath)}");
+            
             using var wb = new XLWorkbook(detailPath);
+            
+            OnProgress($"[ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet");
             
             if (wb.TryGetWorksheet("Network", out var ws))
             {
+                var rowCount = ws.RowsUsed().Count();
+                OnProgress($"[ReadExpectedNetwork] 'Network' worksheet found with {rowCount} rows");
+                
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
+                    var timeCell = row.Cell(2).GetValue<string>();
+                    
+                    // CRITICAL FIX: Skip rows marked as "(Not validated by this test case)"
+                    // These rows appear in Detail.xlsx but should NOT be used for network validation
+                    if (timeCell != null && timeCell.Contains("Not validated"))
+                    {
+                        continue; // Skip this row
+                    }
+                    
                     var flags = row.Cell(6).GetValue<string>();
                     var state = row.Cell(7).GetValue<string>();
                     var sourceRole = row.Cell(9).GetValue<string>();
@@ -1987,6 +2085,13 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
+            else
+            {
+                OnProgress($"[ReadExpectedNetwork] WARNING: 'Network' worksheet NOT FOUND in Detail.xlsx!");
+                OnProgress($"[ReadExpectedNetwork] Available worksheets: {string.Join(", ", wb.Worksheets.Select(w => w.Name))}");
+            }
+            
+            OnProgress($"[ReadExpectedNetwork] Returning {flows.Count} flows");
             
             return flows;
         }
