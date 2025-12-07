@@ -351,7 +351,13 @@ namespace SolutionGrader.Core.Services
                             // Grading server implementation -> use golden (given) client
                             serverPath = actualServerDllPath;
                             clientPath = testKitConfig.GivenClientPath;
-                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                            OnProgress($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                            OnProgress($"[TestCase {testCase.Name}] Student server path: {serverPath ?? "(NULL)"}");
+                            OnProgress($"[TestCase {testCase.Name}] Golden client path: {clientPath ?? "(NULL)"}");
+                            if (!string.IsNullOrEmpty(clientPath))
+                            {
+                                OnProgress($"[TestCase {testCase.Name}] Golden client filename: {Path.GetFileName(clientPath)}");
+                            }
                         }
                     }
                     
