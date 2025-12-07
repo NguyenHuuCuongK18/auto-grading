@@ -2057,6 +2057,15 @@ namespace SolutionGrader.Core.Services
                 foreach (var row in ws.RowsUsed().Skip(1))
                 {
                     var stageStr = row.Cell(1).GetValue<string>();
+                    var timeCell = row.Cell(2).GetValue<string>();
+                    
+                    // CRITICAL FIX: Skip rows marked as "(Not validated by this test case)"
+                    // These rows appear in Detail.xlsx but should NOT be used for network validation
+                    if (timeCell != null && timeCell.Contains("Not validated"))
+                    {
+                        continue; // Skip this row
+                    }
+                    
                     var flags = row.Cell(6).GetValue<string>();
                     var state = row.Cell(7).GetValue<string>();
                     var sourceRole = row.Cell(9).GetValue<string>();
