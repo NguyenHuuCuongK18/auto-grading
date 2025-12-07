@@ -439,6 +439,15 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine($"[NetworkMonitor] [{studentCode}] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
                     Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor stopped for student {studentCode}");
+                    
+                    // CRITICAL FIX: Add delay after stopping monitor to ensure:
+                    // 1. All in-flight packets are processed
+                    // 2. Student is properly unregistered from SharedNetworkMonitor
+                    // 3. Port is fully released before next student uses it
+                    // This prevents cross-contamination between students
+                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Waiting for monitor cleanup to complete...");
+                    await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
+                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor cleanup complete");
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
@@ -1226,8 +1235,22 @@ namespace SolutionGrader.Core.Services
                 // Clear network captures for this test case
                 // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
                 // only traffic from this test case is captured
+                // 
+                // CRITICAL FIX: Clear captures multiple times with delays to ensure
+                // any in-flight packets from previous tests are flushed
+                Console.WriteLine($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
+                
+                // CRITICAL FIX: Add small delay to allow any in-flight packets to be processed and cleared
+                // This prevents cross-contamination from previous test cases
+                await Task.Delay(100, ct);
+                
+                // Clear again to catch any packets that arrived during the delay
+                _networkMonitor?.ClearCaptures();
+                _runContext.ClearNetworkCaptures();
+                Console.WriteLine($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
+                
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
                 // Read Detail.xlsx
@@ -1277,6 +1300,27 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
                     Console.WriteLine("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
                     Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
+                    networkCheckPassed = false;
+                }
+                
+                // CRITICAL FIX: Validate NO unexpected packets when expecting NONE
+                // BUG FIX: When expectedNetwork.Count == 0 (no network flows expected),
+                // but capturedPackets.Count > 0 (some packets were captured),
+                // this indicates cross-contamination from other students or stale packets.
+                // The test MUST FAIL in this case.
+                if (expectedNetwork.Count == 0 && capturedPackets.Count > 0)
+                {
+                    Console.WriteLine($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
+                    Console.WriteLine("[NetworkMonitor] This usually means:");
+                    Console.WriteLine("  1. Student's code is creating network connections when it shouldn't (check student code)");
+                    Console.WriteLine("  2. Packets from previous test or another student (cross-contamination bug)");
+                    Console.WriteLine("  3. Stale packets not properly cleared between tests");
+                    Console.WriteLine("[NetworkMonitor] Captured packets details:");
+                    foreach (var pkt in capturedPackets.Take(10))
+                    {
+                        Console.WriteLine($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                    }
+                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
                     networkCheckPassed = false;
                 }
                 

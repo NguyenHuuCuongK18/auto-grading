@@ -167,8 +167,13 @@ public sealed class SharedNetworkMonitorService : IDisposable
         if (_studentPacketBuffers.TryRemove(studentCode, out var buffer))
         {
             var remainingCount = buffer.Count;
-            Console.WriteLine($"[SharedNetworkMonitor] Removed packet buffer for {studentCode} (had {remainingCount} packets)");
+            // CRITICAL FIX: Drain the entire buffer to ensure no stale packets
+            while (buffer.TryDequeue(out _)) { }
+            Console.WriteLine($"[SharedNetworkMonitor] Removed and drained packet buffer for {studentCode} (had {remainingCount} packets)");
         }
+        
+        // CRITICAL FIX: Clear stage timestamps to prevent stale stage tracking
+        _studentStageTimestamps.TryRemove(studentCode, out _);
         
         _studentContexts.TryRemove(studentCode, out _);
         _studentRunContexts.TryRemove(studentCode, out _); // Remove RunContext mapping
@@ -177,6 +182,12 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         var remainingStudents = _portToStudentCode.Count;
         Console.WriteLine($"[SharedNetworkMonitor] Unregistered {studentCode}. Remaining students: {remainingStudents}");
+        
+        // CRITICAL FIX: Log the freed ports to help diagnose port reuse issues
+        if (portsToRemove.Any())
+        {
+            Console.WriteLine($"[SharedNetworkMonitor] Ports {string.Join(", ", portsToRemove)} are now free for reuse");
+        }
     }
     
     /// <summary>
