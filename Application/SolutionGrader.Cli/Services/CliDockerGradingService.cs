@@ -644,40 +644,19 @@ namespace SolutionGrader.Cli.Services
         /// <summary>
         /// Get the test kit path for a specific paper using Mapping.xlsx.
         /// </summary>
+        /// <summary>
+        /// Gets the test kit path for a specific paper number.
+        /// 
+        /// REFACTORED: Now uses SharedDiscoveryServices to eliminate code duplication
+        /// with UI and ensure consistent Mapping.xlsx reading (column 3 for folder names).
+        /// </summary>
         private string? GetTestKitForPaper(string testKitRoot, string paperNo)
         {
-            // Try to find mapping
-            var mappingPath = Path.Combine(testKitRoot, "Mapping.xlsx");
-            if (File.Exists(mappingPath))
-            {
-                using var wb = new XLWorkbook(mappingPath);
-                var ws = wb.Worksheet(1);
-
-                foreach (var row in ws.RowsUsed().Skip(1))
-                {
-                    var paper = row.Cell(1).GetValue<string>();
-                    var question = row.Cell(2).GetValue<string>();
-
-                    if (paper == paperNo && !string.IsNullOrEmpty(question))
-                    {
-                        var questionPath = Path.Combine(testKitRoot, question);
-                        if (Directory.Exists(questionPath))
-                            return questionPath;
-                    }
-                }
-            }
-
-            // Fallback: try direct folder matching
-            var directPath = Path.Combine(testKitRoot, paperNo);
-            if (Directory.Exists(directPath))
-                return directPath;
-
-            // Try Q1, Q2, etc.
-            var qPath = Path.Combine(testKitRoot, $"Q{paperNo}");
-            if (Directory.Exists(qPath))
-                return qPath;
-
-            return null;
+            // Use shared discovery service to ensure consistent behavior with UI
+            return SharedDiscoveryServices.GetTestKitForPaper(
+                testKitRoot,
+                paperNo,
+                logger: msg => Console.WriteLine($"[TestKit Discovery] {msg}"));
         }
 
         #endregion
