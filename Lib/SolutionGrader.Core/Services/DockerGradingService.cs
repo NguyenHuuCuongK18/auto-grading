@@ -2190,8 +2190,18 @@ namespace SolutionGrader.Core.Services
             // Step 4: Clear network captures for next test case
             // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
             // previous test case's network packets from appearing in next test case
+            OnProgress("Cleanup: Clearing network captures from previous test case...");
             _networkMonitor?.ClearCaptures();
             _runContext.ClearNetworkCaptures();
+            
+            // CRITICAL FIX: Wait for any in-flight packets to be processed and cleared
+            // This prevents packets from previous test case appearing in the next one
+            await Task.Delay(100);
+            
+            // Clear again to catch any packets that arrived during the delay
+            _networkMonitor?.ClearCaptures();
+            _runContext.ClearNetworkCaptures();
+            OnProgress("Cleanup: Network captures cleared");
             
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
