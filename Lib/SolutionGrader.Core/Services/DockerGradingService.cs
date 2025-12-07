@@ -1290,11 +1290,22 @@ namespace SolutionGrader.Core.Services
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
                 
+                // DIRECT FILE LOGGING FOR DEBUGGING
+                var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
+                } catch { }
+                
                 OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
                 
                 // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
                 // PARTIAL counts as passing (flags matched correctly)
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
+                
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n");
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n");
+                } catch { }
                 
                 OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
                 OnProgress($"[Network Scoring] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
@@ -1303,6 +1314,13 @@ namespace SolutionGrader.Core.Services
                 // No partial credit - ALL or NOTHING
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
+                
+                try {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n");
+                    if (!result.Passed) {
+                        File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Test FAILED: output={passed}, netCheck={networkCheckPassed}, netFlows={networkFlowsPassed}\n");
+                    }
+                } catch { }
                 
                 OnProgress($"[Network Scoring] FINAL TEST RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
                 if (!result.Passed)
@@ -1608,6 +1626,14 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
             
+            // DIRECT FILE LOGGING - Bypass OnProgress to ensure messages are written
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n");
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n");
+            } catch { }
+            
             // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
             OnProgress($"[CompareNetwork] Expected network flows from Detail.xlsx: {expected.Count}");
             OnProgress($"[CompareNetwork] Total captured packets in RunContext: {allCapturedPackets.Count}");
@@ -1679,6 +1705,16 @@ namespace SolutionGrader.Core.Services
             int passCount = results.Count(r => r.Passed);
             int partialCount = results.Count(r => r.IsPartial);
             int failCount = results.Count(r => !r.Passed && !r.IsPartial);
+            
+            // DIRECT FILE LOGGING
+            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
+            try {
+                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
+                if (failCount > 0) {
+                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: {failCount} FAIL flows - test should FAIL!\n");
+                }
+            } catch { }
+            
             OnProgress($"[CompareNetwork] RESULTS: {results.Count} total comparisons - PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
             if (failCount > 0)
             {
