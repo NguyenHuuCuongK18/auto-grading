@@ -163,8 +163,22 @@ namespace SolutionGrader.UI.Services
 
             try
             {
+                // DIAGNOSTIC: Log grading loop filtering
+                var studentsToGrade = students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
+                _logger.LogInfo($"[Grading Loop] Total students discovered: {students.Count}");
+                _logger.LogInfo($"[Grading Loop] Students with Not_Run or Paused status: {studentsToGrade.Count}");
+                if (studentsToGrade.Count < students.Count)
+                {
+                    var skipped = students.Except(studentsToGrade).ToList();
+                    _logger.LogWarning($"[Grading Loop] SKIPPING {skipped.Count} students due to status filter:");
+                    foreach (var s in skipped)
+                    {
+                        _logger.LogWarning($"[Grading Loop]   - {s.StudentCode} (Paper {s.PaperNo}): Status={s.Status}");
+                    }
+                }
+                
                 // Grade students one at a time
-                foreach (var student in students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused))
+                foreach (var student in studentsToGrade)
                 {
                     if (ct.IsCancellationRequested)
                     {

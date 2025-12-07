@@ -43,6 +43,8 @@ namespace SolutionGrader.UI.Services
                 studentFilter: null,
                 logger: msg => _logger.LogDebug(msg));
 
+            _logger.LogInfo($"[UI Discovery] SharedDiscoveryServices found {discoveredStudents.Count} students total");
+
             // Convert to UI-specific StudentSolution objects
             var students = new List<StudentSolution>();
             foreach (var discovered in discoveredStudents)
@@ -57,9 +59,10 @@ namespace SolutionGrader.UI.Services
                     Mark = 0
                 };
                 students.Add(student);
+                _logger.LogDebug($"[UI Discovery] Added student: {student.StudentCode} (Paper {student.PaperNo}) - Status={student.Status}");
             }
 
-            _logger.LogInfo($"Discovered {students.Count} student submissions");
+            _logger.LogInfo($"[UI Discovery] Converted to {students.Count} StudentSolution objects, all with Status=Not_Run");
             return students;
         }
     }
