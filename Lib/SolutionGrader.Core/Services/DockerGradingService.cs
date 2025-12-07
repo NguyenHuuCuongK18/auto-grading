@@ -1270,10 +1270,10 @@ namespace SolutionGrader.Core.Services
                     Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
                     Console.WriteLine($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
                     Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Student's server exited immediately without accepting connections");
-                    Console.WriteLine("  2. Network monitor was not running with proper permissions (sudo on Linux)");
-                    Console.WriteLine("  3. libpcap is not installed (Linux) or NPcap is not installed (Windows)");
-                    Console.WriteLine("  4. The loopback interface was not found");
+                    Console.WriteLine("  1. Student's server exited immediately without accepting connections (check server process logs)");
+                    Console.WriteLine("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
+                    Console.WriteLine("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
+                    Console.WriteLine("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
                     Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
                     networkCheckPassed = false;
                 }

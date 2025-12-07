@@ -587,7 +587,8 @@ public sealed class SharedNetworkMonitorService : IDisposable
             }
             
             // CRITICAL VALIDATION #6: Verify packet has correct student port
-            // This ensures the packet is tagged with the student's allocated port, not some other port
+            // This validates the packet's ports match the studentPort determined by routing logic (lines 446-456)
+            // Catches bugs where packet routing logic incorrectly determined studentPort
             bool packetHasStudentPort = (srcPort == studentPort || dstPort == studentPort);
             if (!packetHasStudentPort)
             {
@@ -597,7 +598,9 @@ public sealed class SharedNetworkMonitorService : IDisposable
             }
             
             // CRITICAL VALIDATION #7: Double-check student ownership before storing
-            // This prevents any possibility of cross-contamination
+            // This validates the _portToStudentCode mapping is correct for the determined studentPort
+            // Catches bugs where port mapping was corrupted or student code was incorrectly determined
+            // This is a DEFENSE IN DEPTH check that complements validation #6
             var expectedStudent = _portToStudentCode.TryGetValue(studentPort, out var verifyStudent) ? verifyStudent : null;
             if (expectedStudent != studentCode)
             {
