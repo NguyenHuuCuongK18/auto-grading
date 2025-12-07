@@ -1599,9 +1599,14 @@ namespace SolutionGrader.Core.Services
         {
             var results = new List<ComparisonResult>();
             
+            // CRITICAL FIX: Get ALL captured packets for this stage (regardless of questionCode)
+            // because packets may be stored with various questionCode values or empty string
+            var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
+            
             foreach (var exp in expected)
             {
-                var capturedPackets = _runContext.GetCapturedNetworkPackets("", exp.Stage.ToString());
+                // Filter packets by stage from the complete set
+                var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
                 
                 // Find matching packet by flags
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
