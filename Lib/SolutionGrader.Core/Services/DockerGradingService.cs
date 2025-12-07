@@ -232,6 +232,7 @@ namespace SolutionGrader.Core.Services
                 string? actualClientDllPath = null;
                 
                 // Server discovery
+                OnProgress($"[SERVER DISCOVERY] config.HasServer={config.HasServer}, serverDllPath={serverDllPath ?? "(null)"}");
                 if (config.HasServer)
                 {
                     // Examiner expects student to provide server - use discovered path
@@ -239,10 +240,12 @@ namespace SolutionGrader.Core.Services
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"WARNING: Student should provide server ({config.ServerProjectName}) but none found!");
+                        OnProgress($"[SERVER DISCOVERY] actualServerDllPath will be NULL - test should FAIL");
                     }
                     else
                     {
                         OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using STUDENT's server: {actualServerDllPath}");
                     }
                 }
                 else
@@ -252,6 +255,7 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using GOLDEN server: {actualServerDllPath}");
                     }
                     else
                     {
@@ -1239,8 +1243,17 @@ namespace SolutionGrader.Core.Services
                 // CRITICAL FIX: Clear captures multiple times with delays to ensure
                 // any in-flight packets from previous tests are flushed
                 OnProgress($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
+                
+                // VERIFICATION: Check packet count BEFORE clear
+                var packetCountBefore = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count BEFORE clear: {packetCountBefore}");
+                
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
+                
+                // VERIFICATION: Check packet count AFTER clear
+                var packetCountAfterFirstClear = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER first clear: {packetCountAfterFirstClear}");
                 
                 // CRITICAL FIX: Add small delay to allow any in-flight packets to be processed and cleared
                 // This prevents cross-contamination from previous test cases
@@ -1249,6 +1262,10 @@ namespace SolutionGrader.Core.Services
                 // Clear again to catch any packets that arrived during the delay
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
+                
+                // VERIFICATION: Check packet count AFTER second clear
+                var packetCountAfterSecondClear = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER second clear: {packetCountAfterSecondClear}");
                 OnProgress($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
                 
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
@@ -1282,7 +1299,16 @@ namespace SolutionGrader.Core.Services
                 
                 // Get captured network packets for Network sheet
                 var capturedPackets = GetCapturedNetworkPackets();
-                Console.WriteLine($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
+                
+                // CRITICAL DEBUGGING: Log detailed packet information
+                OnProgress($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
+                OnProgress($"[NetworkMonitor] Student: {_currentStudentCode}, Port: {config.CodeContainerHostPort}");
+                
+                if (capturedPackets.Count > 0)
+                {
+                    OnProgress($"[NetworkMonitor] First packet details: Stage={capturedPackets[0].Stage}, Flags={capturedPackets[0].Flags}, SrcRole={capturedPackets[0].SourceRole}, DstRole={capturedPackets[0].DestinationRole}");
+                    OnProgress($"[NetworkMonitor] Packet timestamps range: {capturedPackets.Min(p => p.Timestamp):HH:mm:ss.fff} to {capturedPackets.Max(p => p.Timestamp):HH:mm:ss.fff}");
+                }
                 
                 result.NetworkCaptures = capturedPackets;
                 
@@ -1292,14 +1318,14 @@ namespace SolutionGrader.Core.Services
                 bool networkCheckPassed = true;
                 if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                 {
-                    Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
-                    Console.WriteLine($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
-                    Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Student's server exited immediately without accepting connections (check server process logs)");
-                    Console.WriteLine("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
-                    Console.WriteLine("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
-                    Console.WriteLine("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
-                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
+                    OnProgress("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
+                    OnProgress($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
+                    OnProgress("[NetworkMonitor] This usually means:");
+                    OnProgress("  1. Student's server exited immediately without accepting connections (check server process logs)");
+                    OnProgress("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
+                    OnProgress("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
+                    OnProgress("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
+                    OnProgress("[NetworkMonitor] Marking test case as FAILED");
                     networkCheckPassed = false;
                 }
                 
