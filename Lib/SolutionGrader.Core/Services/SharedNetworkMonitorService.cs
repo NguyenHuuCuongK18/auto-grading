@@ -370,8 +370,10 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 var desc = device.Description?.ToLowerInvariant() ?? "";
                 
                 // Look for loopback devices
-                bool isLoopback = name.Contains("loopback") || desc.Contains("loopback") ||
-                                 name.Contains("lo0") || name.Contains("\\device\\npcap_loopback");
+                // On Linux: "lo", On macOS: "lo0", On Windows: "\\device\\npcap_loopback"
+                bool isLoopback = name == "lo" || name == "lo0" || 
+                                 name.Contains("loopback") || desc.Contains("loopback") ||
+                                 name.Contains("\\device\\npcap_loopback");
                 
                 if (isLoopback)
                 {

@@ -593,7 +593,9 @@ namespace SolutionGrader.Cli.Services
         /// </summary>
         private string? FindDll(string solutionPath, string projectName)
         {
-            // Common folder patterns
+            // Strategy: Try specific project name first, then fallback to ANY .dll file
+            
+            // Common folder patterns for specific project name
             var patterns = new[]
             {
                 $"{projectName}*",
@@ -632,6 +634,26 @@ namespace SolutionGrader.Cli.Services
 
                 if (dlls.Count > 0)
                     return dlls[0];
+            }
+
+            // FALLBACK: If specific project name not found, search for ANY .dll in solution folder
+            // This handles cases where students use different project names (e.g., Q1.dll instead of Project11.dll)
+            Console.WriteLine($"[DLL Discovery] Specific DLL '{projectName}.dll' not found, searching for any .dll...");
+            var allFolders = Directory.GetDirectories(solutionPath, "*", SearchOption.TopDirectoryOnly);
+            foreach (var folder in allFolders)
+            {
+                var allDlls = Directory.GetFiles(folder, "*.dll", SearchOption.AllDirectories)
+                    .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                    .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") && 
+                               !Path.GetFileName(f).StartsWith("System.") &&
+                               !Path.GetFileName(f).StartsWith("netstandard"))
+                    .ToList();
+
+                if (allDlls.Count > 0)
+                {
+                    Console.WriteLine($"[DLL Discovery] Found DLL: {Path.GetFileName(allDlls[0])} in {Path.GetFileName(folder)}");
+                    return allDlls[0];
+                }
             }
 
             return null;
