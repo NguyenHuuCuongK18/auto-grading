@@ -3303,38 +3303,61 @@ namespace SolutionGrader.Core.Services
         public bool UseDllModificationFallback { get; set; } = false;
         
         /// <summary>
-        /// Use Docker internal networking instead of port mapping.
+        /// Use unified container approach where client and server run in the SAME container.
         /// 
-        /// When true (RECOMMENDED - Docker Internal Networking with Sidecar Monitoring):
+        /// When true (RECOMMENDED - Unified Container with Shared Loopback Monitoring):
+        /// - Client and Server run as separate processes in ONE container
+        /// - Communicate via localhost (127.0.0.1:{port}) - no proxy behavior
+        /// - Shared network monitor (sidecar) attached to container's loopback namespace
+        /// - Monitor captures on 'lo' interface, filters by port for each student
+        /// - Single monitor instance serves ALL students (filters traffic by port)
+        /// - Cleanest network data - pure localhost communication
+        /// - Best resource efficiency - fewer containers overall
+        /// 
+        /// When false (Legacy - Separate Containers with Bridge or Sidecar):
+        /// - Falls back to UseDockerInternalNetworking setting
+        /// - Separate server and client containers
+        /// - Either bridge network or sidecar eth0 monitoring
+        /// 
+        /// UNIFIED CONTAINER ARCHITECTURE:
+        /// 1. Single container per student runs both client and server processes
+        /// 2. Processes communicate over 127.0.0.1 (loopback)
+        /// 3. Shared monitor container attached via --net=container:{unifiedContainer}
+        /// 4. Monitor uses tcpdump on 'lo' interface with port filter
+        /// 5. Each student gets unique port (8000, 8001, 8002...) for filtering
+        /// 
+        /// BENEFITS:
+        /// - No NAT/proxy behavior whatsoever
+        /// - Simplified architecture (1 container vs 2 per student)
+        /// - Shared monitor (1 instance for all students vs per-student)
+        /// - Platform-independent monitoring
+        /// - Easier debugging (localhost is predictable)
+        /// 
+        /// Default: true (Unified Container - the ultimate choice)
+        /// </summary>
+        public bool UseUnifiedContainer { get; set; } = true;
+        
+        /// <summary>
+        /// Use Docker internal networking instead of port mapping (LEGACY - only when UseUnifiedContainer=false).
+        /// 
+        /// When true (Docker Internal Networking with Sidecar on eth0):
         /// - Client connects to server via container name (e.g., "ag-server-student123:8000")
         /// - No port mappings (-p) are created - eliminates Docker NAT proxy behavior
         /// - Traffic stays within Docker bridge network (no proxy interference)
         /// - Network monitor runs as SIDECAR container attached to server's network namespace
-        /// - Monitor uses --net=container:{serverContainer} to share server's network interface
+        /// - Monitor uses --net=container:{serverContainer} to share server's eth0 interface
         /// - Monitor sees ALL traffic going in/out of server (complete visibility)
-        /// - Provides accurate network flow without Docker proxy "ghost" SYN-ACK responses
         /// 
-        /// When false (Legacy Port Mapping Mode):
+        /// When false (Legacy Port Mapping Mode - DEPRECATED):
         /// - Client connects to "host.docker.internal:{port}"
         /// - Server port is exposed to host via `-p {hostPort}:{containerPort}`
         /// - Docker's NAT proxy responds with SYN-ACK even when student server exits
         /// - Can produce false positives (proxy accepts connection when server is dead)
-        /// - Network monitor (SharpPcap) captures on host, but sees proxy behavior
         /// 
-        /// SIDECAR MONITORING ARCHITECTURE (Option A):
-        /// The monitor container shares the server container's network namespace:
-        /// 1. Monitor attaches via --net=container:{serverContainer}
-        /// 2. Sees server's network interface (eth0) as if running inside server
-        /// 3. No bridge switching isolation - direct visibility
-        /// 4. Platform-independent (works on Linux, Windows, Mac)
-        /// 5. When server stops, monitor automatically stops (shared lifecycle)
+        /// NOTE: This setting is IGNORED when UseUnifiedContainer=true.
+        /// Unified container approach is now the default and recommended approach.
         /// 
-        /// REQUIREMENTS:
-        /// - Network monitor container must have --cap-add=NET_ADMIN --cap-add=NET_RAW
-        /// - Network monitor image: fptuxaes/network-monitor:latest
-        /// - Server container must be running before monitor is attached
-        /// 
-        /// Default: true (Docker Internal Networking with sidecar monitoring)
+        /// Default: true (Docker Internal Networking - used only in legacy mode)
         /// </summary>
         public bool UseDockerInternalNetworking { get; set; } = true;
     }
