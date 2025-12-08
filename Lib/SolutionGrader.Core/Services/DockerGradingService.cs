@@ -1412,35 +1412,38 @@ namespace SolutionGrader.Core.Services
                         break;
                         
                     case "INPUT":
-                    case "SENDINPUT":
-                        // Allow empty inputs (e.g., pressing Enter with no text to exit client)
-                        // Only skip if input is null (not in Excel)
-                        if (input != null)
+                        // INPUT action: Send the input value to the client
+                        // Only send if there's actual content
+                        if (!string.IsNullOrWhiteSpace(input))
                         {
-                            // Send input to the client process via unified-control.sh
-                            // Use SendInput action which restarts client with input piped
                             var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
                             try
                             {
                                 _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
+                                await Task.Delay(InputProcessingDelayMs);
+                                OnProgress($"    Input sent: '{input}'");
                             }
                             catch (Exception ex)
                             {
                                 OnProgress($"    WARNING: Failed to send input: {ex.Message}");
                             }
-                            
-                            await Task.Delay(InputProcessingDelayMs);
-                            
-                            OnProgress($"    Input sent: '{input}'");
+                        }
+                        else
+                        {
+                            OnProgress($"    Skipping empty input for stage {stage}");
                         }
                         break;
+                        
+                    case "SENDINPUT":
+                        // Legacy support - treat same as INPUT
+                        goto case "INPUT";
                         
                     case "CLOSECLIENT":
                         // Use unified-control.sh to stop client via supervisord
                         var stopClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseClient {stage}";
                         try
                         {
-                            _commandExecutor.RunCommand(stopClientCmd, null, null, 10000);
+                            _commandExecutor.RunCommand(stopClientCmd, null, null, 5000);
                         }
                         catch (Exception ex)
                         {
