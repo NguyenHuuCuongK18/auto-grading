@@ -2498,15 +2498,18 @@ namespace SolutionGrader.Core.Services
                 Directory.CreateDirectory(outputDir);
             }
             
+            // Extract the filename from the full path
+            var pcapFileName = Path.GetFileName(pcapOutputPath);
+            
             // Build the docker run command for network monitor sidecar
             // CRITICAL: 
             // - Use --net=container:{unifiedContainer} to attach to student's network namespace
             // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for tcpdump permissions
             // - Capture on loopback interface (-i lo) to catch localhost traffic
             // - NO port filtering - capture everything to detect student mistakes
-            // - Write to /capture/traffic.pcap inside container (bind-mounted to host)
+            // - Write to /capture/{pcapFileName} inside container (bind-mounted to host)
             
-            var containerPcapPath = "/capture/traffic.pcap";
+            var containerPcapPath = $"/capture/{pcapFileName}";
             var tcpdumpCommand = $"tcpdump -i lo -w {containerPcapPath} -U";  // -U for unbuffered writing
             
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
@@ -2514,7 +2517,7 @@ namespace SolutionGrader.Core.Services
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/capture\" " +         // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Alpine + tcpdump image
+                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image
                            tcpdumpCommand;                            // tcpdump command (no port filter!)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
