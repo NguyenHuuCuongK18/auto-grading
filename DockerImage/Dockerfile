@@ -63,5 +63,12 @@ WORKDIR /apps
 
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 
+# CRITICAL FIX: Prevent ASP.NET Core from auto-starting Kestrel web server
+# When appsettings.json exists, ASP.NET hosting infrastructure auto-initializes
+# and starts Kestrel even for console apps that don't explicitly create servers.
+# This caused "Hello World" console apps to pass network tests because Kestrel
+# was accepting TCP connections in the background.
+ENV ASPNETCORE_PREVENTHOSTINGSTARTUP=true
+
 # Keep container alive - startup script ensures ZERO NGINX interference
 ENTRYPOINT ["/startup.sh"]
