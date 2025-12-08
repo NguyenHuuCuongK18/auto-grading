@@ -28,27 +28,41 @@ wait_for_start() {
     return 1
 }
 
-# Helper function to mark stage in log
-mark_stage() {
+# Helper function to update stage environment variable in supervisord
+update_stage_env() {
     local program=$1
     local stage=$2
-    echo "=== STAGE $stage START $(date) ===" >> /logs/${program}.log
+    
+    # Update the STAGE environment variable for the program
+    # This requires updating the supervisord config and reloading
+    # For simplicity, we'll use a different approach: set environment before starting
+    
+    # Export for child processes
+    export STAGE=$stage
 }
 
 case "$ACTION" in
     StartServer)
         echo "[Control] Starting server for stage $STAGE"
-        mark_stage "server" "$STAGE"
         
         # Stop if already running
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
         
-        # Start server
+        # Update stage environment variable
+        # We need to update the supervisord config to use the new STAGE value
+        # Use sed to update the STAGE value in the environment line
+        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        
+        # Reread and update supervisord config
+        $SUPERVISORCTL reread 2>/dev/null || true
+        $SUPERVISORCTL update 2>/dev/null || true
+        
+        # Start server with new stage
         $SUPERVISORCTL start server
         
         if wait_for_start server; then
-            echo "[Control] Server started successfully for stage $STAGE"
+            echo "[Control] Server started successfully for stage $STAGE (logging to /apps/server/server-stage-$STAGE.log)"
             # Wait for server to bind to port
             sleep 1
         else
@@ -58,17 +72,23 @@ case "$ACTION" in
     
     StartClient)
         echo "[Control] Starting client for stage $STAGE"
-        mark_stage "client" "$STAGE"
         
         # Stop if already running
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
-        # Start client
+        # Update stage environment variable
+        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        
+        # Reread and update supervisord config
+        $SUPERVISORCTL reread 2>/dev/null || true
+        $SUPERVISORCTL update 2>/dev/null || true
+        
+        # Start client with new stage
         $SUPERVISORCTL start client
         
         if wait_for_start client; then
-            echo "[Control] Client started successfully for stage $STAGE"
+            echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-stage-$STAGE.log)"
         else
             echo "[Control] WARNING: Client may not have started for stage $STAGE"
         fi
@@ -77,27 +97,35 @@ case "$ACTION" in
     CloseServer)
         echo "[Control] Stopping server for stage $STAGE"
         $SUPERVISORCTL stop server
-        echo "=== STAGE $STAGE END $(date) ===" >> /logs/server.log
         sleep 0.2
         ;;
     
     CloseClient)
         echo "[Control] Stopping client for stage $STAGE"
         $SUPERVISORCTL stop client
-        echo "=== STAGE $STAGE END $(date) ===" >> /logs/client.log
         sleep 0.2
         ;;
     
     RestartServer)
         echo "[Control] Restarting server for stage $STAGE"
-        mark_stage "server" "$STAGE"
+        
+        # Update stage environment variable
+        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        $SUPERVISORCTL reread 2>/dev/null || true
+        $SUPERVISORCTL update 2>/dev/null || true
+        
         $SUPERVISORCTL restart server
         sleep 1
         ;;
     
     RestartClient)
         echo "[Control] Restarting client for stage $STAGE"
-        mark_stage "client" "$STAGE"
+        
+        # Update stage environment variable
+        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        $SUPERVISORCTL reread 2>/dev/null || true
+        $SUPERVISORCTL update 2>/dev/null || true
+        
         $SUPERVISORCTL restart client
         ;;
     

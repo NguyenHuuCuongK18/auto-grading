@@ -312,14 +312,14 @@ namespace SolutionGrader.Core.Services
                 
                 // Setup unified container
                 OnProgress($"Setting up unified Docker container for {studentCode}...");
-                logOutputDir = Path.Combine(studentResultPath, "Logs");
+                // Logs will be exported from container after grading
+                // They are written per stage inside the container to /apps/server and /apps/client
                 await SetupUnifiedContainerAsync(
                     actualServerDllPath, 
                     actualClientDllPath, 
                     config, 
                     testKitConfig, 
-                    unifiedContainer,
-                    logOutputDir);
+                    unifiedContainer);
                 
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");
@@ -627,32 +627,26 @@ namespace SolutionGrader.Core.Services
         /// Setup unified container that runs both client and server processes.
         /// Processes are managed by supervisord and started/stopped by test case actions.
         /// CLIENT AND SERVER ARE NOT STARTED AUTOMATICALLY - they start only when test case Detail.xlsx says so.
+        /// Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
         /// </summary>
         private async Task SetupUnifiedContainerAsync(
             string? serverDllPath,
             string? clientDllPath,
             DockerGradingConfig config,
             TestKitConfig testKitConfig,
-            string unifiedContainer,
-            string logOutputDir)
+            string unifiedContainer)
         {
             OnProgress($"[Unified] Creating unified container: {unifiedContainer}");
-            
-            // Create log output directory
-            Directory.CreateDirectory(logOutputDir);
             
             // Remove existing unified container if any
             _commandExecutor.RunCommand($"docker rm -f {unifiedContainer} 2>/dev/null || true", null, null, 10000);
             
-            // Create absolute paths
-            string absLogDir = Path.GetFullPath(logOutputDir);
-            
             // Create the unified container with supervisord
             // CRITICAL: Processes are NOT started automatically
             // They are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
+            // Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log
             var dockerCmd = $"docker run -d --name {unifiedContainer} " +
                            $"--network {config.DockerNetwork} " +
-                           $"-v \"{absLogDir}:/logs\" " +
                            $"-t " +  // TTY for unbuffered logs
                            $"{config.CodeImageName}";
             
@@ -671,6 +665,7 @@ namespace SolutionGrader.Core.Services
                 unifiedContainer);
             
             OnProgress($"[Unified] Container ready - processes will start when test cases execute StartClient/StartServer actions");
+            OnProgress($"[Unified] Logs will be written per stage: /apps/server/server-stage-N.log and /apps/client/client-stage-N.log");
         }
         
         /// <summary>

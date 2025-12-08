@@ -21,11 +21,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-# /apps/server - Server DLLs and appsettings
-# /apps/client - Client DLLs and appsettings  
-# /logs - Stage-specific log files (mounted from host)
+# /apps/server - Server DLLs, appsettings, and per-stage logs (server-stage-N.log)
+# /apps/client - Client DLLs, appsettings, and per-stage logs (client-stage-N.log)
 # /scripts - Control scripts for supervisorctl
-RUN mkdir -p /apps/server /apps/client /logs /scripts
+RUN mkdir -p /apps/server /apps/client /scripts
 
 # Copy supervisord configuration
 COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf

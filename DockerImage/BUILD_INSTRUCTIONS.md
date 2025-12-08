@@ -131,30 +131,30 @@ Pre-configured in the image:
 
 ### Volume Mounts
 
-When running the container:
+When running the container, mount the app folders to access logs:
 ```bash
 docker run -d \
   --name ag-unified-student123 \
   --network auto-grading-network \
-  -v /path/to/logs:/logs \
+  -v /path/to/server-output:/apps/server \
+  -v /path/to/client-output:/apps/client \
   fptuxaes/aes-dotnet8-console:latest
 ```
 
+Note: Logs are now in `/apps/server/` and `/apps/client/`, not `/logs/`.
+This allows easy export of per-stage log files.
+
 ### Logs
 
-Logs are written to `/logs` inside the container:
-- `server.log` - Server process output
-- `client.log` - Client process output
+Logs are written per stage to the app folders:
+- `/apps/server/server-stage-0.log` - Server output for stage 0
+- `/apps/server/server-stage-1.log` - Server output for stage 1
+- `/apps/client/client-stage-0.log` - Client output for stage 0
+- `/apps/client/client-stage-1.log` - Client output for stage 1
+- etc.
 
-Stage markers are automatically inserted:
-```
-=== STAGE 0 START 2025-12-08 07:00:00 ===
-<server output>
-=== STAGE 0 END 2025-12-08 07:00:05 ===
-=== STAGE 1 START 2025-12-08 07:00:10 ===
-<server output>
-=== STAGE 1 END 2025-12-08 07:00:15 ===
-```
+Each stage gets its own log file, making it easy to parse per-stage output.
+No stage markers needed - file separation provides stage isolation.
 
 ### Troubleshooting
 
