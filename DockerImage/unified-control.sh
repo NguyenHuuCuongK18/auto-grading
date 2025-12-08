@@ -82,16 +82,16 @@ case "$ACTION" in
         echo "[Control] Starting client for stage $STAGE"
         
         # Named pipe is created by the entrypoint script before Supervisord starts
-        # The pipe is held open by File Descriptor 3 in PID 1 (Supervisord)
-        # No background process needed - the FD lock is permanent
-        # Just verify the pipe exists
+        # The pipe is held open by a background 'sleep infinity' keeper process
+        # This prevents clients from receiving EOF when reading from empty pipe
+        # Just verify the pipe exists (we trust entrypoint started the keeper)
         if [ ! -p /tmp/client_input ]; then
             echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
             echo "[Control] The entrypoint should have created it. This is a critical error."
             exit 1
         fi
         
-        echo "[Control] Named pipe verified (held open by FD 3 in PID 1)"
+        echo "[Control] Named pipe verified (held open by keeper process)"
         
         # CRITICAL: Add delay before starting client to ensure network monitor is capturing
         # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
