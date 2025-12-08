@@ -301,14 +301,9 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Available Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
                 OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
-                // Register student with shared network monitor
-                // The monitor will filter packets by port for this student
-                if (_networkMonitor != null)
-                {
-                    var monitorPort = config.CodeContainerInternalPort;
-                    _networkMonitor.RegisterStudent(studentCode, monitorPort, testKitConfig.Protocol, _runContext);
-                    OnProgress($"[NetworkMonitor] Registered student {studentCode} on port {monitorPort}");
-                }
+                // NOTE: Network monitor is shared across all students (started by UI/CLI)
+                // No per-student registration needed - monitor captures all traffic on loopback
+                // and filters by port number (each student gets unique port)
                 
                 // Setup unified container
                 OnProgress($"Setting up unified Docker container for {studentCode}...");
@@ -390,7 +385,7 @@ namespace SolutionGrader.Core.Services
                         tcResult = await ExecuteTestCaseAsync(
                             testCase, testKitConfig, config, 
                             actualServerDllPath, actualClientDllPath,
-                            serverContainer, clientContainer, testCaseCts.Token);
+                            unifiedContainer, unifiedContainer, testCaseCts.Token);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
@@ -448,13 +443,8 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
                 }
                 
-                // Unregister student from shared network monitor
-                if (_networkMonitor != null)
-                {
-                    OnProgress($"[NetworkMonitor] Unregistering student {studentCode} from shared monitor...");
-                    _networkMonitor.UnregisterStudent(studentCode);
-                    OnProgress($"[NetworkMonitor] Student {studentCode} unregistered");
-                }
+                // NOTE: Shared network monitor continues running for all students
+                // No per-student unregistration needed
                 
                 // Cleanup unified container
                 await CleanupUnifiedContainerAsync(unifiedContainer, studentCode);
@@ -1023,8 +1013,8 @@ namespace SolutionGrader.Core.Services
             DockerGradingConfig config,
             string? serverDllPath,
             string? clientDllPath,
-            string serverContainer,
-            string clientContainer,
+            string unifiedContainer,
+            string _unused_clientContainer, // Legacy parameter, not used in unified approach
             CancellationToken ct)
         {
             var result = new TestCaseResult
@@ -1151,8 +1141,10 @@ namespace SolutionGrader.Core.Services
                 }).ToList();
                 
                 // Execute actions and capture outputs - UNIFIED CONTAINER (default)
-                var (clientOutputs, serverOutputs) = await ExecuteActionsForUnifiedContainerAsync(
+                var outputs = await ExecuteActionsForUnifiedContainerAsync(
                     actions, config, unifiedContainer, ct);
+                var clientOutputs = outputs.Item1;
+                var serverOutputs = outputs.Item2;
                 
                 // Compare outputs
                 var (earnedMark, passed, comparisons) = CompareOutputs(
