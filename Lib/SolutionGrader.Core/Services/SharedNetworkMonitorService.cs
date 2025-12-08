@@ -327,34 +327,42 @@ public sealed class SharedNetworkMonitorService : IDisposable
     /// </summary>
     private void UpdateBpfFilter()
     {
-        if (_device == null || !_isCapturing) return;
+        if (_devices.Count == 0 || !_isCapturing) return;
         
         var ports = _portToStudentCode.Keys.ToList();
+        string filterExpression;
+        
         if (ports.Count == 0)
         {
             // No ports registered, use dummy filter that matches nothing
-            try { _device.Filter = "tcp port 0"; } catch { }
-            return;
+            filterExpression = "tcp port 0";
+        }
+        else if (ports.Count == 1)
+        {
+            filterExpression = $"tcp port {ports[0]}";
+        }
+        else
+        {
+            var portList = string.Join(" or ", ports);
+            filterExpression = $"tcp port ({portList})";
         }
         
-        try
+        // CRITICAL FIX: Apply filter to ALL devices, not just the first one
+        int successCount = 0;
+        foreach (var device in _devices)
         {
-            if (ports.Count == 1)
+            try
             {
-                _device.Filter = $"tcp port {ports[0]}";
+                device.Filter = filterExpression;
+                successCount++;
             }
-            else
+            catch (Exception ex)
             {
-                var portList = string.Join(" or ", ports);
-                _device.Filter = $"tcp port ({portList})";
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Failed to set BPF filter on {device.Name}: {ex.Message}");
             }
-            
-            Console.WriteLine($"[SharedNetworkMonitor] Updated BPF filter for {ports.Count} ports");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[SharedNetworkMonitor] WARNING: Failed to update BPF filter: {ex.Message}");
-        }
+        
+        Console.WriteLine($"[SharedNetworkMonitor] Updated BPF filter for {ports.Count} ports on {successCount}/{_devices.Count} devices");
     }
     
     private List<ICaptureDevice> FindCandidateDevices()
