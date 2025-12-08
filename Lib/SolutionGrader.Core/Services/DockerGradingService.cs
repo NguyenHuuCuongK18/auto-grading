@@ -654,7 +654,7 @@ namespace SolutionGrader.Core.Services
                            $"--network {config.DockerNetwork} " +
                            $"-v \"{absLogDir}:/logs\" " +
                            $"-t " +  // TTY for unbuffered logs
-                           $"{config.UnifiedContainerImage}";
+                           $"{config.CodeImageName}";
             
             _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
             OnProgress($"[Unified] Container created - supervisord running, processes idle");
@@ -3437,10 +3437,10 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Image name for unified containers that run both client and server processes.
-        /// This image must have supervisord installed for process management.
-        /// Default: "fptuxaes/aes-dotnet8-unified:latest"
+        /// This image has supervisord installed for process management.
+        /// Default: "fptuxaes/aes-dotnet8-console:latest"
         /// </summary>
-        public string UnifiedContainerImage { get; set; } = "fptuxaes/aes-dotnet8-unified:latest";
+        public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
     }
     
     /// <summary>

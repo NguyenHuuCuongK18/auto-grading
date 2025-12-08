@@ -1,15 +1,30 @@
-# Unified Container Dockerfile for Auto-Grading System
-# Runs both client and server processes in a single container
-# Communicates via localhost (127.0.0.1) to eliminate proxy behavior
+# Auto-Grading Unified Container Image
+# Image: fptuxaes/aes-dotnet8-console:latest
+# 
+# This image runs both client and server processes in a single container.
+# Processes communicate via localhost (127.0.0.1) to eliminate proxy behavior.
+# Supervisord manages process lifecycle based on test case actions.
+#
+# Build Command:
+#   docker build -t fptuxaes/aes-dotnet8-console:latest -f DockerImage/Dockerfile.unified DockerImage/
+#
+# Push Command (if needed):
+#   docker push fptuxaes/aes-dotnet8-console:latest
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 # Install supervisord for process management
 RUN apt-get update && apt-get install -y \
     supervisor \
+    netcat-openbsd \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
+# /apps/server - Server DLLs and appsettings
+# /apps/client - Client DLLs and appsettings  
+# /logs - Stage-specific log files (mounted from host)
+# /scripts - Control scripts for supervisorctl
 RUN mkdir -p /apps/server /apps/client /logs /scripts
 
 # Copy supervisord configuration
@@ -19,6 +34,11 @@ COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
 COPY unified-control.sh /scripts/unified-control.sh
 RUN chmod +x /scripts/unified-control.sh
 
+# Set environment variables for .NET
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1
+
 # Expose supervisord HTTP interface (internal only)
 EXPOSE 9001
 
@@ -26,4 +46,6 @@ EXPOSE 9001
 WORKDIR /apps
 
 # Run supervisord as entrypoint
-ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+# This starts the process manager but does NOT start client/server
+# Client and server are started by test case actions via unified-control.sh
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
