@@ -1,7 +1,1 @@
-Student Information Client
-==========================
-Connecting to server at localhost:4002
-Enter student IDs (e.g., 'S001', 'S123')
-Press Enter (empty input) to exit
-
-Enter Student ID: Exiting...
+Server error: An invalid IP address was specified.
