@@ -374,12 +374,12 @@ namespace SolutionGrader.Core.Services
                         await Task.Delay(3000);
                     }
                     
-                    // Copy files to containers (will overwrite existing files)
+                    // Copy files to unified container (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
-                    await CopyFilesToContainersAsync(serverPath, clientPath, serverContainer, clientContainer, config);
+                    await CopyFilesToUnifiedContainerAsync(serverPath, clientPath, config, testKitConfig, unifiedContainer);
                     
-                    // Generate appsettings.json in containers
-                    GenerateAppsettingsInContainers(serverPath, clientPath, config, testKitConfig, serverContainer, clientContainer);
+                    // Generate appsettings.json in unified container
+                    GenerateAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
                     
                     isFirstTestCase = false;
                     
@@ -442,55 +442,28 @@ namespace SolutionGrader.Core.Services
             }
             finally
             {
-                // CRITICAL: Save docker logs BEFORE stopping network monitor and cleanup
-                // Once containers are removed, their logs are permanently lost
-                // This preserves diagnostic information for debugging test failures
+                // UNIFIED CONTAINER: Export per-stage log files from container to student directory
                 try
                 {
-                    OnProgress($"[Docker Logs] Saving container logs to {studentResultPath}...");
-                    await SaveDockerLogsAsync(serverContainer, clientContainer, studentResultPath);
-                    OnProgress($"[Docker Logs] Container logs saved successfully");
+                    OnProgress($"[Unified] Exporting per-stage log files from container...");
+                    await ExportLogsFromUnifiedContainerAsync(unifiedContainer, studentResultPath);
+                    OnProgress($"[Unified] Per-stage log files exported successfully");
                 }
                 catch (Exception ex)
                 {
-                    // Don't fail grading if log saving fails, just log the error
-                    OnProgress($"[Docker Logs] Warning: Failed to save container logs: {ex.Message}");
+                    OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
                 }
                 
-                // Stop network monitor based on mode
-                if (config.UseDockerInternalNetworking)
+                // Unregister student from shared network monitor
+                if (_networkMonitor != null)
                 {
-                    // Docker internal networking mode: Use container-based monitor
-                    if (monitorContainerName != null && monitorOutputDir != null)
-                    {
-                        OnProgress($"[NetworkMonitor] Retrieving captured traffic from monitor container...");
-                        var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
-                        OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
-                        OnProgress($"[NetworkMonitor] Pcap file saved to {Path.Combine(monitorOutputDir, "network_capture.pcap")}");
-                    }
-                }
-                else
-                {
-                    // Legacy mode: Stop SharedNetworkMonitor
-                    if (_networkMonitor != null)
-                    {
-                        OnProgress($"[NetworkMonitor] Stopping SharedNetworkMonitor for student {studentCode}...");
-                        await _networkMonitor.StopAsync(ct);
-                        OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
-                        
-                        // CRITICAL FIX: Add delay after stopping monitor to ensure:
-                        // 1. All in-flight packets are processed
-                        // 2. Student is properly unregistered from SharedNetworkMonitor
-                        // 3. Port is fully released before next student uses it
-                        // This prevents cross-contamination between students
-                        OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
-                        await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
-                        OnProgress($"[NetworkMonitor] Monitor cleanup complete");
-                    }
+                    OnProgress($"[NetworkMonitor] Unregistering student {studentCode} from shared monitor...");
+                    _networkMonitor.UnregisterStudent(studentCode);
+                    OnProgress($"[NetworkMonitor] Student {studentCode} unregistered");
                 }
                 
-                // Cleanup code containers (server and client only, database is shared)
-                await CleanupContainersAsync(serverContainer, clientContainer);
+                // Cleanup unified container
+                await CleanupUnifiedContainerAsync(unifiedContainer, studentCode);
                 
                 // CRITICAL FIX: Cleanup the student's database INSTANCE within the shared container
                 // This drops the database (e.g., Library_student1) but keeps the container running
@@ -1421,6 +1394,91 @@ namespace SolutionGrader.Core.Services
             }
         }
         
+        /// <summary>
+        /// Generate appsettings.json for UNIFIED container.
+        /// Server goes to /apps/server/appsettings.json, Client goes to /apps/client/appsettings.json.
+        /// Both use localhost (127.0.0.1) for communication within the same container.
+        /// </summary>
+        private void GenerateAppsettingsInUnifiedContainer(
+            DockerGradingConfig config,
+            TestKitConfig testKitConfig,
+            string unifiedContainer)
+        {
+            var connectionString = ConnectionStringHelper.BuildForDocker(
+                config.DatabaseContainerHostPort,
+                testKitConfig.DatabaseName,
+                config.DatabaseUsername,
+                config.DatabasePassword ?? DefaultDatabasePassword);
+            
+            // UNIFIED CONTAINER: Both client and server use localhost (127.0.0.1)
+            // Server binds to 127.0.0.1, Client connects to 127.0.0.1
+            var serverIpAddress = "127.0.0.1";  // Bind to localhost
+            var clientIpAddress = "127.0.0.1";  // Connect to localhost
+            
+            var port = config.CodeContainerInternalPort;
+            var serverPort = port.ToString();
+            var clientPort = port.ToString();
+            
+            OnProgress($"[Unified] Generating appsettings for localhost communication (127.0.0.1:{port})");
+            
+            // Generate SERVER appsettings
+            var serverConfig = $@"{{
+  ""ConnectionStrings"": {{ ""MyCnn"": ""{connectionString}"" }},
+  ""IpAddress"": ""{serverIpAddress}"",
+  ""Port"": ""{serverPort}""
+}}";
+            
+            string? tempServerFile = null;
+            try
+            {
+                // Remove any existing appsettings from student files
+                OnProgress($"[Unified] Removing old server appsettings");
+                _dockerExecutor.ExecDockerCommand($"{unifiedContainer} rm -f /apps/server/appsettings.json", 3000);
+                
+                tempServerFile = Path.Combine(Path.GetTempPath(), $"appsettings_unified_server_{Guid.NewGuid()}.json");
+                File.WriteAllText(tempServerFile, serverConfig);
+                _dockerExecutor.CopyFileToContainer(tempServerFile, $"{unifiedContainer}:/apps/server/appsettings.json");
+                OnProgress($"[Unified] Server appsettings: 127.0.0.1:{serverPort} -> /apps/server/appsettings.json");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to generate server appsettings: {ex.Message}");
+            }
+            finally
+            {
+                if (tempServerFile != null && File.Exists(tempServerFile))
+                    try { File.Delete(tempServerFile); } catch { }
+            }
+            
+            // Generate CLIENT appsettings
+            var clientConfig = $@"{{
+  ""IpAddress"": ""{clientIpAddress}"",
+  ""Port"": ""{clientPort}""
+}}";
+            
+            string? tempClientFile = null;
+            try
+            {
+                // Remove any existing appsettings from student files
+                OnProgress($"[Unified] Removing old client appsettings");
+                _dockerExecutor.ExecDockerCommand($"{unifiedContainer} rm -f /apps/client/appsettings.json", 3000);
+                
+                tempClientFile = Path.Combine(Path.GetTempPath(), $"appsettings_unified_client_{Guid.NewGuid()}.json");
+                File.WriteAllText(tempClientFile, clientConfig);
+                _dockerExecutor.CopyFileToContainer(tempClientFile, $"{unifiedContainer}:/apps/client/appsettings.json");
+                OnProgress($"[Unified] Client appsettings: 127.0.0.1:{clientPort} -> /apps/client/appsettings.json");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to generate client appsettings: {ex.Message}");
+            }
+            finally
+            {
+                if (tempClientFile != null && File.Exists(tempClientFile))
+                    try { File.Delete(tempClientFile); } catch { }
+            }
+        }
+        
         #endregion
         
         #region Test Case Execution
@@ -1558,11 +1616,9 @@ namespace SolutionGrader.Core.Services
                     ActionType = a.Action
                 }).ToList();
                 
-                // Execute actions and capture outputs - use the resolved DLLs
-                var (clientOutputs, serverOutputs) = await ExecuteActionsAsync(
-                    actions, config, testKitConfig,
-                    actualServerDll, actualClientDll,
-                    serverContainer, clientContainer, ct);
+                // Execute actions and capture outputs - UNIFIED CONTAINER (default)
+                var (clientOutputs, serverOutputs) = await ExecuteActionsForUnifiedContainerAsync(
+                    actions, config, unifiedContainer, ct);
                 
                 // Compare outputs
                 var (earnedMark, passed, comparisons) = CompareOutputs(
@@ -1863,6 +1919,153 @@ namespace SolutionGrader.Core.Services
                 // OPTIMIZATION: Very brief delay between test cases (no need to wait longer)
                 // Containers remain running, only processes are killed
                 await Task.Delay(10);
+            }
+            
+            return (clientOutputs, serverOutputs);
+        }
+        
+        /// <summary>
+        /// Execute test case actions for UNIFIED container (client and server in same container).
+        /// Uses unified-control.sh script to start/stop processes via supervisord.
+        /// Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// </summary>
+        private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsForUnifiedContainerAsync(
+            List<(int Stage, string Input, string Action)> actions,
+            DockerGradingConfig config,
+            string unifiedContainer,
+            CancellationToken ct)
+        {
+            var clientOutputs = new Dictionary<int, string>();
+            var serverOutputs = new Dictionary<int, string>();
+            
+            foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
+            {
+                ct.ThrowIfCancellationRequested();
+                
+                // Update network monitor stage context
+                _networkMonitor?.SetCurrentContext("", stage.ToString());
+                
+                OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
+                
+                switch (action.ToUpperInvariant())
+                {
+                    case "STARTSERVER":
+                        // Use unified-control.sh to start server via supervisord
+                        var startServerCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartServer {stage}";
+                        _commandExecutor.RunCommand(startServerCmd, null, null, 30000);
+                        
+                        await Task.Delay(StartupDelayMs);
+                        
+                        OnProgress($"    Server started for stage {stage} (logging to /apps/server/server-stage-{stage}.log)");
+                        break;
+                        
+                    case "STARTCLIENT":
+                        // Use unified-control.sh to start client via supervisord
+                        var startClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartClient {stage}";
+                        _commandExecutor.RunCommand(startClientCmd, null, null, 30000);
+                        
+                        await Task.Delay(StartupDelayMs);
+                        
+                        OnProgress($"    Client started for stage {stage} (logging to /apps/client/client-stage-{stage}.log)");
+                        break;
+                        
+                    case "INPUT":
+                    case "SENDINPUT":
+                        if (!string.IsNullOrEmpty(input))
+                        {
+                            // Send input to the unified container
+                            // The input will be directed to the client process via stdin
+                            var sendInputCmd = $"docker exec -i {unifiedContainer} /bin/bash -c 'echo \"{input}\" | supervisorctl fg client'";
+                            try
+                            {
+                                _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
+                            }
+                            catch (Exception ex)
+                            {
+                                OnProgress($"    WARNING: Failed to send input: {ex.Message}");
+                            }
+                            
+                            await Task.Delay(InputProcessingDelayMs);
+                            
+                            OnProgress($"    Input sent: '{input}'");
+                        }
+                        break;
+                        
+                    case "CLOSECLIENT":
+                        // Use unified-control.sh to stop client via supervisord
+                        var stopClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseClient {stage}";
+                        try
+                        {
+                            _commandExecutor.RunCommand(stopClientCmd, null, null, 10000);
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"    WARNING: Failed to stop client: {ex.Message}");
+                        }
+                        
+                        OnProgress($"    Client stopped for stage {stage}");
+                        break;
+                        
+                    case "CLOSESERVER":
+                        // Use unified-control.sh to stop server via supervisord
+                        var stopServerCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseServer {stage}";
+                        try
+                        {
+                            _commandExecutor.RunCommand(stopServerCmd, null, null, 10000);
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"    WARNING: Failed to stop server: {ex.Message}");
+                        }
+                        
+                        OnProgress($"    Server stopped for stage {stage}");
+                        break;
+                }
+                
+                await Task.Delay(10);  // Brief delay between actions
+            }
+            
+            // After all actions complete, read log files from container for each stage
+            OnProgress($"[Unified] Reading per-stage log files from container...");
+            
+            // Collect all stages that had actions
+            var allStages = actions.Select(a => a.Stage).Distinct().OrderBy(s => s).ToList();
+            
+            foreach (var stage in allStages)
+            {
+                // Read server log for this stage
+                try
+                {
+                    var serverLogCmd = $"docker exec {unifiedContainer} cat /apps/server/server-stage-{stage}.log";
+                    var serverLog = _commandExecutor.RunCommand(serverLogCmd, null, null, 5000);
+                    if (!string.IsNullOrEmpty(serverLog))
+                    {
+                        serverOutputs[stage] = serverLog;
+                        OnProgress($"    Server stage {stage}: {serverLog.Length} chars");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"    WARNING: Could not read server log for stage {stage}: {ex.Message}");
+                    serverOutputs[stage] = "";
+                }
+                
+                // Read client log for this stage
+                try
+                {
+                    var clientLogCmd = $"docker exec {unifiedContainer} cat /apps/client/client-stage-{stage}.log";
+                    var clientLog = _commandExecutor.RunCommand(clientLogCmd, null, null, 5000);
+                    if (!string.IsNullOrEmpty(clientLog))
+                    {
+                        clientOutputs[stage] = clientLog;
+                        OnProgress($"    Client stage {stage}: {clientLog.Length} chars");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"    WARNING: Could not read client log for stage {stage}: {ex.Message}");
+                    clientOutputs[stage] = "";
+                }
             }
             
             return (clientOutputs, serverOutputs);
@@ -2733,6 +2936,115 @@ namespace SolutionGrader.Core.Services
         /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
         /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
         /// </summary>
+        /// <summary>
+        /// Export per-stage log files from unified container to student result directory.
+        /// Logs are in /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// </summary>
+        private async Task ExportLogsFromUnifiedContainerAsync(string unifiedContainer, string studentResultPath)
+        {
+            var logsDir = Path.Combine(studentResultPath, "ProcessLogs");
+            Directory.CreateDirectory(logsDir);
+            
+            OnProgress($"[Unified] Exporting logs to {logsDir}");
+            
+            // Export all server log files
+            try
+            {
+                var serverLogsCmd = $"docker exec {unifiedContainer} find /apps/server -name 'server-stage-*.log' -type f";
+                var serverLogFiles = _commandExecutor.RunCommand(serverLogsCmd, null, null, 5000);
+                
+                if (!string.IsNullOrEmpty(serverLogFiles))
+                {
+                    var logPaths = serverLogFiles.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var logPath in logPaths)
+                    {
+                        var fileName = Path.GetFileName(logPath.Trim());
+                        var destPath = Path.Combine(logsDir, fileName);
+                        
+                        try
+                        {
+                            _dockerExecutor.CopyFileFromContainer($"{unifiedContainer}:{logPath.Trim()}", destPath);
+                            OnProgress($"[Unified] Exported {fileName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[Unified] WARNING: Failed to export {fileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to list server logs: {ex.Message}");
+            }
+            
+            // Export all client log files
+            try
+            {
+                var clientLogsCmd = $"docker exec {unifiedContainer} find /apps/client -name 'client-stage-*.log' -type f";
+                var clientLogFiles = _commandExecutor.RunCommand(clientLogsCmd, null, null, 5000);
+                
+                if (!string.IsNullOrEmpty(clientLogFiles))
+                {
+                    var logPaths = clientLogFiles.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var logPath in logPaths)
+                    {
+                        var fileName = Path.GetFileName(logPath.Trim());
+                        var destPath = Path.Combine(logsDir, fileName);
+                        
+                        try
+                        {
+                            _dockerExecutor.CopyFileFromContainer($"{unifiedContainer}:{logPath.Trim()}", destPath);
+                            OnProgress($"[Unified] Exported {fileName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[Unified] WARNING: Failed to export {fileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to list client logs: {ex.Message}");
+            }
+            
+            await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Cleanup unified container after grading.
+        /// Removes the container and unregisters student from shared monitor.
+        /// </summary>
+        private async Task CleanupUnifiedContainerAsync(string unifiedContainer, string studentCode)
+        {
+            OnProgress($"[Unified] Starting cleanup for {unifiedContainer}");
+            
+            try
+            {
+                // Stop all processes in the container
+                try
+                {
+                    _commandExecutor.RunCommand($"docker exec {unifiedContainer} /scripts/unified-control.sh StopAll", null, null, 5000);
+                    OnProgress($"[Unified] Stopped all processes in {unifiedContainer}");
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"[Unified] WARNING: Failed to stop processes: {ex.Message}");
+                }
+                
+                // Remove the unified container
+                _dockerExecutor.RemoveContainer(unifiedContainer);
+                OnProgress($"[Unified] Removed container {unifiedContainer}");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to remove container: {ex.Message}");
+            }
+            
+            await Task.CompletedTask;
+        }
+        
         private async Task CleanupContainersAsync(string serverContainer, string clientContainer)
         {
             _consoleManager.RemoveAllAttachments();
