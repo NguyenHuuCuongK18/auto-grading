@@ -73,25 +73,20 @@ case "$ACTION" in
     StartClient)
         echo "[Control] Starting client for stage $STAGE"
         
-        # Create named pipe for client input if it doesn't exist
-        # CRITICAL: Must be created BEFORE starting the client process
+        # Named pipe is created by the entrypoint script before Supervisord starts
+        # This eliminates the race condition where client starts before the keeper is ready
+        # Just verify it exists
         if [ ! -p /tmp/client_input ]; then
-            mkfifo /tmp/client_input
-            echo "[Control] Created named pipe /tmp/client_input"
+            echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
+            echo "[Control] The entrypoint should have created it. This is a critical error."
+            exit 1
         fi
         
-        # CRITICAL FIX: Use tail -f to keep the pipe open
-        # This prevents EOF from being sent to the client immediately
-        # tail -f /dev/null is more reliable than sleep infinity in minimal shells
-        # Check if any process is keeping the pipe open
+        # Verify keeper is running
         if ! pgrep -f "tail.*client_input" > /dev/null; then
-            # Start dummy writer to hold the pipe open
-            tail -f /dev/null > /tmp/client_input &
-            PIPE_KEEPER_PID=$!
-            echo "[Control] Started pipe keeper with tail -f (PID: $PIPE_KEEPER_PID)"
-            # CRITICAL: Give the pipe keeper time to establish the write lock
-            # Without this delay, the client may start before the writer is ready
-            sleep 0.5
+            echo "[Control] WARNING: Pipe keeper not found! Client may receive EOF immediately."
+        else
+            echo "[Control] Pipe keeper verified running"
         fi
         
         # Stop client if already running
