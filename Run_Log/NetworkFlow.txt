@@ -1,0 +1,73 @@
+2025-12-08 09:02:33	TCP	TCP	127.0.0.1:54878	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:02:33	TCP	TCP	127.0.0.1:4000	127.0.0.1:54878	RST, ACK	Connection reset (RST) - Error occurred				No payload
+2025-12-08 09:02:33	TCP	TCP	127.0.0.1:54879	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:02:33	TCP	TCP	127.0.0.1:4000	127.0.0.1:54879	RST, ACK	Connection reset (RST) - Error occurred				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:54887	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:4000	127.0.0.1:54887	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:54887	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:4000	127.0.0.1:54887	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:54887	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:54887	127.0.0.1:4000	PSH, ACK	Data transfer in progress				S001
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:4000	127.0.0.1:54887	ACK	Connection established				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:54887	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:02:46	TCP	TCP	127.0.0.1:4000	127.0.0.1:54887	ACK	Connection established				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:54898	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:4000	127.0.0.1:54898	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:54898	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:4000	127.0.0.1:54898	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:54898	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:02:59	TCP	TCP	127.0.0.1:54898	127.0.0.1:4000	PSH, ACK	Data transfer in progress				S123
+2025-12-08 09:03:00	TCP	TCP	127.0.0.1:4000	127.0.0.1:54898	ACK	Connection established				No payload
+2025-12-08 09:03:00	TCP	TCP	127.0.0.1:54898	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:00	TCP	TCP	127.0.0.1:4000	127.0.0.1:54898	ACK	Connection established				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:60968	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:4000	127.0.0.1:60968	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:60968	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:4000	127.0.0.1:60968	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:60968	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:60968	127.0.0.1:4000	PSH, ACK	Data transfer in progress				S123
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:4000	127.0.0.1:60968	ACK	Connection established				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:60968	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:14	TCP	TCP	127.0.0.1:4000	127.0.0.1:60968	ACK	Connection established				No payload
+2025-12-08 09:03:27	TCP	TCP	127.0.0.1:60974	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:03:27	TCP	TCP	127.0.0.1:4000	127.0.0.1:60974	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:60974	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:4000	127.0.0.1:60974	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:60974	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:60974	127.0.0.1:4000	PSH, ACK	Data transfer in progress				S001
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:4000	127.0.0.1:60974	ACK	Connection established				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:60974	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:28	TCP	TCP	127.0.0.1:4000	127.0.0.1:60974	ACK	Connection established				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:55500	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:4000	127.0.0.1:55500	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:55500	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:4000	127.0.0.1:55500	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:55500	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:55500	127.0.0.1:4000	PSH, ACK	Data transfer in progress				s001
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:4000	127.0.0.1:55500	ACK	Connection established				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:55500	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:41	TCP	TCP	127.0.0.1:4000	127.0.0.1:55500	ACK	Connection established				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:55508	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:4000	127.0.0.1:55508	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:55508	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:4000	127.0.0.1:55508	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:55508	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:55508	127.0.0.1:4000	PSH, ACK	Data transfer in progress				Sabc
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:4000	127.0.0.1:55508	ACK	Connection established				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:55508	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:03:55	TCP	TCP	127.0.0.1:4000	127.0.0.1:55508	ACK	Connection established				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:55511	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:4000	127.0.0.1:55511	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:55511	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:4000	127.0.0.1:55511	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:55511	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:55511	127.0.0.1:4000	PSH, ACK	Data transfer in progress				S111
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:4000	127.0.0.1:55511	ACK	Connection established				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:55511	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:04:01	TCP	TCP	127.0.0.1:4000	127.0.0.1:55511	ACK	Connection established				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:55513	127.0.0.1:4000	SYN	Client connecting to server (SYN)				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:4000	127.0.0.1:55513	SYN, ACK	Server responding (SYN-ACK)				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:55513	127.0.0.1:4000	ACK	Connection established				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:55513	127.0.0.1:4000	FIN, ACK	Connection closing (FIN-ACK)				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:4000	127.0.0.1:55513	ACK	Connection established				No payload
+2025-12-08 09:04:04	TCP	TCP	127.0.0.1:4000	127.0.0.1:55513	RST, ACK	Connection reset (RST) - Error occurred				No payload
