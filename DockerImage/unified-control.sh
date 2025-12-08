@@ -74,20 +74,16 @@ case "$ACTION" in
         echo "[Control] Starting client for stage $STAGE"
         
         # Named pipe is created by the entrypoint script before Supervisord starts
-        # This eliminates the race condition where client starts before the keeper is ready
-        # Just verify it exists
+        # The pipe is held open by File Descriptor 3 in PID 1 (Supervisord)
+        # No background process needed - the FD lock is permanent
+        # Just verify the pipe exists
         if [ ! -p /tmp/client_input ]; then
             echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
             echo "[Control] The entrypoint should have created it. This is a critical error."
             exit 1
         fi
         
-        # Verify keeper is running
-        if ! pgrep -f "tail.*client_input" > /dev/null; then
-            echo "[Control] WARNING: Pipe keeper not found! Client may receive EOF immediately."
-        else
-            echo "[Control] Pipe keeper verified running"
-        fi
+        echo "[Control] Named pipe verified (held open by FD 3 in PID 1)"
         
         # Stop client if already running
         $SUPERVISORCTL stop client 2>/dev/null || true

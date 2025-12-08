@@ -1,45 +1,30 @@
 #!/bin/sh
 # Unified Container Entrypoint
 # This script runs BEFORE Supervisord to ensure the named pipe is ready
+# Uses File Descriptor (FD) lock for robust pipe persistence
 
 PIPE_PATH="/tmp/client_input"
 
-echo "[Entrypoint] Phase 1: Creating the Named Pipe..."
-# 1. Force remove old pipe to ensure a clean state
+echo "[Entrypoint] Setting up the Golden Pipe..."
+
+# 1. Clean and Create
 rm -f "$PIPE_PATH"
-
-# 2. Create the pipe
 mkfifo "$PIPE_PATH"
-
-# 3. Open permissions (crucial for non-root users)
 chmod 777 "$PIPE_PATH"
 
-echo "[Entrypoint] Phase 2: Starting the Keeper..."
-# 4. Start the Keeper in the background
-# tail -f /dev/null is reliable and explicitly holds the file descriptor open
-tail -f /dev/null > "$PIPE_PATH" &
-KEEPER_PID=$!
+# 2. THE FD LOCK: Open the pipe on File Descriptor 3
+# This attaches the pipe to the Entrypoint shell itself (PID 1)
+# '<>' opens it for both reading and writing, keeping it 'busy'
+# No background process needed - the shell itself holds the lock
+# This FD will be inherited by Supervisord when we exec
+exec 3<> "$PIPE_PATH"
 
-echo "[Entrypoint] Phase 3: Verifying the Keeper..."
-# 5. THE BLOCKING CHECK - ensures the pipe is actually open by a writer
-# We wait until the keeper is confirmed running before starting Supervisord
-for i in $(seq 1 10); do
-    # Check if the PID is still alive
-    if ! kill -0 "$KEEPER_PID" 2>/dev/null; then
-        echo "[Entrypoint] ERROR: Keeper died! Exiting."
-        exit 1
-    fi
-    
-    # Brief delay to ensure the keeper has opened the pipe
-    # This prevents the race condition where client starts before writer is ready
-    sleep 0.5
-done
-
-echo "[Entrypoint] Phase 4: Pipe is ready (Keeper PID: $KEEPER_PID)"
+echo "[Entrypoint] Pipe is locked on FD 3. It will NEVER close."
 echo "[Entrypoint] Pipe verification: $(ls -l $PIPE_PATH)"
 echo "[Entrypoint] Starting Supervisord..."
 
-# 6. Start Supervisord
+# 3. Start Supervisord
 # exec replaces the shell process, so Supervisord becomes PID 1
-# The keeper continues running as a background process
+# Supervisord inherits the open FD 3, keeping the pipe alive
+# No race conditions, no background process to manage
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
