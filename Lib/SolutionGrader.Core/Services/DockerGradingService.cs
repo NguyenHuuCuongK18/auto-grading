@@ -3053,6 +3053,14 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Start network monitor container to capture traffic for Docker internal networking mode.
         /// The monitor container runs tcpdump on the same Docker network as student containers.
+        /// 
+        /// CRITICAL REQUIREMENTS FOR PACKET CAPTURE:
+        /// 1. NET_ADMIN capability: Required for tcpdump to access network interfaces
+        /// 2. NET_RAW capability: Required for tcpdump to capture raw packets
+        /// 3. Attached to same Docker network as student containers
+        /// 4. Filter expression must match actual traffic (tcp port {port})
+        /// 
+        /// Without these capabilities, tcpdump will fail silently or produce empty pcap files.
         /// </summary>
         private async Task StartNetworkMonitorContainerAsync(string monitorContainerName, int port, string outputDir, string dockerNetwork)
         {
@@ -3066,11 +3074,14 @@ namespace SolutionGrader.Core.Services
                 // Remove existing monitor container if any
                 _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
                 
-                // Start network monitor container
-                // Mount output directory to save pcap file
+                // Start network monitor container with required capabilities for packet capture
+                // CRITICAL: --cap-add=NET_ADMIN and --cap-add=NET_RAW are REQUIRED for tcpdump
+                // Without these, tcpdump cannot capture packets and pcap file remains empty
                 string absOutputDir = Path.GetFullPath(outputDir);
                 string dockerCmd = $"docker run -d --name {monitorContainerName} " +
                                  $"--network {dockerNetwork} " +
+                                 $"--cap-add=NET_ADMIN " +
+                                 $"--cap-add=NET_RAW " +
                                  $"-v \"{absOutputDir}:/capture\" " +
                                  $"fptuxaes/network-monitor:latest " +
                                  $"tcpdump -i any -w /capture/network_capture.pcap \"tcp port {port}\"";
@@ -3079,6 +3090,7 @@ namespace SolutionGrader.Core.Services
                 
                 OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
                 OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
+                OnProgress($"[NetworkMonitor] Capabilities: NET_ADMIN, NET_RAW (required for packet capture)");
                 
                 // Give tcpdump a moment to start
                 await Task.Delay(500);
@@ -3260,20 +3272,33 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Use Docker internal networking instead of port mapping.
         /// 
-        /// When true:
-        /// - Client connects to server via container name (e.g., "ag-server-student123")
-        /// - No port mappings (-p) are created
-        /// - Network monitor captures on Docker bridge network
-        /// - Eliminates Docker's NAT proxy behavior (no ghost SYN-ACK responses)
+        /// When true (RECOMMENDED - Docker Internal Networking):
+        /// - Client connects to server via container name (e.g., "ag-server-student123:8000")
+        /// - No port mappings (-p) are created - eliminates Docker NAT proxy behavior
+        /// - Traffic stays within Docker bridge network (no proxy interference)
+        /// - Network monitor runs as a container with NET_ADMIN/NET_RAW capabilities
+        /// - Monitor container captures traffic on Docker bridge network with tcpdump
+        /// - Provides accurate network flow without Docker proxy "ghost" SYN-ACK responses
         /// 
-        /// When false (legacy mode):
-        /// - Client connects to "host.docker.internal"
-        /// - Port mappings expose server port to host
-        /// - Network monitor captures on host loopback
-        /// - Docker's NAT proxy responds with SYN-ACK even when server exits
+        /// When false (Legacy Port Mapping Mode):
+        /// - Client connects to "host.docker.internal:{port}"
+        /// - Server port is exposed to host via `-p {hostPort}:{containerPort}`
+        /// - Docker's NAT proxy responds with SYN-ACK even when student server exits
+        /// - Can produce false positives (proxy accepts connection when server is dead)
+        /// - Network monitor (SharpPcap) captures on host, but sees proxy behavior
         /// 
-        /// Default: false (legacy mode) - temporarily reverted due to network capture issues
-        /// TODO: Change back to true once bridge network capture is verified working
+        /// ARCHITECTURE CHOICE:
+        /// Internal networking (true) is recommended because:
+        /// 1. Eliminates Docker NAT proxy interference (no ghost SYN-ACK)
+        /// 2. Accurate representation of student code behavior
+        /// 3. Container-to-container communication is direct and clean
+        /// 4. Monitor container sees actual traffic without proxy layer
+        /// 
+        /// REQUIREMENTS:
+        /// - Network monitor container must have --cap-add=NET_ADMIN --cap-add=NET_RAW
+        /// - Network monitor image: fptuxaes/network-monitor:latest
+        /// 
+        /// Default: true (Docker Internal Networking with container-based monitoring)
         /// </summary>
         public bool UseDockerInternalNetworking { get; set; } = true;
     }
