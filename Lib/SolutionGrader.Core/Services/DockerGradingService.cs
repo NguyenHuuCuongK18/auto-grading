@@ -72,6 +72,10 @@ namespace SolutionGrader.Core.Services
         private readonly IRunContext _runContext;
         private string? _currentStudentCode; // Track current student for logging
         
+        // Network monitoring for sidecar pattern
+        private string? _currentPcapFilePath; // Path to pcap file being written by network monitor
+        private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
+        
         /// <summary>
         /// Event raised when grading progress is updated.
         /// </summary>
@@ -319,6 +323,8 @@ namespace SolutionGrader.Core.Services
                 // Setup network monitor container attached to unified container
                 var monitorContainer = $"ag-monitor-{studentCode}";
                 pcapFilePath = Path.Combine(studentResultPath, "network_capture.pcap");
+                _currentPcapFilePath = pcapFilePath; // Store for per-stage parsing
+                _lastParsedPacketCount = 0; // Reset packet counter
                 Directory.CreateDirectory(studentResultPath);
                 
                 OnProgress($"Setting up network monitor container for {studentCode}...");
@@ -1337,33 +1343,19 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Gets all captured network packets from the NetworkMonitor.
         /// 
-        /// SIDECAR PATTERN (NEW):
-        /// With the sidecar monitor approach, packets are captured to a pcap file
-        /// during the entire grading session. The pcap file is parsed AFTER all
-        /// test cases complete, not during individual test case execution.
-        /// 
-        /// For now, this returns empty list during test execution. Network packet
-        /// analysis will be done post-grading from the pcap file.
+        /// SIDECAR PATTERN (NEW - LIVE GRADING):
+        /// Packets are parsed from pcap file PER-STAGE and added to RunContext during execution.
+        /// This enables live per-stage validation for all-or-nothing grading strategy.
         /// 
         /// LEGACY PATTERN (OLD):
         /// Uses SharedNetworkMonitorService on HOST to capture packets in real-time.
         /// </summary>
         private List<CapturedNetworkPacket> GetCapturedNetworkPackets()
         {
-            // SIDECAR PATTERN: Network packets are in pcap file, not available during test execution
-            // Return empty list for now - packets will be analyzed from pcap file after grading
-            // This is a simplified approach that focuses on getting the infrastructure working first
-            
-            if (_networkMonitor == null)
-            {
-                // Using sidecar pattern - packets will be in pcap file
-                OnProgress("[NetworkMonitor] Using sidecar pattern - network data will be in pcap file");
-                return new List<CapturedNetworkPacket>();
-            }
-            
-            // LEGACY: Get packets from SharedNetworkMonitorService (if still being used)
             // Get ALL captured packets from the RunContext (across all stages)
-            // Returns packets with Stage, Timestamp, Flags, State, SourceRole, DestinationRole, Data, etc.
+            // This works for both:
+            // - Sidecar pattern: Packets parsed per-stage from pcap and added to RunContext
+            // - Legacy pattern: Packets captured real-time by SharedNetworkMonitorService
             return _runContext.GetAllCapturedNetworkPackets().ToList();
         }
         
@@ -1415,10 +1407,12 @@ namespace SolutionGrader.Core.Services
                         
                     case "INPUT":
                     case "SENDINPUT":
-                        if (!string.IsNullOrEmpty(input))
+                        // Allow empty inputs (e.g., pressing Enter with no text to exit client)
+                        // Only skip if input is null (not in Excel)
+                        if (input != null)
                         {
                             // Send input to the client process via unified-control.sh
-                            // Use SendInput action which finds the client PID and writes to its stdin
+                            // Use SendInput action which restarts client with input piped
                             var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
                             try
                             {
@@ -1464,6 +1458,14 @@ namespace SolutionGrader.Core.Services
                         
                         OnProgress($"    Server stopped for stage {stage}");
                         break;
+                }
+                
+                // LIVE GRADING: Parse network packets for current stage
+                // This enables per-stage validation (all-or-nothing grading strategy)
+                if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath))
+                {
+                    // Using sidecar pattern - parse pcap file for this stage
+                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort);
                 }
                 
                 await Task.Delay(10);  // Brief delay between actions
@@ -3037,6 +3039,176 @@ namespace SolutionGrader.Core.Services
         /// When the server container is removed, the monitor container automatically stops.
         /// This method ensures the monitor is properly stopped and removed, and the pcap file is analyzed.
         /// </summary>
+        
+        /// <summary>
+        /// Parse pcap file for current stage and add new packets to RunContext.
+        /// This enables live per-stage network validation.
+        /// Only parses packets that haven't been processed yet (tracks via _lastParsedPacketCount).
+        /// </summary>
+        private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
+        {
+            if (string.IsNullOrEmpty(_currentPcapFilePath) || !File.Exists(_currentPcapFilePath))
+            {
+                // Pcap file doesn't exist yet - this is normal for early stages
+                return;
+            }
+            
+            try
+            {
+                // Use tcpdump to read pcap with detailed output
+                // -r: read from file
+                // -nn: don't resolve names/ports
+                // -tttt: human-readable timestamps
+                // -v: verbose (shows flags clearly)
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "tcpdump",
+                    Arguments = $"-r \"{_currentPcapFilePath}\" -nn -tttt -v tcp",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var process = Process.Start(psi);
+                if (process == null) return;
+                
+                string output = await process.StandardOutput.ReadToEndAsync();
+                await process.WaitForExitAsync();
+                
+                // Parse tcpdump output
+                // Example: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
+                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                
+                // Skip packets we've already processed
+                var newPackets = lines.Skip(_lastParsedPacketCount).ToList();
+                
+                foreach (var line in newPackets)
+                {
+                    if (string.IsNullOrWhiteSpace(line) || !line.Contains(" > ")) continue;
+                    
+                    try
+                    {
+                        // Parse packet details
+                        var packet = ParseTcpdumpLine(line, currentStage, port);
+                        if (packet != null)
+                        {
+                            // Add to RunContext for this stage
+                            _runContext.AddCapturedNetworkPacket(_currentStudentCode ?? "", currentStage.ToString(), packet);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip malformed lines
+                        continue;
+                    }
+                }
+                
+                // Update counter to skip these packets next time
+                _lastParsedPacketCount = lines.Length;
+                
+                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] Error parsing pcap for stage {currentStage}: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Parse a single tcpdump output line into CapturedNetworkPacket.
+        /// Example line: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
+        /// </summary>
+        private CapturedNetworkPacket? ParseTcpdumpLine(string line, int stage, int expectedPort)
+        {
+            // Extract timestamp
+            var timestampMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)");
+            DateTime timestamp = timestampMatch.Success && DateTime.TryParse(timestampMatch.Groups[1].Value, out var dt) 
+                ? dt 
+                : DateTime.Now;
+            
+            // Extract source and destination: "IP 127.0.0.1.47044 > 127.0.0.1.4000:"
+            var addressMatch = System.Text.RegularExpressions.Regex.Match(line, @"IP (\d+\.\d+\.\d+\.\d+)\.(\d+) > (\d+\.\d+\.\d+\.\d+)\.(\d+)");
+            if (!addressMatch.Success) return null;
+            
+            var srcIp = addressMatch.Groups[1].Value;
+            var srcPort = int.Parse(addressMatch.Groups[2].Value);
+            var dstIp = addressMatch.Groups[3].Value;
+            var dstPort = int.Parse(addressMatch.Groups[4].Value);
+            
+            // Determine roles based on port
+            string srcRole, dstRole;
+            if (srcPort == expectedPort)
+            {
+                srcRole = "Server";
+                dstRole = "Client";
+            }
+            else if (dstPort == expectedPort)
+            {
+                srcRole = "Client";
+                dstRole = "Server";
+            }
+            else
+            {
+                // Not related to our expected port
+                return null;
+            }
+            
+            // Extract flags: [S] = SYN, [S.] = SYN-ACK, [.] = ACK, [P.] = PSH-ACK, [F.] = FIN-ACK, [R] = RST
+            string flags = "UNKNOWN";
+            string state = "";
+            
+            if (line.Contains("Flags [S]") && !line.Contains("Flags [S.]"))
+            {
+                flags = "SYN";
+                state = "SYN_SENT";
+            }
+            else if (line.Contains("Flags [S.]"))
+            {
+                flags = "SYN-ACK";
+                state = "SYN_RECEIVED";
+            }
+            else if (line.Contains("Flags [.]") && !line.Contains("Flags [P.]") && !line.Contains("Flags [F.]"))
+            {
+                flags = "ACK";
+                state = "ESTABLISHED";
+            }
+            else if (line.Contains("Flags [P.]"))
+            {
+                flags = "PSH-ACK";
+                state = "ESTABLISHED";
+            }
+            else if (line.Contains("Flags [F.]"))
+            {
+                flags = "FIN-ACK";
+                state = "FIN_WAIT";
+            }
+            else if (line.Contains("Flags [R]"))
+            {
+                flags = "RST";
+                state = "RESET";
+            }
+            
+            // Extract payload (if any)
+            // Look for "length N" at the end
+            var lengthMatch = System.Text.RegularExpressions.Regex.Match(line, @"length (\d+)");
+            string data = lengthMatch.Success && int.Parse(lengthMatch.Groups[1].Value) > 0 
+                ? $"{lengthMatch.Groups[1].Value} bytes"
+                : "";
+            
+            return new CapturedNetworkPacket
+            {
+                Stage = stage,
+                Timestamp = timestamp,
+                Flags = flags,
+                State = state,
+                SourceRole = srcRole,
+                DestinationRole = dstRole,
+                Data = data,
+                SourcePort = srcPort,
+                DestinationPort = dstPort
+            };
+        }
         
         /// <summary>
         /// Parse pcap file using tcpdump to extract network flows.
