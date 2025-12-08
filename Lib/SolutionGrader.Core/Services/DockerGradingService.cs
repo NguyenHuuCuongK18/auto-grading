@@ -2532,7 +2532,7 @@ namespace SolutionGrader.Core.Services
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
                            $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i lo -n -U -v -w {pcapFileName}";      // Capture on loopback, no name resolution, unbuffered, verbose
+                           $"-i lo -n -U -v -w /data/{pcapFileName}";  // CRITICAL: Write to mounted /data/ directory
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
