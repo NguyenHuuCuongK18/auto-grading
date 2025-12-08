@@ -359,6 +359,7 @@ namespace SolutionGrader.Core.Services
                 
                 // Start network monitor container if using Docker internal networking
                 // This container runs for the entire student grading session, capturing all test cases
+                // Uses SIDECAR approach: monitor shares network namespace with server container
                 if (config.UseDockerInternalNetworking)
                 {
                     monitorContainerName = $"ag-monitor-{studentCode}";
@@ -367,8 +368,8 @@ namespace SolutionGrader.Core.Services
                         monitorContainerName,
                         config.CodeContainerInternalPort,
                         monitorOutputDir,
-                        config.DockerNetwork);
-                    OnProgress($"[NetworkMonitor] Container-based monitor started for {studentCode} on port {config.CodeContainerInternalPort}");
+                        serverContainer); // Pass server container name for sidecar attachment
+                    OnProgress($"[NetworkMonitor] Sidecar monitor started for {studentCode} on port {config.CodeContainerInternalPort}");
                 }
                 
                 // Notify that containers are ready (for staggered startup optimization)
@@ -3052,17 +3053,24 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Start network monitor container to capture traffic for Docker internal networking mode.
-        /// The monitor container runs tcpdump on the same Docker network as student containers.
+        /// 
+        /// SIDECAR APPROACH (Option A):
+        /// The monitor container shares the network namespace of the server container using
+        /// --net=container:{serverContainer}. This "sidecar" approach provides:
+        /// 1. Full visibility into server's network traffic (sees everything server sends/receives)
+        /// 2. Direct access to server's network interface (eth0)
+        /// 3. Platform-independent (works on Linux, Windows, Mac)
+        /// 4. No bridge network complexity or switching isolation issues
         /// 
         /// CRITICAL REQUIREMENTS FOR PACKET CAPTURE:
         /// 1. NET_ADMIN capability: Required for tcpdump to access network interfaces
         /// 2. NET_RAW capability: Required for tcpdump to capture raw packets
-        /// 3. Attached to same Docker network as student containers
+        /// 3. Attached to server container's network namespace via --net=container
         /// 4. Filter expression must match actual traffic (tcp port {port})
         /// 
         /// Without these capabilities, tcpdump will fail silently or produce empty pcap files.
         /// </summary>
-        private async Task StartNetworkMonitorContainerAsync(string monitorContainerName, int port, string outputDir, string dockerNetwork)
+        private async Task StartNetworkMonitorContainerAsync(string monitorContainerName, int port, string outputDir, string serverContainerName)
         {
             try
             {
@@ -3074,12 +3082,16 @@ namespace SolutionGrader.Core.Services
                 // Remove existing monitor container if any
                 _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
                 
-                // Start network monitor container with required capabilities for packet capture
+                // Start network monitor container using SIDECAR approach
+                // CRITICAL: --net=container:{serverContainer} shares the server's network namespace
+                // This allows the monitor to see ALL traffic going in/out of the server container
+                // as if it were running directly inside the server container itself
+                //
                 // CRITICAL: --cap-add=NET_ADMIN and --cap-add=NET_RAW are REQUIRED for tcpdump
                 // Without these, tcpdump cannot capture packets and pcap file remains empty
                 string absOutputDir = Path.GetFullPath(outputDir);
                 string dockerCmd = $"docker run -d --name {monitorContainerName} " +
-                                 $"--network {dockerNetwork} " +
+                                 $"--net=container:{serverContainerName} " +
                                  $"--cap-add=NET_ADMIN " +
                                  $"--cap-add=NET_RAW " +
                                  $"-v \"{absOutputDir}:/capture\" " +
@@ -3088,8 +3100,9 @@ namespace SolutionGrader.Core.Services
                 
                 _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
                 
-                OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
+                OnProgress($"[NetworkMonitor] Started sidecar monitor {monitorContainerName} attached to {serverContainerName}");
                 OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
+                OnProgress($"[NetworkMonitor] Mode: Sidecar (shares network namespace with server container)");
                 OnProgress($"[NetworkMonitor] Capabilities: NET_ADMIN, NET_RAW (required for packet capture)");
                 
                 // Give tcpdump a moment to start
@@ -3104,6 +3117,11 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Stop network monitor container and analyze captured traffic.
         /// Returns network flow data parsed from the pcap file.
+        /// 
+        /// SIDECAR CLEANUP:
+        /// When using --net=container:{serverContainer}, the monitor shares the server's network namespace.
+        /// When the server container is removed, the monitor container automatically stops.
+        /// This method ensures the monitor is properly stopped and removed, and the pcap file is analyzed.
         /// </summary>
         private async Task<List<Dictionary<string, string>>> StopNetworkMonitorContainerAsync(string monitorContainerName, string outputDir)
         {
@@ -3111,10 +3129,13 @@ namespace SolutionGrader.Core.Services
             
             try
             {
+                OnProgress($"[NetworkMonitor] Stopping sidecar monitor {monitorContainerName}...");
+                
                 // Stop the monitor container (tcpdump will flush pcap file)
+                // With sidecar approach, monitor may already be stopped if server was removed first
                 _commandExecutor.RunCommand($"docker stop {monitorContainerName} 2>/dev/null || true", null, null, 10000);
                 
-                // Give it a moment to flush
+                // Give it a moment to flush pcap file to disk
                 await Task.Delay(500);
                 
                 // Parse the pcap file
@@ -3129,13 +3150,25 @@ namespace SolutionGrader.Core.Services
                 {
                     OnProgress($"[NetworkMonitor] WARNING: No pcap file found at {pcapFile}");
                 }
-                
-                // Remove the monitor container
-                _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
             }
             catch (Exception ex)
             {
-                OnProgress($"[NetworkMonitor] WARNING: Error stopping monitor: {ex.Message}");
+                OnProgress($"[NetworkMonitor] WARNING: Error during monitor analysis: {ex.Message}");
+            }
+            finally
+            {
+                // CRITICAL: Always remove the monitor container, even if errors occurred
+                // This ensures no orphaned monitor containers accumulate during batch grading
+                try
+                {
+                    OnProgress($"[NetworkMonitor] Removing monitor container {monitorContainerName}...");
+                    _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
+                    OnProgress($"[NetworkMonitor] Monitor container {monitorContainerName} removed successfully");
+                }
+                catch (Exception rmEx)
+                {
+                    OnProgress($"[NetworkMonitor] WARNING: Failed to remove monitor container: {rmEx.Message}");
+                }
             }
             
             return networkFlows;
@@ -3272,12 +3305,13 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Use Docker internal networking instead of port mapping.
         /// 
-        /// When true (RECOMMENDED - Docker Internal Networking):
+        /// When true (RECOMMENDED - Docker Internal Networking with Sidecar Monitoring):
         /// - Client connects to server via container name (e.g., "ag-server-student123:8000")
         /// - No port mappings (-p) are created - eliminates Docker NAT proxy behavior
         /// - Traffic stays within Docker bridge network (no proxy interference)
-        /// - Network monitor runs as a container with NET_ADMIN/NET_RAW capabilities
-        /// - Monitor container captures traffic on Docker bridge network with tcpdump
+        /// - Network monitor runs as SIDECAR container attached to server's network namespace
+        /// - Monitor uses --net=container:{serverContainer} to share server's network interface
+        /// - Monitor sees ALL traffic going in/out of server (complete visibility)
         /// - Provides accurate network flow without Docker proxy "ghost" SYN-ACK responses
         /// 
         /// When false (Legacy Port Mapping Mode):
@@ -3287,18 +3321,20 @@ namespace SolutionGrader.Core.Services
         /// - Can produce false positives (proxy accepts connection when server is dead)
         /// - Network monitor (SharpPcap) captures on host, but sees proxy behavior
         /// 
-        /// ARCHITECTURE CHOICE:
-        /// Internal networking (true) is recommended because:
-        /// 1. Eliminates Docker NAT proxy interference (no ghost SYN-ACK)
-        /// 2. Accurate representation of student code behavior
-        /// 3. Container-to-container communication is direct and clean
-        /// 4. Monitor container sees actual traffic without proxy layer
+        /// SIDECAR MONITORING ARCHITECTURE (Option A):
+        /// The monitor container shares the server container's network namespace:
+        /// 1. Monitor attaches via --net=container:{serverContainer}
+        /// 2. Sees server's network interface (eth0) as if running inside server
+        /// 3. No bridge switching isolation - direct visibility
+        /// 4. Platform-independent (works on Linux, Windows, Mac)
+        /// 5. When server stops, monitor automatically stops (shared lifecycle)
         /// 
         /// REQUIREMENTS:
         /// - Network monitor container must have --cap-add=NET_ADMIN --cap-add=NET_RAW
         /// - Network monitor image: fptuxaes/network-monitor:latest
+        /// - Server container must be running before monitor is attached
         /// 
-        /// Default: true (Docker Internal Networking with container-based monitoring)
+        /// Default: true (Docker Internal Networking with sidecar monitoring)
         /// </summary>
         public bool UseDockerInternalNetworking { get; set; } = true;
     }
