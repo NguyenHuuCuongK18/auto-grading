@@ -2507,6 +2507,9 @@ namespace SolutionGrader.Core.Services
             if (!string.IsNullOrEmpty(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
+                // CRITICAL: Convert to absolute path for Docker volume mount
+                // Docker requires absolute paths for volume mounts, relative paths will fail
+                outputDir = Path.GetFullPath(outputDir);
             }
             
             // Extract the filename from the full path
