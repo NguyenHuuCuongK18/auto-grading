@@ -200,6 +200,10 @@ namespace SolutionGrader.Core.Services
             // This allows multiple students to share the same container without data conflicts
             string studentDatabaseName = "";
             
+            // Network monitor container variables (for Docker internal networking mode)
+            string? monitorContainerName = null;
+            string? monitorOutputDir = null;
+            
             try
             {
                 OnProgress($"Loading test kit configuration from {testKitPath}...");
@@ -314,11 +318,6 @@ namespace SolutionGrader.Core.Services
                 //
                 // PARALLEL GRADING: Each student gets their own monitor instance configured
                 // with their specific port (basePort + portOffset) to avoid conflicts
-                if (_networkMonitor != null)
-                {
-                    var monitorPort = config.UseDockerInternalNetworking 
-                        ? config.CodeContainerInternalPort   // Monitor container's internal port
-                        : config.CodeContainerHostPort;      // Monitor host's exposed port
                 
                 // Start network monitor based on mode
                 if (config.UseDockerInternalNetworking)
@@ -331,6 +330,10 @@ namespace SolutionGrader.Core.Services
                     // Legacy mode: Use SharedNetworkMonitor for host-based capture
                     if (_networkMonitor != null)
                     {
+                        var monitorPort = config.UseDockerInternalNetworking 
+                            ? config.CodeContainerInternalPort   // Monitor container's internal port
+                            : config.CodeContainerHostPort;      // Monitor host's exposed port
+                        
                         _networkMonitor.MonitorPort = monitorPort;
                         _networkMonitor.ProtocolType = testKitConfig.Protocol;
                         
@@ -353,8 +356,6 @@ namespace SolutionGrader.Core.Services
                 
                 // Start network monitor container if using Docker internal networking
                 // This container runs for the entire student grading session, capturing all test cases
-                string? monitorContainerName = null;
-                string? monitorOutputDir = null;
                 if (config.UseDockerInternalNetworking)
                 {
                     monitorContainerName = $"ag-monitor-{studentCode}";
@@ -3045,50 +3046,6 @@ namespace SolutionGrader.Core.Services
             // Invoke the event to send progress update
             ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(formattedMessage));
         }
-    }
-    
-    #region Model Classes
-    
-    /// <summary>
-    /// Configuration for Docker-based grading.
-    /// </summary>
-    public class DockerGradingConfig
-    {
-        /// <summary>
-        /// Whether the examiner expects the student to provide a CLIENT component.
-        /// If true, the grader will search for the client DLL in student's solution.
-        /// If false and a client is needed, use the golden client from Meta/Given/Client.
-        /// </summary>
-        public bool HasClient { get; set; } = true;
-        
-        /// <summary>
-        /// Whether the examiner expects the student to provide a SERVER component.
-        /// If true, the grader will search for the server DLL in student's solution.
-        /// If false and a server is needed, use the golden server from Meta/Given/Server.
-        /// </summary>
-        public bool HasServer { get; set; } = true;
-        
-        /// <summary>
-        /// Project name for the client DLL (e.g., "Project12" searches for "Project12.dll")
-        /// </summary>
-        public string ClientProjectName { get; set; } = "Project12";
-        
-        /// <summary>
-        /// Project name for the server DLL (e.g., "Project11" searches for "Project11.dll")
-        /// </summary>
-        public string ServerProjectName { get; set; } = "Project11";
-        
-        public int CodeContainerInternalPort { get; set; } = 8000;
-        public int CodeContainerHostPort { get; set; } = 8000;
-        public string DockerNetwork { get; set; } = "auto-grading-network";
-        
-        // Database container settings
-        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
-        public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
-        public int DatabaseContainerInternalPort { get; set; } = 1433;
-        public int DatabaseContainerHostPort { get; set; } = 1434;
-        public string? DatabaseUsername { get; set; } = "sa";
-        public string? DatabasePassword { get; set; }
         
         /// <summary>
         /// Start network monitor container to capture traffic for Docker internal networking mode.
@@ -3104,7 +3061,7 @@ namespace SolutionGrader.Core.Services
                 string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
                 
                 // Remove existing monitor container if any
-                _dockerExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+                _dockerExecutor.ExecDockerCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
                 
                 // Start network monitor container
                 // Mount output directory to save pcap file
@@ -3115,7 +3072,7 @@ namespace SolutionGrader.Core.Services
                                  $"fptuxaes/network-monitor:latest " +
                                  $"tcpdump -i any -w /capture/network_capture.pcap \"tcp port {port}\"";
                 
-                _dockerExecutor.RunCommand(dockerCmd);
+                _dockerExecutor.ExecDockerCommand(dockerCmd);
                 
                 OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
                 OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
@@ -3140,7 +3097,7 @@ namespace SolutionGrader.Core.Services
             try
             {
                 // Stop the monitor container (tcpdump will flush pcap file)
-                _dockerExecutor.RunCommand($"docker stop {monitorContainerName} 2>/dev/null || true");
+                _dockerExecutor.ExecDockerCommand($"docker stop {monitorContainerName} 2>/dev/null || true");
                 
                 // Give it a moment to flush
                 await Task.Delay(500);
@@ -3159,7 +3116,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Remove the monitor container
-                _dockerExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+                _dockerExecutor.ExecDockerCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
             }
             catch (Exception ex)
             {
@@ -3232,6 +3189,50 @@ namespace SolutionGrader.Core.Services
             
             return flows;
         }
+    }
+    
+    #region Model Classes
+    
+    /// <summary>
+    /// Configuration for Docker-based grading.
+    /// </summary>
+    public class DockerGradingConfig
+    {
+        /// <summary>
+        /// Whether the examiner expects the student to provide a CLIENT component.
+        /// If true, the grader will search for the client DLL in student's solution.
+        /// If false and a client is needed, use the golden client from Meta/Given/Client.
+        /// </summary>
+        public bool HasClient { get; set; } = true;
+        
+        /// <summary>
+        /// Whether the examiner expects the student to provide a SERVER component.
+        /// If true, the grader will search for the server DLL in student's solution.
+        /// If false and a server is needed, use the golden server from Meta/Given/Server.
+        /// </summary>
+        public bool HasServer { get; set; } = true;
+        
+        /// <summary>
+        /// Project name for the client DLL (e.g., "Project12" searches for "Project12.dll")
+        /// </summary>
+        public string ClientProjectName { get; set; } = "Project12";
+        
+        /// <summary>
+        /// Project name for the server DLL (e.g., "Project11" searches for "Project11.dll")
+        /// </summary>
+        public string ServerProjectName { get; set; } = "Project11";
+        
+        public int CodeContainerInternalPort { get; set; } = 8000;
+        public int CodeContainerHostPort { get; set; } = 8000;
+        public string DockerNetwork { get; set; } = "auto-grading-network";
+        
+        // Database container settings
+        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
+        public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
+        public int DatabaseContainerInternalPort { get; set; } = 1433;
+        public int DatabaseContainerHostPort { get; set; } = 1434;
+        public string? DatabaseUsername { get; set; } = "sa";
+        public string? DatabasePassword { get; set; }
         
         /// <summary>
         /// Total grading timeout in seconds (overall timeout for all test cases).
