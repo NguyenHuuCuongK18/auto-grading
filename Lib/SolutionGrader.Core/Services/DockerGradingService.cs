@@ -1567,18 +1567,34 @@ namespace SolutionGrader.Core.Services
             int clientBaseline = 0;
             int serverBaseline = 0;
             
-            foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
+            // Start network monitor container if using Docker internal networking
+            string? monitorContainerName = null;
+            string? monitorOutputDir = null;
+            if (config.UseDockerInternalNetworking && !string.IsNullOrEmpty(_currentStudentCode))
             {
-                ct.ThrowIfCancellationRequested();
-                
-                // Update network monitor stage context
-                _networkMonitor?.SetCurrentContext("", stage.ToString());
-                
-                OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
-                
-                switch (action.ToUpperInvariant())
+                monitorContainerName = $"ag-monitor-{_currentStudentCode}";
+                monitorOutputDir = Path.Combine(config.StudentResultPath ?? ".", "NetworkCapture");
+                await StartNetworkMonitorContainerAsync(
+                    monitorContainerName,
+                    config.CodeContainerInternalPort,
+                    monitorOutputDir,
+                    config.DockerNetwork);
+            }
+            
+            try
+            {
+                foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
                 {
-                    case "STARTSERVER":
+                    ct.ThrowIfCancellationRequested();
+                    
+                    // Update network monitor stage context
+                    _networkMonitor?.SetCurrentContext("", stage.ToString());
+                    
+                    OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
+                    
+                    switch (action.ToUpperInvariant())
+                    {
+                        case "STARTSERVER":
                         if (!string.IsNullOrEmpty(serverDllPath))
                         {
                             var serverDirPath = Path.GetDirectoryName(serverDllPath);
@@ -1691,6 +1707,22 @@ namespace SolutionGrader.Core.Services
             
             return (clientOutputs, serverOutputs);
         }
+        finally
+        {
+            // Stop network monitor container and retrieve captured traffic
+            if (config.UseDockerInternalNetworking && monitorContainerName != null && monitorOutputDir != null)
+            {
+                var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
+                
+                // TODO: Integrate network flows into result analysis
+                // For now, just log that we captured them
+                if (networkFlows.Count > 0)
+                {
+                    OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
+                }
+            }
+        }
+    }
         
         #endregion
         
@@ -3046,6 +3078,149 @@ namespace SolutionGrader.Core.Services
         public int DatabaseContainerHostPort { get; set; } = 1434;
         public string? DatabaseUsername { get; set; } = "sa";
         public string? DatabasePassword { get; set; }
+        
+        /// <summary>
+        /// Start network monitor container to capture traffic for Docker internal networking mode.
+        /// The monitor container runs tcpdump on the same Docker network as student containers.
+        /// </summary>
+        private async Task StartNetworkMonitorContainerAsync(string monitorContainerName, int port, string outputDir, string dockerNetwork)
+        {
+            try
+            {
+                // Create output directory
+                Directory.CreateDirectory(outputDir);
+                
+                string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
+                
+                // Remove existing monitor container if any
+                _dockerExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+                
+                // Start network monitor container
+                // Mount output directory to save pcap file
+                string absOutputDir = Path.GetFullPath(outputDir);
+                string dockerCmd = $"docker run -d --name {monitorContainerName} " +
+                                 $"--network {dockerNetwork} " +
+                                 $"-v \"{absOutputDir}:/capture\" " +
+                                 $"fptuxaes/network-monitor:latest " +
+                                 $"tcpdump -i any -w /capture/network_capture.pcap \"tcp port {port}\"";
+                
+                _dockerExecutor.RunCommand(dockerCmd);
+                
+                OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
+                OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
+                
+                // Give tcpdump a moment to start
+                await Task.Delay(500);
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] WARNING: Failed to start monitor container: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Stop network monitor container and analyze captured traffic.
+        /// Returns network flow data parsed from the pcap file.
+        /// </summary>
+        private async Task<List<Dictionary<string, string>>> StopNetworkMonitorContainerAsync(string monitorContainerName, string outputDir)
+        {
+            var networkFlows = new List<Dictionary<string, string>>();
+            
+            try
+            {
+                // Stop the monitor container (tcpdump will flush pcap file)
+                _dockerExecutor.RunCommand($"docker stop {monitorContainerName} 2>/dev/null || true");
+                
+                // Give it a moment to flush
+                await Task.Delay(500);
+                
+                // Parse the pcap file
+                string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
+                if (File.Exists(pcapFile))
+                {
+                    OnProgress($"[NetworkMonitor] Analyzing captured traffic from {pcapFile}");
+                    networkFlows = await ParsePcapFileAsync(pcapFile);
+                    OnProgress($"[NetworkMonitor] Found {networkFlows.Count} network packets");
+                }
+                else
+                {
+                    OnProgress($"[NetworkMonitor] WARNING: No pcap file found at {pcapFile}");
+                }
+                
+                // Remove the monitor container
+                _dockerExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] WARNING: Error stopping monitor: {ex.Message}");
+            }
+            
+            return networkFlows;
+        }
+        
+        /// <summary>
+        /// Parse pcap file using tcpdump to extract network flows.
+        /// Returns list of packets with SYN/ACK/PSH/RST flags.
+        /// </summary>
+        private async Task<List<Dictionary<string, string>>> ParsePcapFileAsync(string pcapFile)
+        {
+            var flows = new List<Dictionary<string, string>>();
+            
+            try
+            {
+                // Use tcpdump to read the pcap file
+                // Format: timestamp src > dst: flags [...]
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "tcpdump",
+                    Arguments = $"-r \"{pcapFile}\" -nn -tttt",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using (var process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        OnProgress("[NetworkMonitor] Failed to start tcpdump for parsing");
+                        return flows;
+                    }
+                    
+                    string output = await process.StandardOutput.ReadToEndAsync();
+                    await process.WaitForExitAsync();
+                    
+                    // Parse tcpdump output
+                    // Example: "2024-12-08 05:00:00.123456 IP 172.18.0.2.54321 > 172.18.0.3.4000: Flags [S], ..."
+                    var lines = output.Split('\n');
+                    foreach (var line in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        
+                        var packet = new Dictionary<string, string>();
+                        
+                        // Extract flags: [S] = SYN, [.] = ACK, [P] = PSH, [R] = RST, [F] = FIN
+                        if (line.Contains("Flags [S]")) packet["Flags"] = "SYN";
+                        else if (line.Contains("Flags [S.]")) packet["Flags"] = "SYN-ACK";
+                        else if (line.Contains("Flags [.]")) packet["Flags"] = "ACK";
+                        else if (line.Contains("Flags [P.]")) packet["Flags"] = "PSH-ACK";
+                        else if (line.Contains("Flags [R]")) packet["Flags"] = "RST";
+                        else if (line.Contains("Flags [F.]")) packet["Flags"] = "FIN-ACK";
+                        else packet["Flags"] = "OTHER";
+                        
+                        packet["RawLine"] = line;
+                        flows.Add(packet);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] Error parsing pcap: {ex.Message}");
+            }
+            
+            return flows;
+        }
         
         /// <summary>
         /// Total grading timeout in seconds (overall timeout for all test cases).
