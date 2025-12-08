@@ -443,6 +443,21 @@ namespace SolutionGrader.Core.Services
             }
             finally
             {
+                // CRITICAL: Save docker logs BEFORE stopping network monitor and cleanup
+                // Once containers are removed, their logs are permanently lost
+                // This preserves diagnostic information for debugging test failures
+                try
+                {
+                    OnProgress($"[Docker Logs] Saving container logs to {studentResultPath}...");
+                    await SaveDockerLogsAsync(serverContainer, clientContainer, studentResultPath);
+                    OnProgress($"[Docker Logs] Container logs saved successfully");
+                }
+                catch (Exception ex)
+                {
+                    // Don't fail grading if log saving fails, just log the error
+                    OnProgress($"[Docker Logs] Warning: Failed to save container logs: {ex.Message}");
+                }
+                
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
@@ -2392,6 +2407,72 @@ namespace SolutionGrader.Core.Services
             await SetupDatabaseContainerAsync(config);
             
             OnProgress($"[Database] Database container reset complete");
+        }
+        
+        /// <summary>
+        /// Saves Docker container logs to persistent files in the student's result directory.
+        /// 
+        /// CRITICAL: This must be called BEFORE container cleanup, as docker logs are destroyed
+        /// when containers are removed. These logs are essential for debugging test failures,
+        /// especially when student's server exits immediately (e.g., "Hello World" and exit).
+        /// 
+        /// Logs are saved to:
+        /// - {studentResultPath}/DockerLogs/server.log
+        /// - {studentResultPath}/DockerLogs/client.log
+        /// </summary>
+        /// <param name="serverContainer">Server container name</param>
+        /// <param name="clientContainer">Client container name</param>
+        /// <param name="studentResultPath">Path to student's result directory</param>
+        private async Task SaveDockerLogsAsync(string serverContainer, string clientContainer, string studentResultPath)
+        {
+            var logsDir = Path.Combine(studentResultPath, "DockerLogs");
+            Directory.CreateDirectory(logsDir);
+            
+            // Save server logs
+            try
+            {
+                var serverLogPath = Path.Combine(logsDir, "server.log");
+                var serverLogs = _dockerExecutor.GetContainerLogs(serverContainer);
+                
+                if (!string.IsNullOrEmpty(serverLogs))
+                {
+                    await File.WriteAllTextAsync(serverLogPath, serverLogs);
+                    OnProgress($"[Docker Logs] Server logs saved to {serverLogPath} ({serverLogs.Length} bytes)");
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(serverLogPath, "[No server logs captured]");
+                    OnProgress($"[Docker Logs] No server logs to save (container may not have started)");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Logs] Warning: Failed to save server logs: {ex.Message}");
+            }
+            
+            // Save client logs
+            try
+            {
+                var clientLogPath = Path.Combine(logsDir, "client.log");
+                var clientLogs = _dockerExecutor.GetContainerLogs(clientContainer);
+                
+                if (!string.IsNullOrEmpty(clientLogs))
+                {
+                    await File.WriteAllTextAsync(clientLogPath, clientLogs);
+                    OnProgress($"[Docker Logs] Client logs saved to {clientLogPath} ({clientLogs.Length} bytes)");
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(clientLogPath, "[No client logs captured]");
+                    OnProgress($"[Docker Logs] No client logs to save (container may not have started)");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Logs] Warning: Failed to save client logs: {ex.Message}");
+            }
+            
+            OnProgress($"[Docker Logs] All docker logs saved to {logsDir}");
         }
         
         /// <summary>
