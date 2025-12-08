@@ -254,9 +254,11 @@ namespace SolutionGrader.UI.Services
                 // Create services
                 IRunContext runctx = new RunContext();
                 
-                // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
-                // Per user request: Singular network monitor with port-based traffic isolation
-                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(studentCode, runctx);
+                // SIDECAR PATTERN: Network monitoring is done via Docker containers attached to student containers
+                // The sidecar monitor captures traffic on the container's loopback interface
+                // Pass null to DockerGradingService - it will create per-student network monitor containers
+                // This replaces the old HOST-based SharedNetworkMonitorAdapter approach
+                INetworkMonitorService? networkMonitor = null;  // Sidecar pattern - no HOST monitoring
 
                 // Create DockerGradingService from Lib
                 var dockerGrading = new DockerGradingService(networkMonitor, runctx);

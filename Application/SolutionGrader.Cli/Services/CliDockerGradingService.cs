@@ -469,11 +469,11 @@ namespace SolutionGrader.Cli.Services
                 // Create the SHARED services (same as SolutionGrader.UI)
                 IRunContext runContext = new RunContext();
                 
-                // OPTIMIZATION: Use SharedNetworkMonitorAdapter for optimal resource usage
-                // This uses a single shared monitor for all students instead of one per student
-                // 97% reduction in monitor instances (e.g., 1 monitor for 32 students instead of 32)
-                // CRITICAL: Pass runContext so packets are stored for grading system
-                INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(student.StudentCode, runContext);
+                // SIDECAR PATTERN: Network monitoring is done via Docker containers attached to student containers
+                // The sidecar monitor captures traffic on the container's loopback interface
+                // Pass null to DockerGradingService - it will create per-student network monitor containers
+                // This replaces the old HOST-based SharedNetworkMonitorAdapter approach
+                INetworkMonitorService? networkMonitor = null;  // Sidecar pattern - no HOST monitoring
 
                 // Create the SHARED DockerGradingService
                 var dockerGradingService = new DockerGradingService(networkMonitor, runContext);
