@@ -60,7 +60,17 @@ namespace SolutionGrader.Core.Services
 
         public void StartServer()
         {
-            if (_server is { HasExited: false }) return;
+            // CRITICAL FIX: Do NOT restart server if it has exited
+            // A properly implemented server should stay running and handle multiple requests.
+            // If the server exits, it's a bug in the student's code - tests should fail.
+            // Previously, this allowed automatic restart which created false positives:
+            //   - Student's "Hello World" server would exit immediately
+            //   - System would restart it for each test input
+            //   - Each restart accepted one connection before exiting
+            //   - Network monitor captured "successful" handshakes
+            //   - Tests incorrectly passed even though code was broken
+            if (_server != null) return;  // Once started, never restart (even if exited)
+            
             if (string.IsNullOrWhiteSpace(_serverPath) || !File.Exists(_serverPath))
                 throw new FileNotFoundException($"Server executable not found: {_serverPath}");
 
