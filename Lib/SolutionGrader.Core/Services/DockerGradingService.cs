@@ -360,16 +360,10 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // For subsequent test cases, cleanup before re-copying
-                    if (!isFirstTestCase)
+                    // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
+                    // Without this delay, network monitor may not be ready to capture packets for TC1
+                    if (isFirstTestCase)
                     {
-                        // Cleanup between test cases (kills processes, removes log files)
-                        await CleanupBetweenTestCasesAsync(serverContainer, clientContainer, config.CodeContainerHostPort);
-                    }
-                    else
-                    {
-                        // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
-                        // Without this delay, network monitor may not be ready to capture packets for TC1
                         OnProgress("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
                         await Task.Delay(3000);
                     }
