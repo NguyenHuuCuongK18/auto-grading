@@ -1569,6 +1569,14 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Gets the underlying command executor for direct docker command execution.
+        /// Used for commands that don't need "docker exec" prepending (like docker run, docker stop).
+        /// </summary>
+        public CommandExecutor GetCommandExecutor()
+        {
+            return _commandExecutor;
+        }
 
         #endregion
     }

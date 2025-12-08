@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
+using EnvironmentBuilder.CommandSupporter;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Helpers;
@@ -65,6 +66,7 @@ namespace SolutionGrader.Core.Services
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
+        private readonly CommandExecutor _commandExecutor;
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
@@ -84,6 +86,7 @@ namespace SolutionGrader.Core.Services
         public DockerGradingService(INetworkMonitorService? networkMonitor, IRunContext runContext)
         {
             _dockerExecutor = new DockerCommandExecutor();
+            _commandExecutor = _dockerExecutor.GetCommandExecutor();
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
@@ -3061,7 +3064,7 @@ namespace SolutionGrader.Core.Services
                 string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
                 
                 // Remove existing monitor container if any
-                _dockerExecutor.ExecDockerCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+                _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
                 
                 // Start network monitor container
                 // Mount output directory to save pcap file
@@ -3072,7 +3075,7 @@ namespace SolutionGrader.Core.Services
                                  $"fptuxaes/network-monitor:latest " +
                                  $"tcpdump -i any -w /capture/network_capture.pcap \"tcp port {port}\"";
                 
-                _dockerExecutor.ExecDockerCommand(dockerCmd);
+                _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
                 
                 OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
                 OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
@@ -3097,7 +3100,7 @@ namespace SolutionGrader.Core.Services
             try
             {
                 // Stop the monitor container (tcpdump will flush pcap file)
-                _dockerExecutor.ExecDockerCommand($"docker stop {monitorContainerName} 2>/dev/null || true");
+                _commandExecutor.RunCommand($"docker stop {monitorContainerName} 2>/dev/null || true", null, null, 10000);
                 
                 // Give it a moment to flush
                 await Task.Delay(500);
@@ -3116,7 +3119,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Remove the monitor container
-                _dockerExecutor.ExecDockerCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true");
+                _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
             }
             catch (Exception ex)
             {
