@@ -1367,7 +1367,7 @@ namespace SolutionGrader.Core.Services
                 int passCount = networkComparisons.Count(c => c.Passed);
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
                 // CRITICAL FIX: Count ALL !Passed items as failures (including PARTIAL)
-                // This prevents proxy/NGINX/TcpListener from passing tests with correct flags but wrong roles
+                // This prevents NGINX from passing tests with correct flags but wrong roles
                 int failCount = networkComparisons.Count(c => !c.Passed);
                 
                 // DIRECT FILE LOGGING FOR DEBUGGING

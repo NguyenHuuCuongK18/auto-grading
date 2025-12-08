@@ -377,11 +377,11 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                         Console.WriteLine($"[Environment] MonitorPort set to {port} (note: GraderPort in GradingConfig takes precedence)");
                     }
                 }
-                // DEPRECATED: Legacy middleware/server port config (kept for backward compatibility)
+                // REMOVED: Legacy middleware port config - no longer used (kept for backward compatibility)
                 #pragma warning disable CS0618 // Type or member is obsolete
-                else if (key.Equals("Port Middleware", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals("Port_DEPRECATED_Middleware", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (int.TryParse(value, out var port)) config.MiddlewarePort = port;
+                    if (int.TryParse(value, out var port)) config.MonitorPort = port;
                 }
                 else if (key.Equals("Port Server", StringComparison.OrdinalIgnoreCase))
                 {
@@ -576,7 +576,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
             // Start with suite environment or create new
             var config = new EnvironmentConfiguration
             {
-                MiddlewarePort = suiteEnv?.MiddlewarePort,
+                MonitorPort = suiteEnv?.MonitorPort,
                 ServerPort = suiteEnv?.ServerPort,
                 GivenServerPath = suiteEnv?.GivenServerPath,
                 GivenClientPath = suiteEnv?.GivenClientPath,

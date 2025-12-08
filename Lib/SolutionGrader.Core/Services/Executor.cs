@@ -13,7 +13,7 @@ namespace SolutionGrader.Core.Services
     /// <summary>
     /// Executes test steps including process management, data comparisons, and validations.
     /// 
-    /// NOTE: The Executor no longer depends on IMiddlewareService.
+    /// NOTE: The Executor does not use any proxy or middleware services.
     /// Network monitoring is now handled by TestCaseOrchestrator using INetworkMonitorService.
     /// The Executor focuses on step execution and data comparison.
     /// </summary>
@@ -42,69 +42,11 @@ namespace SolutionGrader.Core.Services
             _configuredServerPort = serverPort;
         }
 
-        /// <summary>
-        /// Checks if a TCP port is in listening state WITHOUT establishing a connection.
-        /// This prevents triggering "Client connected/disconnected" messages on the server
-        /// that should only appear when actual client connections occur in later stages.
-        /// 
-        /// Implementation: Attempts to bind to the port using a test listener.
-        /// - If binding SUCCEEDS: Port was available (not in use) -> returns false
-        /// - If binding FAILS with AddressAlreadyInUse: Port is occupied by our server -> returns true
-        /// 
-        /// This approach avoids connecting to the server while still verifying it's listening.
-        /// </summary>
-        private static bool IsTcpPortInListeningState(int port)
-        {
-            try
-            {
-                // Try to bind to the port with a test listener
-                using var testListener = new TcpListener(IPAddress.Loopback, port);
-                testListener.Start();  // This will succeed if port is available
-                testListener.Stop();
-                
-                // If we got here, we successfully bound to the port
-                // This means the port was NOT in use (server not listening yet)
-                return false;
-            }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
-            {
-                // Failed to bind because port is already in use
-                // This means our server is listening on this port
-                return true;
-            }
-            catch (SocketException ex)
-            {
-                // Other socket errors (e.g., permission denied, invalid port)
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Port check failed: {ex.Message}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                // Unexpected errors
-                Console.WriteLine($"{LoggingKeywords.LOG_PREFIX_ACTION} Unexpected error in port check: {ex.Message}");
-                return false;
-            }
-        }
-        
-        /// <summary>
-        /// Checks if a TCP port is listening and accepting connections.
-        /// WARNING: This method establishes a connection which may trigger server logging.
-        /// Use IsTcpPortInListeningState for health checks during ServerStart to avoid
-        /// premature "Client connected" messages.
-        /// </summary>
-        private static bool IsTcpPortListening(int port)
-        {
-            try
-            {
-                using var client = new TcpClient();
-                client.Connect(AppsettingKeywords.TCP_LOCALHOST, port);
-                return true;
-            }
-            catch (SocketException)
-            {
-                return false;
-            }
-        }
+        // REMOVED: IsTcpPortInListeningState and IsTcpPortListening methods
+        // These methods used TcpListener/TcpClient which can act as proxies
+        // and interfere with network monitoring during grading.
+        // Port availability is now handled by Docker - if port is in use,
+        // Docker will fail to create container with appropriate error message.
 
         public async Task<(bool, string)> ExecuteAsync(Step step, ExecuteSuiteArgs args, CancellationToken ct)
         {
