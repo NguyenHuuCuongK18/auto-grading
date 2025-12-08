@@ -45,6 +45,14 @@ case "$ACTION" in
     StartServer)
         echo "[Control] Starting server for stage $STAGE"
         
+        # CRITICAL: Add delay before starting server to ensure network monitor is capturing
+        # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
+        # This delay only applies to stage 1 (first server start)
+        if [ "$STAGE" = "1" ]; then
+            echo "[Control] Stage 1: Waiting 2 seconds for network monitor to be ready..."
+            sleep 2
+        fi
+        
         # Stop if already running
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
@@ -73,7 +81,27 @@ case "$ACTION" in
     StartClient)
         echo "[Control] Starting client for stage $STAGE"
         
-        # Stop if already running
+        # Named pipe is created by the entrypoint script before Supervisord starts
+        # The pipe is held open by a background 'sleep infinity' keeper process
+        # This prevents clients from receiving EOF when reading from empty pipe
+        # Just verify the pipe exists (we trust entrypoint started the keeper)
+        if [ ! -p /tmp/client_input ]; then
+            echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
+            echo "[Control] The entrypoint should have created it. This is a critical error."
+            exit 1
+        fi
+        
+        echo "[Control] Named pipe verified (held open by keeper process)"
+        
+        # CRITICAL: Add delay before starting client to ensure network monitor is capturing
+        # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
+        # Without this delay, early network traffic will be missed
+        if [ "$STAGE" = "1" ]; then
+            echo "[Control] Stage 1: Waiting 2 seconds for network monitor to be ready..."
+            sleep 2
+        fi
+        
+        # Stop client if already running
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
@@ -89,41 +117,34 @@ case "$ACTION" in
         
         if wait_for_start client; then
             echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-stage-$STAGE.log)"
+            echo "[Control] Client is reading from named pipe /tmp/client_input"
         else
             echo "[Control] WARNING: Client may not have started for stage $STAGE"
         fi
         ;;
     
     SendInput)
-        # Send input to the client process by restarting it with input piped
+        # Send input to the client process via named pipe
         # Input is provided as third parameter
         INPUT="${3:-}"
         
-        echo "[Control] Providing input to client: '$INPUT'"
+        echo "[Control] Sending input to client via named pipe: '$INPUT'"
         
-        # Stop the current client if running
-        $SUPERVISORCTL stop client 2>/dev/null || true
+        # Ensure named pipe exists
+        if [ ! -p /tmp/client_input ]; then
+            echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
+            echo "[Control] Client must be started with StartClient first"
+            exit 1
+        fi
+        
+        # Write input to the named pipe
+        # The client will immediately read this and process it
+        echo -e "${INPUT}" > /tmp/client_input
+        
+        echo "[Control] Input sent successfully to named pipe"
+        
+        # Give the client time to process the input
         sleep 0.5
-        
-        # Write input to a file
-        INPUT_FILE="/tmp/client-input-${STAGE}.txt"
-        echo -e "${INPUT}" > "$INPUT_FILE"
-        
-        # Update supervisord config to pipe input file to client
-        # Modify the client command to use input redirection
-        sed -i "s|command=/bin/bash -c \"cd /apps/client.*|command=/bin/bash -c \"cd /apps/client \&\& find . -name '*.dll' -not -name 'System.*.dll' -not -name 'Microsoft.*.dll' | head -1 | xargs -I{} dotnet {} < ${INPUT_FILE}\"|" /etc/supervisor/conf.d/supervisord.conf
-        
-        # Update stage
-        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
-        
-        # Reread and update
-        $SUPERVISORCTL reread 2>/dev/null || true
-        $SUPERVISORCTL update 2>/dev/null || true
-        
-        # Start client with input
-        $SUPERVISORCTL start client
-        
-        echo "[Control] Client restarted with input from ${INPUT_FILE}"
         ;;
     
     CloseServer)

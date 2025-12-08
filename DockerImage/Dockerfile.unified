@@ -30,9 +30,10 @@ RUN mkdir -p /apps/server /apps/client /scripts
 # Copy supervisord configuration
 COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Copy control script
+# Copy control script and entrypoint
 COPY unified-control.sh /scripts/unified-control.sh
-RUN chmod +x /scripts/unified-control.sh
+COPY unified-entrypoint.sh /scripts/unified-entrypoint.sh
+RUN chmod +x /scripts/unified-control.sh /scripts/unified-entrypoint.sh
 
 # Set environment variables for .NET
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
@@ -45,7 +46,7 @@ EXPOSE 9001
 # Set working directory
 WORKDIR /apps
 
-# Run supervisord as entrypoint
-# This starts the process manager but does NOT start client/server
-# Client and server are started by test case actions via unified-control.sh
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Use custom entrypoint that sets up named pipe BEFORE starting Supervisord
+# This ensures the pipe and keeper are ready before any client process starts
+# Eliminates the race condition where client starts before writer is established
+ENTRYPOINT ["/scripts/unified-entrypoint.sh"]

@@ -374,14 +374,6 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
-                    // Without this delay, network monitor may not be ready to capture packets for TC1
-                    if (isFirstTestCase)
-                    {
-                        OnProgress("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
-                        await Task.Delay(3000);
-                    }
-                    
                     // Copy files to unified container (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
                     await CopyFilesToUnifiedContainerAsync(serverPath, clientPath, config, testKitConfig, unifiedContainer);
@@ -841,7 +833,11 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             // Copy to /apps/server
-                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/server");
+                            // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
+                            // Without "/.": creates /apps/server/AutoGrading_UnifiedServer_*/
+                            // With "/.": creates /apps/server/*.dll, /apps/server/appsettings.json, etc.
+                            var serverSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            _dockerExecutor.CopyFileToContainer(serverSource, $"{unifiedContainer}:/apps/server/");
                             OnProgress($"[Unified] Copied server files to /apps/server");
                         }
                         catch (Exception ex)
@@ -888,7 +884,11 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             // Copy to /apps/client
-                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/client");
+                            // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
+                            // Without "/.": creates /apps/client/AutoGrading_UnifiedClient_*/
+                            // With "/.": creates /apps/client/*.dll, /apps/client/appsettings.json, etc.
+                            var clientSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            _dockerExecutor.CopyFileToContainer(clientSource, $"{unifiedContainer}:/apps/client/");
                             OnProgress($"[Unified] Copied client files to /apps/client");
                         }
                         catch (Exception ex)
@@ -2523,13 +2523,16 @@ namespace SolutionGrader.Core.Services
             // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
             // We override the -w argument to use our custom filename
             
+            // CRITICAL: Capture on loopback interface specifically
+            // Client and server communicate via localhost (127.0.0.1) in unified container
+            // Using -i lo captures this traffic; -i any was capturing external eth0 instead
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Alpine + tcpdump image with ENTRYPOINT
-                           $"-i lo -U -w {pcapFileName}";            // Override CMD: capture on loopback, unbuffered, custom filename
+                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
+                           $"-i lo -n -U -v -w /data/{pcapFileName}";  // CRITICAL: Write to /data/ (mounted volume)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
@@ -2540,13 +2543,13 @@ namespace SolutionGrader.Core.Services
                 _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
                 OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
                 
-                // Wait for tcpdump to initialize
-                await Task.Delay(1000);
+                // Brief delay to ensure container is up
+                await Task.Delay(500);
                 
                 // Verify monitor is running
                 if (_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Verified {monitorContainer} is running");
+                    OnProgress($"[Monitor] Verified {monitorContainer} is running and ready to capture");
                 }
                 else
                 {
@@ -3050,29 +3053,56 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         
         /// <summary>
-        /// Parse pcap file for current stage and add new packets to RunContext.
-        /// This enables live per-stage network validation.
-        /// Only parses packets that haven't been processed yet (tracks via _lastParsedPacketCount).
+        /// Parse pcap file for current stage using SNAPSHOT strategy.
+        /// Creates an internal snapshot copy inside the container to bypass file locking issues,
+        /// then copies the snapshot to host for parsing.
+        /// This enables per-stage network validation without stopping the monitor.
         /// </summary>
         private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
         {
-            if (string.IsNullOrEmpty(_currentPcapFilePath) || !File.Exists(_currentPcapFilePath))
+            if (string.IsNullOrEmpty(_currentPcapFilePath))
             {
-                // Pcap file doesn't exist yet - this is normal for early stages
                 return;
             }
             
+            var monitorContainer = $"ag-monitor-{_currentStudentCode}";
+            var pcapFileName = Path.GetFileName(_currentPcapFilePath);
+            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_stage{currentStage}.pcap");
+            
             try
             {
+                // Check if monitor container is running
+                if (!_dockerExecutor.IsContainerRunning(monitorContainer))
+                {
+                    return; // Container not running yet
+                }
+                
+                // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
+                // This bypasses Windows/WSL2 file locking issues with the live capture file
+                var snapshotCmd = $"docker exec {monitorContainer} cp /data/{pcapFileName} /data/snapshot.pcap";
+                var (snapshotSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(snapshotCmd, 5000);
+                
+                if (!snapshotSuccess)
+                {
+                    // File doesn't exist yet - normal for early stages before traffic
+                    return;
+                }
+                
+                // SNAPSHOT STRATEGY Step 2: Download the snapshot to host
+                var copyCmd = $"docker cp {monitorContainer}:/data/snapshot.pcap \"{snapshotPath}\"";
+                var (copySuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(copyCmd, 5000);
+                
+                if (!copySuccess || !File.Exists(snapshotPath))
+                {
+                    return;
+                }
+                
+                // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
                 // Use tcpdump to read pcap with detailed output
-                // -r: read from file
-                // -nn: don't resolve names/ports
-                // -tttt: human-readable timestamps
-                // -v: verbose (shows flags clearly)
                 var psi = new ProcessStartInfo
                 {
                     FileName = "tcpdump",
-                    Arguments = $"-r \"{_currentPcapFilePath}\" -nn -tttt -v tcp",
+                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -v tcp",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
