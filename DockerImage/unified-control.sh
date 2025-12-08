@@ -45,6 +45,14 @@ case "$ACTION" in
     StartServer)
         echo "[Control] Starting server for stage $STAGE"
         
+        # CRITICAL: Add delay before starting server to ensure network monitor is capturing
+        # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
+        # This delay only applies to stage 1 (first server start)
+        if [ "$STAGE" = "1" ]; then
+            echo "[Control] Stage 1: Waiting 2 seconds for network monitor to be ready..."
+            sleep 2
+        fi
+        
         # Stop if already running
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
@@ -84,6 +92,14 @@ case "$ACTION" in
         fi
         
         echo "[Control] Named pipe verified (held open by FD 3 in PID 1)"
+        
+        # CRITICAL: Add delay before starting client to ensure network monitor is capturing
+        # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
+        # Without this delay, early network traffic will be missed
+        if [ "$STAGE" = "1" ]; then
+            echo "[Control] Stage 1: Waiting 2 seconds for network monitor to be ready..."
+            sleep 2
+        fi
         
         # Stop client if already running
         $SUPERVISORCTL stop client 2>/dev/null || true
