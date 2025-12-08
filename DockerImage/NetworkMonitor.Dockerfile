@@ -16,36 +16,36 @@
 #     --net=container:ag-unified-student123 \
 #     --cap-add=NET_ADMIN --cap-add=NET_RAW \
 #     -v /tmp/student123:/data \
-#     fptuxaes/network-monitor:latest \
-#     -w network_capture.pcap
+#     fptuxaes/network-monitor:latest
 #
 # CRITICAL DESIGN:
 #   - Captures on loopback (-i lo) to catch localhost traffic inside unified container
 #   - NO port filtering - captures ALL traffic to detect student mistakes
 #   - Packet-buffered mode (-U) writes immediately, safe if container crashes
-#   - Uses Debian (not Alpine) to avoid package repository TLS issues
+#   - Uses Alpine for minimal image size (with retry logic for package installation)
 #
-FROM debian:bullseye-slim
+# Use the lightest base image possible
+FROM alpine:latest
 
-# Install tcpdump (minimal dependencies)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends tcpdump && \
-    rm -rf /var/lib/apt/lists/*
+# Install tcpdump (no cache to keep image small)
+# Add retry logic to handle transient TLS errors with Alpine package repositories
+RUN for i in 1 2 3 4 5; do \
+        apk add --no-cache tcpdump && break || \
+        (echo "Retry $i failed, waiting..." && sleep 10); \
+    done && \
+    apk list | grep tcpdump || (echo "tcpdump installation failed" && exit 1)
 
-# Create directory for capture files
-RUN mkdir -p /data
-
-# Define volume so users don't forget to mount
-VOLUME ["/data"]
-
+# Create a directory for the output files
 WORKDIR /data
 
-# ENTRYPOINT ensures tcpdump is always the executable
-# Grading system can override CMD to change output filename
+# Define a volume so you don't forget to mount it
+VOLUME ["/data"]
+
+# ENTRYPOINT ensures 'tcpdump' is always the executable
 ENTRYPOINT ["tcpdump"]
 
-# CMD sets default arguments:
-#   -i lo : Listen on Loopback (CRITICAL for Fat Container traffic)
-#   -U    : Packet-buffered mode (writes immediately, safer if crash)
-#   -w    : Output file (can be overridden by grading system)
+# CMD sets the default arguments:
+# -i lo  : Listen on Loopback (CRITICAL for your Fat Container)
+# -w ... : Save to file named 'capture.pcap'
+# -U     : 'Packet-Buffered' mode (writes to file immediately, safer if container crashes)
 CMD ["-i", "lo", "-U", "-w", "capture.pcap"]

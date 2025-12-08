@@ -2509,17 +2509,16 @@ namespace SolutionGrader.Core.Services
             // - NO port filtering - capture everything to detect student mistakes
             // - Write to /data/{pcapFileName} inside container (bind-mounted to host)
             //
-            // The network-monitor image uses ENTRYPOINT ["tcpdump"], so we only pass arguments
-            // Default CMD is ["-i", "lo", "-U", "-w", "capture.pcap"]
-            // We override -w to use our custom filename
+            // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
+            // We override the -w argument to use our custom filename
             
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i lo -U -w /data/{pcapFileName}";      // tcpdump arguments (ENTRYPOINT handles 'tcpdump' command)
+                           $"fptuxaes/network-monitor:latest " +     // Alpine + tcpdump image with ENTRYPOINT
+                           $"-i lo -U -w {pcapFileName}";            // Override CMD: capture on loopback, unbuffered, custom filename
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
