@@ -189,9 +189,8 @@ namespace SolutionGrader.Core.Services
             // Set current student code for logging
             _currentStudentCode = studentCode;
             
-            // Container names
-            var serverContainer = $"ag-server-{studentCode}";
-            var clientContainer = $"ag-client-{studentCode}";
+            // Unified container name
+            var unifiedContainer = $"ag-unified-{studentCode}";
             var databaseContainer = config.DatabaseContainerName; // Database container name from config
             
             // CRITICAL FIX: Check Docker container count before starting
@@ -203,9 +202,8 @@ namespace SolutionGrader.Core.Services
             // This allows multiple students to share the same container without data conflicts
             string studentDatabaseName = "";
             
-            // Network monitor container variables (for Docker internal networking mode)
-            string? monitorContainerName = null;
-            string? monitorOutputDir = null;
+            // Log directory for exporting client/server logs
+            string? logOutputDir = null;
             
             try
             {
@@ -303,74 +301,25 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Available Client DLL: {(actualClientDllPath != null ? Path.GetFileName(actualClientDllPath) : "(NONE)")}");
                 OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
-                // CRITICAL: Start network monitor FIRST before ANY containers or processes
-                // 
-                // Network monitoring adapts to networking mode:
-                // 
-                // Docker Internal Networking (UseDockerInternalNetworking=true):
-                // - Captures on Docker bridge network (br-, docker0, veth interfaces)
-                // - Monitors direct container-to-container traffic
-                // - No Docker NAT proxy interference (no ghost SYN-ACK responses)
-                // - More accurate representation of actual student code behavior
-                // 
-                // Legacy Port Mapping (UseDockerInternalNetworking=false):
-                // - Captures on host loopback interface  
-                // - Monitors traffic routed through host's exposed port
-                // - Docker's NAT proxy responds with SYN-ACK even when server exits
-                // - Network flow will show SYN-ACK regardless of server state
-                //
-                // PARALLEL GRADING: Each student gets their own monitor instance configured
-                // with their specific port (basePort + portOffset) to avoid conflicts
-                
-                // Start network monitor based on mode
-                if (config.UseDockerInternalNetworking)
+                // Register student with shared network monitor
+                // The monitor will filter packets by port for this student
+                if (_networkMonitor != null)
                 {
-                    OnProgress($"[NetworkMonitor] Using container-based network monitoring (Docker internal networking mode)");
-                    OnProgress($"[NetworkMonitor] SharedNetworkMonitor will NOT be started (using per-student monitor containers instead)");
-                }
-                else
-                {
-                    // Legacy mode: Use SharedNetworkMonitor for host-based capture
-                    if (_networkMonitor != null)
-                    {
-                        var monitorPort = config.UseDockerInternalNetworking 
-                            ? config.CodeContainerInternalPort   // Monitor container's internal port
-                            : config.CodeContainerHostPort;      // Monitor host's exposed port
-                        
-                        _networkMonitor.MonitorPort = monitorPort;
-                        _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                        
-                        OnProgress($"[NetworkMonitor] Starting SharedNetworkMonitor for student {studentCode}");
-                        OnProgress($"[NetworkMonitor] Monitoring port {monitorPort} (protocol: {testKitConfig.Protocol})");
-                        OnProgress($"[NetworkMonitor] Mode: Legacy port mapping (loopback)");
-                        
-                        await _networkMonitor.StartAsync(ct);
-                        OnProgress($"Network monitor started - capturing traffic on port {monitorPort}");
-                        OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
-                    }
-                    else
-                    {
-                        OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
-                    }
+                    var monitorPort = config.CodeContainerInternalPort;
+                    _networkMonitor.RegisterStudent(studentCode, monitorPort, testKitConfig.Protocol, _runContext);
+                    OnProgress($"[NetworkMonitor] Registered student {studentCode} on port {monitorPort}");
                 }
                 
-                OnProgress($"Setting up Docker containers for {studentCode}...");
-                await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
-                
-                // Start network monitor container if using Docker internal networking
-                // This container runs for the entire student grading session, capturing all test cases
-                // Uses SIDECAR approach: monitor shares network namespace with server container
-                if (config.UseDockerInternalNetworking)
-                {
-                    monitorContainerName = $"ag-monitor-{studentCode}";
-                    monitorOutputDir = Path.Combine(studentResultPath, "NetworkCapture");
-                    await StartNetworkMonitorContainerAsync(
-                        monitorContainerName,
-                        config.CodeContainerInternalPort,
-                        monitorOutputDir,
-                        serverContainer); // Pass server container name for sidecar attachment
-                    OnProgress($"[NetworkMonitor] Sidecar monitor started for {studentCode} on port {config.CodeContainerInternalPort}");
-                }
+                // Setup unified container
+                OnProgress($"Setting up unified Docker container for {studentCode}...");
+                logOutputDir = Path.Combine(studentResultPath, "Logs");
+                await SetupUnifiedContainerAsync(
+                    actualServerDllPath, 
+                    actualClientDllPath, 
+                    config, 
+                    testKitConfig, 
+                    unifiedContainer,
+                    logOutputDir);
                 
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");
@@ -672,6 +621,56 @@ namespace SolutionGrader.Core.Services
             }
             
             await Task.Delay(500);
+        }
+        
+        /// <summary>
+        /// Setup unified container that runs both client and server processes.
+        /// Processes are managed by supervisord and started/stopped by test case actions.
+        /// CLIENT AND SERVER ARE NOT STARTED AUTOMATICALLY - they start only when test case Detail.xlsx says so.
+        /// </summary>
+        private async Task SetupUnifiedContainerAsync(
+            string? serverDllPath,
+            string? clientDllPath,
+            DockerGradingConfig config,
+            TestKitConfig testKitConfig,
+            string unifiedContainer,
+            string logOutputDir)
+        {
+            OnProgress($"[Unified] Creating unified container: {unifiedContainer}");
+            
+            // Create log output directory
+            Directory.CreateDirectory(logOutputDir);
+            
+            // Remove existing unified container if any
+            _commandExecutor.RunCommand($"docker rm -f {unifiedContainer} 2>/dev/null || true", null, null, 10000);
+            
+            // Create absolute paths
+            string absLogDir = Path.GetFullPath(logOutputDir);
+            
+            // Create the unified container with supervisord
+            // CRITICAL: Processes are NOT started automatically
+            // They are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
+            var dockerCmd = $"docker run -d --name {unifiedContainer} " +
+                           $"--network {config.DockerNetwork} " +
+                           $"-v \"{absLogDir}:/logs\" " +
+                           $"-t " +  // TTY for unbuffered logs
+                           $"{config.UnifiedContainerImage}";
+            
+            _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
+            OnProgress($"[Unified] Container created - supervisord running, processes idle");
+            
+            // Wait for supervisord to be ready
+            await Task.Delay(1000);
+            
+            // Copy DLLs and appsettings to container (in separate /apps/server and /apps/client folders)
+            await CopyFilesToUnifiedContainerAsync(
+                serverDllPath, 
+                clientDllPath, 
+                config, 
+                testKitConfig,
+                unifiedContainer);
+            
+            OnProgress($"[Unified] Container ready - processes will start when test cases execute StartClient/StartServer actions");
         }
         
         /// <summary>
@@ -1100,6 +1099,140 @@ namespace SolutionGrader.Core.Services
                     }
                 }
             }
+        }
+        
+        /// <summary>
+        /// Copy DLLs and appsettings to unified container in SEPARATE folders.
+        /// Server goes to /apps/server, Client goes to /apps/client.
+        /// This ensures appsettings.json and DLL mod fallback work correctly.
+        /// </summary>
+        private async Task CopyFilesToUnifiedContainerAsync(
+            string? serverDllPath,
+            string? clientDllPath,
+            DockerGradingConfig config,
+            TestKitConfig testKitConfig,
+            string unifiedContainer)
+        {
+            var dllModService = new DllModificationService();
+            var tempDirectories = new List<string>();
+            
+            try
+            {
+                // Create /apps/server and /apps/client directories in container
+                _dockerExecutor.MakeDirectory(unifiedContainer, "/apps/server");
+                _dockerExecutor.MakeDirectory(unifiedContainer, "/apps/client");
+                
+                // Copy SERVER files
+                if (!string.IsNullOrEmpty(serverDllPath))
+                {
+                    var serverDir = Path.GetDirectoryName(serverDllPath);
+                    if (serverDir != null)
+                    {
+                        string dirToCopy = serverDir;
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(serverDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied server files to temp for modification");
+                                
+                                // Modify for localhost (127.0.0.1)
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ServerProjectName,
+                                    isServer: true,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "127.0.0.1"  // Unified container uses localhost
+                                );
+                                
+                                OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            
+                            // Copy to /apps/server
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/server");
+                            OnProgress($"[Unified] Copied server files to /apps/server");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[Unified] WARNING: Server copy failed: {ex.Message}");
+                        }
+                    }
+                }
+                
+                // Copy CLIENT files
+                if (!string.IsNullOrEmpty(clientDllPath))
+                {
+                    var clientDir = Path.GetDirectoryName(clientDllPath);
+                    if (clientDir != null)
+                    {
+                        string dirToCopy = clientDir;
+                        
+                        try
+                        {
+                            // Apply DLL modification fallback if enabled
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(clientDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied client files to temp for modification");
+                                
+                                // Client connects to localhost
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ClientProjectName,
+                                    isServer: false,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "127.0.0.1"  // Connect to localhost
+                                );
+                                
+                                OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            
+                            // Copy to /apps/client
+                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/client");
+                            OnProgress($"[Unified] Copied client files to /apps/client");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[Unified] WARNING: Client copy failed: {ex.Message}");
+                        }
+                    }
+                }
+                
+                // Generate appsettings.json in both folders
+                GenerateAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
+            }
+            finally
+            {
+                // Cleanup temp directories
+                foreach (var tempDir in tempDirectories)
+                {
+                    try
+                    {
+                        if (Directory.Exists(tempDir))
+                        {
+                            Directory.Delete(tempDir, true);
+                        }
+                    }
+                    catch (Exception cleanEx)
+                    {
+                        OnProgress($"[Unified] WARNING: Failed to cleanup temp directory {tempDir}: {cleanEx.Message}");
+                    }
+                }
+            }
+            
+            await Task.CompletedTask;
         }
         
         /// <summary>
@@ -3303,63 +3436,11 @@ namespace SolutionGrader.Core.Services
         public bool UseDllModificationFallback { get; set; } = false;
         
         /// <summary>
-        /// Use unified container approach where client and server run in the SAME container.
-        /// 
-        /// When true (RECOMMENDED - Unified Container with Shared Loopback Monitoring):
-        /// - Client and Server run as separate processes in ONE container
-        /// - Communicate via localhost (127.0.0.1:{port}) - no proxy behavior
-        /// - Shared network monitor (sidecar) attached to container's loopback namespace
-        /// - Monitor captures on 'lo' interface, filters by port for each student
-        /// - Single monitor instance serves ALL students (filters traffic by port)
-        /// - Cleanest network data - pure localhost communication
-        /// - Best resource efficiency - fewer containers overall
-        /// 
-        /// When false (Legacy - Separate Containers with Bridge or Sidecar):
-        /// - Falls back to UseDockerInternalNetworking setting
-        /// - Separate server and client containers
-        /// - Either bridge network or sidecar eth0 monitoring
-        /// 
-        /// UNIFIED CONTAINER ARCHITECTURE:
-        /// 1. Single container per student runs both client and server processes
-        /// 2. Processes communicate over 127.0.0.1 (loopback)
-        /// 3. Shared monitor container attached via --net=container:{unifiedContainer}
-        /// 4. Monitor uses tcpdump on 'lo' interface with port filter
-        /// 5. Each student gets unique port (8000, 8001, 8002...) for filtering
-        /// 
-        /// BENEFITS:
-        /// - No NAT/proxy behavior whatsoever
-        /// - Simplified architecture (1 container vs 2 per student)
-        /// - Shared monitor (1 instance for all students vs per-student)
-        /// - Platform-independent monitoring
-        /// - Easier debugging (localhost is predictable)
-        /// 
-        /// Default: true (Unified Container - the ultimate choice)
+        /// Image name for unified containers that run both client and server processes.
+        /// This image must have supervisord installed for process management.
+        /// Default: "fptuxaes/aes-dotnet8-unified:latest"
         /// </summary>
-        public bool UseUnifiedContainer { get; set; } = true;
-        
-        /// <summary>
-        /// Use Docker internal networking instead of port mapping (LEGACY - only when UseUnifiedContainer=false).
-        /// 
-        /// When true (Docker Internal Networking with Sidecar on eth0):
-        /// - Client connects to server via container name (e.g., "ag-server-student123:8000")
-        /// - No port mappings (-p) are created - eliminates Docker NAT proxy behavior
-        /// - Traffic stays within Docker bridge network (no proxy interference)
-        /// - Network monitor runs as SIDECAR container attached to server's network namespace
-        /// - Monitor uses --net=container:{serverContainer} to share server's eth0 interface
-        /// - Monitor sees ALL traffic going in/out of server (complete visibility)
-        /// 
-        /// When false (Legacy Port Mapping Mode - DEPRECATED):
-        /// - Client connects to "host.docker.internal:{port}"
-        /// - Server port is exposed to host via `-p {hostPort}:{containerPort}`
-        /// - Docker's NAT proxy responds with SYN-ACK even when student server exits
-        /// - Can produce false positives (proxy accepts connection when server is dead)
-        /// 
-        /// NOTE: This setting is IGNORED when UseUnifiedContainer=true.
-        /// Unified container approach is now the default and recommended approach.
-        /// 
-        /// Default: true (Docker Internal Networking - used only in legacy mode)
-        /// </summary>
-        public bool UseDockerInternalNetworking { get; set; } = true;
+        public string UnifiedContainerImage { get; set; } = "fptuxaes/aes-dotnet8-unified:latest";
     }
     
     /// <summary>
