@@ -2841,7 +2841,7 @@ namespace SolutionGrader.Core.Services
             var formattedMessage = !string.IsNullOrEmpty(_currentStudentCode) 
                 ? $"[{_currentStudentCode}] {message}" 
                 : message;
-            OnProgress($"[DockerGrading] {formattedMessage}");
+            // Invoke the event to send progress update
             ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(formattedMessage));
         }
     }
