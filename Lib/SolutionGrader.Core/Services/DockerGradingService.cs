@@ -824,13 +824,16 @@ namespace SolutionGrader.Core.Services
                                 CopyDirectory(serverDir, tempStagingDir);
                                 OnProgress($"[Unified] Copied server files to temp for modification");
                                 
-                                // Modify for localhost (127.0.0.1)
+                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
+                                // We DON'T force IP replacement - student code should already use correct IP
+                                // We ONLY modify PORT for parallel grading
+                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ServerProjectName,
                                     isServer: true,
                                     targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "127.0.0.1"  // Unified container uses localhost
+                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
                                 );
                                 
                                 OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
@@ -868,13 +871,16 @@ namespace SolutionGrader.Core.Services
                                 CopyDirectory(clientDir, tempStagingDir);
                                 OnProgress($"[Unified] Copied client files to temp for modification");
                                 
-                                // Client connects to localhost
+                                // Client connects to localhost/127.0.0.1 in unified container
+                                // We DON'T force IP replacement - student code should already use localhost
+                                // We ONLY modify PORT for parallel grading
+                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ClientProjectName,
                                     isServer: false,
                                     targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "127.0.0.1"  // Connect to localhost
+                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
                                 );
                                 
                                 OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");

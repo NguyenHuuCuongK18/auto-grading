@@ -145,8 +145,9 @@ namespace SolutionGrader.Core.Services
         /// <param name="dllPath">Path to the DLL file to patch</param>
         /// <param name="newPort">The port number to use</param>
         /// <param name="newIp">The target IP/hostname to connect to (default: "host.docker.internal" for legacy mode, or server container name for internal networking)</param>
+        /// <param name="additionalOldIps">Additional old IP addresses/hostnames to search for and replace (e.g., old container names)</param>
         /// <returns>Result of the modification attempt</returns>
-        public DllModificationResult PatchClientDll(string dllPath, int newPort, string? newIp = null)
+        public DllModificationResult PatchClientDll(string dllPath, int newPort, string? newIp = null, string[]? additionalOldIps = null)
         {
             if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
             {
@@ -162,6 +163,11 @@ namespace SolutionGrader.Core.Services
 
             Console.WriteLine($"[DllMod] Attempting to patch client DLL: {Path.GetFileName(dllPath)}");
             Console.WriteLine($"[DllMod] Target configuration: IP={targetIp}, Port={newPort}");
+            
+            if (additionalOldIps != null && additionalOldIps.Length > 0)
+            {
+                Console.WriteLine($"[DllMod] Additional old IPs to search: {string.Join(", ", additionalOldIps)}");
+            }
 
             try
             {
@@ -170,7 +176,8 @@ namespace SolutionGrader.Core.Services
                 var result = DllModifier.TryPatchWithCommonValues(
                     dllPath,
                     newIp: targetIp,
-                    newPort: newPort
+                    newPort: newPort,
+                    oldIpsToTry: additionalOldIps  // Pass additional old IPs to search for
                 );
 
                 Console.WriteLine($"[DllMod] Client patch result: {result.Message}");
@@ -200,13 +207,15 @@ namespace SolutionGrader.Core.Services
         /// <param name="isServer">True if this is a server component, false if client</param>
         /// <param name="targetPort">The port to configure</param>
         /// <param name="targetIp">The IP address/hostname to configure (optional - uses defaults based on isServer flag)</param>
+        /// <param name="additionalOldIps">Additional old IP addresses/hostnames to search for (for client patching)</param>
         /// <returns>Result of the check and patch operation</returns>
         public DllFallbackResult CheckAndPatchIfNeeded(
             string directoryPath,
             string? projectName,
             bool isServer,
             int targetPort,
-            string? targetIp = null)
+            string? targetIp = null,
+            string[]? additionalOldIps = null)
         {
             var result = new DllFallbackResult
             {
@@ -247,7 +256,7 @@ namespace SolutionGrader.Core.Services
             // Patch the DLL
             var modResult = isServer 
                 ? PatchServerDll(dllPath, targetPort, targetIp)
-                : PatchClientDll(dllPath, targetPort, targetIp);
+                : PatchClientDll(dllPath, targetPort, targetIp, additionalOldIps);
 
             result.Success = modResult.Success;
             result.IpReplacements = modResult.IpReplacements;
