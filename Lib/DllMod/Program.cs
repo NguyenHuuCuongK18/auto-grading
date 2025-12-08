@@ -30,8 +30,15 @@ namespace DllMod
         
         /// <summary>
         /// Default list of common IP addresses/hostnames that students might hardcode.
+        /// Includes:
+        /// - localhost (common for local testing)
+        /// - 127.0.0.1 (IPv4 loopback)
+        /// - 0.0.0.0 (bind to all interfaces, equivalent to IPAddress.Any)
+        /// - ::1 (IPv6 loopback)
+        /// - :: (IPv6 bind to all interfaces, equivalent to IPAddress.IPv6Any)
+        /// Note: IPAddress.Any is a .NET constant equal to "0.0.0.0", so it's covered
         /// </summary>
-        public static readonly string[] CommonIpAddresses = { "localhost", "127.0.0.1", "0.0.0.0" };
+        public static readonly string[] CommonIpAddresses = { "localhost", "127.0.0.1", "0.0.0.0", "::1", "::" };
 
         /// <summary>
         /// Patches a DLL file by replacing old IP address and port with new values.
