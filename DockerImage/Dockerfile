@@ -21,7 +21,7 @@
 #   - mcr.microsoft.com/dotnet/sdk:8.0 (includes build tools)
 #   - mcr.microsoft.com/dotnet/aspnet:8.0 (runtime only, smaller)
 #
-FROM fptuxaes/aes-dotnet8:latest
+FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 # Install procps package for ps/pkill/pgrep commands (needed for process cleanup between test cases)
 # Without these commands, the "Address already in use" error occurs when restarting applications
