@@ -1,6 +1,6 @@
 Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -11,7 +11,7 @@ Raw response: [{"StudentId":"S001","Name":"John Smith","Major":"Computer Science
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -22,7 +22,7 @@ Raw response: []
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -33,7 +33,7 @@ Raw response: []
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -44,7 +44,7 @@ Raw response: [{"StudentId":"S001","Name":"John Smith","Major":"Computer Science
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -55,7 +55,7 @@ Raw response: []
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -66,7 +66,7 @@ Raw response: []
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-duongnthe186310:4006
+Connecting to server at ag-server-duongnthe186310:4000
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
