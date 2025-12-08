@@ -10,11 +10,13 @@ mkfifo "$PIPE_PATH"
 chmod 777 "$PIPE_PATH"
 
 echo "[Entrypoint] Phase 2: Starting the Keeper Process..."
-# CRITICAL: Use 'sleep infinity' to hold the write-end of the pipe open forever
-# This prevents EOF when clients read from the pipe with no data
+# CRITICAL FIX: 'sleep infinity' does NOT work on Alpine/BusyBox!
+# BusyBox sleep requires an integer, not the word 'infinity'
+# Use a large number (31536000 = 1 year in seconds) instead
+# This holds the write-end of the pipe open, preventing EOF for clients
 # We redirect stdout to the pipe, which counts as a "Writer"
 # This keeper process SURVIVES when Supervisord takes over (unlike FD 3 which gets closed)
-sleep infinity > "$PIPE_PATH" &
+sleep 31536000 > "$PIPE_PATH" &
 KEEPER_PID=$!
 
 echo "[Entrypoint] Phase 3: Verifying Keeper (PID: $KEEPER_PID)..."
@@ -23,6 +25,7 @@ sleep 1
 
 if ! kill -0 "$KEEPER_PID" 2>/dev/null; then
     echo "[Entrypoint] CRITICAL ERROR: Keeper process died immediately!"
+    echo "[Entrypoint] (Check if 'sleep infinity' is unsupported - use numeric value instead)"
     exit 1
 fi
 
