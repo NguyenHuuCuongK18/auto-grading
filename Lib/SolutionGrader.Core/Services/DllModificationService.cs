@@ -90,13 +90,14 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Attempts to patch a DLL file for server use.
-        /// Replaces hardcoded localhost references with "0.0.0.0" (bind to all interfaces).
+        /// Replaces hardcoded localhost references with the specified bind address (usually "0.0.0.0").
         /// Replaces hardcoded ports with the specified server port.
         /// </summary>
         /// <param name="dllPath">Path to the DLL file to patch</param>
         /// <param name="newPort">The port number to use</param>
+        /// <param name="newIp">The IP address to bind to (default: "0.0.0.0" for all interfaces)</param>
         /// <returns>Result of the modification attempt</returns>
-        public DllModificationResult PatchServerDll(string dllPath, int newPort)
+        public DllModificationResult PatchServerDll(string dllPath, int newPort, string? newIp = null)
         {
             if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
             {
@@ -107,16 +108,18 @@ namespace SolutionGrader.Core.Services
                 };
             }
 
+            // Default to 0.0.0.0 for server (bind to all interfaces)
+            var targetIp = newIp ?? "0.0.0.0";
+
             Console.WriteLine($"[DllMod] Attempting to patch server DLL: {Path.GetFileName(dllPath)}");
-            Console.WriteLine($"[DllMod] Target configuration: IP=0.0.0.0 (bind all), Port={newPort}");
+            Console.WriteLine($"[DllMod] Target configuration: IP={targetIp}, Port={newPort}");
 
             try
             {
-                // For server, we want to bind to 0.0.0.0 to accept connections from any interface
-                // Try patching with common localhost variations
+                // For server, we want to bind to the specified IP to accept connections
                 var result = DllModifier.TryPatchWithCommonValues(
                     dllPath,
-                    newIp: "0.0.0.0",
+                    newIp: targetIp,
                     newPort: newPort
                 );
 
@@ -136,13 +139,14 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Attempts to patch a DLL file for client use.
-        /// Replaces hardcoded localhost references with "host.docker.internal" (Docker host gateway).
+        /// Replaces hardcoded localhost references with the specified target IP.
         /// Replaces hardcoded ports with the specified client port.
         /// </summary>
         /// <param name="dllPath">Path to the DLL file to patch</param>
         /// <param name="newPort">The port number to use</param>
+        /// <param name="newIp">The target IP/hostname to connect to (default: "host.docker.internal" for legacy mode, or server container name for internal networking)</param>
         /// <returns>Result of the modification attempt</returns>
-        public DllModificationResult PatchClientDll(string dllPath, int newPort)
+        public DllModificationResult PatchClientDll(string dllPath, int newPort, string? newIp = null)
         {
             if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
             {
@@ -153,16 +157,19 @@ namespace SolutionGrader.Core.Services
                 };
             }
 
+            // Default to host.docker.internal for legacy port mapping mode
+            var targetIp = newIp ?? "host.docker.internal";
+
             Console.WriteLine($"[DllMod] Attempting to patch client DLL: {Path.GetFileName(dllPath)}");
-            Console.WriteLine($"[DllMod] Target configuration: IP=host.docker.internal, Port={newPort}");
+            Console.WriteLine($"[DllMod] Target configuration: IP={targetIp}, Port={newPort}");
 
             try
             {
-                // For client, we want to connect to host.docker.internal to reach the host machine
-                // This allows network monitoring to capture the traffic
+                // For client, patch to connect to the specified target IP
+                // This can be host.docker.internal (legacy) or server container name (internal networking)
                 var result = DllModifier.TryPatchWithCommonValues(
                     dllPath,
-                    newIp: "host.docker.internal",
+                    newIp: targetIp,
                     newPort: newPort
                 );
 
@@ -192,19 +199,22 @@ namespace SolutionGrader.Core.Services
         /// <param name="projectName">Project name hint for DLL identification</param>
         /// <param name="isServer">True if this is a server component, false if client</param>
         /// <param name="targetPort">The port to configure</param>
+        /// <param name="targetIp">The IP address/hostname to configure (optional - uses defaults based on isServer flag)</param>
         /// <returns>Result of the check and patch operation</returns>
         public DllFallbackResult CheckAndPatchIfNeeded(
             string directoryPath,
             string? projectName,
             bool isServer,
-            int targetPort)
+            int targetPort,
+            string? targetIp = null)
         {
             var result = new DllFallbackResult
             {
                 DirectoryPath = directoryPath,
                 ProjectName = projectName ?? "Unknown",
                 IsServer = isServer,
-                TargetPort = targetPort
+                TargetPort = targetPort,
+                TargetIp = targetIp
             };
 
             // Check if appsettings.json exists
@@ -236,8 +246,8 @@ namespace SolutionGrader.Core.Services
 
             // Patch the DLL
             var modResult = isServer 
-                ? PatchServerDll(dllPath, targetPort)
-                : PatchClientDll(dllPath, targetPort);
+                ? PatchServerDll(dllPath, targetPort, targetIp)
+                : PatchClientDll(dllPath, targetPort, targetIp);
 
             result.Success = modResult.Success;
             result.IpReplacements = modResult.IpReplacements;
@@ -273,6 +283,13 @@ namespace SolutionGrader.Core.Services
         /// The target port that was configured.
         /// </summary>
         public int TargetPort { get; set; }
+        
+        /// <summary>
+        /// The target IP address/hostname that was configured.
+        /// For servers: typically "0.0.0.0" (bind all interfaces)
+        /// For clients: "host.docker.internal" (legacy) or server container name (internal networking)
+        /// </summary>
+        public string? TargetIp { get; set; }
 
         /// <summary>
         /// True if appsettings.json exists in the directory.

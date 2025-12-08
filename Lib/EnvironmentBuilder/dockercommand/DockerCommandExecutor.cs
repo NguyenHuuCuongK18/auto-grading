@@ -860,6 +860,25 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Starts an application inside a Docker container for grading purposes.
+        /// 
+        /// CRITICAL FOR GRADING: This method does NOT wait for the application to be "ready".
+        /// It simply starts the application and returns after a brief delay to allow process startup.
+        /// 
+        /// Why we don't wait for port readiness:
+        /// - Grading must handle students whose code fails (e.g., prints "Hello World" and exits)
+        /// - Waiting for port would cause 30-second timeouts for broken student code
+        /// - Test cases need to execute even if server exits immediately (to properly fail)
+        /// - Client will get RST when trying to connect if server is not listening (this is expected)
+        /// 
+        /// The flow for grading is:
+        /// 1. Start server (even if it exits immediately)
+        /// 2. Start client
+        /// 3. Client attempts connection (succeeds if server running, RST if not)
+        /// 4. Capture network flow and outputs
+        /// 5. Grade based on actual behavior
+        /// </summary>
         public bool WaitForPublishConsoleFileDeployment(string containerName, string appName, string appPath, string expectedPort, int maxWaitTimeMs = 70000, int checkIntervalMs = 1000)
         {
             try
@@ -868,32 +887,20 @@ namespace EnvironmentBuilder.DockerCommand
 
                 StartApplicationInContainer(containerName, appName, appPath);
 
-                int elapsed = 0;
-                while (elapsed < maxWaitTimeMs)
-                {
-                    // Check if process is running inside the container
-                    bool running = IsProcessRunning(containerName, appName);
-
-                    // Check if expected port is open inside the container
-                    bool portOpen = IsPortOpen(containerName, expPort);
-
-                    if (running && portOpen)
-                    {
-                        Console.WriteLine($"[{appName}] Deployment successful. Process is running and port {expectedPort} is open.");
-                        return true;
-                    }
-
-                    Thread.Sleep(checkIntervalMs);
-                    elapsed += checkIntervalMs;
-                    Console.WriteLine($"[{appName}] Waiting for application to be ready... running={running}, port={portOpen} ({elapsed}/{maxWaitTimeMs}ms)");
-                }
-
-                Console.WriteLine($"[{appName}] Deployment timeout after {maxWaitTimeMs}ms");
-                return false;
+                // For grading, we don't wait for port readiness.
+                // Just give the process a moment to start, then return.
+                // This allows grading to proceed even if student's code exits immediately.
+                Thread.Sleep(500); // Brief delay to allow process startup
+                
+                bool running = IsProcessRunning(containerName, appName);
+                Console.WriteLine($"[{appName}] Application started. Process running: {running}");
+                
+                return true; // Always return true to allow grading to proceed
             }
             catch (Exception ex)
             {
-                throw new Exception($"Error checking deployment of {appName}: {ex.Message}", ex);
+                Console.WriteLine($"[{appName}] Error starting application: {ex.Message}");
+                return false;
             }
         }
 
@@ -1562,6 +1569,14 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Gets the underlying command executor for direct docker command execution.
+        /// Used for commands that don't need "docker exec" prepending (like docker run, docker stop).
+        /// </summary>
+        public CommandExecutor GetCommandExecutor()
+        {
+            return _commandExecutor;
+        }
 
         #endregion
     }

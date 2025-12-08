@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
+using EnvironmentBuilder.CommandSupporter;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Helpers;
@@ -65,6 +66,7 @@ namespace SolutionGrader.Core.Services
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
         private readonly DockerCommandExecutor _dockerExecutor;
+        private readonly CommandExecutor _commandExecutor;
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
@@ -84,6 +86,7 @@ namespace SolutionGrader.Core.Services
         public DockerGradingService(INetworkMonitorService? networkMonitor, IRunContext runContext)
         {
             _dockerExecutor = new DockerCommandExecutor();
+            _commandExecutor = _dockerExecutor.GetCommandExecutor();
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
@@ -200,6 +203,10 @@ namespace SolutionGrader.Core.Services
             // This allows multiple students to share the same container without data conflicts
             string studentDatabaseName = "";
             
+            // Network monitor container variables (for Docker internal networking mode)
+            string? monitorContainerName = null;
+            string? monitorOutputDir = null;
+            
             try
             {
                 OnProgress($"Loading test kit configuration from {testKitPath}...");
@@ -297,30 +304,72 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
-                // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
-                // It MUST start before containers to capture the full network traffic including:
-                // - Initial TCP handshake (SYN, SYN-ACK, ACK)
-                // - All data transfers
-                // - Connection teardown (FIN-ACK)
                 // 
-                // PARALLEL GRADING: Each student gets their own NetworkMonitorService instance
-                // configured with their specific port (basePort + portOffset) to avoid conflicts
-                if (_networkMonitor != null)
+                // Network monitoring adapts to networking mode:
+                // 
+                // Docker Internal Networking (UseDockerInternalNetworking=true):
+                // - Captures on Docker bridge network (br-, docker0, veth interfaces)
+                // - Monitors direct container-to-container traffic
+                // - No Docker NAT proxy interference (no ghost SYN-ACK responses)
+                // - More accurate representation of actual student code behavior
+                // 
+                // Legacy Port Mapping (UseDockerInternalNetworking=false):
+                // - Captures on host loopback interface  
+                // - Monitors traffic routed through host's exposed port
+                // - Docker's NAT proxy responds with SYN-ACK even when server exits
+                // - Network flow will show SYN-ACK regardless of server state
+                //
+                // PARALLEL GRADING: Each student gets their own monitor instance configured
+                // with their specific port (basePort + portOffset) to avoid conflicts
+                
+                // Start network monitor based on mode
+                if (config.UseDockerInternalNetworking)
                 {
-                    _networkMonitor.MonitorPort = config.CodeContainerHostPort;
-                    _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                    OnProgress($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
-                    await _networkMonitor.StartAsync(ct);
-                    OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
-                    OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                    OnProgress($"[NetworkMonitor] Using container-based network monitoring (Docker internal networking mode)");
+                    OnProgress($"[NetworkMonitor] SharedNetworkMonitor will NOT be started (using per-student monitor containers instead)");
                 }
                 else
                 {
-                    OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
+                    // Legacy mode: Use SharedNetworkMonitor for host-based capture
+                    if (_networkMonitor != null)
+                    {
+                        var monitorPort = config.UseDockerInternalNetworking 
+                            ? config.CodeContainerInternalPort   // Monitor container's internal port
+                            : config.CodeContainerHostPort;      // Monitor host's exposed port
+                        
+                        _networkMonitor.MonitorPort = monitorPort;
+                        _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                        
+                        OnProgress($"[NetworkMonitor] Starting SharedNetworkMonitor for student {studentCode}");
+                        OnProgress($"[NetworkMonitor] Monitoring port {monitorPort} (protocol: {testKitConfig.Protocol})");
+                        OnProgress($"[NetworkMonitor] Mode: Legacy port mapping (loopback)");
+                        
+                        await _networkMonitor.StartAsync(ct);
+                        OnProgress($"Network monitor started - capturing traffic on port {monitorPort}");
+                        OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                    }
+                    else
+                    {
+                        OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
+                    }
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
+                
+                // Start network monitor container if using Docker internal networking
+                // This container runs for the entire student grading session, capturing all test cases
+                if (config.UseDockerInternalNetworking)
+                {
+                    monitorContainerName = $"ag-monitor-{studentCode}";
+                    monitorOutputDir = Path.Combine(studentResultPath, "NetworkCapture");
+                    await StartNetworkMonitorContainerAsync(
+                        monitorContainerName,
+                        config.CodeContainerInternalPort,
+                        monitorOutputDir,
+                        config.DockerNetwork);
+                    OnProgress($"[NetworkMonitor] Container-based monitor started for {studentCode} on port {config.CodeContainerInternalPort}");
+                }
                 
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");
@@ -443,21 +492,51 @@ namespace SolutionGrader.Core.Services
             }
             finally
             {
-                // Stop network monitor
-                if (_networkMonitor != null)
+                // CRITICAL: Save docker logs BEFORE stopping network monitor and cleanup
+                // Once containers are removed, their logs are permanently lost
+                // This preserves diagnostic information for debugging test failures
+                try
                 {
-                    OnProgress($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
-                    await _networkMonitor.StopAsync(ct);
-                    OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
-                    
-                    // CRITICAL FIX: Add delay after stopping monitor to ensure:
-                    // 1. All in-flight packets are processed
-                    // 2. Student is properly unregistered from SharedNetworkMonitor
-                    // 3. Port is fully released before next student uses it
-                    // This prevents cross-contamination between students
-                    OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
-                    await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
-                    OnProgress($"[NetworkMonitor] Monitor cleanup complete");
+                    OnProgress($"[Docker Logs] Saving container logs to {studentResultPath}...");
+                    await SaveDockerLogsAsync(serverContainer, clientContainer, studentResultPath);
+                    OnProgress($"[Docker Logs] Container logs saved successfully");
+                }
+                catch (Exception ex)
+                {
+                    // Don't fail grading if log saving fails, just log the error
+                    OnProgress($"[Docker Logs] Warning: Failed to save container logs: {ex.Message}");
+                }
+                
+                // Stop network monitor based on mode
+                if (config.UseDockerInternalNetworking)
+                {
+                    // Docker internal networking mode: Use container-based monitor
+                    if (monitorContainerName != null && monitorOutputDir != null)
+                    {
+                        OnProgress($"[NetworkMonitor] Retrieving captured traffic from monitor container...");
+                        var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
+                        OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
+                        OnProgress($"[NetworkMonitor] Pcap file saved to {Path.Combine(monitorOutputDir, "network_capture.pcap")}");
+                    }
+                }
+                else
+                {
+                    // Legacy mode: Stop SharedNetworkMonitor
+                    if (_networkMonitor != null)
+                    {
+                        OnProgress($"[NetworkMonitor] Stopping SharedNetworkMonitor for student {studentCode}...");
+                        await _networkMonitor.StopAsync(ct);
+                        OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
+                        
+                        // CRITICAL FIX: Add delay after stopping monitor to ensure:
+                        // 1. All in-flight packets are processed
+                        // 2. Student is properly unregistered from SharedNetworkMonitor
+                        // 3. Port is fully released before next student uses it
+                        // This prevents cross-contamination between students
+                        OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
+                        await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
+                        OnProgress($"[NetworkMonitor] Monitor cleanup complete");
+                    }
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
@@ -520,11 +599,16 @@ namespace SolutionGrader.Core.Services
             // This container is shared between students for efficiency
             await SetupDatabaseContainerAsync(config);
             
-            // 2. Create server container with TTY support and PORT EXPOSED to host
-            // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
+            // 2. Create server container with TTY support
+            // Port mapping behavior depends on UseDockerInternalNetworking:
+            // - Internal networking: NO port mapping (client connects via container name)
+            // - Legacy mode: Port exposed to host (client connects via host.docker.internal)
             if (!string.IsNullOrEmpty(serverDllPath))
             {
-                OnProgress($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+                OnProgress($"[Port Config] SetupContainersAsync - About to create server container");
+                OnProgress($"  Internal port: {config.CodeContainerInternalPort}");
+                OnProgress($"  Host port: {config.CodeContainerHostPort}");
+                OnProgress($"  Docker internal networking: {config.UseDockerInternalNetworking}");
                 
                 var serverBase = new DockerBase
                 {
@@ -532,7 +616,8 @@ namespace SolutionGrader.Core.Services
                     ContainerName = serverContainer,
                     DockerNetwork = config.DockerNetwork,
                     ContainerPort = config.CodeContainerInternalPort,
-                    HostPort = config.CodeContainerHostPort,  // EXPOSED to host for NetworkMonitor
+                    // CRITICAL: Only expose port in legacy mode
+                    HostPort = config.UseDockerInternalNetworking ? 0 : config.CodeContainerHostPort,
                     EnvironmentVariables = new Dictionary<string, string>
                     {
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
@@ -540,17 +625,22 @@ namespace SolutionGrader.Core.Services
                     }
                 };
                 
-                OnProgress($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
-                
                 _dockerExecutor.RunContainerWithTty(serverBase);
-                OnProgress($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
+                
+                if (config.UseDockerInternalNetworking)
+                {
+                    OnProgress($"[Docker] Server container {serverContainer} created (internal networking, no port mapping)");
+                }
+                else
+                {
+                    OnProgress($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
+                }
             }
             
-            // 3. Create client container with TTY support (NO port mapping needed)
-            // Client connects to server via host.docker.internal to route traffic through the exposed port.
-            // This is CRITICAL for network monitoring - traffic must pass through the host's exposed port
-            // so the NetworkMonitor (running on the host) can capture it.
-            // The --add-host flag ensures host.docker.internal works on Linux (Docker 20.10+)
+            // 3. Create client container with TTY support
+            // Connectivity depends on UseDockerInternalNetworking:
+            // - Internal networking: Client connects directly to server container name
+            // - Legacy mode: Client connects via host.docker.internal (requires --add-host flag)
             if (!string.IsNullOrEmpty(clientDllPath))
             {
                 var clientBase = new DockerBase
@@ -565,12 +655,19 @@ namespace SolutionGrader.Core.Services
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
                     },
-                    // Add host.docker.internal mapping to allow client to reach the host
-                    // This enables network traffic to flow through the exposed port for capture
-                    AdditionalFlags = AppsettingKeywords.DOCKER_ADD_HOST_FLAG
+                    // CRITICAL: Only add host.docker.internal in legacy mode
+                    AdditionalFlags = config.UseDockerInternalNetworking ? "" : AppsettingKeywords.DOCKER_ADD_HOST_FLAG
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                OnProgress($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
+                
+                if (config.UseDockerInternalNetworking)
+                {
+                    OnProgress($"[Docker] Client container {clientContainer} created (connects to server via container name)");
+                }
+                else
+                {
+                    OnProgress($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support");
+                }
             }
             
             await Task.Delay(500);
@@ -862,12 +959,17 @@ namespace SolutionGrader.Core.Services
                                 OnProgress($"[DllMod] Server files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                // For server: always binds to 0.0.0.0 (all interfaces)
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy");
+                                OnProgress($"[DllMod]   Target IP: 0.0.0.0 (bind all interfaces)");
+                                OnProgress($"[DllMod]   Target Port: {config.CodeContainerInternalPort}");
+                                
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ServerProjectName,
                                     isServer: true,
-                                    targetPort: config.CodeContainerHostPort
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "0.0.0.0"  // Server always binds to all interfaces
                                 );
                                 
                                 OnProgress($"[DllMod] Server fallback result: {result.GetSummary()}");
@@ -927,12 +1029,22 @@ namespace SolutionGrader.Core.Services
                                 OnProgress($"[DllMod] Client files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                // IP address depends on networking mode
+                                string clientTargetIp = config.UseDockerInternalNetworking 
+                                    ? serverContainer  // Direct container name
+                                    : AppsettingKeywords.DOCKER_HOST_INTERNAL;  // Legacy mode
+                                    
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy");
+                                OnProgress($"[DllMod]   Target IP: {clientTargetIp}");
+                                OnProgress($"[DllMod]   Target Port: {config.CodeContainerInternalPort}");
+                                OnProgress($"[DllMod]   Mode: {(config.UseDockerInternalNetworking ? "Docker internal networking" : "Legacy port mapping")}");
+                                
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ClientProjectName,
                                     isServer: false,
-                                    targetPort: config.CodeContainerHostPort
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: clientTargetIp
                                 );
                                 
                                 OnProgress($"[DllMod] Client fallback result: {result.GetSummary()}");
@@ -1033,19 +1145,46 @@ namespace SolutionGrader.Core.Services
                 config.DatabaseUsername,
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
-            // CRITICAL: For network monitoring with libpcap/npcap, we need DIRECT port mapping.
-            // Server binds to internal port, which MUST equal the external host port.
-            // Client connects to host.docker.internal using the SAME port number.
-            // Example: Student 1 uses 8000:8000, Student 2 uses 8001:8001
-            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0
-            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;         // host.docker.internal
+            // CRITICAL: Networking configuration depends on mode:
+            // 
+            // Docker Internal Networking (UseDockerInternalNetworking=true):
+            // - Server binds to 0.0.0.0 (accept connections from any container)
+            // - Client connects to server container name (e.g., "ag-server-student123")
+            // - No port mapping, direct container-to-container communication
+            // - Network monitor captures on Docker bridge network
+            // 
+            // Legacy Port Mapping (UseDockerInternalNetworking=false):
+            // - Server binds to 0.0.0.0 and port is mapped to host
+            // - Client connects to host.docker.internal (routes through host)
+            // - Network monitor captures on host loopback interface
+            // - Docker's NAT proxy will respond with SYN-ACK even when server exits
             
-            // Both server and client use the SAME port number for direct mapping
-            var port = config.CodeContainerHostPort;  // e.g., 8000, 8001, 8002, etc.
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0 (both modes)
+            
+            string clientIpAddress;
+            if (config.UseDockerInternalNetworking)
+            {
+                // Client connects directly to server container name
+                clientIpAddress = serverContainer;  // e.g., "ag-server-student123"
+                OnProgress($"[Appsettings] Docker internal networking mode: Client will connect to '{serverContainer}'");
+            }
+            else
+            {
+                // Client connects via host.docker.internal (legacy mode)
+                clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
+                OnProgress($"[Appsettings] Legacy port mapping mode: Client will connect to 'host.docker.internal'");
+            }
+            
+            // Port configuration
+            var port = config.CodeContainerInternalPort;  // Container's internal port
             var serverPort = port.ToString();
             var clientPort = port.ToString();
             
-            OnProgress($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
+            OnProgress($"[Appsettings] Port configuration: Container internal port {config.CodeContainerInternalPort}");
+            if (!config.UseDockerInternalNetworking)
+            {
+                OnProgress($"[Appsettings] Port mapping: Host port {config.CodeContainerHostPort} -> Container port {config.CodeContainerInternalPort}");
+            }
             
             // Check if DLL modification fallback is enabled and was used
             var dllModService = new DllModificationService();
@@ -1476,17 +1615,17 @@ namespace SolutionGrader.Core.Services
             int serverBaseline = 0;
             
             foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
-            {
-                ct.ThrowIfCancellationRequested();
-                
-                // Update network monitor stage context
-                _networkMonitor?.SetCurrentContext("", stage.ToString());
-                
-                OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
-                
-                switch (action.ToUpperInvariant())
                 {
-                    case "STARTSERVER":
+                    ct.ThrowIfCancellationRequested();
+                    
+                    // Update network monitor stage context
+                    _networkMonitor?.SetCurrentContext("", stage.ToString());
+                    
+                    OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
+                    
+                    switch (action.ToUpperInvariant())
+                    {
+                        case "STARTSERVER":
                         if (!string.IsNullOrEmpty(serverDllPath))
                         {
                             var serverDirPath = Path.GetDirectoryName(serverDllPath);
@@ -2395,6 +2534,72 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Saves Docker container logs to persistent files in the student's result directory.
+        /// 
+        /// CRITICAL: This must be called BEFORE container cleanup, as docker logs are destroyed
+        /// when containers are removed. These logs are essential for debugging test failures,
+        /// especially when student's server exits immediately (e.g., "Hello World" and exit).
+        /// 
+        /// Logs are saved to:
+        /// - {studentResultPath}/DockerLogs/server.log
+        /// - {studentResultPath}/DockerLogs/client.log
+        /// </summary>
+        /// <param name="serverContainer">Server container name</param>
+        /// <param name="clientContainer">Client container name</param>
+        /// <param name="studentResultPath">Path to student's result directory</param>
+        private async Task SaveDockerLogsAsync(string serverContainer, string clientContainer, string studentResultPath)
+        {
+            var logsDir = Path.Combine(studentResultPath, "DockerLogs");
+            Directory.CreateDirectory(logsDir);
+            
+            // Save server logs
+            try
+            {
+                var serverLogPath = Path.Combine(logsDir, "server.log");
+                var serverLogs = _dockerExecutor.GetContainerLogs(serverContainer);
+                
+                if (!string.IsNullOrEmpty(serverLogs))
+                {
+                    await File.WriteAllTextAsync(serverLogPath, serverLogs);
+                    OnProgress($"[Docker Logs] Server logs saved to {serverLogPath} ({serverLogs.Length} bytes)");
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(serverLogPath, "[No server logs captured]");
+                    OnProgress($"[Docker Logs] No server logs to save (container may not have started)");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Logs] Warning: Failed to save server logs: {ex.Message}");
+            }
+            
+            // Save client logs
+            try
+            {
+                var clientLogPath = Path.Combine(logsDir, "client.log");
+                var clientLogs = _dockerExecutor.GetContainerLogs(clientContainer);
+                
+                if (!string.IsNullOrEmpty(clientLogs))
+                {
+                    await File.WriteAllTextAsync(clientLogPath, clientLogs);
+                    OnProgress($"[Docker Logs] Client logs saved to {clientLogPath} ({clientLogs.Length} bytes)");
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(clientLogPath, "[No client logs captured]");
+                    OnProgress($"[Docker Logs] No client logs to save (container may not have started)");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Logs] Warning: Failed to save client logs: {ex.Message}");
+            }
+            
+            OnProgress($"[Docker Logs] All docker logs saved to {logsDir}");
+        }
+        
+        /// <summary>
         /// Cleans up code containers (server, client) after each student.
         /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
         /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
@@ -2844,6 +3049,149 @@ namespace SolutionGrader.Core.Services
             // Invoke the event to send progress update
             ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(formattedMessage));
         }
+        
+        /// <summary>
+        /// Start network monitor container to capture traffic for Docker internal networking mode.
+        /// The monitor container runs tcpdump on the same Docker network as student containers.
+        /// </summary>
+        private async Task StartNetworkMonitorContainerAsync(string monitorContainerName, int port, string outputDir, string dockerNetwork)
+        {
+            try
+            {
+                // Create output directory
+                Directory.CreateDirectory(outputDir);
+                
+                string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
+                
+                // Remove existing monitor container if any
+                _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
+                
+                // Start network monitor container
+                // Mount output directory to save pcap file
+                string absOutputDir = Path.GetFullPath(outputDir);
+                string dockerCmd = $"docker run -d --name {monitorContainerName} " +
+                                 $"--network {dockerNetwork} " +
+                                 $"-v \"{absOutputDir}:/capture\" " +
+                                 $"fptuxaes/network-monitor:latest " +
+                                 $"tcpdump -i any -w /capture/network_capture.pcap \"tcp port {port}\"";
+                
+                _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
+                
+                OnProgress($"[NetworkMonitor] Started container {monitorContainerName} on network {dockerNetwork}");
+                OnProgress($"[NetworkMonitor] Capturing traffic on port {port} to {pcapFile}");
+                
+                // Give tcpdump a moment to start
+                await Task.Delay(500);
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] WARNING: Failed to start monitor container: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Stop network monitor container and analyze captured traffic.
+        /// Returns network flow data parsed from the pcap file.
+        /// </summary>
+        private async Task<List<Dictionary<string, string>>> StopNetworkMonitorContainerAsync(string monitorContainerName, string outputDir)
+        {
+            var networkFlows = new List<Dictionary<string, string>>();
+            
+            try
+            {
+                // Stop the monitor container (tcpdump will flush pcap file)
+                _commandExecutor.RunCommand($"docker stop {monitorContainerName} 2>/dev/null || true", null, null, 10000);
+                
+                // Give it a moment to flush
+                await Task.Delay(500);
+                
+                // Parse the pcap file
+                string pcapFile = Path.Combine(outputDir, "network_capture.pcap");
+                if (File.Exists(pcapFile))
+                {
+                    OnProgress($"[NetworkMonitor] Analyzing captured traffic from {pcapFile}");
+                    networkFlows = await ParsePcapFileAsync(pcapFile);
+                    OnProgress($"[NetworkMonitor] Found {networkFlows.Count} network packets");
+                }
+                else
+                {
+                    OnProgress($"[NetworkMonitor] WARNING: No pcap file found at {pcapFile}");
+                }
+                
+                // Remove the monitor container
+                _commandExecutor.RunCommand($"docker rm -f {monitorContainerName} 2>/dev/null || true", null, null, 10000);
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] WARNING: Error stopping monitor: {ex.Message}");
+            }
+            
+            return networkFlows;
+        }
+        
+        /// <summary>
+        /// Parse pcap file using tcpdump to extract network flows.
+        /// Returns list of packets with SYN/ACK/PSH/RST flags.
+        /// </summary>
+        private async Task<List<Dictionary<string, string>>> ParsePcapFileAsync(string pcapFile)
+        {
+            var flows = new List<Dictionary<string, string>>();
+            
+            try
+            {
+                // Use tcpdump to read the pcap file
+                // Format: timestamp src > dst: flags [...]
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "tcpdump",
+                    Arguments = $"-r \"{pcapFile}\" -nn -tttt",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using (var process = Process.Start(psi))
+                {
+                    if (process == null)
+                    {
+                        OnProgress("[NetworkMonitor] Failed to start tcpdump for parsing");
+                        return flows;
+                    }
+                    
+                    string output = await process.StandardOutput.ReadToEndAsync();
+                    await process.WaitForExitAsync();
+                    
+                    // Parse tcpdump output
+                    // Example: "2024-12-08 05:00:00.123456 IP 172.18.0.2.54321 > 172.18.0.3.4000: Flags [S], ..."
+                    var lines = output.Split('\n');
+                    foreach (var line in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        
+                        var packet = new Dictionary<string, string>();
+                        
+                        // Extract flags: [S] = SYN, [.] = ACK, [P] = PSH, [R] = RST, [F] = FIN
+                        if (line.Contains("Flags [S]")) packet["Flags"] = "SYN";
+                        else if (line.Contains("Flags [S.]")) packet["Flags"] = "SYN-ACK";
+                        else if (line.Contains("Flags [.]")) packet["Flags"] = "ACK";
+                        else if (line.Contains("Flags [P.]")) packet["Flags"] = "PSH-ACK";
+                        else if (line.Contains("Flags [R]")) packet["Flags"] = "RST";
+                        else if (line.Contains("Flags [F.]")) packet["Flags"] = "FIN-ACK";
+                        else packet["Flags"] = "OTHER";
+                        
+                        packet["RawLine"] = line;
+                        flows.Add(packet);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] Error parsing pcap: {ex.Message}");
+            }
+            
+            return flows;
+        }
     }
     
     #region Model Classes
@@ -2908,6 +3256,26 @@ namespace SolutionGrader.Core.Services
         /// Default: false (disabled).
         /// </summary>
         public bool UseDllModificationFallback { get; set; } = false;
+        
+        /// <summary>
+        /// Use Docker internal networking instead of port mapping.
+        /// 
+        /// When true:
+        /// - Client connects to server via container name (e.g., "ag-server-student123")
+        /// - No port mappings (-p) are created
+        /// - Network monitor captures on Docker bridge network
+        /// - Eliminates Docker's NAT proxy behavior (no ghost SYN-ACK responses)
+        /// 
+        /// When false (legacy mode):
+        /// - Client connects to "host.docker.internal"
+        /// - Port mappings expose server port to host
+        /// - Network monitor captures on host loopback
+        /// - Docker's NAT proxy responds with SYN-ACK even when server exits
+        /// 
+        /// Default: false (legacy mode) - temporarily reverted due to network capture issues
+        /// TODO: Change back to true once bridge network capture is verified working
+        /// </summary>
+        public bool UseDockerInternalNetworking { get; set; } = true;
     }
     
     /// <summary>

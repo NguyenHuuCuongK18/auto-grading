@@ -327,34 +327,42 @@ public sealed class SharedNetworkMonitorService : IDisposable
     /// </summary>
     private void UpdateBpfFilter()
     {
-        if (_device == null || !_isCapturing) return;
+        if (_devices.Count == 0 || !_isCapturing) return;
         
         var ports = _portToStudentCode.Keys.ToList();
+        string filterExpression;
+        
         if (ports.Count == 0)
         {
             // No ports registered, use dummy filter that matches nothing
-            try { _device.Filter = "tcp port 0"; } catch { }
-            return;
+            filterExpression = "tcp port 0";
+        }
+        else if (ports.Count == 1)
+        {
+            filterExpression = $"tcp port {ports[0]}";
+        }
+        else
+        {
+            var portList = string.Join(" or ", ports);
+            filterExpression = $"tcp port ({portList})";
         }
         
-        try
+        // CRITICAL FIX: Apply filter to ALL devices, not just the first one
+        int successCount = 0;
+        foreach (var device in _devices)
         {
-            if (ports.Count == 1)
+            try
             {
-                _device.Filter = $"tcp port {ports[0]}";
+                device.Filter = filterExpression;
+                successCount++;
             }
-            else
+            catch (Exception ex)
             {
-                var portList = string.Join(" or ", ports);
-                _device.Filter = $"tcp port ({portList})";
+                Console.WriteLine($"[SharedNetworkMonitor] WARNING: Failed to set BPF filter on {device.Name}: {ex.Message}");
             }
-            
-            Console.WriteLine($"[SharedNetworkMonitor] Updated BPF filter for {ports.Count} ports");
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[SharedNetworkMonitor] WARNING: Failed to update BPF filter: {ex.Message}");
-        }
+        
+        Console.WriteLine($"[SharedNetworkMonitor] Updated BPF filter for {ports.Count} ports on {successCount}/{_devices.Count} devices");
     }
     
     private List<ICaptureDevice> FindCandidateDevices()
@@ -371,22 +379,55 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 return candidates;
             }
             
+            Console.WriteLine($"[SharedNetworkMonitor] Scanning {allDevices.Count} network devices...");
+            
+            // CRITICAL FIX: Capture on ALL interfaces to catch ephemeral Docker bridges
+            // Custom Docker networks create dynamic br-<network-id> interfaces that:
+            // 1. Only exist while containers are running
+            // 2. Have unpredictable names (include network ID)
+            // 3. Cannot be pre-selected before containers start
+            // 
+            // Solution: Capture on all interfaces and use BPF filter to limit to target ports
+            // This ensures we catch traffic regardless of which interface Docker uses
+            
             foreach (var device in allDevices)
             {
                 var name = device.Name?.ToLowerInvariant() ?? "";
                 var desc = device.Description?.ToLowerInvariant() ?? "";
                 
-                // Look for loopback devices
-                // On Linux: "lo", On macOS: "lo0", On Windows: "\\device\\npcap_loopback"
-                bool isLoopback = name == "lo" || name == "lo0" || 
-                                 name.Contains("loopback") || desc.Contains("loopback") ||
-                                 name.Contains("\\device\\npcap_loopback");
-                
-                if (isLoopback)
+                // Skip "any" pseudo-device on Linux (causes issues)
+                if (name == "any" || name.Contains("\\device\\npcap\\any"))
                 {
-                    candidates.Add(device);
-                    Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name}");
+                    Console.WriteLine($"[SharedNetworkMonitor] Skipping pseudo-device: {name}");
+                    continue;
                 }
+                
+                // Skip USB/Bluetooth/other non-network interfaces
+                if (name.Contains("usb") || name.Contains("bluetooth") || desc.Contains("bluetooth"))
+                {
+                    continue;
+                }
+                
+                // Add all other devices
+                candidates.Add(device);
+                Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name} ({device.Description})");
+            }
+            
+            if (candidates.Count == 0)
+            {
+                Console.WriteLine("[SharedNetworkMonitor] WARNING: No suitable capture devices found!");
+                Console.WriteLine("[SharedNetworkMonitor] This usually means:");
+                Console.WriteLine("  1. On Linux: libpcap is not installed or you need to run with sudo");
+                Console.WriteLine("  2. On Windows: NPcap is not installed");
+                Console.WriteLine("[SharedNetworkMonitor] Available devices:");
+                foreach (var device in allDevices)
+                {
+                    Console.WriteLine($"  - {device.Name}: {device.Description}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] Selected {candidates.Count} devices for monitoring");
             }
         }
         catch (Exception ex)
