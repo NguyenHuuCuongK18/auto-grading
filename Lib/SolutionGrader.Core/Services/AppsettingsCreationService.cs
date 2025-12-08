@@ -45,6 +45,12 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
 
         var ipAddress = DetermineIpAddress(protocol ?? dbConfig?.Type ?? AppsettingKeywords.PROTOCOL_HTTP);
 
+        // DISABLED: Don't create appsettings.json for server DLL
+        // Reason: Even with ASPNETCORE_PREVENTHOSTINGSTARTUP=true, the .NET runtime loads configuration from appsettings.json
+        // This can trigger default Kestrel/listener initialization for console apps that shouldn't have servers
+        // Students writing real servers should create their own appsettings.json or hardcode configuration
+        // This prevents false positives where "Hello, World!" console apps get partial credit from .NET auto-configuration
+        /*
         if (!string.IsNullOrEmpty(serverExePath) && File.Exists(serverExePath))
         {
             var serverDir = Path.GetDirectoryName(serverExePath);
@@ -56,6 +62,7 @@ public sealed class AppsettingsCreationService : IAppsettingsCreationService
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS_CREATION} {string.Format(AppsettingKeywords.MSG_GENERATED_SERVER_APPSETTINGS, serverAppsettingsPath)}");
             }
         }
+        */
 
         if (!string.IsNullOrEmpty(clientExePath) && File.Exists(clientExePath))
         {
