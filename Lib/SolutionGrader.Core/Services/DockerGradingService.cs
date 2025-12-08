@@ -3059,11 +3059,19 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
         {
-            if (string.IsNullOrEmpty(_currentPcapFilePath) || !File.Exists(_currentPcapFilePath))
+            if (string.IsNullOrEmpty(_currentPcapFilePath))
             {
-                // Pcap file doesn't exist yet - this is normal for early stages
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Pcap file path not set, skipping packet parsing");
                 return;
             }
+            
+            if (!File.Exists(_currentPcapFilePath))
+            {
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Pcap file not found at {_currentPcapFilePath}, skipping (normal for early stages)");
+                return;
+            }
+            
+            OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsing pcap file: {_currentPcapFilePath}");
             
             try
             {
@@ -3119,11 +3127,13 @@ namespace SolutionGrader.Core.Services
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = lines.Length;
                 
-                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Successfully parsed {newPackets.Count} new packets (total lines: {lines.Length}, already processed: {_lastParsedPacketCount})");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Total packets in RunContext: {_runContext.GetAllCapturedNetworkPackets().Count}");
             }
             catch (Exception ex)
             {
-                OnProgress($"[NetworkMonitor] Error parsing pcap for stage {currentStage}: {ex.Message}");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: ERROR parsing pcap - {ex.Message}");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Exception details: {ex.ToString()}");
             }
         }
         
