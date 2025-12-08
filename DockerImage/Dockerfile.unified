@@ -1,0 +1,29 @@
+# Unified Container Dockerfile for Auto-Grading System
+# Runs both client and server processes in a single container
+# Communicates via localhost (127.0.0.1) to eliminate proxy behavior
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+# Install supervisord for process management
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directory structure
+RUN mkdir -p /apps/server /apps/client /logs /scripts
+
+# Copy supervisord configuration
+COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy control script
+COPY unified-control.sh /scripts/unified-control.sh
+RUN chmod +x /scripts/unified-control.sh
+
+# Expose supervisord HTTP interface (internal only)
+EXPOSE 9001
+
+# Set working directory
+WORKDIR /apps
+
+# Run supervisord as entrypoint
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
