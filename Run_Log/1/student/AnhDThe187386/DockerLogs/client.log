@@ -1,6 +1,6 @@
 Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -18,7 +18,7 @@ Message: Student information retrieved successfully
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -33,7 +33,7 @@ Message: Student not found
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -48,7 +48,7 @@ Message: Student not found
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -66,7 +66,7 @@ Message: Student information retrieved successfully
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -81,7 +81,7 @@ Message: Invalid student ID format. Expected: S followed by 3 digits
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
@@ -96,7 +96,7 @@ Message: Student not found
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at ag-server-AnhDThe187386:4005
+Connecting to server at ag-server-AnhDThe187386:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 

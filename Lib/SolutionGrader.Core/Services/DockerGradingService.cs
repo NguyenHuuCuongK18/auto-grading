@@ -3085,7 +3085,7 @@ namespace SolutionGrader.Core.Services
         /// Default: false (legacy mode) - temporarily reverted due to network capture issues
         /// TODO: Change back to true once bridge network capture is verified working
         /// </summary>
-        public bool UseDockerInternalNetworking { get; set; } = false;
+        public bool UseDockerInternalNetworking { get; set; } = true;
     }
     
     /// <summary>
