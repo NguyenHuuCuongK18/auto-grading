@@ -860,6 +860,25 @@ namespace EnvironmentBuilder.DockerCommand
             }
         }
 
+        /// <summary>
+        /// Starts an application inside a Docker container for grading purposes.
+        /// 
+        /// CRITICAL FOR GRADING: This method does NOT wait for the application to be "ready".
+        /// It simply starts the application and returns after a brief delay to allow process startup.
+        /// 
+        /// Why we don't wait for port readiness:
+        /// - Grading must handle students whose code fails (e.g., prints "Hello World" and exits)
+        /// - Waiting for port would cause 30-second timeouts for broken student code
+        /// - Test cases need to execute even if server exits immediately (to properly fail)
+        /// - Client will get RST when trying to connect if server is not listening (this is expected)
+        /// 
+        /// The flow for grading is:
+        /// 1. Start server (even if it exits immediately)
+        /// 2. Start client
+        /// 3. Client attempts connection (succeeds if server running, RST if not)
+        /// 4. Capture network flow and outputs
+        /// 5. Grade based on actual behavior
+        /// </summary>
         public bool WaitForPublishConsoleFileDeployment(string containerName, string appName, string appPath, string expectedPort, int maxWaitTimeMs = 70000, int checkIntervalMs = 1000)
         {
             try
@@ -868,59 +887,20 @@ namespace EnvironmentBuilder.DockerCommand
 
                 StartApplicationInContainer(containerName, appName, appPath);
 
-                int elapsed = 0;
-                bool processEverRan = false;
-                bool portEverOpened = false;
+                // For grading, we don't wait for port readiness.
+                // Just give the process a moment to start, then return.
+                // This allows grading to proceed even if student's code exits immediately.
+                Thread.Sleep(500); // Brief delay to allow process startup
                 
-                while (elapsed < maxWaitTimeMs)
-                {
-                    // Check if process is running inside the container
-                    bool running = IsProcessRunning(containerName, appName);
-                    if (running) processEverRan = true;
-
-                    // Check if expected port is actually being listened on inside the container
-                    // CRITICAL: This now uses 'ss -ltn' to check for actual LISTEN state,
-                    // not just whether the port is mapped with 'docker container port'
-                    bool portOpen = IsPortOpen(containerName, expPort);
-                    if (portOpen) portEverOpened = true;
-
-                    if (running && portOpen)
-                    {
-                        Console.WriteLine($"[{appName}] Deployment successful. Process is running and port {expectedPort} is listening.");
-                        return true;
-                    }
-
-                    Thread.Sleep(checkIntervalMs);
-                    elapsed += checkIntervalMs;
-                    
-                    // Only log periodically to avoid spam
-                    if (elapsed % 3000 == 0 || elapsed >= maxWaitTimeMs)
-                    {
-                        Console.WriteLine($"[{appName}] Waiting for application... running={running}, listening={portOpen} ({elapsed}/{maxWaitTimeMs}ms)");
-                    }
-                }
-
-                // Deployment timeout - provide detailed diagnostic information
-                Console.WriteLine($"[{appName}] Deployment timeout after {maxWaitTimeMs}ms");
-                Console.WriteLine($"[{appName}] Process ever started: {processEverRan}");
-                Console.WriteLine($"[{appName}] Port ever listened: {portEverOpened}");
+                bool running = IsProcessRunning(containerName, appName);
+                Console.WriteLine($"[{appName}] Application started. Process running: {running}");
                 
-                if (processEverRan && !portEverOpened)
-                {
-                    Console.WriteLine($"[{appName}] DIAGNOSIS: Process started but never listened on port {expectedPort}.");
-                    Console.WriteLine($"[{appName}] This usually means the application exited immediately (e.g., 'Hello World' that exits).");
-                    Console.WriteLine($"[{appName}] Or the application is listening on a different port than configured.");
-                }
-                else if (!processEverRan)
-                {
-                    Console.WriteLine($"[{appName}] DIAGNOSIS: Process never started. Check if DLL path is correct: {appPath}");
-                }
-                
-                return false;
+                return true; // Always return true to allow grading to proceed
             }
             catch (Exception ex)
             {
-                throw new Exception($"Error checking deployment of {appName}: {ex.Message}", ex);
+                Console.WriteLine($"[{appName}] Error starting application: {ex.Message}");
+                return false;
             }
         }
 
@@ -1032,67 +1012,11 @@ namespace EnvironmentBuilder.DockerCommand
             return output.Contains(processName, StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>
-        /// Checks if a port is actually being listened on inside the container.
-        /// 
-        /// CRITICAL FIX: Previously used 'docker container port' which only checks if port is MAPPED,
-        /// not if anything is actually LISTENING on it. This caused false positives where:
-        /// - Student's server exits immediately (e.g., prints "Hello World" and exits)
-        /// - Port is still mapped to host (-p 4000:4000)
-        /// - Method returns true even though nothing is listening
-        /// - Network monitor captures ghost responses from TCP stack
-        /// 
-        /// Now uses 'ss -ltn' (socket statistics) inside the container to check for LISTEN state.
-        /// This accurately detects whether an application is actually accepting connections.
-        /// </summary>
-        /// <param name="containerName">Container to check</param>
-        /// <param name="internalPort">Port number to check (container's internal port)</param>
-        /// <returns>True if port is in LISTEN state, false otherwise</returns>
         private bool IsPortOpen(string containerName, int internalPort)
         {
             if (internalPort == -1) return true;
-            
-            try
-            {
-                // Use 'ss -ltn' to check for LISTEN state on the specific port
-                // -l: listening sockets only
-                // -t: TCP sockets only  
-                // -n: numeric port numbers (don't resolve service names)
-                // 
-                // Example output when port 4000 is listening:
-                //   LISTEN 0      128          0.0.0.0:4000       0.0.0.0:*
-                //
-                // If nothing is listening, output will be empty or not contain the port
-                string command = $"docker exec {containerName} sh -c \"ss -ltn | grep ':{internalPort} '\"";
-                string output = RunCommand(command);
-                
-                // Check if output contains LISTEN state for our port
-                bool isListening = !string.IsNullOrWhiteSpace(output) && output.Contains("LISTEN");
-                
-                return isListening;
-            }
-            catch (Exception ex)
-            {
-                // If 'ss' command fails (e.g., not installed), fall back to netstat
-                // This ensures backward compatibility with older images
-                try
-                {
-                    string command = $"docker exec {containerName} sh -c \"netstat -ltn | grep ':{internalPort} '\"";
-                    string output = RunCommand(command);
-                    
-                    // netstat shows LISTEN in the State column
-                    bool isListening = !string.IsNullOrWhiteSpace(output) && output.Contains("LISTEN");
-                    
-                    return isListening;
-                }
-                catch
-                {
-                    // If both commands fail, assume port is not listening for safety
-                    // This is better than false positive (thinking server is ready when it's not)
-                    // Note: Caller (DockerGradingService) will log this via OnProgress if needed
-                    return false;
-                }
-            }
+            string output = RunCommand($"docker container port {containerName} {internalPort}/tcp");
+            return !string.IsNullOrWhiteSpace(output);
         }
 
         /// <summary>

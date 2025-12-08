@@ -23,13 +23,9 @@
 #
 FROM fptuxaes/aes-dotnet8:latest
 
-# Install essential packages for grading system:
-# - procps: provides ps/pkill/pgrep commands (needed for process cleanup between test cases)
-# - iproute2: provides ss command (needed to check if ports are actually listening)
-# - net-tools: provides netstat command (fallback if ss is not available)
-# Without these commands, the "Address already in use" error occurs when restarting applications,
-# and port validation cannot detect when student's server exits immediately
-RUN apt-get update && apt-get install -y procps iproute2 net-tools && rm -rf /var/lib/apt/lists/*
+# Install procps package for ps/pkill/pgrep commands (needed for process cleanup between test cases)
+# Without these commands, the "Address already in use" error occurs when restarting applications
+RUN apt-get update && apt-get install -y procps && rm -rf /var/lib/apt/lists/*
 
 # CRITICAL FIX: Disable ALL services from base image that interfere with grading
 # The base image (fptuxaes/aes-dotnet8:latest) has NGINX installed (layer 9) and 
