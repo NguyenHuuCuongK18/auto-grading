@@ -1475,10 +1475,15 @@ namespace SolutionGrader.Core.Services
                 
                 // LIVE GRADING: Parse network packets for current stage
                 // This enables per-stage validation (all-or-nothing grading strategy)
+                OnProgress($"[NetworkMonitor] Stage {stage}: _networkMonitor={(_networkMonitor == null ? "null" : "not-null")}, _currentPcapFilePath={_currentPcapFilePath ?? "null"}");
                 if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath))
                 {
                     // Using sidecar pattern - parse pcap file for this stage
                     await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort);
+                }
+                else
+                {
+                    OnProgress($"[NetworkMonitor] Stage {stage}: Skipping parse - using legacy network monitor or no pcap path");
                 }
                 
                 await Task.Delay(10);  // Brief delay between actions
@@ -3105,28 +3110,43 @@ namespace SolutionGrader.Core.Services
                 // Check if monitor container is running
                 if (!_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
+                    OnProgress($"[NetworkMonitor] Container {monitorContainer} not running, skipping parse for stage {currentStage}");
                     return; // Container not running yet
                 }
                 
                 // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
                 // This bypasses Windows/WSL2 file locking issues with the live capture file
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Creating snapshot from /data/{pcapFileName}");
                 var snapshotCmd = $"docker exec {monitorContainer} cp /data/{pcapFileName} /data/snapshot.pcap";
-                var (snapshotSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(snapshotCmd, 5000);
+                var (snapshotSuccess, snapshotOutput) = _dockerExecutor.ExecDockerCommandWithOutput(snapshotCmd, 5000);
                 
                 if (!snapshotSuccess)
                 {
                     // File doesn't exist yet - normal for early stages before traffic
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot copy failed (file may not exist yet): {snapshotOutput}");
                     return;
                 }
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot created, downloading to host");
                 
                 // SNAPSHOT STRATEGY Step 2: Download the snapshot to host
                 var copyCmd = $"docker cp {monitorContainer}:/data/snapshot.pcap \"{snapshotPath}\"";
-                var (copySuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(copyCmd, 5000);
+                var (copySuccess, copyOutput) = _dockerExecutor.ExecDockerCommandWithOutput(copyCmd, 5000);
                 
-                if (!copySuccess || !File.Exists(snapshotPath))
+                if (!copySuccess)
                 {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to download snapshot: {copyOutput}");
                     return;
                 }
+                
+                if (!File.Exists(snapshotPath))
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot file not found at {snapshotPath}");
+                    return;
+                }
+                
+                var fileSize = new FileInfo(snapshotPath).Length;
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
                 
                 // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
                 // Use tcpdump to read pcap with detailed output
@@ -3141,14 +3161,26 @@ namespace SolutionGrader.Core.Services
                 };
                 
                 using var process = Process.Start(psi);
-                if (process == null) return;
+                if (process == null)
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to start tcpdump process");
+                    return;
+                }
                 
                 string output = await process.StandardOutput.ReadToEndAsync();
+                string errorOutput = await process.StandardError.ReadToEndAsync();
                 await process.WaitForExitAsync();
+                
+                if (!string.IsNullOrEmpty(errorOutput))
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
+                }
                 
                 // Parse tcpdump output
                 // Example: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
                 var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump output has {lines.Length} lines");
                 
                 // Skip packets we've already processed
                 var newPackets = lines.Skip(_lastParsedPacketCount).ToList();
@@ -3177,7 +3209,7 @@ namespace SolutionGrader.Core.Services
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = lines.Length;
                 
-                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}");
+                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}, total packets: {lines.Length}");
             }
             catch (Exception ex)
             {
