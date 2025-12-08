@@ -1591,8 +1591,8 @@ namespace SolutionGrader.Core.Services
                 // Read server log for this stage
                 try
                 {
-                    var serverLogCmd = $"docker exec {unifiedContainer} cat /apps/server/server-stage-{stage}.log";
-                    var serverLog = _commandExecutor.RunCommand(serverLogCmd, null, null, 5000);
+                    var serverLogPath = $"/apps/server/server-stage-{stage}.log";
+                    var serverLog = ReadFileFromContainer(unifiedContainer, serverLogPath);
                     if (!string.IsNullOrEmpty(serverLog))
                     {
                         serverOutputs[stage] = serverLog;
@@ -1608,8 +1608,8 @@ namespace SolutionGrader.Core.Services
                 // Read client log for this stage
                 try
                 {
-                    var clientLogCmd = $"docker exec {unifiedContainer} cat /apps/client/client-stage-{stage}.log";
-                    var clientLog = _commandExecutor.RunCommand(clientLogCmd, null, null, 5000);
+                    var clientLogPath = $"/apps/client/client-stage-{stage}.log";
+                    var clientLog = ReadFileFromContainer(unifiedContainer, clientLogPath);
                     if (!string.IsNullOrEmpty(clientLog))
                     {
                         clientOutputs[stage] = clientLog;
@@ -2428,6 +2428,36 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Reads a file from a Docker container using docker exec cat.
+        /// </summary>
+        private string ReadFileFromContainer(string containerName, string filePath)
+        {
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = $"exec {containerName} cat {filePath}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            
+            process.Start();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            
+            if (process.ExitCode != 0)
+            {
+                throw new Exception($"Failed to read file {filePath} from container {containerName}");
+            }
+            
+            return output;
+        }
+        
+        /// <summary>
         /// Cleans up code containers (server, client) after each student.
         /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
         /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
@@ -2443,66 +2473,53 @@ namespace SolutionGrader.Core.Services
             
             OnProgress($"[Unified] Exporting logs to {logsDir}");
             
-            // Export all server log files
+            // Export all server and client log files using docker cp
             try
             {
-                var serverLogsCmd = $"docker exec {unifiedContainer} find /apps/server -name 'server-stage-*.log' -type f";
-                var serverLogFiles = _commandExecutor.RunCommand(serverLogsCmd, null, null, 5000);
-                
-                if (!string.IsNullOrEmpty(serverLogFiles))
-                {
-                    var logPaths = serverLogFiles.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var logPath in logPaths)
-                    {
-                        var fileName = Path.GetFileName(logPath.Trim());
-                        var destPath = Path.Combine(logsDir, fileName);
-                        
-                        try
-                        {
-                            _dockerExecutor.CopyFileFromContainer($"{unifiedContainer}:{logPath.Trim()}", destPath);
-                            OnProgress($"[Unified] Exported {fileName}");
-                        }
-                        catch (Exception ex)
-                        {
-                            OnProgress($"[Unified] WARNING: Failed to export {fileName}: {ex.Message}");
-                        }
-                    }
-                }
+                // Copy all server log files
+                var serverCopyCmd = $"docker cp {unifiedContainer}:/apps/server/. {logsDir}/";
+                _commandExecutor.RunCommand(serverCopyCmd, null, null, 10000);
+                OnProgress($"[Unified] Exported server logs");
             }
             catch (Exception ex)
             {
-                OnProgress($"[Unified] WARNING: Failed to list server logs: {ex.Message}");
+                OnProgress($"[Unified] WARNING: Failed to export server logs: {ex.Message}");
             }
             
-            // Export all client log files
             try
             {
-                var clientLogsCmd = $"docker exec {unifiedContainer} find /apps/client -name 'client-stage-*.log' -type f";
-                var clientLogFiles = _commandExecutor.RunCommand(clientLogsCmd, null, null, 5000);
-                
-                if (!string.IsNullOrEmpty(clientLogFiles))
+                // Copy all client log files
+                var clientCopyCmd = $"docker cp {unifiedContainer}:/apps/client/. {logsDir}/";
+                _commandExecutor.RunCommand(clientCopyCmd, null, null, 10000);
+                OnProgress($"[Unified] Exported client logs");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to export client logs: {ex.Message}");
+            }
+            
+            // Clean up: remove DLL files from logs directory, keep only log files
+            try
+            {
+                var dllFiles = Directory.GetFiles(logsDir, "*.dll", SearchOption.AllDirectories);
+                foreach (var dllFile in dllFiles)
                 {
-                    var logPaths = clientLogFiles.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var logPath in logPaths)
-                    {
-                        var fileName = Path.GetFileName(logPath.Trim());
-                        var destPath = Path.Combine(logsDir, fileName);
-                        
-                        try
-                        {
-                            _dockerExecutor.CopyFileFromContainer($"{unifiedContainer}:{logPath.Trim()}", destPath);
-                            OnProgress($"[Unified] Exported {fileName}");
-                        }
-                        catch (Exception ex)
-                        {
-                            OnProgress($"[Unified] WARNING: Failed to export {fileName}: {ex.Message}");
-                        }
-                    }
+                    try { File.Delete(dllFile); } catch { }
+                }
+                var exeFiles = Directory.GetFiles(logsDir, "*.exe", SearchOption.AllDirectories);
+                foreach (var exeFile in exeFiles)
+                {
+                    try { File.Delete(exeFile); } catch { }
+                }
+                var jsonFiles = Directory.GetFiles(logsDir, "appsettings.json", SearchOption.AllDirectories);
+                foreach (var jsonFile in jsonFiles)
+                {
+                    try { File.Delete(jsonFile); } catch { }
                 }
             }
             catch (Exception ex)
             {
-                OnProgress($"[Unified] WARNING: Failed to list client logs: {ex.Message}");
+                OnProgress($"[Unified] WARNING: Failed to clean up non-log files: {ex.Message}");
             }
             
             await Task.CompletedTask;
