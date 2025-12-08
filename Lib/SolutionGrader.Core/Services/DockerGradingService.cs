@@ -374,6 +374,10 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
+                    // CRITICAL: Clear old stage log files before executing new test case
+                    // Same container is reused across test cases, so logs must be cleaned up
+                    ClearStageLogsInContainer(unifiedContainer);
+                    
                     // Copy files to unified container (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
                     await CopyFilesToUnifiedContainerAsync(serverPath, clientPath, config, testKitConfig, unifiedContainer);
@@ -2423,6 +2427,30 @@ namespace SolutionGrader.Core.Services
             }
             
             await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Clear old stage log files in the unified container before executing a new test case.
+        /// This prevents log accumulation across test cases (same container is reused).
+        /// </summary>
+        private void ClearStageLogsInContainer(string unifiedContainer)
+        {
+            try
+            {
+                // Remove all server stage log files
+                var clearServerCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/server/server-stage-*.log\"";
+                _commandExecutor.RunCommand(clearServerCmd, null, null, 5000);
+                
+                // Remove all client stage log files
+                var clearClientCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/client/client-stage-*.log\"";
+                _commandExecutor.RunCommand(clearClientCmd, null, null, 5000);
+                
+                OnProgress($"[Unified] Cleared old stage log files for new test case");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to clear old logs: {ex.Message}");
+            }
         }
         
         /// <summary>
