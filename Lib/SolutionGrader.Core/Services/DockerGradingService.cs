@@ -374,14 +374,6 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
-                    // Without this delay, network monitor may not be ready to capture packets for TC1
-                    if (isFirstTestCase)
-                    {
-                        OnProgress("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
-                        await Task.Delay(3000);
-                    }
-                    
                     // Copy files to unified container (will overwrite existing files)
                     OnProgress($"Copying files for test case {testCase.Name}...");
                     await CopyFilesToUnifiedContainerAsync(serverPath, clientPath, config, testKitConfig, unifiedContainer);
@@ -2531,13 +2523,16 @@ namespace SolutionGrader.Core.Services
             // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
             // We override the -w argument to use our custom filename
             
+            // CRITICAL: Capture on 'any' interface to ensure we don't miss traffic
+            // When using --net=container, 'lo' might not capture all localhost traffic
+            // Using 'any' ensures we capture all traffic in the network namespace
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Alpine + tcpdump image with ENTRYPOINT
-                           $"-i lo -U -w {pcapFileName}";            // Override CMD: capture on loopback, unbuffered, custom filename
+                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
+                           $"-i any -n -U -v -w {pcapFileName}";     // Capture on any interface, no name resolution, unbuffered, verbose
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
@@ -2548,13 +2543,13 @@ namespace SolutionGrader.Core.Services
                 _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
                 OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
                 
-                // Wait for tcpdump to initialize
-                await Task.Delay(1000);
+                // Brief delay to ensure container is up
+                await Task.Delay(500);
                 
                 // Verify monitor is running
                 if (_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Verified {monitorContainer} is running");
+                    OnProgress($"[Monitor] Verified {monitorContainer} is running and ready to capture");
                 }
                 else
                 {

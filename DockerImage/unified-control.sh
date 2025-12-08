@@ -80,12 +80,18 @@ case "$ACTION" in
             echo "[Control] Created named pipe /tmp/client_input"
         fi
         
-        # Ensure pipe keeper is running to keep pipe open
+        # CRITICAL FIX: Use tail -f to keep the pipe open
+        # This prevents EOF from being sent to the client immediately
+        # tail -f /dev/null is more reliable than sleep infinity in minimal shells
         # Check if any process is keeping the pipe open
-        if ! pgrep -f "sleep infinity.*client_input" > /dev/null; then
-            # Start pipe keeper in background
-            (sleep infinity > /tmp/client_input) &
-            echo "[Control] Started pipe keeper (PID: $!)"
+        if ! pgrep -f "tail.*client_input" > /dev/null; then
+            # Start dummy writer to hold the pipe open
+            tail -f /dev/null > /tmp/client_input &
+            PIPE_KEEPER_PID=$!
+            echo "[Control] Started pipe keeper with tail -f (PID: $PIPE_KEEPER_PID)"
+            # CRITICAL: Give the pipe keeper time to establish the write lock
+            # Without this delay, the client may start before the writer is ready
+            sleep 0.5
         fi
         
         # Stop client if already running
