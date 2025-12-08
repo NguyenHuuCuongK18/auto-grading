@@ -1417,9 +1417,9 @@ namespace SolutionGrader.Core.Services
                     case "SENDINPUT":
                         if (!string.IsNullOrEmpty(input))
                         {
-                            // Send input to the unified container
-                            // The input will be directed to the client process via stdin
-                            var sendInputCmd = $"docker exec -i {unifiedContainer} /bin/bash -c 'echo \"{input}\" | supervisorctl fg client'";
+                            // Send input to the client process via unified-control.sh
+                            // Use SendInput action which finds the client PID and writes to its stdin
+                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
                             try
                             {
                                 _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
