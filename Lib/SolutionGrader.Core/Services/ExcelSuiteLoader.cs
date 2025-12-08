@@ -29,21 +29,13 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
         // CRITICAL: Read Grade_Content from outer Header.xlsx
         // This determines whether students provide Server or Client
         var suiteGradeContent = ReadGradeContentFromHeader(headerPath);
-        if (!string.IsNullOrEmpty(suiteGradeContent))
-        {
-            Console.WriteLine($"[Suite] Grade_Content from outer Header.xlsx: {suiteGradeContent}");
-        }
+        // NOTE: Logging removed - no console output in library code
+        // UI and CLI handle their own logging through OnProgress callbacks
         
         // Read environment configuration from outermost environment.xlsx
-        Console.WriteLine($"[Environment] Looking for environment config in: {suiteRoot}");
         var envConfig = ReadEnvironmentConfig(suiteRoot);
-        Console.WriteLine($"[Environment] Environment config loaded: {(envConfig != null ? "Yes" : "No")}");
-        if (envConfig != null)
-        {
-            Console.WriteLine($"[Environment] DatabaseHostPort: {envConfig.DatabaseHostPort}");
-            Console.WriteLine($"[Environment] DatabaseName: {envConfig.DatabaseName}");
-            Console.WriteLine($"[Environment] DatabaseUsername: {envConfig.DatabaseUsername}");
-        }
+        // NOTE: Logging removed - no console output in library code
+        // UI and CLI handle their own logging through OnProgress callbacks
         
         // Build test cases from directories
         var cases = BuildCasesFromDirectory(suiteRoot, marks, envConfig, useInnerTestCaseEnvironment, suiteGradeContent);

@@ -2035,7 +2035,8 @@ namespace SolutionGrader.Core.Services
                             int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
                             timeout = parsedTimeout;
-                            OnProgress($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
+                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                            // Logging moved to instance method context where OnProgress is available
                         }
                         
                         // Read Grade_Content
@@ -2043,7 +2044,8 @@ namespace SolutionGrader.Core.Services
                             !string.IsNullOrWhiteSpace(value))
                         {
                             gradeContent = value;
-                            OnProgress($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
+                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                            // Logging moved to instance method context where OnProgress is available
                         }
                     }
                     
@@ -2052,7 +2054,8 @@ namespace SolutionGrader.Core.Services
             }
             catch (Exception ex)
             {
-                OnProgress($"[TestKit] Warning: Could not read config from {headerPath}: {ex.Message}");
+                // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                // Silently use defaults if header cannot be read
             }
             
             return (defaultTimeout, "Client/Server");
