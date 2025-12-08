@@ -1137,32 +1137,15 @@ namespace SolutionGrader.Core.Services
                 // only traffic from this test case is captured
                 // 
                 // CRITICAL FIX: Clear captures multiple times with delays to ensure
-                // any in-flight packets from previous tests are flushed
-                OnProgress($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
+                // CRITICAL FIX: DO NOT clear captures between test cases
+                // Since we reuse the same unified container across all test cases, packets accumulate
+                // The comparison happens AFTER all test cases complete and needs ALL captured packets
+                // Clearing between test cases would lose previous packets
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case (captures will accumulate)...");
                 
-                // VERIFICATION: Check packet count BEFORE clear
+                // VERIFICATION: Check cumulative packet count
                 var packetCountBefore = _runContext.GetAllCapturedNetworkPackets().Count;
-                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count BEFORE clear: {packetCountBefore}");
-                
-                _networkMonitor?.ClearCaptures();
-                _runContext.ClearNetworkCaptures();
-                
-                // VERIFICATION: Check packet count AFTER clear
-                var packetCountAfterFirstClear = _runContext.GetAllCapturedNetworkPackets().Count;
-                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER first clear: {packetCountAfterFirstClear}");
-                
-                // CRITICAL FIX: Add small delay to allow any in-flight packets to be processed and cleared
-                // This prevents cross-contamination from previous test cases
-                await Task.Delay(100, ct);
-                
-                // Clear again to catch any packets that arrived during the delay
-                _networkMonitor?.ClearCaptures();
-                _runContext.ClearNetworkCaptures();
-                
-                // VERIFICATION: Check packet count AFTER second clear
-                var packetCountAfterSecondClear = _runContext.GetAllCapturedNetworkPackets().Count;
-                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER second clear: {packetCountAfterSecondClear}");
-                OnProgress($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Cumulative packet count: {packetCountBefore}");
                 
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
