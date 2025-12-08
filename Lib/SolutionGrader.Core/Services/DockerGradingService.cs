@@ -319,21 +319,33 @@ namespace SolutionGrader.Core.Services
                     var monitorPort = config.UseDockerInternalNetworking 
                         ? config.CodeContainerInternalPort   // Monitor container's internal port
                         : config.CodeContainerHostPort;      // Monitor host's exposed port
-                        
-                    _networkMonitor.MonitorPort = monitorPort;
-                    _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                    
-                    OnProgress($"[NetworkMonitor] Starting monitor for student {studentCode}");
-                    OnProgress($"[NetworkMonitor] Monitoring port {monitorPort} (protocol: {testKitConfig.Protocol})");
-                    OnProgress($"[NetworkMonitor] Mode: {(config.UseDockerInternalNetworking ? "Docker internal networking (bridge)" : "Legacy port mapping (loopback)")}");
-                    
-                    await _networkMonitor.StartAsync(ct);
-                    OnProgress($"Network monitor started - capturing traffic on port {monitorPort}");
-                    OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                
+                // Start network monitor based on mode
+                if (config.UseDockerInternalNetworking)
+                {
+                    OnProgress($"[NetworkMonitor] Using container-based network monitoring (Docker internal networking mode)");
+                    OnProgress($"[NetworkMonitor] SharedNetworkMonitor will NOT be started (using per-student monitor containers instead)");
                 }
                 else
                 {
-                    OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
+                    // Legacy mode: Use SharedNetworkMonitor for host-based capture
+                    if (_networkMonitor != null)
+                    {
+                        _networkMonitor.MonitorPort = monitorPort;
+                        _networkMonitor.ProtocolType = testKitConfig.Protocol;
+                        
+                        OnProgress($"[NetworkMonitor] Starting SharedNetworkMonitor for student {studentCode}");
+                        OnProgress($"[NetworkMonitor] Monitoring port {monitorPort} (protocol: {testKitConfig.Protocol})");
+                        OnProgress($"[NetworkMonitor] Mode: Legacy port mapping (loopback)");
+                        
+                        await _networkMonitor.StartAsync(ct);
+                        OnProgress($"Network monitor started - capturing traffic on port {monitorPort}");
+                        OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                    }
+                    else
+                    {
+                        OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
+                    }
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
@@ -491,30 +503,36 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Docker Logs] Warning: Failed to save container logs: {ex.Message}");
                 }
                 
-                // Stop network monitor
-                if (_networkMonitor != null)
+                // Stop network monitor based on mode
+                if (config.UseDockerInternalNetworking)
                 {
-                    OnProgress($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
-                    await _networkMonitor.StopAsync(ct);
-                    OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
-                    
-                    // CRITICAL FIX: Add delay after stopping monitor to ensure:
-                    // 1. All in-flight packets are processed
-                    // 2. Student is properly unregistered from SharedNetworkMonitor
-                    // 3. Port is fully released before next student uses it
-                    // This prevents cross-contamination between students
-                    OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
-                    await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
-                    OnProgress($"[NetworkMonitor] Monitor cleanup complete");
+                    // Docker internal networking mode: Use container-based monitor
+                    if (monitorContainerName != null && monitorOutputDir != null)
+                    {
+                        OnProgress($"[NetworkMonitor] Retrieving captured traffic from monitor container...");
+                        var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
+                        OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
+                        OnProgress($"[NetworkMonitor] Pcap file saved to {Path.Combine(monitorOutputDir, "network_capture.pcap")}");
+                    }
                 }
-                
-                // Stop and cleanup network monitor container if using Docker internal networking
-                if (config.UseDockerInternalNetworking && monitorContainerName != null && monitorOutputDir != null)
+                else
                 {
-                    OnProgress($"[NetworkMonitor] Retrieving captured traffic from monitor container...");
-                    var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
-                    OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
-                    OnProgress($"[NetworkMonitor] Pcap file saved to {Path.Combine(monitorOutputDir, "network_capture.pcap")}");
+                    // Legacy mode: Stop SharedNetworkMonitor
+                    if (_networkMonitor != null)
+                    {
+                        OnProgress($"[NetworkMonitor] Stopping SharedNetworkMonitor for student {studentCode}...");
+                        await _networkMonitor.StopAsync(ct);
+                        OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
+                        
+                        // CRITICAL FIX: Add delay after stopping monitor to ensure:
+                        // 1. All in-flight packets are processed
+                        // 2. Student is properly unregistered from SharedNetworkMonitor
+                        // 3. Port is fully released before next student uses it
+                        // This prevents cross-contamination between students
+                        OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
+                        await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
+                        OnProgress($"[NetworkMonitor] Monitor cleanup complete");
+                    }
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
