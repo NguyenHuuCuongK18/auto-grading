@@ -3107,17 +3107,14 @@ namespace SolutionGrader.Core.Services
             
             try
             {
-                // Check if monitor container is running
-                if (!_dockerExecutor.IsContainerRunning(monitorContainer))
-                {
-                    OnProgress($"[NetworkMonitor] Container {monitorContainer} not running, skipping parse for stage {currentStage}");
-                    return; // Container not running yet
-                }
+                // Skip the IsContainerRunning check - it has reliability issues with docker ps filters
+                // If the container doesn't exist or has crashed, the snapshot copy will fail which we handle below
                 
                 // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
                 // This bypasses Windows/WSL2 file locking issues with the live capture file
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Creating snapshot from /data/{pcapFileName}");
-                var snapshotCmd = $"docker exec {monitorContainer} cp /data/{pcapFileName} /data/snapshot.pcap";
+                // Note: ExecDockerCommandWithOutput adds "docker exec" prefix, so we only provide container name and command
+                var snapshotCmd = $"{monitorContainer} cp /data/{pcapFileName} /data/snapshot.pcap";
                 var (snapshotSuccess, snapshotOutput) = _dockerExecutor.ExecDockerCommandWithOutput(snapshotCmd, 5000);
                 
                 if (!snapshotSuccess)
@@ -3130,8 +3127,11 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot created, downloading to host");
                 
                 // SNAPSHOT STRATEGY Step 2: Download the snapshot to host
+                // Note: docker cp is a top-level command, not docker exec, so we run it directly
                 var copyCmd = $"docker cp {monitorContainer}:/data/snapshot.pcap \"{snapshotPath}\"";
-                var (copySuccess, copyOutput) = _dockerExecutor.ExecDockerCommandWithOutput(copyCmd, 5000);
+                var copyResult = _commandExecutor.RunCommandAndCaptureOutput(copyCmd, null, null, 5000);
+                var copySuccess = copyResult.ExitCode == 0;
+                var copyOutput = string.Join("\n", copyResult.Output);
                 
                 if (!copySuccess)
                 {

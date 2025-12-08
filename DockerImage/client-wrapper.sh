@@ -17,7 +17,16 @@ export DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1
 cd /apps/client
 
 # Find the DLL to run
-DLL=$(find . -maxdepth 1 -name '*.dll' -not -name 'System.*.dll' -not -name 'Microsoft.*.dll' | head -1)
+# CRITICAL: Find client DLL by excluding system DLLs and any DLL that exists in /apps/server
+# This handles Grade_Content scenarios where golden client is in /apps/client
+DLL=$(find . -maxdepth 1 -name '*.dll' -not -name 'System.*.dll' -not -name 'Microsoft.*.dll' | while read dll; do
+    basename_dll=$(basename "$dll")
+    # Skip this DLL if it exists in /apps/server (it's the server DLL, not client)
+    if [ ! -f "/apps/server/$basename_dll" ]; then
+        echo "$dll"
+        break
+    fi
+done | head -1)
 
 if [ -z "$DLL" ]; then
     echo "ERROR: No client DLL found in /apps/client"
