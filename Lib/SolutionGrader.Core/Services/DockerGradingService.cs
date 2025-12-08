@@ -339,6 +339,22 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Setting up Docker containers for {studentCode}...");
                 await SetupContainersAsync(actualServerDllPath, actualClientDllPath, config, testKitConfig, serverContainer, clientContainer);
                 
+                // Start network monitor container if using Docker internal networking
+                // This container runs for the entire student grading session, capturing all test cases
+                string? monitorContainerName = null;
+                string? monitorOutputDir = null;
+                if (config.UseDockerInternalNetworking)
+                {
+                    monitorContainerName = $"ag-monitor-{studentCode}";
+                    monitorOutputDir = Path.Combine(studentResultPath, "NetworkCapture");
+                    await StartNetworkMonitorContainerAsync(
+                        monitorContainerName,
+                        config.CodeContainerInternalPort,
+                        monitorOutputDir,
+                        config.DockerNetwork);
+                    OnProgress($"[NetworkMonitor] Container-based monitor started for {studentCode} on port {config.CodeContainerInternalPort}");
+                }
+                
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");
                 ContainersReady?.Invoke(this, EventArgs.Empty);
@@ -490,6 +506,15 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
                     await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
                     OnProgress($"[NetworkMonitor] Monitor cleanup complete");
+                }
+                
+                // Stop and cleanup network monitor container if using Docker internal networking
+                if (config.UseDockerInternalNetworking && monitorContainerName != null && monitorOutputDir != null)
+                {
+                    OnProgress($"[NetworkMonitor] Retrieving captured traffic from monitor container...");
+                    var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
+                    OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
+                    OnProgress($"[NetworkMonitor] Pcap file saved to {Path.Combine(monitorOutputDir, "network_capture.pcap")}");
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
@@ -1567,23 +1592,7 @@ namespace SolutionGrader.Core.Services
             int clientBaseline = 0;
             int serverBaseline = 0;
             
-            // Start network monitor container if using Docker internal networking
-            string? monitorContainerName = null;
-            string? monitorOutputDir = null;
-            if (config.UseDockerInternalNetworking && !string.IsNullOrEmpty(_currentStudentCode))
-            {
-                monitorContainerName = $"ag-monitor-{_currentStudentCode}";
-                monitorOutputDir = Path.Combine(config.StudentResultPath ?? ".", "NetworkCapture");
-                await StartNetworkMonitorContainerAsync(
-                    monitorContainerName,
-                    config.CodeContainerInternalPort,
-                    monitorOutputDir,
-                    config.DockerNetwork);
-            }
-            
-            try
-            {
-                foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
+            foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
                 {
                     ct.ThrowIfCancellationRequested();
                     
@@ -1707,22 +1716,6 @@ namespace SolutionGrader.Core.Services
             
             return (clientOutputs, serverOutputs);
         }
-        finally
-        {
-            // Stop network monitor container and retrieve captured traffic
-            if (config.UseDockerInternalNetworking && monitorContainerName != null && monitorOutputDir != null)
-            {
-                var networkFlows = await StopNetworkMonitorContainerAsync(monitorContainerName, monitorOutputDir);
-                
-                // TODO: Integrate network flows into result analysis
-                // For now, just log that we captured them
-                if (networkFlows.Count > 0)
-                {
-                    OnProgress($"[NetworkMonitor] Captured {networkFlows.Count} packets from container network");
-                }
-            }
-        }
-    }
         
         #endregion
         
