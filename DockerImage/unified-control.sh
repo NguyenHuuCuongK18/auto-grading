@@ -73,7 +73,22 @@ case "$ACTION" in
     StartClient)
         echo "[Control] Starting client for stage $STAGE"
         
-        # Stop if already running
+        # Create named pipe for client input if it doesn't exist
+        # CRITICAL: Must be created BEFORE starting the client process
+        if [ ! -p /tmp/client_input ]; then
+            mkfifo /tmp/client_input
+            echo "[Control] Created named pipe /tmp/client_input"
+        fi
+        
+        # Ensure pipe keeper is running to keep pipe open
+        # Check if any process is keeping the pipe open
+        if ! pgrep -f "sleep infinity.*client_input" > /dev/null; then
+            # Start pipe keeper in background
+            (sleep infinity > /tmp/client_input) &
+            echo "[Control] Started pipe keeper (PID: $!)"
+        fi
+        
+        # Stop client if already running
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
@@ -89,55 +104,34 @@ case "$ACTION" in
         
         if wait_for_start client; then
             echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-stage-$STAGE.log)"
+            echo "[Control] Client is reading from named pipe /tmp/client_input"
         else
             echo "[Control] WARNING: Client may not have started for stage $STAGE"
         fi
         ;;
     
     SendInput)
-        # Send input to the client process by restarting it with input piped
+        # Send input to the client process via named pipe
         # Input is provided as third parameter
         INPUT="${3:-}"
         
-        echo "[Control] Providing input to client: '$INPUT'"
+        echo "[Control] Sending input to client via named pipe: '$INPUT'"
         
-        # Stop the current client if running
-        $SUPERVISORCTL stop client 2>/dev/null || true
+        # Ensure named pipe exists
+        if [ ! -p /tmp/client_input ]; then
+            echo "[Control] ERROR: Named pipe /tmp/client_input does not exist!"
+            echo "[Control] Client must be started with StartClient first"
+            exit 1
+        fi
+        
+        # Write input to the named pipe
+        # The client will immediately read this and process it
+        echo -e "${INPUT}" > /tmp/client_input
+        
+        echo "[Control] Input sent successfully to named pipe"
+        
+        # Give the client time to process the input
         sleep 0.5
-        
-        # Write input to a file
-        INPUT_FILE="/tmp/client-input-${STAGE}.txt"
-        echo -e "${INPUT}" > "$INPUT_FILE"
-        
-        # Update supervisord config to pipe input file to client
-        # We need to find and replace the entire command line
-        # First, backup the original config
-        cp /etc/supervisor/conf.d/supervisord.conf /etc/supervisor/conf.d/supervisord.conf.bak
-        
-        # Use awk to replace the client command line properly
-        # CRITICAL: Input redirection must come AFTER the entire find|head|xargs pipeline
-        # Use sh -c to ensure proper parsing: sh -c 'dotnet file.dll < input.txt'
-        awk -v input_file="$INPUT_FILE" -v stage="$STAGE" '
-        /^\[program:client\]/ { in_client=1; print; next }
-        /^\[program:/ && in_client { in_client=0 }
-        in_client && /^command=/ { 
-            print "command=/bin/bash -c \"cd /apps/client && DLL=\\$(find . -maxdepth 1 -name '\\''*.dll'\\'' -not -name '\\''System.*.dll'\\'' -not -name '\\''Microsoft.*.dll'\\'' | head -1) && dotnet \\$DLL < " input_file "\""
-            next 
-        }
-        in_client && /^environment=/ {
-            sub(/STAGE=[0-9]*/, "STAGE=" stage)
-        }
-        { print }
-        ' /etc/supervisor/conf.d/supervisord.conf.bak > /etc/supervisor/conf.d/supervisord.conf
-        
-        # Reread and update
-        $SUPERVISORCTL reread 2>/dev/null || true
-        $SUPERVISORCTL update 2>/dev/null || true
-        
-        # Start client with input
-        $SUPERVISORCTL start client
-        
-        echo "[Control] Client restarted with input from ${INPUT_FILE}"
         ;;
     
     CloseServer)
