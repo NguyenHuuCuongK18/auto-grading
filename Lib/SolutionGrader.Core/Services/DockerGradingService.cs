@@ -3065,13 +3065,47 @@ namespace SolutionGrader.Core.Services
                 return;
             }
             
-            if (!File.Exists(_currentPcapFilePath))
+            // CRITICAL FIX: Volume mount doesn't make file accessible during execution
+            // Copy pcap from monitor container to host before parsing
+            var monitorContainer = $"ag-monitor-{_currentStudentCode}";
+            var pcapFileName = Path.GetFileName(_currentPcapFilePath);
+            
+            OnProgress($"[NetworkMonitor] Stage {currentStage}: Checking monitor container: {monitorContainer}");
+            
+            try
             {
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Pcap file not found at {_currentPcapFilePath}, skipping (normal for early stages)");
+                // Check if monitor container is running
+                var isRunning = _dockerExecutor.IsContainerRunning(monitorContainer);
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Monitor container running check: {isRunning}");
+                
+                if (!isRunning)
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Monitor container '{monitorContainer}' not running, skipping");
+                    return;
+                }
+                
+                // Copy pcap from container to host
+                // Container has it at /data/network_capture.pcap
+                var copyCmd = $"docker cp {monitorContainer}:/data/{pcapFileName} \"{_currentPcapFilePath}\"";
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Copying pcap from container: {copyCmd}");
+                var (copySuccess, copyOutput) = _dockerExecutor.ExecDockerCommandWithOutput(copyCmd, 5000);
+                
+                if (!copySuccess || !File.Exists(_currentPcapFilePath))
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Could not copy pcap file (normal for early stages): {copyOutput}");
+                    return;
+                }
+                
+                var fileSize = new FileInfo(_currentPcapFilePath).Length;
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Pcap file copied successfully ({fileSize} bytes)");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Error copying pcap: {ex.Message}");
                 return;
             }
             
-            OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsing pcap file: {_currentPcapFilePath}");
+            OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsing pcap file");
             
             try
             {
@@ -3134,6 +3168,79 @@ namespace SolutionGrader.Core.Services
             {
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: ERROR parsing pcap - {ex.Message}");
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Exception details: {ex.ToString()}");
+            }
+        }
+        
+        /// <summary>
+        /// Parse the complete pcap file after all test cases complete.
+        /// Since the pcap file isn't accessible during execution, we parse it once at the end.
+        /// All packets are added to RunContext with stage=0 (will be matched against all expected flows).
+        /// </summary>
+        private async Task ParseCompletePcapFileAsync(string pcapFilePath, int port)
+        {
+            if (string.IsNullOrEmpty(pcapFilePath) || !File.Exists(pcapFilePath))
+            {
+                OnProgress($"[NetworkMonitor] Cannot parse pcap - file not found: {pcapFilePath}");
+                return;
+            }
+            
+            OnProgress($"[NetworkMonitor] Parsing complete pcap file: {pcapFilePath}");
+            
+            try
+            {
+                // Use tcpdump to read pcap with detailed output
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "tcpdump",
+                    Arguments = $"-r \"{pcapFilePath}\" -nn -tttt -v tcp",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    OnProgress($"[NetworkMonitor] Failed to start tcpdump process");
+                    return;
+                }
+                
+                string output = await process.StandardOutput.ReadToEndAsync();
+                await process.WaitForExitAsync();
+                
+                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                OnProgress($"[NetworkMonitor] Tcpdump output: {lines.Length} lines");
+                
+                int parsedCount = 0;
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line) || !line.Contains(" > ")) continue;
+                    
+                    try
+                    {
+                        // Parse packet - assign to stage 0 (all packets available for all stages)
+                        var packet = ParseTcpdumpLine(line, 0, port);
+                        if (packet != null)
+                        {
+                            _runContext.AddCapturedNetworkPacket(_currentStudentCode ?? "", "0", packet);
+                            parsedCount++;
+                        }
+                    }
+                    catch
+                    {
+                        // Skip malformed lines
+                        continue;
+                    }
+                }
+                
+                OnProgress($"[NetworkMonitor] Successfully parsed {parsedCount} packets from pcap file");
+                OnProgress($"[NetworkMonitor] Total packets in RunContext: {_runContext.GetAllCapturedNetworkPackets().Count}");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] ERROR parsing complete pcap: {ex.Message}");
+                OnProgress($"[NetworkMonitor] Exception details: {ex.ToString()}");
             }
         }
         
