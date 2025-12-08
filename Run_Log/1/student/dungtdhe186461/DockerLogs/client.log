@@ -1,77 +1,63 @@
 Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  S001
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  S123
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  S123
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  S001
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  s001
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  Sabc
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
 Enter Student ID: Student Information Client
 ==========================
-Connecting to server at host.docker.internal:4000
+Connecting to server at ag-server-dungtdhe186461:4004
 Enter student IDs (e.g., 'S001', 'S123')
 Press Enter (empty input) to exit
 
 Enter Student ID:  S111
-Error: Failed to parse server response
-
-Raw response: 
+Error: Server is not running. Please try again later.
 
