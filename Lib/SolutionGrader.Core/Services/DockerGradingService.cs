@@ -128,7 +128,7 @@ namespace SolutionGrader.Core.Services
         /// <param name="config">Docker grading configuration</param>
         public void DisposeAllContainers(DockerGradingConfig config)
         {
-            Console.WriteLine("[Docker] Disposing all containers...");
+            OnProgress("[Docker] Disposing all containers...");
             
             var databaseContainer = config.DatabaseContainerName;
             var serverContainer = $"server-{databaseContainer}";
@@ -141,7 +141,7 @@ namespace SolutionGrader.Core.Services
             // Remove database container
             try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
             
-            Console.WriteLine("[Docker] All containers disposed");
+            OnProgress("[Docker] All containers disposed");
         }
         
         /// <summary>
@@ -212,8 +212,8 @@ namespace SolutionGrader.Core.Services
                 studentDatabaseName = $"{baseDatabaseName}_{studentCode}";
                 testKitConfig.DatabaseName = studentDatabaseName;
                 
-                Console.WriteLine($"[Database] Student {studentCode} will use database instance: {studentDatabaseName}");
-                Console.WriteLine($"[Database] Database container {databaseContainer} is shared, but instance is unique per student");
+                OnProgress($"[Database] Student {studentCode} will use database instance: {studentDatabaseName}");
+                OnProgress($"[Database] Database container {databaseContainer} is shared, but instance is unique per student");
                 
                 // INITIAL DLL DISCOVERY: Find what DLLs the student provided
                 // This logic discovers which DLLs exist in the student's submission.
@@ -232,6 +232,7 @@ namespace SolutionGrader.Core.Services
                 string? actualClientDllPath = null;
                 
                 // Server discovery
+                OnProgress($"[SERVER DISCOVERY] config.HasServer={config.HasServer}, serverDllPath={serverDllPath ?? "(null)"}");
                 if (config.HasServer)
                 {
                     // Examiner expects student to provide server - use discovered path
@@ -239,10 +240,12 @@ namespace SolutionGrader.Core.Services
                     if (string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"WARNING: Student should provide server ({config.ServerProjectName}) but none found!");
+                        OnProgress($"[SERVER DISCOVERY] actualServerDllPath will be NULL - test should FAIL");
                     }
                     else
                     {
                         OnProgress($"Discovered student's server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using STUDENT's server: {actualServerDllPath}");
                     }
                 }
                 else
@@ -252,6 +255,7 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(actualServerDllPath))
                     {
                         OnProgress($"Prepared golden server from Meta/Given/Server: {Path.GetFileName(actualServerDllPath)}");
+                        OnProgress($"[SERVER DISCOVERY] Using GOLDEN server: {actualServerDllPath}");
                     }
                     else
                     {
@@ -305,14 +309,14 @@ namespace SolutionGrader.Core.Services
                 {
                     _networkMonitor.MonitorPort = config.CodeContainerHostPort;
                     _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                    Console.WriteLine($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
+                    OnProgress($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
                     await _networkMonitor.StartAsync(ct);
                     OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
-                    Console.WriteLine($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
+                    OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
                 }
                 else
                 {
-                    Console.WriteLine($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
+                    OnProgress($"[NetworkMonitor] WARNING: NetworkMonitor is NULL for student {studentCode} - network traffic will NOT be captured!");
                 }
                 
                 OnProgress($"Setting up Docker containers for {studentCode}...");
@@ -340,14 +344,20 @@ namespace SolutionGrader.Core.Services
                             // Grading client implementation -> use golden (given) server
                             serverPath = testKitConfig.GivenServerPath;
                             clientPath = actualClientDllPath;
-                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
+                            OnProgress($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
                         }
                         else if (testCase.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
                         {
                             // Grading server implementation -> use golden (given) client
                             serverPath = actualServerDllPath;
                             clientPath = testKitConfig.GivenClientPath;
-                            Console.WriteLine($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                            OnProgress($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
+                            OnProgress($"[TestCase {testCase.Name}] Student server path: {serverPath ?? "(NULL)"}");
+                            OnProgress($"[TestCase {testCase.Name}] Golden client path: {clientPath ?? "(NULL)"}");
+                            if (!string.IsNullOrEmpty(clientPath))
+                            {
+                                OnProgress($"[TestCase {testCase.Name}] Golden client filename: {Path.GetFileName(clientPath)}");
+                            }
                         }
                     }
                     
@@ -361,7 +371,7 @@ namespace SolutionGrader.Core.Services
                     {
                         // CRITICAL FIX for TC1: Network monitor needs time to initialize before first test case
                         // Without this delay, network monitor may not be ready to capture packets for TC1
-                        Console.WriteLine("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
+                        OnProgress("[TC1 Fix] Waiting 3 seconds for network monitor to fully initialize...");
                         await Task.Delay(3000);
                     }
                     
@@ -436,9 +446,18 @@ namespace SolutionGrader.Core.Services
                 // Stop network monitor
                 if (_networkMonitor != null)
                 {
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Stopping monitor for student {studentCode}...");
+                    OnProgress($"[NetworkMonitor] Stopping monitor for student {studentCode}...");
                     await _networkMonitor.StopAsync(ct);
-                    Console.WriteLine($"[NetworkMonitor] [{studentCode}] Monitor stopped for student {studentCode}");
+                    OnProgress($"[NetworkMonitor] Monitor stopped for student {studentCode}");
+                    
+                    // CRITICAL FIX: Add delay after stopping monitor to ensure:
+                    // 1. All in-flight packets are processed
+                    // 2. Student is properly unregistered from SharedNetworkMonitor
+                    // 3. Port is fully released before next student uses it
+                    // This prevents cross-contamination between students
+                    OnProgress($"[NetworkMonitor] Waiting for monitor cleanup to complete...");
+                    await Task.Delay(200, CancellationToken.None); // Use None to ensure cleanup even if cancelled
+                    OnProgress($"[NetworkMonitor] Monitor cleanup complete");
                 }
                 
                 // Cleanup code containers (server and client only, database is shared)
@@ -505,7 +524,7 @@ namespace SolutionGrader.Core.Services
             // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
             if (!string.IsNullOrEmpty(serverDllPath))
             {
-                Console.WriteLine($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+                OnProgress($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
                 
                 var serverBase = new DockerBase
                 {
@@ -521,10 +540,10 @@ namespace SolutionGrader.Core.Services
                     }
                 };
                 
-                Console.WriteLine($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
+                OnProgress($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
                 
                 _dockerExecutor.RunContainerWithTty(serverBase);
-                Console.WriteLine($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
+                OnProgress($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
             }
             
             // 3. Create client container with TTY support (NO port mapping needed)
@@ -551,7 +570,7 @@ namespace SolutionGrader.Core.Services
                     AdditionalFlags = AppsettingKeywords.DOCKER_ADD_HOST_FLAG
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                Console.WriteLine($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
+                OnProgress($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
             }
             
             await Task.Delay(500);
@@ -568,14 +587,14 @@ namespace SolutionGrader.Core.Services
             // Check if database container is already running
             if (_dockerExecutor.IsContainerRunning(databaseContainer))
             {
-                Console.WriteLine($"[Docker] Database container {databaseContainer} is already running");
+                OnProgress($"[Docker] Database container {databaseContainer} is already running");
                 return;
             }
             
             // Check if container exists but stopped
             if (_dockerExecutor.IsContainerExist(databaseContainer))
             {
-                Console.WriteLine($"[Docker] Starting existing database container {databaseContainer}...");
+                OnProgress($"[Docker] Starting existing database container {databaseContainer}...");
                 _dockerExecutor.StartExistedContainer(databaseContainer);
                 // Wait for container to be running with quick health checks (no logging spam)
                 await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 10);
@@ -583,7 +602,7 @@ namespace SolutionGrader.Core.Services
             }
             
             // Create new MSSQL database container
-            Console.WriteLine($"[Docker] Creating new MSSQL database container {databaseContainer}...");
+            OnProgress($"[Docker] Creating new MSSQL database container {databaseContainer}...");
             
             var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
             var databaseBase = new DockerBase
@@ -601,10 +620,10 @@ namespace SolutionGrader.Core.Services
             };
             
             _dockerExecutor.RunContainer(databaseBase, 3000);
-            Console.WriteLine($"[Docker] Database container {databaseContainer} created with port {config.DatabaseContainerHostPort}:{config.DatabaseContainerInternalPort} exposed");
+            OnProgress($"[Docker] Database container {databaseContainer} created with port {config.DatabaseContainerHostPort}:{config.DatabaseContainerInternalPort} exposed");
             
             // Wait for MSSQL to fully start with polling instead of fixed delay
-            Console.WriteLine("[Docker] Waiting for MSSQL to start...");
+            OnProgress("[Docker] Waiting for MSSQL to start...");
             await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 20);
         }
         
@@ -626,7 +645,7 @@ namespace SolutionGrader.Core.Services
                 await Task.Delay(500); // Check every 500ms without logging
             }
             // If we get here, container didn't start in time but proceed anyway
-            Console.WriteLine($"[Docker] Warning: Container {containerName} may not be fully ready after {maxWaitSeconds}s");
+            OnProgress($"[Docker] Warning: Container {containerName} may not be fully ready after {maxWaitSeconds}s");
         }
         
         /// <summary>
@@ -642,37 +661,37 @@ namespace SolutionGrader.Core.Services
                 if (!_dockerExecutor.IsContainerExist(containerName))
                 {
                     // Container is gone - return immediately
-                    Console.WriteLine($"[Docker Cleanup] Container {containerName} successfully removed (waited {i * 100}ms)");
+                    OnProgress($"[Docker Cleanup] Container {containerName} successfully removed (waited {i * 100}ms)");
                     return;
                 }
                 await Task.Delay(100); // Check every 100ms without logging
             }
             
             // CRITICAL: Container still exists after max wait - this is a zombie container
-            Console.WriteLine($"[Docker Cleanup] WARNING: Container {containerName} still exists after {maxWaitSeconds}s - attempting force removal");
+            OnProgress($"[Docker Cleanup] WARNING: Container {containerName} still exists after {maxWaitSeconds}s - attempting force removal");
             
             // Try force removal with -f flag
             try
             {
                 var forceCommand = $"rm -f {containerName}";
                 _dockerExecutor.ExecDockerCommand(forceCommand, 5000);
-                Console.WriteLine($"[Docker Cleanup] Force removal attempted for {containerName}");
+                OnProgress($"[Docker Cleanup] Force removal attempted for {containerName}");
                 
                 // Wait a bit more to see if force removal worked
                 await Task.Delay(1000);
                 
                 if (!_dockerExecutor.IsContainerExist(containerName))
                 {
-                    Console.WriteLine($"[Docker Cleanup] Force removal successful for {containerName}");
+                    OnProgress($"[Docker Cleanup] Force removal successful for {containerName}");
                 }
                 else
                 {
-                    Console.WriteLine($"[Docker Cleanup] CRITICAL: Container {containerName} is a zombie - cannot be removed. This may cause resource exhaustion!");
+                    OnProgress($"[Docker Cleanup] CRITICAL: Container {containerName} is a zombie - cannot be removed. This may cause resource exhaustion!");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Docker Cleanup] ERROR: Force removal failed for {containerName}: {ex.Message}");
+                OnProgress($"[Docker Cleanup] ERROR: Force removal failed for {containerName}: {ex.Message}");
             }
         }
         
@@ -696,27 +715,27 @@ namespace SolutionGrader.Core.Services
                     var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                     var totalContainers = containerIds.Length;
                     
-                    Console.WriteLine($"[Docker Resource Monitor] Total containers: {totalContainers}");
+                    OnProgress($"[Docker Resource Monitor] Total containers: {totalContainers}");
                     
                     // Docker default limit is typically 256-512 containers per daemon
                     // Warn at 50% and 75% thresholds
                     if (totalContainers > 380) // 75% of 512
                     {
-                        Console.WriteLine($"[Docker Resource Monitor] CRITICAL WARNING: {totalContainers} containers exist! Approaching Docker daemon limit. Container creation may fail soon!");
+                        OnProgress($"[Docker Resource Monitor] CRITICAL WARNING: {totalContainers} containers exist! Approaching Docker daemon limit. Container creation may fail soon!");
                     }
                     else if (totalContainers > 256) // 50% of 512
                     {
-                        Console.WriteLine($"[Docker Resource Monitor] WARNING: {totalContainers} containers exist. Consider aggressive cleanup to prevent exhaustion.");
+                        OnProgress($"[Docker Resource Monitor] WARNING: {totalContainers} containers exist. Consider aggressive cleanup to prevent exhaustion.");
                     }
                     else if (totalContainers > 128) // 25% of 512
                     {
-                        Console.WriteLine($"[Docker Resource Monitor] Info: {totalContainers} containers exist. Monitoring for potential exhaustion.");
+                        OnProgress($"[Docker Resource Monitor] Info: {totalContainers} containers exist. Monitoring for potential exhaustion.");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Docker Resource Monitor] Warning: Could not check container count: {ex.Message}");
+                OnProgress($"[Docker Resource Monitor] Warning: Could not check container count: {ex.Message}");
             }
         }
         
@@ -726,7 +745,7 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private void AggressiveCleanupOldContainers()
         {
-            Console.WriteLine("[Docker Aggressive Cleanup] Starting cleanup of old auto-grading containers...");
+            OnProgress("[Docker Aggressive Cleanup] Starting cleanup of old auto-grading containers...");
             
             try
             {
@@ -737,7 +756,7 @@ namespace SolutionGrader.Core.Services
                 if (success && !string.IsNullOrWhiteSpace(output))
                 {
                     var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                    Console.WriteLine($"[Docker Aggressive Cleanup] Found {containerIds.Length} old auto-grading containers to remove");
+                    OnProgress($"[Docker Aggressive Cleanup] Found {containerIds.Length} old auto-grading containers to remove");
                     
                     foreach (var containerId in containerIds)
                     {
@@ -751,16 +770,16 @@ namespace SolutionGrader.Core.Services
                         }
                     }
                     
-                    Console.WriteLine($"[Docker Aggressive Cleanup] Cleanup complete. Removed {containerIds.Length} containers.");
+                    OnProgress($"[Docker Aggressive Cleanup] Cleanup complete. Removed {containerIds.Length} containers.");
                 }
                 else
                 {
-                    Console.WriteLine("[Docker Aggressive Cleanup] No old containers found.");
+                    OnProgress("[Docker Aggressive Cleanup] No old containers found.");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Docker Aggressive Cleanup] Warning: Cleanup encountered errors: {ex.Message}");
+                OnProgress($"[Docker Aggressive Cleanup] Warning: Cleanup encountered errors: {ex.Message}");
             }
         }
         
@@ -835,15 +854,15 @@ namespace SolutionGrader.Core.Services
                                 Directory.CreateDirectory(tempStagingDir);
                                 tempDirectories.Add(tempStagingDir);
                                 
-                                Console.WriteLine($"[DllMod] Created temp staging directory for server: {tempStagingDir}");
-                                Console.WriteLine($"[DllMod] Copying server files from {serverDir} to temp for isolated modification...");
+                                OnProgress($"[DllMod] Created temp staging directory for server: {tempStagingDir}");
+                                OnProgress($"[DllMod] Copying server files from {serverDir} to temp for isolated modification...");
                                 
                                 // Copy entire server directory to temp
                                 CopyDirectory(serverDir, tempStagingDir);
-                                Console.WriteLine($"[DllMod] Server files copied to temp staging area");
+                                OnProgress($"[DllMod] Server files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ServerProjectName,
@@ -851,15 +870,15 @@ namespace SolutionGrader.Core.Services
                                     targetPort: config.CodeContainerHostPort
                                 );
                                 
-                                Console.WriteLine($"[DllMod] Server fallback result: {result.GetSummary()}");
+                                OnProgress($"[DllMod] Server fallback result: {result.GetSummary()}");
                                 
                                 if (result.RequiresDllModification && !result.Success)
                                 {
-                                    Console.WriteLine($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
+                                    OnProgress($"[DllMod] WARNING: Server DLL modification failed - will attempt appsettings generation");
                                 }
                                 else if (result.RequiresDllModification && result.Success)
                                 {
-                                    Console.WriteLine($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
+                                    OnProgress($"[DllMod] Server DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
                                 // CRITICAL FIX: Use temp directory content BUT keep original folder name
@@ -873,11 +892,11 @@ namespace SolutionGrader.Core.Services
                             // Copy from temp staging (if modified) or original (if not) to container
                             _dockerExecutor.MakeDirectory(serverContainer, "/apps");
                             _dockerExecutor.CopyFileToContainer(dirToCopy, $"{serverContainer}:/apps/{folderName}");
-                            Console.WriteLine($"[Docker] Copied server files from {dirToCopy} to container {serverContainer}:/apps/{folderName}");
+                            OnProgress($"[Docker] Copied server files from {dirToCopy} to container {serverContainer}:/apps/{folderName}");
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[Warning] Failed to copy server files: {ex.Message}");
+                            OnProgress($"[Warning] Failed to copy server files: {ex.Message}");
                         }
                     }
                 }
@@ -900,15 +919,15 @@ namespace SolutionGrader.Core.Services
                                 Directory.CreateDirectory(tempStagingDir);
                                 tempDirectories.Add(tempStagingDir);
                                 
-                                Console.WriteLine($"[DllMod] Created temp staging directory for client: {tempStagingDir}");
-                                Console.WriteLine($"[DllMod] Copying client files from {clientDir} to temp for isolated modification...");
+                                OnProgress($"[DllMod] Created temp staging directory for client: {tempStagingDir}");
+                                OnProgress($"[DllMod] Copying client files from {clientDir} to temp for isolated modification...");
                                 
                                 // Copy entire client directory to temp
                                 CopyDirectory(clientDir, tempStagingDir);
-                                Console.WriteLine($"[DllMod] Client files copied to temp staging area");
+                                OnProgress($"[DllMod] Client files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                Console.WriteLine($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ClientProjectName,
@@ -916,15 +935,15 @@ namespace SolutionGrader.Core.Services
                                     targetPort: config.CodeContainerHostPort
                                 );
                                 
-                                Console.WriteLine($"[DllMod] Client fallback result: {result.GetSummary()}");
+                                OnProgress($"[DllMod] Client fallback result: {result.GetSummary()}");
                                 
                                 if (result.RequiresDllModification && !result.Success)
                                 {
-                                    Console.WriteLine($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
+                                    OnProgress($"[DllMod] WARNING: Client DLL modification failed - will attempt appsettings generation");
                                 }
                                 else if (result.RequiresDllModification && result.Success)
                                 {
-                                    Console.WriteLine($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
+                                    OnProgress($"[DllMod] Client DLL successfully modified in temp staging at: {result.DllPath}");
                                 }
                                 
                                 // CRITICAL FIX: Use temp directory content BUT keep original folder name
@@ -938,11 +957,11 @@ namespace SolutionGrader.Core.Services
                             // Copy from temp staging (if modified) or original (if not) to container
                             _dockerExecutor.MakeDirectory(clientContainer, "/apps");
                             _dockerExecutor.CopyFileToContainer(dirToCopy, $"{clientContainer}:/apps/{folderName}");
-                            Console.WriteLine($"[Docker] Copied client files from {dirToCopy} to container {clientContainer}:/apps/{folderName}");
+                            OnProgress($"[Docker] Copied client files from {dirToCopy} to container {clientContainer}:/apps/{folderName}");
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[Warning] Failed to copy client files: {ex.Message}");
+                            OnProgress($"[Warning] Failed to copy client files: {ex.Message}");
                         }
                     }
                 }
@@ -959,12 +978,12 @@ namespace SolutionGrader.Core.Services
                         if (Directory.Exists(tempDir))
                         {
                             Directory.Delete(tempDir, recursive: true);
-                            Console.WriteLine($"[DllMod] Cleaned up temp staging directory: {tempDir}");
+                            OnProgress($"[DllMod] Cleaned up temp staging directory: {tempDir}");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[DllMod] Warning: Failed to cleanup temp directory {tempDir}: {ex.Message}");
+                        OnProgress($"[DllMod] Warning: Failed to cleanup temp directory {tempDir}: {ex.Message}");
                     }
                 }
             }
@@ -1026,7 +1045,7 @@ namespace SolutionGrader.Core.Services
             var serverPort = port.ToString();
             var clientPort = port.ToString();
             
-            Console.WriteLine($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
+            OnProgress($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
             
             // Check if DLL modification fallback is enabled and was used
             var dllModService = new DllModificationService();
@@ -1042,7 +1061,7 @@ namespace SolutionGrader.Core.Services
                     if (serverDir != null && !dllModService.AppsettingsExists(serverDir))
                     {
                         skipServerAppsettings = true;
-                        Console.WriteLine($"[Appsettings] Skipping server appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                        OnProgress($"[Appsettings] Skipping server appsettings generation - DLL modification fallback was used (appsettings.json not found)");
                     }
                 }
                 
@@ -1053,7 +1072,7 @@ namespace SolutionGrader.Core.Services
                     if (clientDir != null && !dllModService.AppsettingsExists(clientDir))
                     {
                         skipClientAppsettings = true;
-                        Console.WriteLine($"[Appsettings] Skipping client appsettings generation - DLL modification fallback was used (appsettings.json not found)");
+                        OnProgress($"[Appsettings] Skipping client appsettings generation - DLL modification fallback was used (appsettings.json not found)");
                     }
                 }
             }
@@ -1076,17 +1095,17 @@ namespace SolutionGrader.Core.Services
                     {
                         // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Server)
                         // This ensures we use the dynamically generated appsettings with correct port for this student
-                        Console.WriteLine($"[Appsettings] Removing old server appsettings: {containerPath}");
+                        OnProgress($"[Appsettings] Removing old server appsettings: {containerPath}");
                         _dockerExecutor.ExecDockerCommand($"{serverContainer} rm -f {containerPath}", 3000);
                         
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_server_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, serverConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{serverContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort} -> {containerPath}");
+                        OnProgress($"[Appsettings] Server: IP={serverIpAddress}, Port={serverPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Warning] Failed to generate server appsettings: {ex.Message}");
+                        OnProgress($"[Warning] Failed to generate server appsettings: {ex.Message}");
                     }
                     finally
                     {
@@ -1113,17 +1132,17 @@ namespace SolutionGrader.Core.Services
                     {
                         // CRITICAL FIX: Remove any existing appsettings.json from copied files (e.g., from Meta/Given/Client)
                         // This ensures we use the dynamically generated appsettings with correct port for this student
-                        Console.WriteLine($"[Appsettings] Removing old client appsettings: {containerPath}");
+                        OnProgress($"[Appsettings] Removing old client appsettings: {containerPath}");
                         _dockerExecutor.ExecDockerCommand($"{clientContainer} rm -f {containerPath}", 3000);
                         
                         tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_client_{Guid.NewGuid()}.json");
                         File.WriteAllText(tempFile, clientConfig);
                         _dockerExecutor.CopyFileToContainer(tempFile, $"{clientContainer}:{containerPath}");
-                        Console.WriteLine($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort} -> {containerPath}");
+                        OnProgress($"[Appsettings] Client: IP={clientIpAddress}, Port={clientPort} -> {containerPath}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Warning] Failed to generate client appsettings: {ex.Message}");
+                        OnProgress($"[Warning] Failed to generate client appsettings: {ex.Message}");
                     }
                     finally
                     {
@@ -1162,13 +1181,13 @@ namespace SolutionGrader.Core.Services
                 string? actualClientDll = null;
                 
                 var gradeContent = (testCase.GradeContent ?? "Client/Server").Trim();
-                Console.WriteLine($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
+                OnProgress($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
                 
                 // Validate Grade_Content value
                 var validValues = new[] { "Client", "Server", "Client/Server" };
                 if (!validValues.Contains(gradeContent, StringComparer.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine($"[TestCase] WARNING: Invalid Grade_Content value '{gradeContent}', defaulting to 'Client/Server'");
+                    OnProgress($"[TestCase] WARNING: Invalid Grade_Content value '{gradeContent}', defaulting to 'Client/Server'");
                     gradeContent = "Client/Server";
                 }
                 
@@ -1177,9 +1196,9 @@ namespace SolutionGrader.Core.Services
                     // Grade student's CLIENT only - use golden SERVER
                     actualClientDll = clientDllPath;
                     actualServerDll = testKitConfig.GivenServerPath;
-                    Console.WriteLine($"[TestCase] Using student CLIENT + golden SERVER");
-                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
-                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    OnProgress($"[TestCase] Using student CLIENT + golden SERVER");
+                    OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
                     
                     // Validate required DLLs exist
                     if (string.IsNullOrEmpty(actualClientDll))
@@ -1196,9 +1215,9 @@ namespace SolutionGrader.Core.Services
                     // Grade student's SERVER only - use golden CLIENT
                     actualServerDll = serverDllPath;
                     actualClientDll = testKitConfig.GivenClientPath;
-                    Console.WriteLine($"[TestCase] Using student SERVER + golden CLIENT");
-                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
-                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    OnProgress($"[TestCase] Using student SERVER + golden CLIENT");
+                    OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
                     
                     // Validate required DLLs exist
                     if (string.IsNullOrEmpty(actualServerDll))
@@ -1215,9 +1234,9 @@ namespace SolutionGrader.Core.Services
                     // Grade BOTH student's CLIENT and SERVER - no golden used
                     actualClientDll = clientDllPath;
                     actualServerDll = serverDllPath;
-                    Console.WriteLine($"[TestCase] Using student CLIENT + student SERVER (no golden)");
-                    Console.WriteLine($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
-                    Console.WriteLine($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
+                    OnProgress($"[TestCase] Using student CLIENT + student SERVER (no golden)");
+                    OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
+                    OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
                     
                     // Note: For Client/Server mode, we allow one to be missing if the test only uses one
                     // The test will fail naturally if it tries to use a missing component
@@ -1226,8 +1245,35 @@ namespace SolutionGrader.Core.Services
                 // Clear network captures for this test case
                 // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to ensure
                 // only traffic from this test case is captured
+                // 
+                // CRITICAL FIX: Clear captures multiple times with delays to ensure
+                // any in-flight packets from previous tests are flushed
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Clearing captures before test case starts...");
+                
+                // VERIFICATION: Check packet count BEFORE clear
+                var packetCountBefore = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count BEFORE clear: {packetCountBefore}");
+                
                 _networkMonitor?.ClearCaptures();
                 _runContext.ClearNetworkCaptures();
+                
+                // VERIFICATION: Check packet count AFTER clear
+                var packetCountAfterFirstClear = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER first clear: {packetCountAfterFirstClear}");
+                
+                // CRITICAL FIX: Add small delay to allow any in-flight packets to be processed and cleared
+                // This prevents cross-contamination from previous test cases
+                await Task.Delay(100, ct);
+                
+                // Clear again to catch any packets that arrived during the delay
+                _networkMonitor?.ClearCaptures();
+                _runContext.ClearNetworkCaptures();
+                
+                // VERIFICATION: Check packet count AFTER second clear
+                var packetCountAfterSecondClear = _runContext.GetAllCapturedNetworkPackets().Count;
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Packet count AFTER second clear: {packetCountAfterSecondClear}");
+                OnProgress($"[NetworkMonitor] [{testCase.Name}] Captures cleared, setting context...");
+                
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
                 
                 // Read Detail.xlsx
@@ -1259,7 +1305,16 @@ namespace SolutionGrader.Core.Services
                 
                 // Get captured network packets for Network sheet
                 var capturedPackets = GetCapturedNetworkPackets();
-                Console.WriteLine($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
+                
+                // CRITICAL DEBUGGING: Log detailed packet information
+                OnProgress($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
+                OnProgress($"[NetworkMonitor] Student: {_currentStudentCode}, Port: {config.CodeContainerHostPort}");
+                
+                if (capturedPackets.Count > 0)
+                {
+                    OnProgress($"[NetworkMonitor] First packet details: Stage={capturedPackets[0].Stage}, Flags={capturedPackets[0].Flags}, SrcRole={capturedPackets[0].SourceRole}, DstRole={capturedPackets[0].DestinationRole}");
+                    OnProgress($"[NetworkMonitor] Packet timestamps range: {capturedPackets.Min(p => p.Timestamp):HH:mm:ss.fff} to {capturedPackets.Max(p => p.Timestamp):HH:mm:ss.fff}");
+                }
                 
                 result.NetworkCaptures = capturedPackets;
                 
@@ -1269,27 +1324,51 @@ namespace SolutionGrader.Core.Services
                 bool networkCheckPassed = true;
                 if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                 {
-                    Console.WriteLine("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
-                    Console.WriteLine($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
-                    Console.WriteLine("[NetworkMonitor] This usually means:");
-                    Console.WriteLine("  1. Student's server exited immediately without accepting connections (check server process logs)");
-                    Console.WriteLine("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
-                    Console.WriteLine("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
-                    Console.WriteLine("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
-                    Console.WriteLine("[NetworkMonitor] Marking test case as FAILED");
+                    OnProgress("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
+                    OnProgress($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
+                    OnProgress("[NetworkMonitor] This usually means:");
+                    OnProgress("  1. Student's server exited immediately without accepting connections (check server process logs)");
+                    OnProgress("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
+                    OnProgress("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
+                    OnProgress("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
+                    OnProgress("[NetworkMonitor] Marking test case as FAILED");
+                    networkCheckPassed = false;
+                }
+                
+                // CRITICAL FIX: Validate NO unexpected packets when expecting NONE
+                // BUG FIX: When expectedNetwork.Count == 0 (no network flows expected),
+                // but capturedPackets.Count > 0 (some packets were captured),
+                // this indicates cross-contamination from other students or stale packets.
+                // The test MUST FAIL in this case.
+                if (expectedNetwork.Count == 0 && capturedPackets.Count > 0)
+                {
+                    OnProgress($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
+                    OnProgress("[NetworkMonitor] This usually means:");
+                    OnProgress("  1. Student's code is creating network connections when it shouldn't (check student code)");
+                    OnProgress("  2. Packets from previous test or another student (cross-contamination bug)");
+                    OnProgress("  3. Stale packets not properly cleared between tests");
+                    OnProgress("[NetworkMonitor] Captured packets details:");
+                    foreach (var pkt in capturedPackets.Take(10))
+                    {
+                        OnProgress($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                    }
+                    OnProgress("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
                     networkCheckPassed = false;
                 }
                 
                 // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
                 // - If ANY flow has FAIL status, entire test FAILS
-                // - PARTIAL is treated as PASS (flags match, roles don't matter for passing)
+                // - CRITICAL FIX: PARTIAL is treated as FAIL (flags match but roles don't - wrong packet source/dest)
+                // - Only EXACT matches (flags + roles + correct source/dest) count as PASS
                 // - Only flows recorded in Detail.xlsx are validated
                 // - Flows NOT in Detail.xlsx are ignored (even if captured)
                 
                 int totalNetworkFlows = networkComparisons.Count;
                 int passCount = networkComparisons.Count(c => c.Passed);
                 int partialCount = networkComparisons.Count(c => c.IsPartial);
-                int failCount = networkComparisons.Count(c => !c.Passed && !c.IsPartial);
+                // CRITICAL FIX: Count ALL !Passed items as failures (including PARTIAL)
+                // This prevents NGINX from passing tests with correct flags but wrong roles
+                int failCount = networkComparisons.Count(c => !c.Passed);
                 
                 // DIRECT FILE LOGGING FOR DEBUGGING
                 var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
@@ -1299,8 +1378,8 @@ namespace SolutionGrader.Core.Services
                 
                 OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
                 
-                // ALL-OR-NOTHING: Test passes ONLY if NO FAIL flows
-                // PARTIAL counts as passing (flags matched correctly)
+                // ALL-OR-NOTHING: Test passes ONLY if ALL flows passed (failCount == 0)
+                // PARTIAL matches count as FAIL - only EXACT matches (flags + roles) pass
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
                 try {
@@ -1361,7 +1440,7 @@ namespace SolutionGrader.Core.Services
             catch (Exception ex)
             {
                 result.ErrorMessage = ex.Message;
-                Console.WriteLine($"[Error] Test case {testCase.Name} failed: {ex.Message}");
+                OnProgress($"[Error] Test case {testCase.Name} failed: {ex.Message}");
             }
             
             return result;
@@ -1403,7 +1482,7 @@ namespace SolutionGrader.Core.Services
                 // Update network monitor stage context
                 _networkMonitor?.SetCurrentContext("", stage.ToString());
                 
-                Console.WriteLine($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
+                OnProgress($"  [Stage {stage}] {action}" + (string.IsNullOrEmpty(input) ? "" : $" input='{input}'"));
                 
                 switch (action.ToUpperInvariant())
                 {
@@ -1430,7 +1509,7 @@ namespace SolutionGrader.Core.Services
                                 serverBaseline = output.Length;
                                 serverOutputs[stage] = newOutput;
                                 
-                                Console.WriteLine($"    Server started, output: {newOutput.Length} chars");
+                                OnProgress($"    Server started, output: {newOutput.Length} chars");
                             }
                         }
                         break;
@@ -1468,7 +1547,7 @@ namespace SolutionGrader.Core.Services
                                 }
                                 clientOutputs[stage] = newOutput;
                                 
-                                Console.WriteLine($"    Client started, output: {newOutput.Length} chars");
+                                OnProgress($"    Client started, output: {newOutput.Length} chars");
                             }
                         }
                         break;
@@ -1496,7 +1575,7 @@ namespace SolutionGrader.Core.Services
                             clientOutputs[stage] = newClientOutput;
                             serverOutputs[stage] = newServerOutput;
                             
-                            Console.WriteLine($"    Input sent, client: {newClientOutput.Length} chars, server: {newServerOutput.Length} chars");
+                            OnProgress($"    Input sent, client: {newClientOutput.Length} chars, server: {newServerOutput.Length} chars");
                         }
                         break;
                         
@@ -1558,11 +1637,11 @@ namespace SolutionGrader.Core.Services
                     if (match) passed++;
                     
                     // Log detailed comparison for debugging (NO TRUNCATION - full output for debugging)
-                    Console.WriteLine($"  [Stage {stage}] Client comparison: {(match ? "PASS" : "FAIL")}");
+                    OnProgress($"  [Stage {stage}] Client comparison: {(match ? "PASS" : "FAIL")}");
                     if (!match)
                     {
-                        Console.WriteLine($"    Expected (contains): '{exp.ClientConsole}'");
-                        Console.WriteLine($"    Actual output: '{actual}'");
+                        OnProgress($"    Expected (contains): '{exp.ClientConsole}'");
+                        OnProgress($"    Actual output: '{actual}'");
                     }
                     
                     comparisons.Add(new ComparisonResult
@@ -1583,11 +1662,11 @@ namespace SolutionGrader.Core.Services
                     if (match) passed++;
                     
                     // Log detailed comparison for debugging (NO TRUNCATION - full output for debugging)
-                    Console.WriteLine($"  [Stage {stage}] Server comparison: {(match ? "PASS" : "FAIL")}");
+                    OnProgress($"  [Stage {stage}] Server comparison: {(match ? "PASS" : "FAIL")}");
                     if (!match)
                     {
-                        Console.WriteLine($"    Expected (contains): '{exp.ServerConsole}'");
-                        Console.WriteLine($"    Actual output: '{actual}'");
+                        OnProgress($"    Expected (contains): '{exp.ServerConsole}'");
+                        OnProgress($"    Actual output: '{actual}'");
                     }
                     
                     comparisons.Add(new ComparisonResult
@@ -1609,11 +1688,11 @@ namespace SolutionGrader.Core.Services
             
             if (total == 0)
             {
-                Console.WriteLine($"  Comparison summary: No console output expectations - PASS by default");
+                OnProgress($"  Comparison summary: No console output expectations - PASS by default");
             }
             else
             {
-                Console.WriteLine($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
+                OnProgress($"  Comparison summary: {passed}/{total} checks passed, earned {earnedMark:F2}/{maxMark:F2} marks");
             }
             
             return (earnedMark, allPassed, comparisons);
@@ -1826,7 +1905,7 @@ namespace SolutionGrader.Core.Services
                             if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
                                 System.Globalization.CultureInfo.InvariantCulture, out mark))
                             {
-                                Console.WriteLine($"[Warning] Cannot parse mark value '{markStr}' for test case '{tcName}' - defaulting to 0");
+                                OnProgress($"[Warning] Cannot parse mark value '{markStr}' for test case '{tcName}' - defaulting to 0");
                                 mark = 0.0;
                             }
                         }
@@ -1885,7 +1964,7 @@ namespace SolutionGrader.Core.Services
                     if (serverDll != null)
                     {
                         tkConfig.GivenServerPath = serverDll;
-                        Console.WriteLine($"[TestKit] Found given server: {Path.GetFileName(serverDll)}");
+                        OnProgress($"[TestKit] Found given server: {Path.GetFileName(serverDll)}");
                     }
                 }
                 
@@ -1902,21 +1981,21 @@ namespace SolutionGrader.Core.Services
                     if (clientDll != null)
                     {
                         tkConfig.GivenClientPath = clientDll;
-                        Console.WriteLine($"[TestKit] Found given client: {Path.GetFileName(clientDll)}");
+                        OnProgress($"[TestKit] Found given client: {Path.GetFileName(clientDll)}");
                     }
                 }
             }
             
             // Apply config overrides
-            Console.WriteLine($"[Port Config] LoadTestKitConfig - Before override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
-            Console.WriteLine($"[Port Config] LoadTestKitConfig - Config values: config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+            OnProgress($"[Port Config] LoadTestKitConfig - Before override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
+            OnProgress($"[Port Config] LoadTestKitConfig - Config values: config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
             
             if (config.CodeContainerInternalPort > 0)
                 tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
             if (config.CodeContainerHostPort > 0)
                 tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
             
-            Console.WriteLine($"[Port Config] LoadTestKitConfig - After override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
+            OnProgress($"[Port Config] LoadTestKitConfig - After override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
             
             return tkConfig;
         }
@@ -1956,7 +2035,8 @@ namespace SolutionGrader.Core.Services
                             int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
                             timeout = parsedTimeout;
-                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Timeout = {timeout}s (from Header.xlsx)");
+                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                            // Logging moved to instance method context where OnProgress is available
                         }
                         
                         // Read Grade_Content
@@ -1964,7 +2044,8 @@ namespace SolutionGrader.Core.Services
                             !string.IsNullOrWhiteSpace(value))
                         {
                             gradeContent = value;
-                            Console.WriteLine($"[TestKit] {Path.GetFileName(testCasePath)}: Grade_Content = '{gradeContent}' (from Header.xlsx)");
+                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                            // Logging moved to instance method context where OnProgress is available
                         }
                     }
                     
@@ -1973,7 +2054,8 @@ namespace SolutionGrader.Core.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TestKit] Warning: Could not read config from {headerPath}: {ex.Message}");
+                // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                // Silently use defaults if header cannot be read
             }
             
             return (defaultTimeout, "Client/Server");
@@ -2146,8 +2228,18 @@ namespace SolutionGrader.Core.Services
             // Step 4: Clear network captures for next test case
             // CRITICAL: Must clear BOTH NetworkMonitor AND RunContext to prevent
             // previous test case's network packets from appearing in next test case
+            OnProgress("Cleanup: Clearing network captures from previous test case...");
             _networkMonitor?.ClearCaptures();
             _runContext.ClearNetworkCaptures();
+            
+            // CRITICAL FIX: Wait for any in-flight packets to be processed and cleared
+            // This prevents packets from previous test case appearing in the next one
+            await Task.Delay(100);
+            
+            // Clear again to catch any packets that arrived during the delay
+            _networkMonitor?.ClearCaptures();
+            _runContext.ClearNetworkCaptures();
+            OnProgress("Cleanup: Network captures cleared");
             
             // Step 5: Clear console manager logs
             _consoleManager.ClearAllLogs();
@@ -2287,7 +2379,7 @@ namespace SolutionGrader.Core.Services
         private async Task ResetDatabaseContainerAsync(DockerGradingConfig config)
         {
             var databaseContainer = config.DatabaseContainerName;
-            Console.WriteLine($"[Database] Resetting database container {databaseContainer} for new student...");
+            OnProgress($"[Database] Resetting database container {databaseContainer} for new student...");
             
             // Stop and remove existing database container
             try { _dockerExecutor.StopContainer(databaseContainer, 10000); } catch { }
@@ -2299,7 +2391,7 @@ namespace SolutionGrader.Core.Services
             // Recreate the database container
             await SetupDatabaseContainerAsync(config);
             
-            Console.WriteLine($"[Database] Database container reset complete");
+            OnProgress($"[Database] Database container reset complete");
         }
         
         /// <summary>
@@ -2313,28 +2405,28 @@ namespace SolutionGrader.Core.Services
             
             // CRITICAL FIX: Aggressive container cleanup to prevent Docker exhaustion
             // When grading 200+ students, containers MUST be fully removed before limit is reached
-            Console.WriteLine($"[Docker Cleanup] Starting cleanup for {serverContainer} and {clientContainer}");
+            OnProgress($"[Docker Cleanup] Starting cleanup for {serverContainer} and {clientContainer}");
             
             // Remove server container
             try 
             { 
                 _dockerExecutor.RemoveContainer(serverContainer); 
-                Console.WriteLine($"[Docker Cleanup] Removed {serverContainer}");
+                OnProgress($"[Docker Cleanup] Removed {serverContainer}");
             } 
             catch (Exception ex)
             { 
-                Console.WriteLine($"[Docker Cleanup] Warning: Failed to remove {serverContainer}: {ex.Message}");
+                OnProgress($"[Docker Cleanup] Warning: Failed to remove {serverContainer}: {ex.Message}");
             }
             
             // Remove client container
             try 
             { 
                 _dockerExecutor.RemoveContainer(clientContainer); 
-                Console.WriteLine($"[Docker Cleanup] Removed {clientContainer}");
+                OnProgress($"[Docker Cleanup] Removed {clientContainer}");
             } 
             catch (Exception ex)
             { 
-                Console.WriteLine($"[Docker Cleanup] Warning: Failed to remove {clientContainer}: {ex.Message}");
+                OnProgress($"[Docker Cleanup] Warning: Failed to remove {clientContainer}: {ex.Message}");
             }
             
             // NOTE: Database container is NOT removed here - it's shared between students
@@ -2346,7 +2438,7 @@ namespace SolutionGrader.Core.Services
             await WaitForContainerRemovedAsync(serverContainer, maxWaitSeconds: 10);
             await WaitForContainerRemovedAsync(clientContainer, maxWaitSeconds: 10);
             
-            Console.WriteLine($"[Docker Cleanup] Cleanup complete for code containers (database container kept running)");
+            OnProgress($"[Docker Cleanup] Cleanup complete for code containers (database container kept running)");
         }
         
         /// <summary>
@@ -2359,11 +2451,11 @@ namespace SolutionGrader.Core.Services
         {
             if (string.IsNullOrEmpty(databaseName))
             {
-                Console.WriteLine("[Database Cleanup] No database name provided, skipping instance cleanup");
+                OnProgress("[Database Cleanup] No database name provided, skipping instance cleanup");
                 return;
             }
             
-            Console.WriteLine($"[Database Cleanup] Dropping database instance '{databaseName}' in container {databaseContainer}");
+            OnProgress($"[Database Cleanup] Dropping database instance '{databaseName}' in container {databaseContainer}");
             
             try
             {
@@ -2378,17 +2470,17 @@ namespace SolutionGrader.Core.Services
                 
                 if (success)
                 {
-                    Console.WriteLine($"[Database Cleanup] Successfully dropped database instance '{databaseName}'");
-                    Console.WriteLine($"[Database Cleanup] Output: {output}");
+                    OnProgress($"[Database Cleanup] Successfully dropped database instance '{databaseName}'");
+                    OnProgress($"[Database Cleanup] Output: {output}");
                 }
                 else
                 {
-                    Console.WriteLine($"[Database Cleanup] Warning: Failed to drop database instance '{databaseName}': {output}");
+                    OnProgress($"[Database Cleanup] Warning: Failed to drop database instance '{databaseName}': {output}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Database Cleanup] Warning: Exception dropping database instance '{databaseName}': {ex.Message}");
+                OnProgress($"[Database Cleanup] Warning: Exception dropping database instance '{databaseName}': {ex.Message}");
                 // Don't throw - this is cleanup, we want to continue even if it fails
             }
             
@@ -2503,7 +2595,7 @@ namespace SolutionGrader.Core.Services
             // Show ALL expected flows with their matching actual captures
             if (expectedNetworkFlows.Count > 0)
             {
-                Console.WriteLine($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
+                OnProgress($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
                 
                 foreach (var expectedFlow in expectedNetworkFlows.OrderBy(f => f.Stage))
                 {
@@ -2577,7 +2669,7 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 18).Value = "FAIL";
                         netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightPink;
                         
-                        Console.WriteLine($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
+                        OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
                     
                     netRow++;
@@ -2597,7 +2689,7 @@ namespace SolutionGrader.Core.Services
                 var remainingPackets = capturesByStage[stage];
                 if (remainingPackets.Count > 0)
                 {
-                    Console.WriteLine($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    OnProgress($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
                     
                     foreach (var packet in remainingPackets)
                     {
@@ -2749,7 +2841,7 @@ namespace SolutionGrader.Core.Services
             var formattedMessage = !string.IsNullOrEmpty(_currentStudentCode) 
                 ? $"[{_currentStudentCode}] {message}" 
                 : message;
-            Console.WriteLine($"[DockerGrading] {formattedMessage}");
+            // Invoke the event to send progress update
             ProgressUpdated?.Invoke(this, new GradingProgressEventArgs(formattedMessage));
         }
     }

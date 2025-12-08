@@ -27,14 +27,48 @@ FROM fptuxaes/aes-dotnet8:latest
 # Without these commands, the "Address already in use" error occurs when restarting applications
 RUN apt-get update && apt-get install -y procps && rm -rf /var/lib/apt/lists/*
 
-# Disable the watch scripts from base image that interfere with grading
+# CRITICAL FIX: Disable ALL services from base image that interfere with grading
+# The base image (fptuxaes/aes-dotnet8:latest) has NGINX installed (layer 9) and 
+# an entrypoint script (layer 19) that starts NGINX as a reverse proxy
 RUN if [ -f /scripts/watch-apps.sh ]; then mv /scripts/watch-apps.sh /scripts/watch-apps.sh.disabled; fi
 RUN if [ -f /scripts/generate-nginx-config.sh ]; then mv /scripts/generate-nginx-config.sh /scripts/generate-nginx-config.sh.disabled; fi
 RUN if [ -f /scripts/entrypoint.sh ]; then mv /scripts/entrypoint.sh /scripts/entrypoint.sh.disabled; fi
+
+# CRITICAL: Completely disable NGINX to prevent proxy interference
+# NGINX acts as a reverse proxy and responds on ports even when student code exits
+# This causes FALSE POSITIVES where broken student code (e.g., "Hello World" that exits)
+# appears to work because NGINX handles the TCP connections
+RUN systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true && \
+    systemctl disable nginx 2>/dev/null || update-rc.d nginx disable 2>/dev/null || true && \
+    rm -f /etc/nginx/sites-enabled/* && \
+    rm -f /etc/nginx/sites-available/* && \
+    rm -f /etc/nginx/conf.d/* && \
+    if [ -f /etc/nginx/nginx.conf ]; then mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.disabled; fi
+
+# Create a startup script that aggressively kills NGINX on container start
+# This ensures no NGINX processes from base image layers can interfere
+RUN echo '#!/bin/bash\n\
+# Kill all NGINX processes if any exist\n\
+pkill -9 nginx 2>/dev/null || true\n\
+ps aux | grep nginx | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true\n\
+# Verify NGINX is dead - exit silently if still running\n\
+if pgrep -x nginx > /dev/null; then\n\
+    exit 1\n\
+fi\n\
+# Container ready - no output to avoid interfering with UI logs\n\
+exec tail -f /dev/null\n\
+' > /startup.sh && chmod +x /startup.sh
 
 WORKDIR /apps
 
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 
-# Keep container alive - grading system will exec into it to run student code
-ENTRYPOINT ["tail", "-f", "/dev/null"]
+# CRITICAL FIX: Prevent ASP.NET Core from auto-starting Kestrel web server
+# When appsettings.json exists, ASP.NET hosting infrastructure auto-initializes
+# and starts Kestrel even for console apps that don't explicitly create servers.
+# This caused "Hello World" console apps to pass network tests because Kestrel
+# was accepting TCP connections in the background.
+ENV ASPNETCORE_PREVENTHOSTINGSTARTUP=true
+
+# Keep container alive - startup script ensures ZERO NGINX interference
+ENTRYPOINT ["/startup.sh"]

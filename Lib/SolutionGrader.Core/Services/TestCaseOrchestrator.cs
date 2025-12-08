@@ -85,9 +85,9 @@ namespace SolutionGrader.Core.Services
                 var envConfig = testCase.Environment ?? suite.Environment;
                 
                 // Always generate appsettings from header
-                // This now generates a single port for both client and server
+                // Client connects directly to server on the same port - NO proxy or middleware
                 Console.WriteLine($"{AppsettingKeywords.LOG_PREFIX_APPSETTINGS} {AppsettingKeywords.MSG_GENERATING_FROM_HEADER}");
-                var (proxyPort, serverPort) = _appsettings.GenerateAppsettings(
+                var (clientPort, serverPort) = _appsettings.GenerateAppsettings(
                     suite.DatabaseConfig, 
                     clientExePath, 
                     serverExePath, 

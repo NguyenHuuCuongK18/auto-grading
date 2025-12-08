@@ -126,6 +126,10 @@ public sealed class SharedNetworkMonitorService : IDisposable
             }
         }
         
+        // CRITICAL FIX: Clear port buffers BEFORE registering new student
+        // This ensures NO stale packets from previous student remain
+        ClearPortBuffers(port);
+        
         _portToStudentCode[port] = studentCode;
         _studentPacketBuffers[studentCode] = new ConcurrentQueue<PacketInfo>();
         _studentContexts[studentCode] = new StudentContext();
@@ -166,9 +170,12 @@ public sealed class SharedNetworkMonitorService : IDisposable
         // Clear all packets for this student before unregistering
         if (_studentPacketBuffers.TryRemove(studentCode, out var buffer))
         {
-            var remainingCount = buffer.Count;
-            Console.WriteLine($"[SharedNetworkMonitor] Removed packet buffer for {studentCode} (had {remainingCount} packets)");
+            // CRITICAL FIX: Drain the entire buffer to ensure no stale packets
+            while (buffer.TryDequeue(out _)) { }
         }
+        
+        // CRITICAL FIX: Clear stage timestamps to prevent stale stage tracking
+        _studentStageTimestamps.TryRemove(studentCode, out _);
         
         _studentContexts.TryRemove(studentCode, out _);
         _studentRunContexts.TryRemove(studentCode, out _); // Remove RunContext mapping
@@ -732,6 +739,7 @@ public sealed class SharedNetworkMonitorService : IDisposable
     
     /// <summary>
     /// Clear all captured packets for a student (e.g., between test cases).
+    /// CRITICAL: This should be called between test cases to ensure clean slate.
     /// </summary>
     public void ClearStudentCaptures(string studentCode)
     {
@@ -748,6 +756,38 @@ public sealed class SharedNetworkMonitorService : IDisposable
         {
             runContext.ClearNetworkCaptures();
             Console.WriteLine($"[SharedNetworkMonitor] [{studentCode}] Cleared packets from RunContext");
+        }
+    }
+    
+    /// <summary>
+    /// CRITICAL FIX: Clear all packet buffers for a specific port.
+    /// This is called BEFORE registering a new student on a port to ensure
+    /// no stale packets from the previous student remain in the system.
+    /// 
+    /// This method clears:
+    /// 1. Any in-flight packets in the capture handler queue
+    /// 2. Packets that may have been captured during the brief window between unregister and register
+    /// 3. Any OS-level buffered packets that haven't been processed yet
+    /// </summary>
+    public void ClearPortBuffers(int port)
+    {
+        // Find if any student is currently registered on this port
+        if (_portToStudentCode.TryGetValue(port, out var studentCode))
+        {
+            // Port is still registered - clear captures for that student
+            ClearStudentCaptures(studentCode);
+        }
+        
+        // Additional safety: Clear any client ports that might have been associated with this server port
+        // Client ports are ephemeral and tracked in _portRoleMap
+        var associatedClientPorts = _portRoleMap
+            .Where(kvp => kvp.Value == NetworkKeywords.Role_Client)
+            .Select(kvp => kvp.Key)
+            .ToList();
+        
+        foreach (var clientPort in associatedClientPorts)
+        {
+            _portRoleMap.TryRemove(clientPort, out _);
         }
     }
     

@@ -137,7 +137,7 @@ namespace SolutionGrader.UI
             _logger.LogInfo($"DLL modification fallback: {(_configuration.UseDllModificationFallback ? "Enabled" : "Disabled")}");
         }
 
-        private void Window_Closing(object sender, CancelEventArgs e)
+        private async void Window_Closing(object sender, CancelEventArgs e)
         {
             if (_isRunning)
             {
@@ -155,6 +155,19 @@ namespace SolutionGrader.UI
                 
                 _cancellationTokenSource?.Cancel();
                 _cancellationTokenSource?.Dispose();
+            }
+            
+            // CRITICAL FIX: Clear shared network monitors on window close
+            // This ensures complete cleanup and prevents stale state if the window is reopened
+            try
+            {
+                _logger.LogInfo("[Window Close] Clearing shared network monitors...");
+                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                _logger.LogInfo("[Window Close] Shared network monitors cleared");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Window Close] Error clearing monitors: {ex.Message}");
             }
             
             // Flush any pending UI updates before closing
@@ -516,6 +529,21 @@ namespace SolutionGrader.UI
             // OPTIMIZATION: Pre-allocate shared network monitor for all students in batch
             // This dramatically reduces resource usage (97% reduction in monitor instances)
             // Per user request: Use singular network monitor with port range pre-allocation
+            // CRITICAL FIX: Clear shared network monitors from previous grading session
+            // This is essential when rerunning tests in the UI, as the SharedNetworkMonitorManager
+            // is a singleton that persists across sessions. Without this cleanup, stale monitors
+            // and student registrations from previous runs can cause cross-contamination.
+            try
+            {
+                _logger.LogInfo("[Shared Network Monitor] Clearing monitors from previous session...");
+                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                _logger.LogInfo("[Shared Network Monitor] Previous session monitors cleared");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Shared Network Monitor] Error clearing previous monitors: {ex.Message}");
+            }
+            
             try
             {
                 var firstStudent = studentsToGrade.FirstOrDefault();
@@ -1012,7 +1040,7 @@ namespace SolutionGrader.UI
             }
         }
 
-        private void Pause_Click(object sender, RoutedEventArgs e)
+        private async void Pause_Click(object sender, RoutedEventArgs e)
         {
             if (_isRunning && !_isPaused)
             {
@@ -1020,6 +1048,21 @@ namespace SolutionGrader.UI
                 // Cancel the current grading operation to abort the student being graded
                 _cancellationTokenSource?.Cancel();
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
+                
+                // CRITICAL FIX: Clear shared network monitors when pausing
+                // This prevents stale monitors from interfering when user resumes or starts a new session
+                // Without this, the Resume -> StartGradingAsync flow would create duplicate monitors
+                try
+                {
+                    _logger.LogInfo("[Pause] Clearing shared network monitors...");
+                    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
+                    _logger.LogInfo("[Pause] Shared network monitors cleared");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"[Pause] Error clearing monitors: {ex.Message}");
+                }
+                
                 UpdateButtonStates();
             }
         }

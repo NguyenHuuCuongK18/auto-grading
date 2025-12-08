@@ -225,6 +225,9 @@ public static class SuiteKeywords
     [Obsolete("Use Col_Console_Output instead")]
     public const string Col_OC_Output             = "Output";
     
+    [Obsolete("DataType is no longer used in new format")]
+    public const string Col_OC_DataType           = "DataType";
+    
     [Obsolete("DataTypeMiddleware is no longer used in new format")]
     public const string Col_OC_DataTypeMiddleware = "DataTypeMiddleWare";
     
@@ -243,6 +246,9 @@ public static class SuiteKeywords
     
     [Obsolete("Use Col_Console_Output instead")]
     public const string Col_OS_Output             = "Output";
+    
+    [Obsolete("DataType is no longer used in new format")]
+    public const string Col_OS_DataType           = "DataType";
     
     [Obsolete("DataTypeMiddleware is no longer used in new format")]
     public const string Col_OS_DataTypeMiddleware = "DataTypeMiddleware";

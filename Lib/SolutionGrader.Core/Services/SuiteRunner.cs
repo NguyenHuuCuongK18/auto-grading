@@ -461,17 +461,18 @@ namespace SolutionGrader.Core.Services
         /// <returns>True if port is available, false if in use</returns>
         private static bool IsPortAvailable(int port)
         {
-            try
-            {
-                using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
-                listener.Start();
-                listener.Stop();
-                return true;
-            }
-            catch (System.Net.Sockets.SocketException)
-            {
-                return false;
-            }
+            // CRITICAL FIX: Do NOT use TcpListener to check port availability!
+            // TcpListener.Start() actually binds to the port and can respond to SYN packets,
+            // acting as a proxy that interferes with network monitoring during grading.
+            //
+            // Instead, we simply return true and let Docker handle port binding.
+            // If port is in use, Docker will fail to create the container and we'll get
+            // an appropriate error message.
+            //
+            // This prevents false positive network captures where IsPortAvailable's
+            // TcpListener responds with SYN-ACK even when student code exits immediately.
+            
+            return true; // Always return true, let Docker handle port conflicts
         }
     }
 }

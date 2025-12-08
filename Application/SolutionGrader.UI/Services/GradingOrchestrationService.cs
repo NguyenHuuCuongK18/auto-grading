@@ -426,19 +426,44 @@ namespace SolutionGrader.UI.Services
                 
                 _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using pre-allocated port {portToUse} for container, DLL modification, and network monitoring");
                 
-                // Build Docker configuration from UI config
-                // The examiner sets HasClient/HasServer to indicate what the student should provide:
-                // - HasClient=true, HasServer=true  → student provides both
-                // - HasClient=true, HasServer=false → student provides client, use golden server
-                // - HasClient=false, HasServer=true → student provides server, use golden client
+                // CRITICAL FIX: Read Grade_Content from test kit's OUTER Header.xlsx
+                // This determines what the student should provide (Server or Client)
+                // Overrides UI checkboxes for single-file scenarios
+                bool hasClient = config.HasClient;
+                bool hasServer = config.HasServer;
+                string? gradeContent = ReadGradeContentFromTestKit(testKitPath);
+                
+                if (!string.IsNullOrEmpty(gradeContent))
+                {
+                    _logger.LogInfo($"[Grade_Content] Test kit specifies Grade_Content='{gradeContent}' - overriding UI checkboxes");
+                    
+                    if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Student provides SERVER, use golden CLIENT
+                        hasServer = true;
+                        hasClient = false;
+                        _logger.LogInfo($"[Grade_Content] Student provides SERVER → HasServer=true, HasClient=false (use golden client)");
+                    }
+                    else if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Student provides CLIENT, use golden SERVER
+                        hasServer = false;
+                        hasClient = true;
+                        _logger.LogInfo($"[Grade_Content] Student provides CLIENT → HasServer=false, HasClient=true (use golden server)");
+                    }
+                }
+                else
+                {
+                    _logger.LogInfo($"[Grade_Content] No Grade_Content in test kit - using UI checkboxes: HasClient={hasClient}, HasServer={hasServer}");
+                }
                 
                 _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
                 
                 var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
                 {
-                    // Examiner's component requirements
-                    HasClient = config.HasClient,
-                    HasServer = config.HasServer,
+                    // Component requirements (from Grade_Content or UI checkboxes)
+                    HasClient = hasClient,
+                    HasServer = hasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
@@ -799,6 +824,44 @@ namespace SolutionGrader.UI.Services
             _libGrading.DisposeAllContainers(dockerConfig);
         }
 
+        /// <summary>
+        /// Reads Grade_Content from the test kit's outer Header.xlsx file.
+        /// This determines whether the student should provide Server or Client.
+        /// Returns null if Grade_Content is not specified (two-file scenario).
+        /// </summary>
+        private string? ReadGradeContentFromTestKit(string testKitPath)
+        {
+            try
+            {
+                var headerPath = Path.Combine(testKitPath, "Header.xlsx");
+                if (!File.Exists(headerPath))
+                {
+                    return null;
+                }
+
+                using var wb = new ClosedXML.Excel.XLWorkbook(headerPath);
+                var ws = wb.Worksheets.FirstOrDefault();
+                if (ws == null) return null;
+
+                // Look for Grade_Content key
+                for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+                {
+                    var key = ws.Cell(r, 1).GetValue<string>()?.Trim() ?? "";
+                    if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var value = ws.Cell(r, 2).GetValue<string>()?.Trim() ?? "";
+                        return string.IsNullOrEmpty(value) ? null : value;
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Could not read Grade_Content from test kit Header.xlsx: {ex.Message}");
+                return null;
+            }
+        }
 
     }
 }

@@ -11,7 +11,7 @@ namespace SolutionGrader.Core.Services;
 
 /// <summary>
 /// Network monitor service that captures network traffic using SharpPcap/PacketDotNet.
-/// This replaces the middleware proxy approach by passively sniffing packets on the loopback interface.
+/// This uses passive network sniffing - NO proxy or middleware by passively sniffing packets on the loopback interface.
 /// 
 /// Key differences from middleware proxy:
 /// - Does not intercept or modify traffic

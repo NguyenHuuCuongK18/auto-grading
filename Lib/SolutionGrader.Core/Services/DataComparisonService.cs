@@ -759,7 +759,7 @@ namespace SolutionGrader.Core.Services
                 {
                     return CompareHttpMethod(step.HttpMethod ?? step.Target, httpMethod);
                 }
-                return (false, "HTTP method not captured from middleware");
+                return (false, "HTTP method not captured from network monitor");
             }
 
             if (step.Id.Contains("-STATUS-", StringComparison.OrdinalIgnoreCase) || validationType == "STATUS_CODE")
@@ -771,7 +771,7 @@ namespace SolutionGrader.Core.Services
                 {
                     return CompareStatusCode(step.StatusCode ?? step.Target, statusCode);
                 }
-                return (false, "Status code not captured from middleware");
+                return (false, "Status code not captured from network monitor");
             }
 
             if (step.Id.Contains("-SIZE-", StringComparison.OrdinalIgnoreCase) || validationType == "BYTE_SIZE")
@@ -783,7 +783,7 @@ namespace SolutionGrader.Core.Services
                 {
                     return CompareByteSize(step.ByteSize, byteSize);
                 }
-                return (false, "Byte size not captured from middleware");
+                return (false, "Byte size not captured from network monitor");
             }
 
             if (step.Id.Contains("-DATA-", StringComparison.OrdinalIgnoreCase) || validationType == "DATA_RESPONSE")
