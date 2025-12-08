@@ -2507,18 +2507,19 @@ namespace SolutionGrader.Core.Services
             // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for tcpdump permissions
             // - Capture on loopback interface (-i lo) to catch localhost traffic
             // - NO port filtering - capture everything to detect student mistakes
-            // - Write to /capture/{pcapFileName} inside container (bind-mounted to host)
-            
-            var containerPcapPath = $"/capture/{pcapFileName}";
-            var tcpdumpCommand = $"tcpdump -i lo -w {containerPcapPath} -U";  // -U for unbuffered writing
+            // - Write to /data/{pcapFileName} inside container (bind-mounted to host)
+            //
+            // The network-monitor image uses ENTRYPOINT ["tcpdump"], so we only pass arguments
+            // Default CMD is ["-i", "lo", "-U", "-w", "capture.pcap"]
+            // We override -w to use our custom filename
             
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
-                           $"-v \"{outputDir}:/capture\" " +         // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image
-                           tcpdumpCommand;                            // tcpdump command (no port filter!)
+                           $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
+                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
+                           $"-i lo -U -w /data/{pcapFileName}";      // tcpdump arguments (ENTRYPOINT handles 'tcpdump' command)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
