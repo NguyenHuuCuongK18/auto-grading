@@ -110,11 +110,25 @@ case "$ACTION" in
         echo -e "${INPUT}" > "$INPUT_FILE"
         
         # Update supervisord config to pipe input file to client
-        # Modify the client command to use input redirection
-        sed -i "s|command=/bin/bash -c \"cd /apps/client.*|command=/bin/bash -c \"cd /apps/client \&\& find . -name '*.dll' -not -name 'System.*.dll' -not -name 'Microsoft.*.dll' | head -1 | xargs -I{} dotnet {} < ${INPUT_FILE}\"|" /etc/supervisor/conf.d/supervisord.conf
+        # We need to find and replace the entire command line
+        # First, backup the original config
+        cp /etc/supervisor/conf.d/supervisord.conf /etc/supervisor/conf.d/supervisord.conf.bak
         
-        # Update stage
-        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        # Use awk to replace the client command line properly
+        # CRITICAL: Input redirection must come AFTER the entire find|head|xargs pipeline
+        # Use sh -c to ensure proper parsing: sh -c 'dotnet file.dll < input.txt'
+        awk -v input_file="$INPUT_FILE" -v stage="$STAGE" '
+        /^\[program:client\]/ { in_client=1; print; next }
+        /^\[program:/ && in_client { in_client=0 }
+        in_client && /^command=/ { 
+            print "command=/bin/bash -c \"cd /apps/client && DLL=\\$(find . -maxdepth 1 -name '\\''*.dll'\\'' -not -name '\\''System.*.dll'\\'' -not -name '\\''Microsoft.*.dll'\\'' | head -1) && dotnet \\$DLL < " input_file "\""
+            next 
+        }
+        in_client && /^environment=/ {
+            sub(/STAGE=[0-9]*/, "STAGE=" stage)
+        }
+        { print }
+        ' /etc/supervisor/conf.d/supervisord.conf.bak > /etc/supervisor/conf.d/supervisord.conf
         
         # Reread and update
         $SUPERVISORCTL reread 2>/dev/null || true

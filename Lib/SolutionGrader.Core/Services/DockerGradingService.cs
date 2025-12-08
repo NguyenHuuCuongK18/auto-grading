@@ -841,7 +841,11 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             // Copy to /apps/server
-                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/server");
+                            // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
+                            // Without "/.": creates /apps/server/AutoGrading_UnifiedServer_*/
+                            // With "/.": creates /apps/server/*.dll, /apps/server/appsettings.json, etc.
+                            var serverSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            _dockerExecutor.CopyFileToContainer(serverSource, $"{unifiedContainer}:/apps/server/");
                             OnProgress($"[Unified] Copied server files to /apps/server");
                         }
                         catch (Exception ex)
@@ -888,7 +892,11 @@ namespace SolutionGrader.Core.Services
                             }
                             
                             // Copy to /apps/client
-                            _dockerExecutor.CopyFileToContainer(dirToCopy, $"{unifiedContainer}:/apps/client");
+                            // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
+                            // Without "/.": creates /apps/client/AutoGrading_UnifiedClient_*/
+                            // With "/.": creates /apps/client/*.dll, /apps/client/appsettings.json, etc.
+                            var clientSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            _dockerExecutor.CopyFileToContainer(clientSource, $"{unifiedContainer}:/apps/client/");
                             OnProgress($"[Unified] Copied client files to /apps/client");
                         }
                         catch (Exception ex)
