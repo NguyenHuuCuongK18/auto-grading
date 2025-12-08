@@ -51,12 +51,11 @@ RUN echo '#!/bin/bash\n\
 # Kill all NGINX processes if any exist\n\
 pkill -9 nginx 2>/dev/null || true\n\
 ps aux | grep nginx | grep -v grep | awk "{print \$2}" | xargs -r kill -9 2>/dev/null || true\n\
-# Verify NGINX is dead\n\
+# Verify NGINX is dead - exit silently if still running\n\
 if pgrep -x nginx > /dev/null; then\n\
-    echo "ERROR: NGINX still running after kill attempts!"\n\
     exit 1\n\
 fi\n\
-echo "Container ready - no NGINX processes detected"\n\
+# Container ready - no output to avoid interfering with UI logs\n\
 exec tail -f /dev/null\n\
 ' > /startup.sh && chmod +x /startup.sh
 
