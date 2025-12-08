@@ -3082,9 +3082,10 @@ namespace SolutionGrader.Core.Services
         /// - Network monitor captures on host loopback
         /// - Docker's NAT proxy responds with SYN-ACK even when server exits
         /// 
-        /// Default: true (use Docker internal networking to avoid proxy behavior)
+        /// Default: false (legacy mode) - temporarily reverted due to network capture issues
+        /// TODO: Change back to true once bridge network capture is verified working
         /// </summary>
-        public bool UseDockerInternalNetworking { get; set; } = true;
+        public bool UseDockerInternalNetworking { get; set; } = false;
     }
     
     /// <summary>

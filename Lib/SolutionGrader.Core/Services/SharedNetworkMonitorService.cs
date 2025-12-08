@@ -373,56 +373,53 @@ public sealed class SharedNetworkMonitorService : IDisposable
             
             Console.WriteLine($"[SharedNetworkMonitor] Scanning {allDevices.Count} network devices...");
             
+            // CRITICAL FIX: Capture on ALL interfaces to catch ephemeral Docker bridges
+            // Custom Docker networks create dynamic br-<network-id> interfaces that:
+            // 1. Only exist while containers are running
+            // 2. Have unpredictable names (include network ID)
+            // 3. Cannot be pre-selected before containers start
+            // 
+            // Solution: Capture on all interfaces and use BPF filter to limit to target ports
+            // This ensures we catch traffic regardless of which interface Docker uses
+            
             foreach (var device in allDevices)
             {
                 var name = device.Name?.ToLowerInvariant() ?? "";
                 var desc = device.Description?.ToLowerInvariant() ?? "";
                 
-                bool isCandidate = false;
-                
-                if (OperatingSystem.IsLinux())
+                // Skip "any" pseudo-device on Linux (causes issues)
+                if (name == "any" || name.Contains("\\device\\npcap\\any"))
                 {
-                    // Linux: loopback (lo), Docker bridge (docker0, br-*), veth pairs, eth interfaces
-                    isCandidate = name == "lo" || 
-                                 name.StartsWith("br-") || 
-                                 name == "docker0" || 
-                                 name.StartsWith("veth") || 
-                                 name.StartsWith("eth");
-                }
-                else if (OperatingSystem.IsMacOS())
-                {
-                    // macOS: loopback (lo0), ethernet (en*), Docker bridge (bridge*)
-                    isCandidate = name == "lo0" || 
-                                 name.StartsWith("en") || 
-                                 name.StartsWith("bridge");
-                }
-                else
-                {
-                    // Windows: NPcap Loopback, Hyper-V virtual switches, Docker adapters
-                    isCandidate = name.Contains("loopback") || 
-                                 desc.Contains("loopback") ||
-                                 name.Contains("npcap_loopback") ||
-                                 desc.Contains("hyper-v") ||
-                                 desc.Contains("vethernet") ||
-                                 desc.Contains("docker") ||
-                                 desc.Contains("wsl");
+                    Console.WriteLine($"[SharedNetworkMonitor] Skipping pseudo-device: {name}");
+                    continue;
                 }
                 
-                if (isCandidate)
+                // Skip USB/Bluetooth/other non-network interfaces
+                if (name.Contains("usb") || name.Contains("bluetooth") || desc.Contains("bluetooth"))
                 {
-                    candidates.Add(device);
-                    Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name} ({device.Description})");
+                    continue;
                 }
+                
+                // Add all other devices
+                candidates.Add(device);
+                Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name} ({device.Description})");
             }
             
             if (candidates.Count == 0)
             {
                 Console.WriteLine("[SharedNetworkMonitor] WARNING: No suitable capture devices found!");
+                Console.WriteLine("[SharedNetworkMonitor] This usually means:");
+                Console.WriteLine("  1. On Linux: libpcap is not installed or you need to run with sudo");
+                Console.WriteLine("  2. On Windows: NPcap is not installed");
                 Console.WriteLine("[SharedNetworkMonitor] Available devices:");
                 foreach (var device in allDevices)
                 {
                     Console.WriteLine($"  - {device.Name}: {device.Description}");
                 }
+            }
+            else
+            {
+                Console.WriteLine($"[SharedNetworkMonitor] Selected {candidates.Count} devices for monitoring");
             }
         }
         catch (Exception ex)
