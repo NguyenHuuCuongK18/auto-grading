@@ -1,37 +1,36 @@
-# Network Monitor Container for Docker Internal Networking
+# Network Monitor Container for Sidecar Pattern
 #
-# This container runs tcpdump to capture network traffic between student containers
-# when using Docker internal networking mode (no port mappings).
+# This container runs tcpdump to capture network traffic on the loopback interface
+# when attached to a unified container via --net=container.
 #
 # BUILD COMMAND:
 #   docker build -t fptuxaes/network-monitor:latest -f NetworkMonitor.Dockerfile .
 #
-# RUN REQUIREMENTS:
-#   The container MUST be run with --cap-add=NET_ADMIN --cap-add=NET_RAW
-#   These capabilities are REQUIRED for tcpdump to capture packets.
-#   Without them, tcpdump will fail silently and produce empty pcap files.
+# CRITICAL DESIGN:
+#   - Captures on loopback (-i lo) to catch localhost traffic inside unified container
+#   - NO port filtering - captures ALL traffic to detect student mistakes
+#   - Packet-buffered mode (-U) writes immediately, safe if container crashes
+#   - Uses Debian (Alpine has persistent TLS issues with package repositories in CI)
 #
-# Example run command (automatically done by grading system):
-#   docker run -d --name ag-monitor-student123 \
-#     --network auto-grading-network \
-#     --cap-add=NET_ADMIN --cap-add=NET_RAW \
-#     -v /path/to/output:/capture \
-#     fptuxaes/network-monitor:latest \
-#     tcpdump -i any -w /capture/network_capture.pcap "tcp port 8000"
-#
-# The grading system will automatically create and manage this container when
-# UseDockerInternalNetworking = true in DockerGradingConfig.
-#
-FROM alpine:latest
+# Use Debian slim for reliability (Alpine has TLS certificate issues)
+FROM debian:bullseye-slim
 
-# Install tcpdump for packet capture
-RUN apk add --no-cache tcpdump
+# Install tcpdump (minimal dependencies, reliable package repository)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tcpdump && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create directory for capture files
-RUN mkdir -p /capture
+# Create a directory for the output files
+WORKDIR /data
 
-WORKDIR /capture
+# Define a volume so you don't forget to mount it
+VOLUME ["/data"]
 
-# Default command - will be overridden by grading system
-# Format: tcpdump -i any -w /capture/traffic.pcap "tcp port {PORT}"
-CMD ["tcpdump", "-i", "any", "-w", "/capture/traffic.pcap"]
+# ENTRYPOINT ensures 'tcpdump' is always the executable
+ENTRYPOINT ["tcpdump"]
+
+# CMD sets the default arguments:
+# -i lo  : Listen on Loopback (CRITICAL for your Fat Container)
+# -w ... : Save to file named 'capture.pcap'
+# -U     : 'Packet-Buffered' mode (writes to file immediately, safer if container crashes)
+CMD ["-i", "lo", "-U", "-w", "capture.pcap"]

@@ -14,11 +14,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 # Install supervisord for process management
-RUN apt-get update && apt-get install -y \
-    supervisor \
-    netcat-openbsd \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+# Install dependencies with retry logic to handle transient network errors
+RUN apt-get update && \
+    for i in $(seq 1 3); do \
+        apt-get install -y supervisor netcat-openbsd procps && break || sleep 5; \
+    done && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
 # /apps/server - Server DLLs, appsettings, and per-stage logs (server-stage-N.log)

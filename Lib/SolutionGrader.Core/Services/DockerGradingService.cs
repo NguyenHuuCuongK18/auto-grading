@@ -72,6 +72,10 @@ namespace SolutionGrader.Core.Services
         private readonly IRunContext _runContext;
         private string? _currentStudentCode; // Track current student for logging
         
+        // Network monitoring for sidecar pattern
+        private string? _currentPcapFilePath; // Path to pcap file being written by network monitor
+        private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
+        
         /// <summary>
         /// Event raised when grading progress is updated.
         /// </summary>
@@ -202,8 +206,8 @@ namespace SolutionGrader.Core.Services
             // This allows multiple students to share the same container without data conflicts
             string studentDatabaseName = "";
             
-            // Log directory for exporting client/server logs
-            string? logOutputDir = null;
+            // Network monitor pcap file path (for sidecar pattern)
+            string pcapFilePath = "";
             
             try
             {
@@ -315,6 +319,21 @@ namespace SolutionGrader.Core.Services
                     config, 
                     testKitConfig, 
                     unifiedContainer);
+                
+                // Setup network monitor container attached to unified container
+                var monitorContainer = $"ag-monitor-{studentCode}";
+                pcapFilePath = Path.Combine(studentResultPath, "network_capture.pcap");
+                _currentPcapFilePath = pcapFilePath; // Store for per-stage parsing
+                _lastParsedPacketCount = 0; // Reset packet counter
+                Directory.CreateDirectory(studentResultPath);
+                
+                OnProgress($"Setting up network monitor container for {studentCode}...");
+                await SetupNetworkMonitorContainerAsync(
+                    monitorContainer,
+                    unifiedContainer,
+                    config.CodeContainerHostPort,
+                    pcapFilePath,
+                    testKitConfig.Protocol);
                 
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");
@@ -443,8 +462,18 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
                 }
                 
-                // NOTE: Shared network monitor continues running for all students
-                // No per-student unregistration needed
+                // Cleanup network monitor container (sidecar pattern)
+                var monitorContainer = $"ag-monitor-{studentCode}";
+                try
+                {
+                    OnProgress($"[Monitor] Stopping and extracting pcap from {monitorContainer}...");
+                    await CleanupNetworkMonitorContainerAsync(monitorContainer, studentResultPath);
+                    OnProgress($"[Monitor] Network monitor cleanup completed");
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"[Monitor] WARNING: Failed to cleanup network monitor: {ex.Message}");
+                }
                 
                 // Cleanup unified container
                 await CleanupUnifiedContainerAsync(unifiedContainer, studentCode);
@@ -795,13 +824,16 @@ namespace SolutionGrader.Core.Services
                                 CopyDirectory(serverDir, tempStagingDir);
                                 OnProgress($"[Unified] Copied server files to temp for modification");
                                 
-                                // Modify for localhost (127.0.0.1)
+                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
+                                // We DON'T force IP replacement - student code should already use correct IP
+                                // We ONLY modify PORT for parallel grading
+                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ServerProjectName,
                                     isServer: true,
                                     targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "127.0.0.1"  // Unified container uses localhost
+                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
                                 );
                                 
                                 OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
@@ -839,13 +871,16 @@ namespace SolutionGrader.Core.Services
                                 CopyDirectory(clientDir, tempStagingDir);
                                 OnProgress($"[Unified] Copied client files to temp for modification");
                                 
-                                // Client connects to localhost
+                                // Client connects to localhost/127.0.0.1 in unified container
+                                // We DON'T force IP replacement - student code should already use localhost
+                                // We ONLY modify PORT for parallel grading
+                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ClientProjectName,
                                     isServer: false,
                                     targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "127.0.0.1"  // Connect to localhost
+                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
                                 );
                                 
                                 OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
@@ -1171,39 +1206,54 @@ namespace SolutionGrader.Core.Services
                 // CRITICAL: Validate network monitoring is working
                 // If we expected network data but got none, this indicates a problem with network monitoring
                 // OR the student's server exited immediately without accepting connections
+                //
+                // SIDECAR PATTERN: Network data is captured to pcap file and analyzed post-grading
+                // During test execution, capturedPackets will be empty. Skip validation for now.
                 bool networkCheckPassed = true;
-                if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
-                {
-                    OnProgress("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
-                    OnProgress($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
-                    OnProgress("[NetworkMonitor] This usually means:");
-                    OnProgress("  1. Student's server exited immediately without accepting connections (check server process logs)");
-                    OnProgress("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
-                    OnProgress("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
-                    OnProgress("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
-                    OnProgress("[NetworkMonitor] Marking test case as FAILED");
-                    networkCheckPassed = false;
-                }
                 
-                // CRITICAL FIX: Validate NO unexpected packets when expecting NONE
-                // BUG FIX: When expectedNetwork.Count == 0 (no network flows expected),
-                // but capturedPackets.Count > 0 (some packets were captured),
-                // this indicates cross-contamination from other students or stale packets.
-                // The test MUST FAIL in this case.
-                if (expectedNetwork.Count == 0 && capturedPackets.Count > 0)
+                if (_networkMonitor != null)  // Only validate if using legacy HOST-based monitoring
                 {
-                    OnProgress($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
-                    OnProgress("[NetworkMonitor] This usually means:");
-                    OnProgress("  1. Student's code is creating network connections when it shouldn't (check student code)");
-                    OnProgress("  2. Packets from previous test or another student (cross-contamination bug)");
-                    OnProgress("  3. Stale packets not properly cleared between tests");
-                    OnProgress("[NetworkMonitor] Captured packets details:");
-                    foreach (var pkt in capturedPackets.Take(10))
+                    if (expectedNetwork.Count > 0 && capturedPackets.Count == 0)
                     {
-                        OnProgress($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                        OnProgress("[NetworkMonitor] CRITICAL: Expected network traffic but captured NONE!");
+                        OnProgress($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows, but captured 0 packets");
+                        OnProgress("[NetworkMonitor] This usually means:");
+                        OnProgress("  1. Student's server exited immediately without accepting connections (check server process logs)");
+                        OnProgress("  2. Network monitor was not running with proper permissions (run with: sudo on Linux)");
+                        OnProgress("  3. libpcap/NPcap not installed (Linux: sudo apt-get install libpcap-dev, Windows: install NPcap)");
+                        OnProgress("  4. Loopback interface not found (check: ip addr show lo on Linux, ipconfig on Windows)");
+                        OnProgress("[NetworkMonitor] Marking test case as FAILED");
+                        networkCheckPassed = false;
                     }
-                    OnProgress("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
-                    networkCheckPassed = false;
+                    
+                    // CRITICAL FIX: Validate NO unexpected packets when expecting NONE
+                    // BUG FIX: When expectedNetwork.Count == 0 (no network flows expected),
+                    // but capturedPackets.Count > 0 (some packets were captured),
+                    // this indicates cross-contamination from other students or stale packets.
+                    // The test MUST FAIL in this case.
+                    if (expectedNetwork.Count == 0 && capturedPackets.Count > 0)
+                    {
+                        OnProgress($"[NetworkMonitor] CRITICAL: Expected NO network traffic but captured {capturedPackets.Count} packets!");
+                        OnProgress("[NetworkMonitor] This usually means:");
+                        OnProgress("  1. Student's code is creating network connections when it shouldn't (check student code)");
+                        OnProgress("  2. Packets from previous test or another student (cross-contamination bug)");
+                        OnProgress("  3. Stale packets not properly cleared between tests");
+                        OnProgress("[NetworkMonitor] Captured packets details:");
+                        foreach (var pkt in capturedPackets.Take(10))
+                        {
+                            OnProgress($"  Stage {pkt.Stage}: {pkt.SourceRole}->{pkt.DestinationRole} [{pkt.Flags}] {pkt.State}");
+                        }
+                        OnProgress("[NetworkMonitor] Marking test case as FAILED due to unexpected network traffic");
+                        networkCheckPassed = false;
+                    }
+                }
+                else
+                {
+                    // SIDECAR PATTERN: Network monitoring via Docker container
+                    // Packets are being captured to pcap file and will be analyzed after grading completes
+                    OnProgress("[NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file");
+                    OnProgress($"[NetworkMonitor] Expected {expectedNetwork.Count} network flows - will be validated from pcap after grading");
+                    networkCheckPassed = true;  // Don't fail during execution, validate from pcap later
                 }
                 
                 // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
@@ -1298,14 +1348,20 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Gets all captured network packets from the NetworkMonitor.
+        /// 
+        /// SIDECAR PATTERN (NEW - LIVE GRADING):
+        /// Packets are parsed from pcap file PER-STAGE and added to RunContext during execution.
+        /// This enables live per-stage validation for all-or-nothing grading strategy.
+        /// 
+        /// LEGACY PATTERN (OLD):
+        /// Uses SharedNetworkMonitorService on HOST to capture packets in real-time.
         /// </summary>
         private List<CapturedNetworkPacket> GetCapturedNetworkPackets()
         {
-            if (_networkMonitor == null)
-                return new List<CapturedNetworkPacket>();
-            
             // Get ALL captured packets from the RunContext (across all stages)
-            // Returns packets with Stage, Timestamp, Flags, State, SourceRole, DestinationRole, Data, etc.
+            // This works for both:
+            // - Sidecar pattern: Packets parsed per-stage from pcap and added to RunContext
+            // - Legacy pattern: Packets captured real-time by SharedNetworkMonitorService
             return _runContext.GetAllCapturedNetworkPackets().ToList();
         }
         
@@ -1356,33 +1412,38 @@ namespace SolutionGrader.Core.Services
                         break;
                         
                     case "INPUT":
-                    case "SENDINPUT":
-                        if (!string.IsNullOrEmpty(input))
+                        // INPUT action: Send the input value to the client
+                        // Only send if there's actual content
+                        if (!string.IsNullOrWhiteSpace(input))
                         {
-                            // Send input to the unified container
-                            // The input will be directed to the client process via stdin
-                            var sendInputCmd = $"docker exec -i {unifiedContainer} /bin/bash -c 'echo \"{input}\" | supervisorctl fg client'";
+                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
                             try
                             {
                                 _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
+                                await Task.Delay(InputProcessingDelayMs);
+                                OnProgress($"    Input sent: '{input}'");
                             }
                             catch (Exception ex)
                             {
                                 OnProgress($"    WARNING: Failed to send input: {ex.Message}");
                             }
-                            
-                            await Task.Delay(InputProcessingDelayMs);
-                            
-                            OnProgress($"    Input sent: '{input}'");
+                        }
+                        else
+                        {
+                            OnProgress($"    Skipping empty input for stage {stage}");
                         }
                         break;
+                        
+                    case "SENDINPUT":
+                        // Legacy support - treat same as INPUT
+                        goto case "INPUT";
                         
                     case "CLOSECLIENT":
                         // Use unified-control.sh to stop client via supervisord
                         var stopClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseClient {stage}";
                         try
                         {
-                            _commandExecutor.RunCommand(stopClientCmd, null, null, 10000);
+                            _commandExecutor.RunCommand(stopClientCmd, null, null, 5000);
                         }
                         catch (Exception ex)
                         {
@@ -1406,6 +1467,14 @@ namespace SolutionGrader.Core.Services
                         
                         OnProgress($"    Server stopped for stage {stage}");
                         break;
+                }
+                
+                // LIVE GRADING: Parse network packets for current stage
+                // This enables per-stage validation (all-or-nothing grading strategy)
+                if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath))
+                {
+                    // Using sidecar pattern - parse pcap file for this stage
+                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort);
                 }
                 
                 await Task.Delay(10);  // Brief delay between actions
@@ -2389,6 +2458,162 @@ namespace SolutionGrader.Core.Services
             await Task.CompletedTask;
         }
         
+        /// <summary>
+        /// Sets up network monitor container using sidecar pattern.
+        /// 
+        /// SIDECAR PATTERN:
+        /// The monitor container attaches to the student's unified container network namespace
+        /// using --net=container:{unifiedContainer}. This allows tcpdump to capture all traffic
+        /// on the student container's loopback (lo) interface.
+        /// 
+        /// CRITICAL DESIGN DECISIONS (per new requirement):
+        /// 1. Monitor loopback interface (lo) - NOT eth0
+        /// 2. Capture ALL traffic - NO port filtering (catches student mistakes like wrong ports)
+        /// 3. Use Alpine Linux + tcpdump (lightweight, dedicated monitoring)
+        /// 4. Sidecar survives if student container crashes
+        /// 5. Clean separation of concerns (student code vs monitoring)
+        /// 
+        /// REQUIREMENTS:
+        /// - NET_ADMIN and NET_RAW capabilities for packet capture
+        /// - Attached to unified container's network namespace
+        /// - Output written to bind-mounted volume for extraction
+        /// </summary>
+        /// <param name="monitorContainer">Name of the monitor container</param>
+        /// <param name="unifiedContainer">Name of the unified student container to attach to</param>
+        /// <param name="port">Port number (for logging/reference only, NOT for filtering)</param>
+        /// <param name="pcapOutputPath">Host path where pcap file will be saved</param>
+        /// <param name="protocol">Protocol type (TCP/HTTP) for logging</param>
+        private async Task SetupNetworkMonitorContainerAsync(
+            string monitorContainer,
+            string unifiedContainer,
+            int port,
+            string pcapOutputPath,
+            string protocol)
+        {
+            OnProgress($"[Monitor] Creating sidecar network monitor for {unifiedContainer}");
+            
+            // Remove existing monitor container if any
+            try
+            {
+                _dockerExecutor.RemoveContainer(monitorContainer);
+            }
+            catch
+            {
+                // Container doesn't exist or already removed - this is fine
+            }
+            
+            // Create directory for pcap output on host
+            var outputDir = Path.GetDirectoryName(pcapOutputPath);
+            if (!string.IsNullOrEmpty(outputDir))
+            {
+                Directory.CreateDirectory(outputDir);
+            }
+            
+            // Extract the filename from the full path
+            var pcapFileName = Path.GetFileName(pcapOutputPath);
+            
+            // Build the docker run command for network monitor sidecar
+            // CRITICAL: 
+            // - Use --net=container:{unifiedContainer} to attach to student's network namespace
+            // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for tcpdump permissions
+            // - Capture on loopback interface (-i lo) to catch localhost traffic
+            // - NO port filtering - capture everything to detect student mistakes
+            // - Write to /data/{pcapFileName} inside container (bind-mounted to host)
+            //
+            // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
+            // We override the -w argument to use our custom filename
+            
+            var dockerCmd = $"docker run -d --name {monitorContainer} " +
+                           $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
+                           $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
+                           $"--cap-add=NET_RAW " +                   // Required for raw packet capture
+                           $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
+                           $"fptuxaes/network-monitor:latest " +     // Alpine + tcpdump image with ENTRYPOINT
+                           $"-i lo -U -w {pcapFileName}";            // Override CMD: capture on loopback, unbuffered, custom filename
+            
+            OnProgress($"[Monitor] Command: {dockerCmd}");
+            OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
+            OnProgress($"[Monitor] Output will be saved to: {pcapOutputPath}");
+            
+            try
+            {
+                _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
+                OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
+                
+                // Wait for tcpdump to initialize
+                await Task.Delay(1000);
+                
+                // Verify monitor is running
+                if (_dockerExecutor.IsContainerRunning(monitorContainer))
+                {
+                    OnProgress($"[Monitor] Verified {monitorContainer} is running");
+                }
+                else
+                {
+                    OnProgress($"[Monitor] WARNING: {monitorContainer} may not be running properly");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Monitor] ERROR: Failed to start network monitor: {ex.Message}");
+                throw new InvalidOperationException($"Failed to start network monitor container: {ex.Message}", ex);
+            }
+        }
+        
+        /// <summary>
+        /// Cleans up network monitor container and extracts pcap file.
+        /// 
+        /// CLEANUP WORKFLOW:
+        /// 1. Stop the monitor container (this flushes tcpdump's buffer)
+        /// 2. Extract the pcap file from the container (already on host via volume mount)
+        /// 3. Remove the monitor container
+        /// 4. Parse pcap file and integrate with grading system (if needed)
+        /// 
+        /// The pcap file is already on the host due to volume mounting, so we just need
+        /// to ensure the container is stopped to flush any buffered packets.
+        /// </summary>
+        /// <param name="monitorContainer">Name of the monitor container</param>
+        /// <param name="studentResultPath">Student result directory path</param>
+        private async Task CleanupNetworkMonitorContainerAsync(string monitorContainer, string studentResultPath)
+        {
+            OnProgress($"[Monitor] Cleaning up {monitorContainer}");
+            
+            try
+            {
+                // Stop the container (this flushes tcpdump buffer)
+                if (_dockerExecutor.IsContainerRunning(monitorContainer))
+                {
+                    OnProgress($"[Monitor] Stopping container to flush tcpdump buffer...");
+                    _commandExecutor.RunCommand($"docker stop {monitorContainer}", null, null, 10000);
+                    
+                    // Wait for clean shutdown
+                    await Task.Delay(1000);
+                }
+                
+                // Verify pcap file exists on host (should be there via volume mount)
+                var pcapPath = Path.Combine(studentResultPath, "network_capture.pcap");
+                if (File.Exists(pcapPath))
+                {
+                    var fileInfo = new FileInfo(pcapPath);
+                    OnProgress($"[Monitor] Network capture saved: {pcapPath} ({fileInfo.Length} bytes)");
+                }
+                else
+                {
+                    OnProgress($"[Monitor] WARNING: Network capture file not found at {pcapPath}");
+                }
+                
+                // Remove the monitor container
+                _dockerExecutor.RemoveContainer(monitorContainer);
+                OnProgress($"[Monitor] Removed container {monitorContainer}");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Monitor] WARNING during cleanup: {ex.Message}");
+            }
+            
+            await Task.CompletedTask;
+        }
+        
         
         /// <summary>
         /// Cleans up a specific database INSTANCE within the shared database container.
@@ -2823,6 +3048,176 @@ namespace SolutionGrader.Core.Services
         /// When the server container is removed, the monitor container automatically stops.
         /// This method ensures the monitor is properly stopped and removed, and the pcap file is analyzed.
         /// </summary>
+        
+        /// <summary>
+        /// Parse pcap file for current stage and add new packets to RunContext.
+        /// This enables live per-stage network validation.
+        /// Only parses packets that haven't been processed yet (tracks via _lastParsedPacketCount).
+        /// </summary>
+        private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
+        {
+            if (string.IsNullOrEmpty(_currentPcapFilePath) || !File.Exists(_currentPcapFilePath))
+            {
+                // Pcap file doesn't exist yet - this is normal for early stages
+                return;
+            }
+            
+            try
+            {
+                // Use tcpdump to read pcap with detailed output
+                // -r: read from file
+                // -nn: don't resolve names/ports
+                // -tttt: human-readable timestamps
+                // -v: verbose (shows flags clearly)
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "tcpdump",
+                    Arguments = $"-r \"{_currentPcapFilePath}\" -nn -tttt -v tcp",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var process = Process.Start(psi);
+                if (process == null) return;
+                
+                string output = await process.StandardOutput.ReadToEndAsync();
+                await process.WaitForExitAsync();
+                
+                // Parse tcpdump output
+                // Example: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
+                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                
+                // Skip packets we've already processed
+                var newPackets = lines.Skip(_lastParsedPacketCount).ToList();
+                
+                foreach (var line in newPackets)
+                {
+                    if (string.IsNullOrWhiteSpace(line) || !line.Contains(" > ")) continue;
+                    
+                    try
+                    {
+                        // Parse packet details
+                        var packet = ParseTcpdumpLine(line, currentStage, port);
+                        if (packet != null)
+                        {
+                            // Add to RunContext for this stage
+                            _runContext.AddCapturedNetworkPacket(_currentStudentCode ?? "", currentStage.ToString(), packet);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip malformed lines
+                        continue;
+                    }
+                }
+                
+                // Update counter to skip these packets next time
+                _lastParsedPacketCount = lines.Length;
+                
+                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[NetworkMonitor] Error parsing pcap for stage {currentStage}: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Parse a single tcpdump output line into CapturedNetworkPacket.
+        /// Example line: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
+        /// </summary>
+        private CapturedNetworkPacket? ParseTcpdumpLine(string line, int stage, int expectedPort)
+        {
+            // Extract timestamp
+            var timestampMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)");
+            DateTime timestamp = timestampMatch.Success && DateTime.TryParse(timestampMatch.Groups[1].Value, out var dt) 
+                ? dt 
+                : DateTime.Now;
+            
+            // Extract source and destination: "IP 127.0.0.1.47044 > 127.0.0.1.4000:"
+            var addressMatch = System.Text.RegularExpressions.Regex.Match(line, @"IP (\d+\.\d+\.\d+\.\d+)\.(\d+) > (\d+\.\d+\.\d+\.\d+)\.(\d+)");
+            if (!addressMatch.Success) return null;
+            
+            var srcIp = addressMatch.Groups[1].Value;
+            var srcPort = int.Parse(addressMatch.Groups[2].Value);
+            var dstIp = addressMatch.Groups[3].Value;
+            var dstPort = int.Parse(addressMatch.Groups[4].Value);
+            
+            // Determine roles based on port
+            string srcRole, dstRole;
+            if (srcPort == expectedPort)
+            {
+                srcRole = "Server";
+                dstRole = "Client";
+            }
+            else if (dstPort == expectedPort)
+            {
+                srcRole = "Client";
+                dstRole = "Server";
+            }
+            else
+            {
+                // Not related to our expected port
+                return null;
+            }
+            
+            // Extract flags: [S] = SYN, [S.] = SYN-ACK, [.] = ACK, [P.] = PSH-ACK, [F.] = FIN-ACK, [R] = RST
+            string flags = "UNKNOWN";
+            string state = "";
+            
+            if (line.Contains("Flags [S]") && !line.Contains("Flags [S.]"))
+            {
+                flags = "SYN";
+                state = "SYN_SENT";
+            }
+            else if (line.Contains("Flags [S.]"))
+            {
+                flags = "SYN-ACK";
+                state = "SYN_RECEIVED";
+            }
+            else if (line.Contains("Flags [.]") && !line.Contains("Flags [P.]") && !line.Contains("Flags [F.]"))
+            {
+                flags = "ACK";
+                state = "ESTABLISHED";
+            }
+            else if (line.Contains("Flags [P.]"))
+            {
+                flags = "PSH-ACK";
+                state = "ESTABLISHED";
+            }
+            else if (line.Contains("Flags [F.]"))
+            {
+                flags = "FIN-ACK";
+                state = "FIN_WAIT";
+            }
+            else if (line.Contains("Flags [R]"))
+            {
+                flags = "RST";
+                state = "RESET";
+            }
+            
+            // Extract payload (if any)
+            // Look for "length N" at the end
+            var lengthMatch = System.Text.RegularExpressions.Regex.Match(line, @"length (\d+)");
+            string data = lengthMatch.Success && int.Parse(lengthMatch.Groups[1].Value) > 0 
+                ? $"{lengthMatch.Groups[1].Value} bytes"
+                : "";
+            
+            return new CapturedNetworkPacket
+            {
+                Stage = stage,
+                Timestamp = timestamp,
+                Flags = flags,
+                State = state,
+                SourceRole = srcRole,
+                DestinationRole = dstRole,
+                Data = data,
+                SourcePort = srcPort,
+                DestinationPort = dstPort
+            };
+        }
         
         /// <summary>
         /// Parse pcap file using tcpdump to extract network flows.

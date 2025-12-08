@@ -94,6 +94,38 @@ case "$ACTION" in
         fi
         ;;
     
+    SendInput)
+        # Send input to the client process by restarting it with input piped
+        # Input is provided as third parameter
+        INPUT="${3:-}"
+        
+        echo "[Control] Providing input to client: '$INPUT'"
+        
+        # Stop the current client if running
+        $SUPERVISORCTL stop client 2>/dev/null || true
+        sleep 0.5
+        
+        # Write input to a file
+        INPUT_FILE="/tmp/client-input-${STAGE}.txt"
+        echo -e "${INPUT}" > "$INPUT_FILE"
+        
+        # Update supervisord config to pipe input file to client
+        # Modify the client command to use input redirection
+        sed -i "s|command=/bin/bash -c \"cd /apps/client.*|command=/bin/bash -c \"cd /apps/client \&\& find . -name '*.dll' -not -name 'System.*.dll' -not -name 'Microsoft.*.dll' | head -1 | xargs -I{} dotnet {} < ${INPUT_FILE}\"|" /etc/supervisor/conf.d/supervisord.conf
+        
+        # Update stage
+        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        
+        # Reread and update
+        $SUPERVISORCTL reread 2>/dev/null || true
+        $SUPERVISORCTL update 2>/dev/null || true
+        
+        # Start client with input
+        $SUPERVISORCTL start client
+        
+        echo "[Control] Client restarted with input from ${INPUT_FILE}"
+        ;;
+    
     CloseServer)
         echo "[Control] Stopping server for stage $STAGE"
         $SUPERVISORCTL stop server
@@ -140,7 +172,7 @@ case "$ACTION" in
     
     *)
         echo "Unknown action: $ACTION"
-        echo "Valid actions: StartServer, StartClient, CloseServer, CloseClient, RestartServer, RestartClient, Status, StopAll"
+        echo "Valid actions: StartServer, StartClient, SendInput, CloseServer, CloseClient, RestartServer, RestartClient, Status, StopAll"
         exit 1
         ;;
 esac

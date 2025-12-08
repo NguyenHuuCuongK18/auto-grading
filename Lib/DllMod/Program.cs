@@ -25,8 +25,9 @@ namespace DllMod
         /// <summary>
         /// Default list of common ports that students might use for server connections.
         /// These are tried in order when attempting to detect and replace hardcoded ports.
+        /// Includes 4001-4010 for golden/test kit DLLs that may use these ports.
         /// </summary>
-        public static readonly int[] CommonPorts = { 3000, 4000, 5000, 8000, 8080, 5001, 5002, 7000, 7001, 9000 };
+        public static readonly int[] CommonPorts = { 3000, 4000, 4001, 4002, 4003, 4004, 4005, 5000, 8000, 8080, 5001, 5002, 7000, 7001, 9000 };
         
         /// <summary>
         /// Default list of common IP addresses/hostnames that students might hardcode.

@@ -1,0 +1,49 @@
+Sample data initialized successfully!
+Students: 5
+Student Information Server is running on 0.0.0.0:4003
+Waiting for client connections...
+Sample data initialized successfully!
+Students: 5
+Unhandled exception. System.Net.Sockets.SocketException (98): Address already in use
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at Server.Main(String[] args)
+   at Server.<Main>(String[] args)
+xargs: dotnet: terminated by signal 6
+Sample data initialized successfully!
+Students: 5
+Unhandled exception. System.Net.Sockets.SocketException (98): Address already in use
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at Server.Main(String[] args)
+   at Server.<Main>(String[] args)
+xargs: dotnet: terminated by signal 6
+Sample data initialized successfully!
+Students: 5
+Unhandled exception. System.Net.Sockets.SocketException (98): Address already in use
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at Server.Main(String[] args)
+   at Server.<Main>(String[] args)
+xargs: dotnet: terminated by signal 6
+Sample data initialized successfully!
+Students: 5
+Unhandled exception. System.Net.Sockets.SocketException (98): Address already in use
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at Server.Main(String[] args)
+   at Server.<Main>(String[] args)
+xargs: dotnet: terminated by signal 6
+Sample data initialized successfully!
+Students: 5
+Unhandled exception. System.Net.Sockets.SocketException (98): Address already in use
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at Server.Main(String[] args)
+   at Server.<Main>(String[] args)
+xargs: dotnet: terminated by signal 6

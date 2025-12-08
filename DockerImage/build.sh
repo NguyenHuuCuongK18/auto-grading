@@ -6,10 +6,10 @@ set -e
 echo "Building auto-grading Docker images..."
 echo ""
 
-# Build main student code container
-echo "1. Building student code container (fptuxaes/aes-dotnet8-console:latest)..."
-docker build -t fptuxaes/aes-dotnet8-console:latest -f Dockerfile .
-echo "   ✓ Student code container built successfully"
+# Build unified student code container
+echo "1. Building unified student code container (fptuxaes/aes-dotnet8-console:latest)..."
+docker build -t fptuxaes/aes-dotnet8-console:latest -f Dockerfile.unified .
+echo "   ✓ Unified student code container built successfully"
 echo ""
 
 # Build network monitor container
@@ -22,3 +22,4 @@ echo "All images built successfully!"
 echo ""
 echo "Available images:"
 docker images | grep -E "(fptuxaes/aes-dotnet8-console|fptuxaes/network-monitor)"
+
