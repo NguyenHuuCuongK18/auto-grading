@@ -157,8 +157,11 @@ namespace SolutionGrader.UI
                 _cancellationTokenSource?.Dispose();
             }
             
-            // CRITICAL FIX: Clear shared network monitors on window close
-            // This ensures complete cleanup and prevents stale state if the window is reopened
+            // LEGACY: Clear shared network monitors (HOST-based monitoring)
+            // With sidecar pattern, monitors are per-student Docker containers
+            // and are cleaned up automatically
+            // Keeping this commented for reference
+            /*
             try
             {
                 _logger.LogInfo("[Window Close] Clearing shared network monitors...");
@@ -169,6 +172,7 @@ namespace SolutionGrader.UI
             {
                 _logger.LogWarning($"[Window Close] Error clearing monitors: {ex.Message}");
             }
+            */
             
             // Flush any pending UI updates before closing
             _uiUpdateBatcher?.Flush();
@@ -532,7 +536,10 @@ namespace SolutionGrader.UI
             // CRITICAL FIX: Clear shared network monitors from previous grading session
             // This is essential when rerunning tests in the UI, as the SharedNetworkMonitorManager
             // is a singleton that persists across sessions. Without this cleanup, stale monitors
-            // and student registrations from previous runs can cause cross-contamination.
+            // LEGACY: Clear shared network monitors from previous session
+            // With sidecar pattern, each grading session creates fresh Docker container monitors
+            // Keeping this commented for reference
+            /*
             try
             {
                 _logger.LogInfo("[Shared Network Monitor] Clearing monitors from previous session...");
@@ -543,6 +550,7 @@ namespace SolutionGrader.UI
             {
                 _logger.LogWarning($"[Shared Network Monitor] Error clearing previous monitors: {ex.Message}");
             }
+            */
             
             try
             {
@@ -555,13 +563,18 @@ namespace SolutionGrader.UI
                         int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
                         if (startingPort <= 0) startingPort = 8000;
                         
-                        // Pre-allocate shared monitor with port range for all students + 15% buffer
+                        // LEGACY: SharedNetworkMonitorManager for HOST-based monitoring (libpcap/NPcap)
+                        // With sidecar pattern, each student gets a Docker container network monitor
+                        // attached via --net=container, so this pre-allocation is no longer needed
+                        // Keeping this commented for reference
+                        /*
                         SharedNetworkMonitorManager.Instance.PreAllocateForBatch(startingPort, studentsToGrade.Count);
                         _logger.LogInfo($"[Shared Network Monitor] Pre-allocated for {studentsToGrade.Count} students starting from port {startingPort}");
                         _logger.LogInfo($"[Shared Network Monitor] Single monitor instance will handle all students (97% resource reduction)");
                         
                         var stats = SharedNetworkMonitorManager.Instance.GetStatistics();
                         _logger.LogInfo($"[Shared Network Monitor] Statistics: {stats}");
+                        */
                     }
                 }
             }
@@ -757,8 +770,9 @@ namespace SolutionGrader.UI
                 _sharedMessageLogger = null;
                 _logger.LogInfo("[Message Logger] Shared GradingMessageLogger disposed and logs exported to Excel");
                 
-                // OPTIMIZATION: Clear shared network monitors
-                // This releases resources after grading session completes
+                // LEGACY: Clear shared network monitors (HOST-based monitoring)
+                // With sidecar pattern, monitors are Docker containers cleaned up automatically
+                /*
                 try
                 {
                     await SharedNetworkMonitorManager.Instance.ClearAllAsync();
@@ -768,6 +782,7 @@ namespace SolutionGrader.UI
                 {
                     _logger.LogWarning($"[Shared Network Monitor] Error clearing monitors: {ex.Message}");
                 }
+                */
                 
                 _logger.LogInfo("Grading session completed");
             }
@@ -1049,9 +1064,9 @@ namespace SolutionGrader.UI
                 _cancellationTokenSource?.Cancel();
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
                 
-                // CRITICAL FIX: Clear shared network monitors when pausing
-                // This prevents stale monitors from interfering when user resumes or starts a new session
-                // Without this, the Resume -> StartGradingAsync flow would create duplicate monitors
+                // LEGACY: Clear shared network monitors when pausing (HOST-based monitoring)
+                // With sidecar pattern, monitors are Docker containers cleaned up automatically
+                /*
                 try
                 {
                     _logger.LogInfo("[Pause] Clearing shared network monitors...");
@@ -1062,6 +1077,7 @@ namespace SolutionGrader.UI
                 {
                     _logger.LogWarning($"[Pause] Error clearing monitors: {ex.Message}");
                 }
+                */
                 
                 UpdateButtonStates();
             }

@@ -104,9 +104,11 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine($"[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.");
             Console.WriteLine();
 
-            // OPTIMIZATION: Pre-allocate shared network monitor for all students
-            // This dramatically reduces resource usage (97% reduction in monitor instances)
-            // Get starting port from first student's test kit
+            // LEGACY: SharedNetworkMonitorManager was for HOST-based monitoring (libpcap/NPcap)
+            // With sidecar pattern, each student gets a per-container network monitor
+            // attached via --net=container, so this pre-allocation is no longer needed
+            // Keeping this code commented for reference
+            /*
             try
             {
                 var firstStudent = students.FirstOrDefault();
@@ -129,6 +131,7 @@ namespace SolutionGrader.Cli.Services
                 Console.WriteLine($"[CLI] WARNING: Failed to pre-allocate shared network monitor: {ex.Message}");
                 Console.WriteLine($"[CLI] Will fall back to per-student monitors if needed");
             }
+            */
 
             // Create output directory
             Directory.CreateDirectory(config.SaveResultFolderPath);
@@ -307,8 +310,11 @@ namespace SolutionGrader.Cli.Services
                 .OrderBy(r => studentIndexMap.TryGetValue(r.StudentCode, out var idx) ? idx : int.MaxValue)
                 .ToList();
             
-            // CRITICAL FIX: Clear all shared network monitors after grading session completes
-            // This prevents resource leaks and ensures clean state for subsequent grading sessions
+            // LEGACY: Clear shared network monitors (HOST-based monitoring)
+            // With sidecar pattern, monitors are per-student Docker containers
+            // and are cleaned up automatically with the student's unified container
+            // Keeping this commented for reference
+            /*
             try
             {
                 await SharedNetworkMonitorManager.Instance.ClearAllAsync();
@@ -318,6 +324,7 @@ namespace SolutionGrader.Cli.Services
             {
                 Console.WriteLine($"[CLI] WARNING: Error clearing shared network monitors: {ex.Message}");
             }
+            */
             
             return resultsList;
         }
