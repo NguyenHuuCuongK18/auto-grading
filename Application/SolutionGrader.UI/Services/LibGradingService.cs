@@ -106,6 +106,10 @@ namespace SolutionGrader.UI.Services
                 // Per user request: Singular network monitor with port-based traffic isolation
                 // Extract student code from result root path (e.g., Results/GradeResult_20241206/StudentCode)
                 string extractedStudentCode = Path.GetFileName(resultRoot) ?? "UnknownStudent";
+                
+                // NOTE: Non-Docker grading still uses HOST-based network monitoring (SharedNetworkMonitorAdapter)
+                // This is for direct process execution without containers (Windows-only legacy mode)
+                // Docker grading uses sidecar pattern instead (see ExecuteDockerGradingAsync)
                 INetworkMonitorService networkMonitor = new SharedNetworkMonitorAdapter(extractedStudentCode, runctx);
                 
                 IDataComparisonService cmp = new DataComparisonService(runctx);

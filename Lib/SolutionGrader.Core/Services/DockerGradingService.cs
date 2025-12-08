@@ -2484,9 +2484,12 @@ namespace SolutionGrader.Core.Services
             // Remove existing monitor container if any
             try
             {
-                _commandExecutor.RunCommand($"docker rm -f {monitorContainer} 2>/dev/null || true", null, null, 5000);
+                _dockerExecutor.RemoveContainer(monitorContainer);
             }
-            catch { /* Ignore cleanup errors */ }
+            catch
+            {
+                // Container doesn't exist or already removed - this is fine
+            }
             
             // Create directory for pcap output on host
             var outputDir = Path.GetDirectoryName(pcapOutputPath);
