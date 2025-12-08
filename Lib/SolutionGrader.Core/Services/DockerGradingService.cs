@@ -297,21 +297,38 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"NOTE: Each test case will select DLLs based on its Grade_Content field");
                 
                 // CRITICAL: Start network monitor FIRST before ANY containers or processes
-                // NetworkMonitor runs on HOST and sniffs localhost:{hostPort}
-                // It MUST start before containers to capture the full network traffic including:
-                // - Initial TCP handshake (SYN, SYN-ACK, ACK)
-                // - All data transfers
-                // - Connection teardown (FIN-ACK)
                 // 
-                // PARALLEL GRADING: Each student gets their own NetworkMonitorService instance
-                // configured with their specific port (basePort + portOffset) to avoid conflicts
+                // Network monitoring adapts to networking mode:
+                // 
+                // Docker Internal Networking (UseDockerInternalNetworking=true):
+                // - Captures on Docker bridge network (br-, docker0, veth interfaces)
+                // - Monitors direct container-to-container traffic
+                // - No Docker NAT proxy interference (no ghost SYN-ACK responses)
+                // - More accurate representation of actual student code behavior
+                // 
+                // Legacy Port Mapping (UseDockerInternalNetworking=false):
+                // - Captures on host loopback interface  
+                // - Monitors traffic routed through host's exposed port
+                // - Docker's NAT proxy responds with SYN-ACK even when server exits
+                // - Network flow will show SYN-ACK regardless of server state
+                //
+                // PARALLEL GRADING: Each student gets their own monitor instance configured
+                // with their specific port (basePort + portOffset) to avoid conflicts
                 if (_networkMonitor != null)
                 {
-                    _networkMonitor.MonitorPort = config.CodeContainerHostPort;
+                    var monitorPort = config.UseDockerInternalNetworking 
+                        ? config.CodeContainerInternalPort   // Monitor container's internal port
+                        : config.CodeContainerHostPort;      // Monitor host's exposed port
+                        
+                    _networkMonitor.MonitorPort = monitorPort;
                     _networkMonitor.ProtocolType = testKitConfig.Protocol;
-                    OnProgress($"[NetworkMonitor] Starting monitor for student {studentCode} on host port {config.CodeContainerHostPort} (protocol: {testKitConfig.Protocol})");
+                    
+                    OnProgress($"[NetworkMonitor] Starting monitor for student {studentCode}");
+                    OnProgress($"[NetworkMonitor] Monitoring port {monitorPort} (protocol: {testKitConfig.Protocol})");
+                    OnProgress($"[NetworkMonitor] Mode: {(config.UseDockerInternalNetworking ? "Docker internal networking (bridge)" : "Legacy port mapping (loopback)")}");
+                    
                     await _networkMonitor.StartAsync(ct);
-                    OnProgress($"Network monitor started on host port {config.CodeContainerHostPort} - capturing all traffic");
+                    OnProgress($"Network monitor started - capturing traffic on port {monitorPort}");
                     OnProgress($"[NetworkMonitor] Monitor active for student {studentCode} - ready to capture packets");
                 }
                 else
@@ -535,11 +552,16 @@ namespace SolutionGrader.Core.Services
             // This container is shared between students for efficiency
             await SetupDatabaseContainerAsync(config);
             
-            // 2. Create server container with TTY support and PORT EXPOSED to host
-            // This is CRITICAL - NetworkMonitor sniffs on the HOST at this exposed port
+            // 2. Create server container with TTY support
+            // Port mapping behavior depends on UseDockerInternalNetworking:
+            // - Internal networking: NO port mapping (client connects via container name)
+            // - Legacy mode: Port exposed to host (client connects via host.docker.internal)
             if (!string.IsNullOrEmpty(serverDllPath))
             {
-                OnProgress($"[Port Config] SetupContainersAsync - About to create server container with config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+                OnProgress($"[Port Config] SetupContainersAsync - About to create server container");
+                OnProgress($"  Internal port: {config.CodeContainerInternalPort}");
+                OnProgress($"  Host port: {config.CodeContainerHostPort}");
+                OnProgress($"  Docker internal networking: {config.UseDockerInternalNetworking}");
                 
                 var serverBase = new DockerBase
                 {
@@ -547,7 +569,8 @@ namespace SolutionGrader.Core.Services
                     ContainerName = serverContainer,
                     DockerNetwork = config.DockerNetwork,
                     ContainerPort = config.CodeContainerInternalPort,
-                    HostPort = config.CodeContainerHostPort,  // EXPOSED to host for NetworkMonitor
+                    // CRITICAL: Only expose port in legacy mode
+                    HostPort = config.UseDockerInternalNetworking ? 0 : config.CodeContainerHostPort,
                     EnvironmentVariables = new Dictionary<string, string>
                     {
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
@@ -555,17 +578,22 @@ namespace SolutionGrader.Core.Services
                     }
                 };
                 
-                OnProgress($"[Port Config] DockerBase created with ContainerPort={serverBase.ContainerPort}, HostPort={serverBase.HostPort}");
-                
                 _dockerExecutor.RunContainerWithTty(serverBase);
-                OnProgress($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
+                
+                if (config.UseDockerInternalNetworking)
+                {
+                    OnProgress($"[Docker] Server container {serverContainer} created (internal networking, no port mapping)");
+                }
+                else
+                {
+                    OnProgress($"[Docker] Server container {serverContainer} created with port {config.CodeContainerHostPort}:{config.CodeContainerInternalPort} exposed");
+                }
             }
             
-            // 3. Create client container with TTY support (NO port mapping needed)
-            // Client connects to server via host.docker.internal to route traffic through the exposed port.
-            // This is CRITICAL for network monitoring - traffic must pass through the host's exposed port
-            // so the NetworkMonitor (running on the host) can capture it.
-            // The --add-host flag ensures host.docker.internal works on Linux (Docker 20.10+)
+            // 3. Create client container with TTY support
+            // Connectivity depends on UseDockerInternalNetworking:
+            // - Internal networking: Client connects directly to server container name
+            // - Legacy mode: Client connects via host.docker.internal (requires --add-host flag)
             if (!string.IsNullOrEmpty(clientDllPath))
             {
                 var clientBase = new DockerBase
@@ -580,12 +608,19 @@ namespace SolutionGrader.Core.Services
                         { "DOTNET_RUNNING_IN_CONTAINER", "true" },
                         { "DOTNET_SYSTEM_CONSOLE_UNBUFFERED", "1" }
                     },
-                    // Add host.docker.internal mapping to allow client to reach the host
-                    // This enables network traffic to flow through the exposed port for capture
-                    AdditionalFlags = AppsettingKeywords.DOCKER_ADD_HOST_FLAG
+                    // CRITICAL: Only add host.docker.internal in legacy mode
+                    AdditionalFlags = config.UseDockerInternalNetworking ? "" : AppsettingKeywords.DOCKER_ADD_HOST_FLAG
                 };
                 _dockerExecutor.RunContainerWithTty(clientBase);
-                OnProgress($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support (no port exposed)");
+                
+                if (config.UseDockerInternalNetworking)
+                {
+                    OnProgress($"[Docker] Client container {clientContainer} created (connects to server via container name)");
+                }
+                else
+                {
+                    OnProgress($"[Docker] Client container {clientContainer} created with {AppsettingKeywords.DOCKER_HOST_INTERNAL} support");
+                }
             }
             
             await Task.Delay(500);
@@ -877,12 +912,17 @@ namespace SolutionGrader.Core.Services
                                 OnProgress($"[DllMod] Server files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                // For server: always binds to 0.0.0.0 (all interfaces)
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy");
+                                OnProgress($"[DllMod]   Target IP: 0.0.0.0 (bind all interfaces)");
+                                OnProgress($"[DllMod]   Target Port: {config.CodeContainerInternalPort}");
+                                
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ServerProjectName,
                                     isServer: true,
-                                    targetPort: config.CodeContainerHostPort
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "0.0.0.0"  // Server always binds to all interfaces
                                 );
                                 
                                 OnProgress($"[DllMod] Server fallback result: {result.GetSummary()}");
@@ -942,12 +982,22 @@ namespace SolutionGrader.Core.Services
                                 OnProgress($"[DllMod] Client files copied to temp staging area");
                                 
                                 // NOW modify the TEMP copy, not the original student files
-                                OnProgress($"[DllMod] Applying DLL modification to temp copy (port: {config.CodeContainerHostPort})");
+                                // IP address depends on networking mode
+                                string clientTargetIp = config.UseDockerInternalNetworking 
+                                    ? serverContainer  // Direct container name
+                                    : AppsettingKeywords.DOCKER_HOST_INTERNAL;  // Legacy mode
+                                    
+                                OnProgress($"[DllMod] Applying DLL modification to temp copy");
+                                OnProgress($"[DllMod]   Target IP: {clientTargetIp}");
+                                OnProgress($"[DllMod]   Target Port: {config.CodeContainerInternalPort}");
+                                OnProgress($"[DllMod]   Mode: {(config.UseDockerInternalNetworking ? "Docker internal networking" : "Legacy port mapping")}");
+                                
                                 var result = dllModService.CheckAndPatchIfNeeded(
                                     tempStagingDir,
                                     config.ClientProjectName,
                                     isServer: false,
-                                    targetPort: config.CodeContainerHostPort
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: clientTargetIp
                                 );
                                 
                                 OnProgress($"[DllMod] Client fallback result: {result.GetSummary()}");
@@ -1048,19 +1098,46 @@ namespace SolutionGrader.Core.Services
                 config.DatabaseUsername,
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
-            // CRITICAL: For network monitoring with libpcap/npcap, we need DIRECT port mapping.
-            // Server binds to internal port, which MUST equal the external host port.
-            // Client connects to host.docker.internal using the SAME port number.
-            // Example: Student 1 uses 8000:8000, Student 2 uses 8001:8001
-            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0
-            var clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;         // host.docker.internal
+            // CRITICAL: Networking configuration depends on mode:
+            // 
+            // Docker Internal Networking (UseDockerInternalNetworking=true):
+            // - Server binds to 0.0.0.0 (accept connections from any container)
+            // - Client connects to server container name (e.g., "ag-server-student123")
+            // - No port mapping, direct container-to-container communication
+            // - Network monitor captures on Docker bridge network
+            // 
+            // Legacy Port Mapping (UseDockerInternalNetworking=false):
+            // - Server binds to 0.0.0.0 and port is mapped to host
+            // - Client connects to host.docker.internal (routes through host)
+            // - Network monitor captures on host loopback interface
+            // - Docker's NAT proxy will respond with SYN-ACK even when server exits
             
-            // Both server and client use the SAME port number for direct mapping
-            var port = config.CodeContainerHostPort;  // e.g., 8000, 8001, 8002, etc.
+            var serverIpAddress = AppsettingKeywords.DOCKER_SERVER_BIND_ADDRESS;  // 0.0.0.0 (both modes)
+            
+            string clientIpAddress;
+            if (config.UseDockerInternalNetworking)
+            {
+                // Client connects directly to server container name
+                clientIpAddress = serverContainer;  // e.g., "ag-server-student123"
+                OnProgress($"[Appsettings] Docker internal networking mode: Client will connect to '{serverContainer}'");
+            }
+            else
+            {
+                // Client connects via host.docker.internal (legacy mode)
+                clientIpAddress = AppsettingKeywords.DOCKER_HOST_INTERNAL;
+                OnProgress($"[Appsettings] Legacy port mapping mode: Client will connect to 'host.docker.internal'");
+            }
+            
+            // Port configuration
+            var port = config.CodeContainerInternalPort;  // Container's internal port
             var serverPort = port.ToString();
             var clientPort = port.ToString();
             
-            OnProgress($"[Appsettings] Direct mapping: Container internal port {config.CodeContainerInternalPort} -> Host port {config.CodeContainerHostPort}");
+            OnProgress($"[Appsettings] Port configuration: Container internal port {config.CodeContainerInternalPort}");
+            if (!config.UseDockerInternalNetworking)
+            {
+                OnProgress($"[Appsettings] Port mapping: Host port {config.CodeContainerHostPort} -> Container port {config.CodeContainerInternalPort}");
+            }
             
             // Check if DLL modification fallback is enabled and was used
             var dllModService = new DllModificationService();
@@ -2989,6 +3066,25 @@ namespace SolutionGrader.Core.Services
         /// Default: false (disabled).
         /// </summary>
         public bool UseDllModificationFallback { get; set; } = false;
+        
+        /// <summary>
+        /// Use Docker internal networking instead of port mapping.
+        /// 
+        /// When true:
+        /// - Client connects to server via container name (e.g., "ag-server-student123")
+        /// - No port mappings (-p) are created
+        /// - Network monitor captures on Docker bridge network
+        /// - Eliminates Docker's NAT proxy behavior (no ghost SYN-ACK responses)
+        /// 
+        /// When false (legacy mode):
+        /// - Client connects to "host.docker.internal"
+        /// - Port mappings expose server port to host
+        /// - Network monitor captures on host loopback
+        /// - Docker's NAT proxy responds with SYN-ACK even when server exits
+        /// 
+        /// Default: true (use Docker internal networking to avoid proxy behavior)
+        /// </summary>
+        public bool UseDockerInternalNetworking { get; set; } = true;
     }
     
     /// <summary>
