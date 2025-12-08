@@ -371,21 +371,57 @@ public sealed class SharedNetworkMonitorService : IDisposable
                 return candidates;
             }
             
+            Console.WriteLine($"[SharedNetworkMonitor] Scanning {allDevices.Count} network devices...");
+            
             foreach (var device in allDevices)
             {
                 var name = device.Name?.ToLowerInvariant() ?? "";
                 var desc = device.Description?.ToLowerInvariant() ?? "";
                 
-                // Look for loopback devices
-                // On Linux: "lo", On macOS: "lo0", On Windows: "\\device\\npcap_loopback"
-                bool isLoopback = name == "lo" || name == "lo0" || 
-                                 name.Contains("loopback") || desc.Contains("loopback") ||
-                                 name.Contains("\\device\\npcap_loopback");
+                bool isCandidate = false;
                 
-                if (isLoopback)
+                if (OperatingSystem.IsLinux())
+                {
+                    // Linux: loopback (lo), Docker bridge (docker0, br-*), veth pairs, eth interfaces
+                    isCandidate = name == "lo" || 
+                                 name.StartsWith("br-") || 
+                                 name == "docker0" || 
+                                 name.StartsWith("veth") || 
+                                 name.StartsWith("eth");
+                }
+                else if (OperatingSystem.IsMacOS())
+                {
+                    // macOS: loopback (lo0), ethernet (en*), Docker bridge (bridge*)
+                    isCandidate = name == "lo0" || 
+                                 name.StartsWith("en") || 
+                                 name.StartsWith("bridge");
+                }
+                else
+                {
+                    // Windows: NPcap Loopback, Hyper-V virtual switches, Docker adapters
+                    isCandidate = name.Contains("loopback") || 
+                                 desc.Contains("loopback") ||
+                                 name.Contains("npcap_loopback") ||
+                                 desc.Contains("hyper-v") ||
+                                 desc.Contains("vethernet") ||
+                                 desc.Contains("docker") ||
+                                 desc.Contains("wsl");
+                }
+                
+                if (isCandidate)
                 {
                     candidates.Add(device);
-                    Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name}");
+                    Console.WriteLine($"[SharedNetworkMonitor] Found candidate device: {device.Name} ({device.Description})");
+                }
+            }
+            
+            if (candidates.Count == 0)
+            {
+                Console.WriteLine("[SharedNetworkMonitor] WARNING: No suitable capture devices found!");
+                Console.WriteLine("[SharedNetworkMonitor] Available devices:");
+                foreach (var device in allDevices)
+                {
+                    Console.WriteLine($"  - {device.Name}: {device.Description}");
                 }
             }
         }
