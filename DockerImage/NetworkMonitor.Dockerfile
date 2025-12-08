@@ -1,7 +1,7 @@
 # Network Monitor Container for Docker Internal Networking
 #
 # This container runs tcpdump to capture network traffic between student containers
-# when using Docker internal networking mode (no port mappings).
+# when using the sidecar pattern (attached via --net=container).
 #
 # BUILD COMMAND:
 #   docker build -t fptuxaes/network-monitor:latest -f NetworkMonitor.Dockerfile .
@@ -13,19 +13,19 @@
 #
 # Example run command (automatically done by grading system):
 #   docker run -d --name ag-monitor-student123 \
-#     --network auto-grading-network \
+#     --net=container:ag-unified-student123 \
 #     --cap-add=NET_ADMIN --cap-add=NET_RAW \
 #     -v /path/to/output:/capture \
 #     fptuxaes/network-monitor:latest \
-#     tcpdump -i any -w /capture/network_capture.pcap "tcp port 8000"
+#     tcpdump -i lo -w /capture/network_capture.pcap
 #
-# The grading system will automatically create and manage this container when
-# UseDockerInternalNetworking = true in DockerGradingConfig.
-#
-FROM alpine:latest
+# Using Debian slim instead of Alpine to avoid package repository TLS issues
+FROM debian:bullseye-slim
 
 # Install tcpdump for packet capture
-RUN apk add --no-cache tcpdump
+RUN apt-get update && \
+    apt-get install -y tcpdump && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create directory for capture files
 RUN mkdir -p /capture
@@ -33,5 +33,5 @@ RUN mkdir -p /capture
 WORKDIR /capture
 
 # Default command - will be overridden by grading system
-# Format: tcpdump -i any -w /capture/traffic.pcap "tcp port {PORT}"
-CMD ["tcpdump", "-i", "any", "-w", "/capture/traffic.pcap"]
+# Format: tcpdump -i lo -w /capture/traffic.pcap
+CMD ["tcpdump", "-i", "lo", "-w", "/capture/traffic.pcap"]
