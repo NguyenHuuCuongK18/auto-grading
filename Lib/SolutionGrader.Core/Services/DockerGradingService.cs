@@ -73,6 +73,7 @@ namespace SolutionGrader.Core.Services
         private string? _currentStudentCode; // Track current student for logging
         
         // Network monitoring for sidecar pattern
+        private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
         private string? _currentPcapFilePath; // Path to pcap file being written by network monitor
         private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
         
@@ -2525,6 +2526,11 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress($"[Monitor] Creating sidecar network monitor for {unifiedContainer}");
             
+            // === CRITICAL FIX: Save monitor container name to class field ===
+            _currentMonitorContainer = monitorContainer;
+            _currentPcapFilePath = pcapOutputPath;
+            // ================================================================
+            
             // Remove existing monitor container if any
             try
             {
@@ -3096,12 +3102,13 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
         {
-            if (string.IsNullOrEmpty(_currentPcapFilePath))
+            if (string.IsNullOrEmpty(_currentPcapFilePath) || string.IsNullOrEmpty(_currentMonitorContainer))
             {
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Skipping - monitor container not set (_currentMonitorContainer={_currentMonitorContainer ?? "null"})");
                 return;
             }
             
-            var monitorContainer = $"ag-monitor-{_currentStudentCode}";
+            var monitorContainer = _currentMonitorContainer; // Use the saved container name
             var pcapFileName = Path.GetFileName(_currentPcapFilePath);
             var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_stage{currentStage}.pcap");
             
@@ -3109,6 +3116,15 @@ namespace SolutionGrader.Core.Services
             {
                 // Skip the IsContainerRunning check - it has reliability issues with docker ps filters
                 // If the container doesn't exist or has crashed, the snapshot copy will fail which we handle below
+                
+                // SNAPSHOT STRATEGY Step 0: Force tcpdump to flush its buffer by sending SIGUSR1 signal
+                // This ensures all captured packets are written to the pcap file before we copy it
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Flushing tcpdump buffer in {monitorContainer}...");
+                var flushCmd = $"{monitorContainer} pkill -USR1 tcpdump";
+                _dockerExecutor.ExecDockerCommandWithOutput(flushCmd, 2000);
+                
+                // Give tcpdump a moment to finish flushing
+                await Task.Delay(500);
                 
                 // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
                 // This bypasses Windows/WSL2 file locking issues with the live capture file
