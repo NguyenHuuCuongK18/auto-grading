@@ -60,6 +60,52 @@ namespace SolutionGrader.UI
         }
 
         /// <summary>
+        /// Validates Docker images asynchronously and updates the UI.
+        /// </summary>
+        private async System.Threading.Tasks.Task ValidateDockerImagesAsync()
+        {
+            txtDockerStatus.Text = "Checking Docker images...";
+            txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Gray);
+            btnValidateDocker.IsEnabled = false;
+
+            try
+            {
+                var result = await _dockerValidator.ValidateImagesAsync();
+                
+                txtDockerStatus.Text = result.Message;
+                
+                if (result.IsValid)
+                {
+                    txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Green);
+                    _dockerValidationPassed = true;
+                }
+                else
+                {
+                    txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
+                    _dockerValidationPassed = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                txtDockerStatus.Text = $"Error checking Docker images: {ex.Message}";
+                txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
+                _dockerValidationPassed = false;
+            }
+            finally
+            {
+                btnValidateDocker.IsEnabled = true;
+            }
+        }
+
+        /// <summary>
+        /// Event handler for the Docker validation button.
+        /// </summary>
+        private async void ValidateDocker_Click(object sender, RoutedEventArgs e)
+        {
+            await ValidateDockerImagesAsync();
+        }
+
+        /// <summary>
         /// Gets the configured grading configuration after setup.
         /// </summary>
         public GradingConfiguration Configuration => _configuration;
@@ -150,6 +196,21 @@ namespace SolutionGrader.UI
 
         private void StartGrading_Click(object sender, RoutedEventArgs e)
         {
+            // Check Docker validation first
+            if (!_dockerValidationPassed)
+            {
+                System.Windows.MessageBox.Show(
+                    "Docker images validation has not passed.\n\n" +
+                    "Please click 'Check Docker Images' and resolve any issues before starting grading.\n\n" +
+                    "If the images are missing or incorrect, you need to rebuild them using:\n" +
+                    "  cd DockerImage\n" +
+                    "  bash build.sh",
+                    "Docker Validation Required",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+            
             // Update configuration with project names and roles
             // CRITICAL FIX: Set ALL properties BEFORE the automatic UpdateLegacyProperties() mapping
             // to ensure the mapping has complete information
