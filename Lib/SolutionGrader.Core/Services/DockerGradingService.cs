@@ -3537,12 +3537,14 @@ namespace SolutionGrader.Core.Services
                 // Use tcpdump to read pcap
                 // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
                 // Single-line format: "timestamp IP src > dst: Flags [S], ..."
-                // CRITICAL: -A flag outputs payload in ASCII for data extraction
-                // Without -A, we only get headers and no payload data (Data column will be empty)
+                // CRITICAL: -X flag outputs payload in HEX+ASCII format for data extraction
+                // -X provides: "0x0000:  4500 0038 ...  E..8...S001" format
+                // -A only provides raw ASCII which our parser doesn't handle correctly
+                // PcapParsingService expects hex dump format with "0x" prefix and double-space separator
                 var psi = new ProcessStartInfo
                 {
                     FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -A tcp",
+                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -X tcp",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
