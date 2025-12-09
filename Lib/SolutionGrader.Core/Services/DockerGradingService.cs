@@ -3195,12 +3195,19 @@ namespace SolutionGrader.Core.Services
                         if (packet != null)
                         {
                             // Add to RunContext for this stage
-                            _runContext.AddCapturedNetworkPacket(_currentStudentCode ?? "", currentStage.ToString(), packet);
+                            var studentCode = _currentStudentCode ?? "";
+                            OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}");
+                            _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
+                            
+                            // Verify it was added
+                            var allPackets = _runContext.GetAllCapturedNetworkPackets();
+                            OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Skip malformed lines
+                        // Log the exception instead of silently swallowing it
+                        OnProgress($"[NetworkMonitor] ERROR parsing packet: {ex.Message}");
                         continue;
                     }
                 }
