@@ -510,18 +510,8 @@ namespace SolutionGrader.Cli.Services
                 result.Passed = dockerResult.Passed;
                 result.ErrorMessage = dockerResult.ErrorMessage;
 
-                // Convert test case results
-                foreach (var tcResult in dockerResult.TestCaseResults)
-                {
-                    result.TestCaseResults.Add(new TestCaseResult
-                    {
-                        TestCaseName = tcResult.TestCaseName,
-                        EarnedMark = tcResult.EarnedMark,
-                        MaxMark = tcResult.MaxMark,
-                        Passed = tcResult.Passed,
-                        ErrorMessage = tcResult.ErrorMessage
-                    });
-                }
+                // Use test case results directly from DockerGradingResult (Domain.Models.TestCaseResult)
+                result.TestCaseResults = dockerResult.TestCaseResults;
             }
             catch (Exception ex)
             {
@@ -910,20 +900,7 @@ namespace SolutionGrader.Cli.Services
         public double MaxMark { get; set; }
         public bool Passed { get; set; }
         public string? ErrorMessage { get; set; }
-        public List<TestCaseResult> TestCaseResults { get; set; } = new();
-    }
-
-    /// <summary>
-    /// Result of a single test case (simplified for CLI).
-    /// The detailed results are written by DockerGradingService.
-    /// </summary>
-    public class TestCaseResult
-    {
-        public string TestCaseName { get; set; } = "";
-        public double EarnedMark { get; set; }
-        public double MaxMark { get; set; }
-        public bool Passed { get; set; }
-        public string? ErrorMessage { get; set; }
+        public List<Domain.Models.TestCaseResult> TestCaseResults { get; set; } = new();
     }
 
     #endregion

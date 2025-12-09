@@ -262,7 +262,7 @@ namespace SolutionGrader.UI.Services
         /// Creates {PaperNo}/student/{StudentCode}/OverallSummary.xlsx
         /// Format matches SampleLogging/student/student-code-here/OverallSummary.xlsx
         /// </summary>
-        public void WriteStudentSummary(StudentSolution student, List<TestCaseResult> testCases)
+        public void WriteStudentSummary(StudentSolution student, List<Domain.Models.TestCaseResult> testCases)
         {
             var studentDir = GetStudentResultFolder(student.StudentCode, student.PaperNo);
 
@@ -460,31 +460,5 @@ namespace SolutionGrader.UI.Services
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Represents a test case result for a student.
-    /// </summary>
-    public class TestCaseResult
-    {
-        public string TestCaseName { get; set; } = string.Empty;
-        public bool Passed { get; set; }
-        public double EarnedMark { get; set; }
-        public double MaxMark { get; set; }
-        public string? Message { get; set; }
-        public List<StepResult> Steps { get; set; } = new List<StepResult>();
-    }
-
-    /// <summary>
-    /// Represents a single step result within a test case.
-    /// </summary>
-    public class StepResult
-    {
-        public string StepId { get; set; } = string.Empty;
-        public string Action { get; set; } = string.Empty;
-        public string Stage { get; set; } = string.Empty;
-        public bool Passed { get; set; }
-        public string? Message { get; set; }
-        public double DurationMs { get; set; }
     }
 }
