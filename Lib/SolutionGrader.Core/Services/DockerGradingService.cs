@@ -71,8 +71,9 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
-        private readonly PcapParsingService _pcapParser; // PCAP parsing service (single responsibility)
+        private readonly SharpPcapParsingService _sharpPcapParser; // SharpPcap parser for robust PCAP reading
         private string? _currentStudentCode; // Track current student for logging
+        private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
         
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
@@ -97,7 +98,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
-            _pcapParser = new PcapParsingService(); // Initialize PCAP parser
+            _sharpPcapParser = new SharpPcapParsingService(); // Initialize SharpPcap parser
         }
         
         /// <summary>
@@ -341,6 +342,120 @@ namespace SolutionGrader.Core.Services
                 // No per-student registration needed - monitor captures all traffic on loopback
                 // and filters by port number (each student gets unique port)
                 
+                // CRITICAL: Setup database container FIRST before creating instance
+                // The database container must be running before we can create database instances
+                OnProgress($"[Database] Ensuring database container is running...");
+                await SetupDatabaseContainerAsync(config);
+                
+                // CRITICAL: Create database instance for this student
+                // Database container must be running before creating instance
+                // Each student gets their own database instance (e.g., Library_student1)
+                OnProgress($"[Database] Creating database instance for {studentCode}...");
+                
+                // Look for SQL initialization script in test kit Environment.xlsx
+                // Key name: Default_Database_File_Path
+                string? sqlScriptPath = null;
+                var environmentExcelPath = Path.Combine(testKitPath, "Environment.xlsx");
+                if (File.Exists(environmentExcelPath))
+                {
+                    try
+                    {
+                        using var envWb = new XLWorkbook(environmentExcelPath);
+                        if (envWb.TryGetWorksheet("Config", out var envWs))
+                        {
+                            // Look for Default_Database_File_Path in Environment.xlsx Config sheet
+                            foreach (var row in envWs.RowsUsed().Skip(1))
+                            {
+                                var key = row.Cell(1).GetValue<string>()?.Trim();
+                                var value = row.Cell(2).GetValue<string>()?.Trim();
+                                
+                                // Match exact key name: Default_Database_File_Path
+                                // Also support legacy key names for backward compatibility
+                                if (key != null && (
+                                    key.Equals("Default_Database_File_Path", StringComparison.OrdinalIgnoreCase) ||
+                                    key.Replace("_", "").Equals("DefaultDatabaseFilePath", StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    if (!string.IsNullOrEmpty(value))
+                                    {
+                                        // Resolve relative path from test kit folder
+                                        sqlScriptPath = Path.IsPathRooted(value) ? value : Path.Combine(testKitPath, value);
+                                        OnProgress($"[Database] Found SQL script path in Environment.xlsx (key '{key}'): {sqlScriptPath}");
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[Database] Warning: Failed to read SQL script path from Environment.xlsx: {ex.Message}");
+                    }
+                }
+                
+                // If no SQL script in Environment.xlsx, check for default locations
+                if (string.IsNullOrEmpty(sqlScriptPath))
+                {
+                    var defaultScriptLocations = new[]
+                    {
+                        Path.Combine(testKitPath, $"{baseDatabaseName}.sql"),
+                        Path.Combine(testKitPath, "database.sql"),
+                        Path.Combine(testKitPath, "init.sql"),
+                        Path.Combine(Path.GetDirectoryName(testKitPath) ?? "", $"{baseDatabaseName}.sql")
+                    };
+                    
+                    foreach (var location in defaultScriptLocations)
+                    {
+                        if (File.Exists(location))
+                        {
+                            sqlScriptPath = location;
+                            OnProgress($"[Database] Found SQL script at default location: {sqlScriptPath}");
+                            break;
+                        }
+                    }
+                }
+                
+                // Attempt to create database instance - failure will not stop grading
+                // SQL server container will remain running even if database creation fails
+                try
+                {
+                    if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
+                    {
+                        OnProgress($"[Database] Creating database '{studentDatabaseName}' from SQL script: {Path.GetFileName(sqlScriptPath)}");
+                        
+                        // Read SQL script and replace database name with student-specific name
+                        var sqlContent = File.ReadAllText(sqlScriptPath);
+                        
+                        // Replace the default database name with student-specific name
+                        // Common patterns: CREATE DATABASE [DatabaseName], USE [DatabaseName]
+                        if (!string.IsNullOrEmpty(baseDatabaseName))
+                        {
+                            sqlContent = sqlContent.Replace($"[{baseDatabaseName}]", $"[{studentDatabaseName}]");
+                            sqlContent = sqlContent.Replace($"{baseDatabaseName}", studentDatabaseName);
+                        }
+                        
+                        // Create temporary SQL file with student-specific database name
+                        var tempSqlPath = Path.Combine(Path.GetTempPath(), $"{studentDatabaseName}.sql");
+                        File.WriteAllText(tempSqlPath, sqlContent);
+                        
+                        await CreateDatabaseInstanceAsync(config, studentDatabaseName, tempSqlPath);
+                        
+                        // Clean up temp file
+                        try { File.Delete(tempSqlPath); } catch { }
+                    }
+                    else
+                    {
+                        OnProgress($"[Database] No SQL script found - skipping database instance creation");
+                        OnProgress($"[Database] SQL server container will remain running for the session");
+                        // Don't create empty database if no script is found - just skip
+                    }
+                }
+                catch (Exception dbEx)
+                {
+                    OnProgress($"[Database] Failed to create database instance: {dbEx.Message}");
+                    OnProgress($"[Database] Continuing with grading - SQL server container remains running");
+                    // Don't throw - allow grading to continue
+                }
+                
                 // Setup unified container
                 OnProgress($"Setting up unified Docker container for {studentCode}...");
                 // Logs will be exported from container after grading
@@ -375,6 +490,9 @@ namespace SolutionGrader.Core.Services
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
+                    
+                    // CRITICAL: Set current test case name for per-TC logging
+                    _currentTestCaseName = testCase.Name;
                     
                     // CRITICAL: Clear old stage log files before executing new test case
                     // Same container is reused across test cases, so logs must be cleaned up
@@ -583,6 +701,118 @@ namespace SolutionGrader.Core.Services
             // Wait for MSSQL to fully start with polling instead of fixed delay
             OnProgress("[Docker] Waiting for MSSQL to start...");
             await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 20);
+        }
+        
+        /// <summary>
+        /// Creates a database instance within the shared MSSQL container for a student.
+        /// This ensures each student has their own isolated database even when sharing the container.
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
+        /// <param name="databaseName">Name of the database to create (e.g., Library_student1)</param>
+        /// <param name="sqlScriptPath">Optional path to SQL initialization script on host machine</param>
+        private async Task CreateDatabaseInstanceAsync(DockerGradingConfig config, string databaseName, string? sqlScriptPath = null)
+        {
+            var databaseContainer = config.DatabaseContainerName;
+            var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
+            var databaseUsername = config.DatabaseUsername ?? "sa";
+            
+            // SECURITY: Validate database name to prevent SQL injection
+            // Database names should only contain alphanumeric characters, underscores, and hyphens
+            if (!System.Text.RegularExpressions.Regex.IsMatch(databaseName, @"^[a-zA-Z0-9_\-]+$"))
+            {
+                throw new ArgumentException($"Invalid database name '{databaseName}'. Database names must contain only letters, numbers, underscores, and hyphens.", nameof(databaseName));
+            }
+            
+            OnProgress($"[Database] Creating database instance '{databaseName}' in container {databaseContainer}");
+            
+            try
+            {
+                // Step 1: Check if database already exists
+                var checkDbSql = $"SELECT name FROM sys.databases WHERE name = '{databaseName}'";
+                var checkCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{checkDbSql}\" -h -1";
+                
+                var (checkSuccess, checkOutput) = _dockerExecutor.ExecDockerCommandWithOutput(checkCommand, 5000);
+                
+                if (checkSuccess && checkOutput.Contains(databaseName))
+                {
+                    OnProgress($"[Database] Database '{databaseName}' already exists, dropping it first");
+                    
+                    // Drop existing database
+                    var dropSql = $"USE master; ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}];";
+                    var dropCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{dropSql}\"";
+                    _dockerExecutor.ExecDockerCommand(dropCommand, 10000);
+                    
+                    OnProgress($"[Database] Dropped existing database '{databaseName}'");
+                    await Task.Delay(1000); // Wait for drop to complete
+                }
+                
+                // Step 2: Create database
+                if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
+                {
+                    // Create database from SQL script
+                    OnProgress($"[Database] Creating database '{databaseName}' from SQL script: {sqlScriptPath}");
+                    
+                    // Copy SQL script to container
+                    var containerSqlPath = $"/tmp/{databaseName}.sql";
+                    _dockerExecutor.CopyFileToContainer(databaseContainer, sqlScriptPath, containerSqlPath);
+                    
+                    // Execute SQL script
+                    var execScriptCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -i {containerSqlPath}";
+                    var (scriptSuccess, scriptOutput) = _dockerExecutor.ExecDockerCommandWithOutput(execScriptCommand, 30000);
+                    
+                    if (scriptSuccess)
+                    {
+                        OnProgress($"[Database] Successfully created database '{databaseName}' from script");
+                    }
+                    else
+                    {
+                        OnProgress($"[Database] WARNING: Failed to create database from script: {scriptOutput}");
+                        OnProgress($"[Database] SQL server container will remain running, but database instance was not created");
+                        throw new Exception($"Failed to create database from SQL script: {scriptOutput}");
+                    }
+                }
+                else
+                {
+                    // Create empty database (no SQL script provided)
+                    OnProgress($"[Database] Creating empty database '{databaseName}' (no SQL script provided)");
+                    
+                    var createDbSql = $"CREATE DATABASE [{databaseName}]";
+                    var createCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{createDbSql}\"";
+                    
+                    var (createSuccess, createOutput) = _dockerExecutor.ExecDockerCommandWithOutput(createCommand, 10000);
+                    
+                    if (createSuccess)
+                    {
+                        OnProgress($"[Database] Successfully created empty database '{databaseName}'");
+                    }
+                    else
+                    {
+                        OnProgress($"[Database] WARNING: Failed to create database: {createOutput}");
+                        OnProgress($"[Database] SQL server container will remain running, but database instance was not created");
+                        throw new Exception($"Failed to create database: {createOutput}");
+                    }
+                }
+                
+                // Step 3: Verify database was created
+                var verifyCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{checkDbSql}\" -h -1";
+                var (verifySuccess, verifyOutput) = _dockerExecutor.ExecDockerCommandWithOutput(verifyCommand, 5000);
+                
+                if (verifySuccess && verifyOutput.Contains(databaseName))
+                {
+                    OnProgress($"[Database] Verified database '{databaseName}' exists and is ready");
+                }
+                else
+                {
+                    OnProgress($"[Database] WARNING: Could not verify database '{databaseName}' exists");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Database] WARNING: Failed to create database instance '{databaseName}': {ex.Message}");
+                OnProgress($"[Database] Skipping database creation but keeping SQL server container running");
+                // Don't throw - allow grading to continue without database
+                // The SQL server container will remain running for the session
+            }
         }
         
         /// <summary>
@@ -1493,24 +1723,26 @@ namespace SolutionGrader.Core.Services
                         
                     case "INPUT":
                         // INPUT action: Send the input value to the client
-                        // Only send if there's actual content
-                        if (!string.IsNullOrWhiteSpace(input))
+                        // IMPORTANT: Always send input when Input action is specified, even if empty
+                        // The client application may be waiting for input (including empty lines)
+                        // Not sending input causes the client to hang waiting for stdin
+                        var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
+                        try
                         {
-                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
-                            try
+                            _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
+                            await Task.Delay(InputProcessingDelayMs);
+                            if (string.IsNullOrWhiteSpace(input))
                             {
-                                _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
-                                await Task.Delay(InputProcessingDelayMs);
+                                OnProgress($"    Empty input sent (newline) for stage {stage}");
+                            }
+                            else
+                            {
                                 OnProgress($"    Input sent: '{input}'");
                             }
-                            catch (Exception ex)
-                            {
-                                OnProgress($"    WARNING: Failed to send input: {ex.Message}");
-                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            OnProgress($"    Skipping empty input for stage {stage}");
+                            OnProgress($"    WARNING: Failed to send input: {ex.Message}");
                         }
                         break;
                         
@@ -1751,34 +1983,74 @@ namespace SolutionGrader.Core.Services
                 {
                     // Check if it's an exact match (PASS) or partial match (PARTIAL)
                     bool exactMatch = true;
+                    var mismatchReasons = new List<string>();
                     
                     // Compare flags using set comparison (already matched in FirstOrDefault above)
                     // This is redundant but kept for clarity
                     if (!string.IsNullOrEmpty(exp.Flags) && !FlagsMatch(exp.Flags, matchingPacket.Flags))
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"flags: expected '{exp.Flags}' but got '{matchingPacket.Flags}'");
+                    }
                     
                     // Compare roles exactly
                     if (!string.IsNullOrEmpty(exp.SourceRole) && matchingPacket.SourceRole != exp.SourceRole)
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"source role: expected '{exp.SourceRole}' but got '{matchingPacket.SourceRole}'");
+                    }
                     if (!string.IsNullOrEmpty(exp.DestinationRole) && matchingPacket.DestinationRole != exp.DestinationRole)
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"dest role: expected '{exp.DestinationRole}' but got '{matchingPacket.DestinationRole}'");
+                    }
+                    
+                    // Compare Data payload if expected data is provided
+                    // Note: Expected data from Excel uses null or empty string to indicate "no data expected"
+                    // We need to check if exp.Data is not null/empty AND not the string "None" (which Excel uses for null)
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var actualData = matchingPacket.Data ?? "";
+                        var expectedData = exp.Data;
+                        
+                        // Compare data - trim whitespace and use case-insensitive comparison for now
+                        // TODO: Make this configurable per test case if needed
+                        if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            var expPreview = expectedData.Length > 50 ? expectedData.Substring(0, 50) + "..." : expectedData;
+                            var actPreview = actualData.Length > 50 ? actualData.Substring(0, 50) + "..." : actualData;
+                            mismatchReasons.Add($"data: expected '{expPreview}' but got '{actPreview}'");
+                        }
+                    }
                     
                     // Log detailed comparison
                     if (exactMatch)
                     {
-                        OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}");
+                        var dataInfo = (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase)) 
+                            ? $" with data='{exp.Data}'" : "";
+                        OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}{dataInfo}");
                     }
                     else
                     {
-                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: Expected {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}, Found {matchingPacket.Flags} from {matchingPacket.SourceRole} to {matchingPacket.DestinationRole} (role mismatch)");
+                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: {string.Join(", ", mismatchReasons)}");
+                    }
+                    
+                    var expectedStr = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}";
+                    var actualStr = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}";
+                    
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        expectedStr += $", Data={exp.Data}";
+                        actualStr += $", Data={matchingPacket.Data ?? "(empty)"}";
                     }
                     
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
-                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                        Actual = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}",
+                        Expected = expectedStr,
+                        Actual = actualStr,
                         Passed = exactMatch
                     });
                 }
@@ -2200,6 +2472,7 @@ namespace SolutionGrader.Core.Services
                     
                     var flags = row.Cell(6).GetValue<string>();
                     var state = row.Cell(7).GetValue<string>();
+                    var data = row.Cell(8).GetValue<string>();  // Column H: Data payload
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
                     
@@ -2210,6 +2483,7 @@ namespace SolutionGrader.Core.Services
                             Stage = stage,
                             Flags = flags,
                             State = state,
+                            Data = data,
                             SourceRole = sourceRole,
                             DestinationRole = destRole
                         });
@@ -3200,7 +3474,12 @@ namespace SolutionGrader.Core.Services
             
             var monitorContainer = _currentMonitorContainer; // Use the saved container name
             var pcapFileName = Path.GetFileName(_currentPcapFilePath);
-            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_stage{currentStage}.pcap");
+            
+            // CRITICAL: Include test case name in snapshot path for per-TC organization
+            // Format: snapshot_TC3_stage1.pcap instead of snapshot_stage1.pcap
+            // This prevents overwriting between test cases and organizes artifacts per TC
+            var testCasePrefix = !string.IsNullOrEmpty(_currentTestCaseName) ? $"{_currentTestCaseName}_" : "";
+            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_{testCasePrefix}stage{currentStage}.pcap");
             
             try
             {
@@ -3252,88 +3531,42 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 var fileSize = new FileInfo(snapshotPath).Length;
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with SharpPcap");
                 
-                // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
-                // Use tcpdump to read pcap
-                // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
-                // Single-line format: "timestamp IP src > dst: Flags [S], ..."
-                var psi = new ProcessStartInfo
+                // SNAPSHOT STRATEGY Step 3: Parse the snapshot using SharpPcap
+                // This is more robust than tcpdump text parsing - works cross-platform
+                var packets = _sharpPcapParser.ParsePcapFile(snapshotPath, currentStage, port);
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsed {packets.Count} total packets");
+                
+                // Skip packets we've already processed (cumulative parsing)
+                var newPackets = packets.Skip(_lastParsedPacketCount).ToList();
+                
+                foreach (var packet in newPackets)
                 {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt tcp",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using var process = Process.Start(psi);
-                if (process == null)
-                {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to start tcpdump process");
-                    return;
-                }
-                
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string errorOutput = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
-                
-                if (!string.IsNullOrEmpty(errorOutput))
-                {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
-                }
-                
-                // Parse tcpdump output
-                // Example: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump output has {lines.Length} lines");
-                
-                // Skip packets we've already processed
-                var newPackets = lines.Skip(_lastParsedPacketCount).ToList();
-                
-                foreach (var line in newPackets)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    
                     try
                     {
-                        // Parse packet details (handles multi-line payload with -A flag)
-                        var packet = _pcapParser.ParseTcpdumpLine(line, currentStage, port);
-                        if (packet != null)
-                        {
-                            // Add to RunContext for this stage
-                            var studentCode = _currentStudentCode ?? "";
-                            OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
-                            _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
-                            
-                            // Verify it was added
-                            var allPackets = _runContext.GetAllCapturedNetworkPackets();
-                            OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
-                        }
+                        // Add to RunContext for this stage
+                        var studentCode = _currentStudentCode ?? "";
+                        OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
+                        _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
+                        
+                        // Verify it was added
+                        var allPackets = _runContext.GetAllCapturedNetworkPackets();
+                        OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
                     }
                     catch (Exception ex)
                     {
                         // Log the exception instead of silently swallowing it
-                        OnProgress($"[NETWORK] ERROR parsing packet: {ex.Message}");
+                        OnProgress($"[NETWORK] ERROR adding packet: {ex.Message}");
                         continue;
                     }
                 }
                 
-                // Finalize any remaining packet being parsed
-                var finalPacket = _pcapParser.FinalizeCurrentPacket();
-                if (finalPacket != null)
-                {
-                    var studentCode = _currentStudentCode ?? "";
-                    OnProgress($"[NetworkMonitor] DEBUG: Finalizing last packet - StudentCode='{studentCode}', Stage={currentStage}, Flags={finalPacket.Flags}, Data={finalPacket.Data ?? "(empty)"}");
-                    _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), finalPacket);
-                }
-                
                 // Update counter to skip these packets next time
-                _lastParsedPacketCount = lines.Length;
+                _lastParsedPacketCount = packets.Count;
                 
-                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {lines.Length}");
+                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count}");
             }
             catch (Exception ex)
             {
@@ -3660,6 +3893,7 @@ namespace SolutionGrader.Core.Services
         public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
+        public string? Data { get; set; }
     }
     
     #endregion

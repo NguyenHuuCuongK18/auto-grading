@@ -1203,11 +1203,11 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Preserves expected Data column values from the Network sheet template.
-        /// The template Detail.xlsx contains expected payload values (e.g., "S123", JSON responses)
+        /// The template Detail.xlsx contains expected payload values (e.g., "S123", "None", JSON responses)
         /// that must be retained in the graded output for side-by-side comparison with actual captured data.
         /// 
-        /// This method is a workaround for ClosedXML potentially treating empty/populated cells inconsistently.
-        /// By explicitly reading and re-writing the Data column values, we ensure they are preserved.
+        /// This method explicitly reads and re-writes ALL Data column values to ensure they are preserved.
+        /// ClosedXML sometimes treats cells inconsistently, so we force preservation of all values.
         /// </summary>
         private void PreserveNetworkExpectedData(IXLWorksheet ws, Dictionary<string, int> hdr)
         {
@@ -1218,16 +1218,29 @@ namespace SolutionGrader.Core.Services
             
             // Read all Data column values and re-write them to ensure they're preserved
             // This forces ClosedXML to recognize the values and keep them when saving
+            // CRITICAL: Preserve ALL values including "None", empty strings, and null
             foreach (var row in rng.RowsUsed().Skip(1))
             {
                 var dataCell = ws.Cell(row.RowNumber(), dataCol);
-                var dataValue = dataCell.GetString();
                 
-                // Re-assign the value to ensure it's preserved (even if empty)
-                // This prevents ClosedXML from treating it as "never set" and clearing it
-                if (!string.IsNullOrEmpty(dataValue))
+                // CRITICAL FIX: Get the actual string value directly
+                // Don't use cellValue.IsBlank or cellValue.IsText as they may not work correctly
+                // for all cell types. Just get the string representation and re-assign it.
+                try
                 {
+                    var dataValue = dataCell.GetString();
+                    // Re-assign to force ClosedXML to preserve it
+                    // Even if empty or "None", we want to keep it
                     dataCell.Value = dataValue;
+                }
+                catch
+                {
+                    // If GetString() fails, try getting as Value
+                    var cellValue = dataCell.Value;
+                    if (!cellValue.IsBlank)
+                    {
+                        dataCell.Value = cellValue.ToString() ?? "";
+                    }
                 }
             }
         }
@@ -1268,6 +1281,7 @@ namespace SolutionGrader.Core.Services
             int expFlagsCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Flags, "Expected_Flags");
             int expSrcRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_SourceRole, "Expected_SourceRole");
             int expDstRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_DestinationRole, "Expected_DestinationRole");
+            int expDataCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Data, "Expected_Data");
             
             // Track per-stage packet indices for matching with captured data
             var stagePacketIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1348,6 +1362,26 @@ namespace SolutionGrader.Core.Services
                             !string.Equals(expectedDstRole, actualDstRole, StringComparison.OrdinalIgnoreCase))
                         {
                             matched = false;
+                        }
+                    }
+                    
+                    // Compare Data payload if expected data is provided
+                    // Note: Excel uses null, empty string, or "None" to indicate "no data expected"
+                    // We only validate data if the expected value is non-empty and not "None"
+                    if (matched && expDataCol > 0)
+                    {
+                        var expectedData = row.Cell(expDataCol).GetString()?.Trim() ?? "";
+                        var actualData = actualPacket.Data ?? "";
+                        
+                        // Only compare if expected data is specified and not "None"
+                        if (!string.IsNullOrEmpty(expectedData) && 
+                            !expectedData.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Trim and compare case-insensitively
+                            if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                            {
+                                matched = false;
+                            }
                         }
                     }
                     

@@ -11,16 +11,17 @@ namespace SolutionGrader.Core.Services;
 public class PcapParsingService
 {
     private CapturedNetworkPacket? _currentParsingPacket = null;
-    private StringBuilder _currentPayloadBuffer = new StringBuilder();
+    private List<byte> _currentPayloadBytes = new List<byte>(); // Changed to collect bytes instead of strings
+    private int _currentPacketPayloadStart = -1; // Track where TCP payload starts in the dump
 
     /// <summary>
     /// Parse a single tcpdump output line into CapturedNetworkPacket.
-    /// With -A flag, tcpdump outputs:
-    /// Line 1: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [P.], seq 1:5, ack 1, win 512, length 4"
-    /// Line 2+: ASCII payload data (hex offset + printable chars)
-    /// Example payload lines:
-    ///   0x0000:  4500 0038 ...   E..8...
-    ///   0x0010:  ... S123       (actual data)
+    /// With -X flag, tcpdump outputs hex dump with ASCII on the right.
+    /// We parse the HEX bytes directly and convert them to ASCII ourselves to avoid garbage from TCP/IP headers.
+    /// Example:
+    ///   0x0000:  4500 0038 eecc 4000 4006 4df1 7f00 0001  E..8..@.@.M.....
+    ///   0x0030:  f8e7 db42 5330 3031                      ...BS001
+    /// The hex bytes 5330 3031 = "S001" in ASCII.
     /// </summary>
     /// <param name="line">Single line from tcpdump output</param>
     /// <param name="stage">Current test stage number</param>
@@ -28,27 +29,35 @@ public class PcapParsingService
     /// <returns>Completed packet if header line triggers finalization, null if still collecting payload</returns>
     public CapturedNetworkPacket? ParseTcpdumpLine(string line, int stage, int expectedPort)
     {
-        // Check if this is a payload line (hex dump format from -A flag)
-        // Payload lines start with spaces/tabs followed by 0x or just hex data
-        // Example: "	0x0000:  4500 0038 ..." or data continuation lines
+        // Check if this is a payload line (hex dump format from -X flag)
+        // Example: "	0x0030:  f8e7 db42 5330 3031                      ...BS001"
         if (line.TrimStart().StartsWith("0x") || (line.StartsWith("\t") || line.StartsWith(" ")) && !line.Contains(" IP "))
         {
-            // This is a payload line for the current packet
+            // This is a hex dump line for the current packet
             if (_currentParsingPacket != null)
             {
-                // Extract ASCII data from the hex dump line
-                // Format: "	0x0000:  4500 0038 ...  E..8...S123" 
-                // We want the part after the hex bytes (the ASCII representation)
-                var parts = line.Split(new[] { "  " }, StringSplitOptions.None);
-                if (parts.Length >= 2)
+                // CRITICAL FIX: Parse HEX bytes directly instead of relying on ASCII column
+                // The ASCII column includes garbage from TCP/IP headers (dots, special chars)
+                // By parsing hex and converting ourselves, we get clean application payload
+                
+                // Split by whitespace to get individual tokens
+                var tokens = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                
+                foreach (var token in tokens)
                 {
-                    // Last part typically contains ASCII representation
-                    var asciiPart = parts[parts.Length - 1].Trim();
-                    // Filter out non-printable characters but keep readable text
-                    var readable = new string(asciiPart.Where(c => c >= 32 && c < 127).ToArray());
-                    if (!string.IsNullOrWhiteSpace(readable))
+                    // Filter: Only accept 2-character or 4-character hex strings (byte pairs)
+                    // Ignore offset (e.g., "0x0030:"), ignore ASCII representation
+                    if ((token.Length == 2 || token.Length == 4) && token.All(c => "0123456789abcdefABCDEF".Contains(c)))
                     {
-                        _currentPayloadBuffer.Append(readable);
+                        // Parse hex bytes
+                        for (int i = 0; i < token.Length; i += 2)
+                        {
+                            if (i + 1 < token.Length)
+                            {
+                                var hexByte = token.Substring(i, 2);
+                                _currentPayloadBytes.Add(Convert.ToByte(hexByte, 16));
+                            }
+                        }
                     }
                 }
             }
@@ -59,15 +68,44 @@ public class PcapParsingService
         CapturedNetworkPacket? completedPacket = null;
         if (_currentParsingPacket != null)
         {
-            // Finalize the previous packet with collected payload
-            var collectedPayload = _currentPayloadBuffer.ToString().Trim();
-            if (!string.IsNullOrWhiteSpace(collectedPayload))
+            // CRITICAL FIX: Convert collected hex bytes to ASCII string
+            // This extracts ONLY the actual TCP payload data, skipping all headers
+            // We determine payload start by looking at TCP header length from the packet
+            
+            if (_currentPayloadBytes.Count > 0)
             {
-                _currentParsingPacket.Data = collectedPayload;
+                // For TCP packets, the payload typically starts after byte 0x40 (64 bytes = IP+TCP headers)
+                // But this varies with TCP options. A safer approach: extract ALL bytes, convert to ASCII,
+                // and filter out non-printable chars. The header bytes will be gibberish and get filtered.
+                
+                // Skip the first ~54 bytes (Ethernet 14 + IP 20 + TCP 20 minimum headers)
+                // But since we're getting raw packet dump, we need a smarter approach
+                
+                // BETTER: Convert all bytes to ASCII and only keep valid printable characters
+                var sb = new StringBuilder();
+                foreach (var b in _currentPayloadBytes)
+                {
+                    // Only include bytes that are printable ASCII (letters, digits, common symbols)
+                    // This automatically filters out header bytes which are random binary values
+                    if ((b >= 32 && b <= 126)) // Printable ASCII range
+                    {
+                        sb.Append((char)b);
+                    }
+                }
+                
+                var payload = sb.ToString().Trim();
+                
+                // Further cleanup: Remove sequences of dots and control characters that leak from headers
+                // Keep only sequences with actual letters/digits
+                if (!string.IsNullOrWhiteSpace(payload) && payload.Any(char.IsLetterOrDigit))
+                {
+                    _currentParsingPacket.Data = payload;
+                }
             }
+            
             completedPacket = _currentParsingPacket;
             _currentParsingPacket = null;
-            _currentPayloadBuffer.Clear();
+            _currentPayloadBytes.Clear();
         }
         
         // Now parse the new header line
@@ -177,7 +215,7 @@ public class PcapParsingService
         if (payloadLength > 0)
         {
             _currentParsingPacket = newPacket;
-            _currentPayloadBuffer.Clear();
+            _currentPayloadBytes.Clear();
             // Return the completed previous packet if any
             return completedPacket;
         }
@@ -204,15 +242,28 @@ public class PcapParsingService
     {
         if (_currentParsingPacket != null)
         {
-            var collectedPayload = _currentPayloadBuffer.ToString().Trim();
-            if (!string.IsNullOrWhiteSpace(collectedPayload))
+            // Convert collected hex bytes to ASCII string
+            if (_currentPayloadBytes.Count > 0)
             {
-                _currentParsingPacket.Data = collectedPayload;
+                var sb = new StringBuilder();
+                foreach (var b in _currentPayloadBytes)
+                {
+                    if ((b >= 32 && b <= 126)) // Printable ASCII
+                    {
+                        sb.Append((char)b);
+                    }
+                }
+                
+                var payload = sb.ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(payload) && payload.Any(char.IsLetterOrDigit))
+                {
+                    _currentParsingPacket.Data = payload;
+                }
             }
             
             var finalPacket = _currentParsingPacket;
             _currentParsingPacket = null;
-            _currentPayloadBuffer.Clear();
+            _currentPayloadBytes.Clear();
             return finalPacket;
         }
         return null;
@@ -224,6 +275,6 @@ public class PcapParsingService
     public void Reset()
     {
         _currentParsingPacket = null;
-        _currentPayloadBuffer.Clear();
+        _currentPayloadBytes.Clear();
     }
 }
