@@ -217,6 +217,34 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
+                // CRITICAL: Apply DefaultGradeContent from test kit to determine HasServer/HasClient
+                // This overrides the default behavior based on what the test kit expects students to submit
+                if (!string.IsNullOrEmpty(testKitConfig.DefaultGradeContent))
+                {
+                    OnProgress($"[TestKit] Applying DefaultGradeContent from test kit: {testKitConfig.DefaultGradeContent}");
+                    if (testKitConfig.DefaultGradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Students submit ONLY server - use golden client
+                        config.HasServer = true;
+                        config.HasClient = false;
+                        OnProgress($"[TestKit] Students submit SERVER only → HasServer=true, HasClient=false");
+                    }
+                    else if (testKitConfig.DefaultGradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Students submit ONLY client - use golden server
+                        config.HasServer = false;
+                        config.HasClient = true;
+                        OnProgress($"[TestKit] Students submit CLIENT only → HasServer=false, HasClient=true");
+                    }
+                    else // "Client/Server" or default
+                    {
+                        // Students submit BOTH - no golden needed
+                        config.HasServer = true;
+                        config.HasClient = true;
+                        OnProgress($"[TestKit] Students submit BOTH → HasServer=true, HasClient=true");
+                    }
+                }
+                
                 // CRITICAL FIX: Create unique database name for this student
                 // Format: {BaseName}_{StudentCode} to ensure isolation
                 var baseDatabaseName = testKitConfig.DatabaseName ?? "Library";
@@ -1800,7 +1828,16 @@ namespace SolutionGrader.Core.Services
                         var key = row.Cell(1).GetString()?.Trim();
                         var value = row.Cell(2).GetString()?.Trim();
                         if (key?.Equals("Protocol", StringComparison.OrdinalIgnoreCase) == true)
+                        {
                             tkConfig.Protocol = value ?? "TCP";
+                        }
+                        else if (key?.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            // Store Grade_Content from test kit root Header.xlsx
+                            // This determines whether students submit Server, Client, or Both
+                            tkConfig.DefaultGradeContent = value ?? "Client/Server";
+                            OnProgress($"[TestKit] Root Header.xlsx Grade_Content: {tkConfig.DefaultGradeContent}");
+                        }
                     }
                 }
             }
@@ -3334,6 +3371,13 @@ namespace SolutionGrader.Core.Services
         public string DatabaseName { get; set; } = "Library";
         public string DatabasePassword { get; set; } = "";
         public string Protocol { get; set; } = "TCP";
+        
+        /// <summary>
+        /// Default Grade_Content from test kit root Header.xlsx Config sheet.
+        /// Determines what students submit: "Server", "Client", or "Client/Server".
+        /// This is used to automatically set HasServer and HasClient if not explicitly provided.
+        /// </summary>
+        public string DefaultGradeContent { get; set; } = "Client/Server";
         
         /// <summary>
         /// Path to the given/golden server DLL from Meta/Given/Server folder.

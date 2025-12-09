@@ -1,0 +1,15 @@
+Student Information Client
+==========================
+Connecting to server at 127.0.0.1:4000
+Enter student IDs (e.g., 'S001', 'S123')
+Press Enter (empty input) to exit
+
+Enter Student ID: 
+========== Server Response ==========
+Student ID: S111
+Status: error
+Error: Student not found
+Message: Student not found
+=====================================
+
+Enter Student ID: 
