@@ -1996,25 +1996,55 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
+            // CRITICAL: Track which packets have been matched to enforce sequential matching
+            // Network flow order matters! TCP handshake must be SYN → SYN-ACK → ACK, not any order
+            var matchedPacketIndices = new HashSet<int>();
+            var capturedList = allCapturedPackets.ToList(); // Convert to List for IndexOf
+            
             foreach (var exp in expected)
             {
                 // Filter packets by stage from the complete set
-                var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
+                var capturedPackets = capturedList.Where(p => p.Stage == exp.Stage).ToList();
                 
-                // CRITICAL FIX: Match by FLAGS **AND** ROLES (direction)
-                // Previous bug: Only matched by flags, could match wrong direction (Client→Server vs Server→Client)
-                // For example: Both "Client sends S123" and "Server responds JSON" have PSH-ACK flags
-                // Without role matching, we'd match the request packet against the expected response!
+                // CRITICAL FIX: Sequential matching - find FIRST unmatched packet that matches criteria
+                // This enforces order: if we expect [SYN, SYN-ACK, ACK] and student sends [ACK, SYN, SYN-ACK],
+                // we'll match SYN against ACK (FAIL - wrong order) instead of finding SYN later (false PASS)
                 //
                 // Match criteria (all must match):
                 // 1. Flags (PSH-ACK, SYN, FIN-ACK, etc.)
-                // 2. Source role (Client or Server)
+                // 2. Source role (Client or Server)  
                 // 3. Destination role (Server or Client)
-                var matchingPacket = capturedPackets.FirstOrDefault(p =>
-                    !string.IsNullOrEmpty(exp.Flags) && 
-                    FlagsMatch(exp.Flags, p.Flags) &&
-                    (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
-                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
+                // 4. Packet not already matched (enforces 1-to-1 mapping and order)
+                CapturedNetworkPacket? matchingPacket = null;
+                int matchedIndex = -1;
+                
+                for (int i = 0; i < capturedPackets.Count; i++)
+                {
+                    var p = capturedPackets[i];
+                    var globalIndex = capturedList.IndexOf(p);
+                    
+                    // Skip if already matched
+                    if (matchedPacketIndices.Contains(globalIndex))
+                        continue;
+                    
+                    // Check if this packet matches the expected flow
+                    bool flagsMatch = !string.IsNullOrEmpty(exp.Flags) && FlagsMatch(exp.Flags, p.Flags);
+                    bool sourceMatch = string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole;
+                    bool destMatch = string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole;
+                    
+                    if (flagsMatch && sourceMatch && destMatch)
+                    {
+                        matchingPacket = p;
+                        matchedIndex = globalIndex;
+                        break;  // Take FIRST match (enforces sequential order)
+                    }
+                }
+                
+                // Mark this packet as matched so it won't be reused
+                if (matchedIndex >= 0)
+                {
+                    matchedPacketIndices.Add(matchedIndex);
+                }
                 
                 if (matchingPacket != null)
                 {
