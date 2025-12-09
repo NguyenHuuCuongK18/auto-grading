@@ -147,12 +147,12 @@ namespace SolutionGrader.Cli.Services
             Console.WriteLine($"{'=',-60}");
             Console.WriteLine("[CLI] Grading Complete!");
             Console.WriteLine($"Total students: {results.Count}");
-            Console.WriteLine($"Passed: {results.Count(r => r.Passed)}");
-            Console.WriteLine($"Failed: {results.Count(r => !r.Passed)}");
+            Console.WriteLine($"With errors: {results.Count(r => !string.IsNullOrEmpty(r.ErrorMessage))}");
+            Console.WriteLine($"Completed: {results.Count(r => string.IsNullOrEmpty(r.ErrorMessage))}");
             Console.WriteLine($"Results saved to: {config.SaveResultFolderPath}");
             Console.WriteLine($"{'=',-60}");
 
-            return results.Any(r => r.Passed) ? 0 : 1;
+            return results.All(r => string.IsNullOrEmpty(r.ErrorMessage)) ? 0 : 1;
         }
 
         /// <summary>
@@ -217,7 +217,7 @@ namespace SolutionGrader.Cli.Services
                     var result = await GradeStudentUsingSharedServiceAsync(student, config, 0);
                     results.Add(result);
 
-                    Console.WriteLine($"[CLI] Result: {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                    Console.WriteLine($"[CLI] Result: Completed - {result.TotalMark:F2}/{result.MaxMark:F2}");
                 }
             }
             else
@@ -287,7 +287,7 @@ namespace SolutionGrader.Cli.Services
                                 currentIndex = completedCount;
                             }
                             
-                            Console.WriteLine($"[Worker-{localWorkerId}] [{currentIndex}/{students.Count}] Completed: {student.StudentCode} - {(result.Passed ? "PASSED" : "FAILED")} - {result.TotalMark:F2}/{result.MaxMark:F2}");
+                            Console.WriteLine($"[Worker-{localWorkerId}] [{currentIndex}/{students.Count}] Completed: {student.StudentCode} - {result.TotalMark:F2}/{result.MaxMark:F2}");
                             Console.WriteLine($"[Progress] {completedCount}/{students.Count} students completed, {Math.Min(config.MaxParallelStudents, students.Count - completedCount)} students currently in progress");
                         }
                     });
@@ -507,7 +507,6 @@ namespace SolutionGrader.Cli.Services
                 // Convert DockerGradingResult to StudentGradingResult
                 result.TotalMark = dockerResult.TotalMark;
                 result.MaxMark = dockerResult.MaxMark;
-                result.Passed = dockerResult.Passed;
                 result.ErrorMessage = dockerResult.ErrorMessage;
 
                 // Use test case results directly from DockerGradingResult (Domain.Models.TestCaseResult)
@@ -766,7 +765,7 @@ namespace SolutionGrader.Cli.Services
             {
                 ws.Cell(row, 1).Value = result.StudentCode;
                 ws.Cell(row, 2).Value = result.PaperNo;
-                ws.Cell(row, 3).Value = result.Passed ? "PASSED" : "FAILED";
+                ws.Cell(row, 3).Value = string.IsNullOrEmpty(result.ErrorMessage) ? "Completed" : "Error";
                 ws.Cell(row, 4).Value = result.TotalMark;
                 ws.Cell(row, 5).Value = result.MaxMark;
                 ws.Cell(row, 6).Value = result.ErrorMessage ?? "";
@@ -891,6 +890,7 @@ namespace SolutionGrader.Cli.Services
 
     /// <summary>
     /// Result of grading a single student.
+    /// Note: No "Passed" field - grading either completes or errors. Test cases have Pass/Fail.
     /// </summary>
     public class StudentGradingResult
     {
@@ -898,7 +898,6 @@ namespace SolutionGrader.Cli.Services
         public string PaperNo { get; set; } = "";
         public double TotalMark { get; set; }
         public double MaxMark { get; set; }
-        public bool Passed { get; set; }
         public string? ErrorMessage { get; set; }
         public List<Domain.Models.TestCaseResult> TestCaseResults { get; set; } = new();
     }

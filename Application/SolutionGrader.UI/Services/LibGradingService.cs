@@ -109,7 +109,7 @@ namespace SolutionGrader.UI.Services
                     studentCode,
                     ct);
 
-                _uiLogger.LogInfo($"[LibGradingService] Docker grading completed: {(result.Passed ? "PASSED" : "FAILED")} ({result.TotalMark:F2}/{result.MaxMark:F2})");
+                _uiLogger.LogInfo($"[LibGradingService] Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}");
                 return result;
             }
             catch (OperationCanceledException)

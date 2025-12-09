@@ -419,8 +419,7 @@ namespace SolutionGrader.Core.Services
                 
                 // Calculate totals
                 result.TotalMark = result.TestCaseResults.Sum(tc => tc.EarnedMark);
-                // CRITICAL FIX: Student passes ONLY if ALL test cases pass (not ANY)
-                result.Passed = result.TestCaseResults.All(tc => tc.Passed);
+                // Note: No "Passed" status at grading level - individual test cases have Pass/Fail
                 
                 // Write overall summary
                 await WriteOverallSummaryAsync(studentResultPath, result.TestCaseResults);

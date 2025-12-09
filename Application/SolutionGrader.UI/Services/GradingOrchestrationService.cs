@@ -506,7 +506,7 @@ namespace SolutionGrader.UI.Services
                 StudentProgressUpdated?.Invoke(this, student);
 
                 // Step 4: Interpret results from DockerGradingResult
-                if (result.Passed || result.TotalMark > 0)
+                if (string.IsNullOrEmpty(result.ErrorMessage) || result.TotalMark > 0)
                 {
                     student.Status = GradingStatus.Success;
                     student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
