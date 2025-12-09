@@ -73,6 +73,7 @@ namespace SolutionGrader.Core.Services
         private readonly IRunContext _runContext;
         private readonly PcapParsingService _pcapParser; // PCAP parsing service (single responsibility)
         private string? _currentStudentCode; // Track current student for logging
+        private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
         
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
@@ -489,6 +490,9 @@ namespace SolutionGrader.Core.Services
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
+                    
+                    // CRITICAL: Set current test case name for per-TC logging
+                    _currentTestCaseName = testCase.Name;
                     
                     // CRITICAL: Clear old stage log files before executing new test case
                     // Same container is reused across test cases, so logs must be cleaned up
@@ -3470,7 +3474,12 @@ namespace SolutionGrader.Core.Services
             
             var monitorContainer = _currentMonitorContainer; // Use the saved container name
             var pcapFileName = Path.GetFileName(_currentPcapFilePath);
-            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_stage{currentStage}.pcap");
+            
+            // CRITICAL: Include test case name in snapshot path for per-TC organization
+            // Format: snapshot_TC3_stage1.pcap instead of snapshot_stage1.pcap
+            // This prevents overwriting between test cases and organizes artifacts per TC
+            var testCasePrefix = !string.IsNullOrEmpty(_currentTestCaseName) ? $"{_currentTestCaseName}_" : "";
+            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_{testCasePrefix}stage{currentStage}.pcap");
             
             try
             {

@@ -1223,21 +1223,24 @@ namespace SolutionGrader.Core.Services
             {
                 var dataCell = ws.Cell(row.RowNumber(), dataCol);
                 
-                // Get the value (could be string, null, etc.)
-                var cellValue = dataCell.Value;
-                
-                // Re-assign the value to ensure it's preserved
-                // This prevents ClosedXML from treating it as "never set" and clearing it
-                // For null/empty cells, we explicitly set them to preserve the cell state
-                if (cellValue.IsBlank || cellValue.IsText)
+                // CRITICAL FIX: Get the actual string value directly
+                // Don't use cellValue.IsBlank or cellValue.IsText as they may not work correctly
+                // for all cell types. Just get the string representation and re-assign it.
+                try
                 {
                     var dataValue = dataCell.GetString();
-                    dataCell.Value = dataValue ?? "";  // Preserve even empty strings
+                    // Re-assign to force ClosedXML to preserve it
+                    // Even if empty or "None", we want to keep it
+                    dataCell.Value = dataValue;
                 }
-                else
+                catch
                 {
-                    // For other types, preserve as-is
-                    dataCell.Value = cellValue;
+                    // If GetString() fails, try getting as Value
+                    var cellValue = dataCell.Value;
+                    if (!cellValue.IsBlank)
+                    {
+                        dataCell.Value = cellValue.ToString() ?? "";
+                    }
                 }
             }
         }
