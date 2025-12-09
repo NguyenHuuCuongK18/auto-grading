@@ -2057,7 +2057,9 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(exp.Status))
                     {
                         var actualStatus = matchingPacket.Status ?? "";
-                        if (!actualStatus.Contains(exp.Status, StringComparison.OrdinalIgnoreCase))
+                        // Use StartsWith for status code matching to avoid false positives
+                        // e.g., expected "200" matches "200 OK" but not "404" or "520"
+                        if (!actualStatus.StartsWith(exp.Status, StringComparison.OrdinalIgnoreCase))
                         {
                             exactMatch = false;
                             mismatchReasons.Add($"Status: expected '{exp.Status}' but got '{actualStatus}'");
@@ -3376,7 +3378,7 @@ namespace SolutionGrader.Core.Services
                                 exactMatch = false;
                             if (!string.IsNullOrEmpty(expectedFlow.Method) && matchingPacket.Method != expectedFlow.Method)
                                 exactMatch = false;
-                            if (!string.IsNullOrEmpty(expectedFlow.Status) && !(matchingPacket.Status ?? "").Contains(expectedFlow.Status))
+                            if (!string.IsNullOrEmpty(expectedFlow.Status) && !(matchingPacket.Status ?? "").StartsWith(expectedFlow.Status, StringComparison.OrdinalIgnoreCase))
                                 exactMatch = false;
                             if (!string.IsNullOrEmpty(expectedFlow.HttpBody) && matchingPacket.HttpBody != expectedFlow.HttpBody)
                                 exactMatch = false;

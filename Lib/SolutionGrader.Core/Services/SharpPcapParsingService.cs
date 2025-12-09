@@ -186,6 +186,12 @@ public class SharpPcapParsingService
         };
     }
     
+    // HTTP method detection set for O(1) lookup performance
+    private static readonly HashSet<string> HttpMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ", "CONNECT ", "TRACE "
+    };
+    
     /// <summary>
     /// Check if payload data contains HTTP protocol signatures
     /// </summary>
@@ -193,12 +199,14 @@ public class SharpPcapParsingService
     {
         if (string.IsNullOrWhiteSpace(payloadData))
             return false;
-            
+        
         // Check for HTTP request methods at the start
-        var httpMethods = new[] { "GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ", "CONNECT ", "TRACE " };
-        foreach (var method in httpMethods)
+        // Extract first word (up to space) for efficient method matching
+        var firstWordEnd = payloadData.IndexOf(' ');
+        if (firstWordEnd > 0 && firstWordEnd < 10) // Method names are short
         {
-            if (payloadData.StartsWith(method, StringComparison.OrdinalIgnoreCase))
+            var firstWord = payloadData.Substring(0, firstWordEnd + 1); // Include space
+            if (HttpMethods.Contains(firstWord))
                 return true;
         }
         
@@ -295,10 +303,10 @@ public class SharpPcapParsingService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // If HTTP parsing fails, fall back to storing raw data
-            Console.WriteLine($"[SharpPcap] HTTP parsing error: {ex.Message}");
+            // Error is silently handled - packet will have cleaned payload data
             packet.Data = CleanPayloadData(payloadData);
         }
     }
