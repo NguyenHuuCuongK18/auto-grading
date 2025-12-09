@@ -556,30 +556,6 @@ namespace SolutionGrader.Core.Services
                     MoveSnapshotsToTCFolder(studentResultPath, tcResultPath, testCase.Name);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
-                    
-                    // CRITICAL: Truncate PCAP file AFTER test case completes (not before)
-                    // This ensures tcpdump has created the file and captured packets
-                    // Truncation prepares for next test case by clearing the capture file
-                    if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
-                    {
-                        try
-                        {
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Test case completed - truncating PCAP for next TC...");
-                            
-                            // Truncate the PCAP file in the monitor container
-                            var truncateCmd = $"docker exec {_currentMonitorContainer} sh -c 'truncate -s 0 /data/network_capture.pcap'";
-                            _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Truncated PCAP file (ready for next TC)");
-                            
-                            // Reset packet counter since PCAP file is now empty
-                            _lastParsedPacketCount = 0;
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Reset packet counter to 0");
-                        }
-                        catch (Exception ex)
-                        {
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] WARNING: Failed to truncate PCAP: {ex.Message}");
-                        }
-                    }
                 }
                 
                 // Calculate totals
@@ -3847,6 +3823,27 @@ namespace SolutionGrader.Core.Services
                 
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = packets.Count;
+                
+                // CRITICAL: Truncate PCAP after parsing if new packets were captured and graded
+                // This isolates network flows between stages (e.g., TC6 has flows in stage 3 AND stage 6)
+                // With all-or-nothing grading: only expected flows are checked, extra flows are ignored
+                if (newPackets.Count > 0 && !string.IsNullOrEmpty(_currentMonitorContainer))
+                {
+                    try
+                    {
+                        OnProgress($"[NetworkMonitor] Stage {currentStage}: Captured {newPackets.Count} new packets - truncating PCAP for next stage");
+                        var truncateCmd = $"docker exec {_currentMonitorContainer} sh -c 'truncate -s 0 /data/{pcapFileName}'";
+                        _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
+                        
+                        // Reset packet counter since PCAP file is now empty
+                        _lastParsedPacketCount = 0;
+                        OnProgress($"[NetworkMonitor] Stage {currentStage}: PCAP truncated and counter reset (ready for next stage with network flows)");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[NetworkMonitor] Stage {currentStage}: WARNING: Failed to truncate PCAP: {ex.Message}");
+                    }
+                }
                 
                 OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count}");
             }
