@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Windows;
 using SolutionGrader.UI.Models;
-using SolutionGrader.UI.Services;
 
 namespace SolutionGrader.UI
 {
@@ -10,16 +9,10 @@ namespace SolutionGrader.UI
     /// Setup window for configuring grading parameters.
     /// 
     /// This window is displayed first and allows the user to:
-    /// - Validate Docker images (ensures correct image is built from Dockerfile.unified)
     /// - Select the Submit folder containing student solutions
     /// - Select the Test Kit folder containing test cases
     /// - Select the save location for grading results
     /// - Configure project names and their roles (client/server) for DLL lookup
-    /// 
-    /// Docker Validation:
-    /// - CRITICAL: Validates that the Docker image has the correct entrypoint
-    /// - Detects when users have built with old Dockerfile instead of Dockerfile.unified
-    /// - Prevents the error: "exec /scripts/unified-entrypoint.sh: no such file or directory"
     /// 
     /// Project Configuration:
     /// - Users can specify 1 or 2 project names (e.g., Q1, Q2, Project11, Project12)
@@ -37,14 +30,11 @@ namespace SolutionGrader.UI
     public partial class SetupWindow : Window
     {
         private readonly GradingConfiguration _configuration;
-        private readonly DockerImageValidator _dockerValidator;
-        private bool _dockerValidationPassed = false;
 
         public SetupWindow()
         {
             InitializeComponent();
             _configuration = new GradingConfiguration();
-            _dockerValidator = new DockerImageValidator();
 
             // Initialize with default values - but roles are now flexible
             // Default to Project 1 being server (typically Q1 is server in many scenarios)
@@ -54,67 +44,6 @@ namespace SolutionGrader.UI
             
             // Initially hide role toggles until projects are specified
             UpdateRoleToggleVisibility();
-            
-            // Validate Docker images on startup
-            // Use fire-and-forget with exception handling to avoid blocking UI initialization
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await ValidateDockerImagesAsync();
-                }
-                catch (Exception ex)
-                {
-                    // Log error but don't crash - user can manually validate later
-                    System.Diagnostics.Debug.WriteLine($"Docker validation failed: {ex.Message}");
-                }
-            });
-        }
-
-        /// <summary>
-        /// Validates Docker images asynchronously and updates the UI.
-        /// </summary>
-        private async System.Threading.Tasks.Task ValidateDockerImagesAsync()
-        {
-            txtDockerStatus.Text = "Checking Docker images...";
-            txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Gray);
-            btnValidateDocker.IsEnabled = false;
-
-            try
-            {
-                var result = await _dockerValidator.ValidateImagesAsync();
-                
-                txtDockerStatus.Text = result.Message;
-                
-                if (result.IsValid)
-                {
-                    txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Green);
-                    _dockerValidationPassed = true;
-                }
-                else
-                {
-                    txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
-                    _dockerValidationPassed = false;
-                }
-            }
-            catch (Exception ex)
-            {
-                txtDockerStatus.Text = $"Error checking Docker images: {ex.Message}";
-                txtDockerStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
-                _dockerValidationPassed = false;
-            }
-            finally
-            {
-                btnValidateDocker.IsEnabled = true;
-            }
-        }
-
-        /// <summary>
-        /// Event handler for the Docker validation button.
-        /// </summary>
-        private async void ValidateDocker_Click(object sender, RoutedEventArgs e)
-        {
-            await ValidateDockerImagesAsync();
         }
 
         /// <summary>
@@ -208,21 +137,6 @@ namespace SolutionGrader.UI
 
         private void StartGrading_Click(object sender, RoutedEventArgs e)
         {
-            // Check Docker validation first
-            if (!_dockerValidationPassed)
-            {
-                System.Windows.MessageBox.Show(
-                    "Docker images validation has not passed.\n\n" +
-                    "Please click 'Check Docker Images' and resolve any issues before starting grading.\n\n" +
-                    "If the images are missing or incorrect, you need to rebuild them using:\n" +
-                    "  cd DockerImage\n" +
-                    "  bash build.sh",
-                    "Docker Validation Required",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-            
             // Update configuration with project names and roles
             // CRITICAL FIX: Set ALL properties BEFORE the automatic UpdateLegacyProperties() mapping
             // to ensure the mapping has complete information

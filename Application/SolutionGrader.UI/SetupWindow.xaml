@@ -116,41 +116,6 @@
                     Style="{StaticResource BrowseButton}"
                     Click="BrowseSaveFolder_Click"/>
             
-            <!-- Docker Validation Status -->
-            <Border Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" 
-                    BorderBrush="#DDDDDD" BorderThickness="1" 
-                    CornerRadius="5" Padding="15"
-                    Margin="0,0,0,15">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="10"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="10"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    
-                    <TextBlock Grid.Row="0" 
-                               Text="Docker Image Validation" 
-                               FontWeight="Bold" 
-                               FontSize="14"/>
-                    
-                    <TextBlock Grid.Row="2" 
-                               x:Name="txtDockerStatus"
-                               Text="Checking Docker images..."
-                               TextWrapping="Wrap"
-                               Foreground="#666666"
-                               FontSize="12"/>
-                    
-                    <Button Grid.Row="4" 
-                            x:Name="btnValidateDocker"
-                            Content="🔄 Check Docker Images"
-                            Padding="10,5"
-                            HorizontalAlignment="Left"
-                            Click="ValidateDocker_Click"/>
-                </Grid>
-            </Border>
-            
             <!-- Client/Server Configuration -->
             <Border Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3" 
                     BorderBrush="#DDDDDD" BorderThickness="1" 
