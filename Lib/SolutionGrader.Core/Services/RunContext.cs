@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 

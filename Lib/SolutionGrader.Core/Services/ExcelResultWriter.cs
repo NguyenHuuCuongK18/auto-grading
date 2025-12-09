@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using Domain.Entities.Docker.DockerSupporter.Entity;
-using SolutionGrader.Core.Models;
+using Domain.Models;
 
 namespace SolutionGrader.Core.Services
 {

@@ -1,3 +1,4 @@
+using Domain.Models;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;

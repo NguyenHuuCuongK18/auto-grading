@@ -128,8 +128,22 @@ case "$ACTION" in
         fi
         
         # Write input to the named pipe
-        # The client will immediately read this and process it
-        echo -e "${INPUT}" > /tmp/client_input
+        # CRITICAL: Use printf instead of echo to avoid issues with special characters
+        # The pipe keeper (sleep infinity > /tmp/client_input) holds the write end open
+        # to prevent EOF when client starts reading
+        #
+        # Use printf with explicit newline to ensure input is sent correctly:
+        # - Empty input: sends just newline (client continues waiting for more input)
+        # - Non-empty input: sends input + newline (client processes it)
+        if [ -z "$INPUT" ]; then
+            # Empty input: send newline without closing pipe
+            printf "\n" > /tmp/client_input
+            echo "[Control] Sent empty input (newline only) to named pipe"
+        else
+            # Non-empty: send input with newline  
+            printf "%s\n" "$INPUT" > /tmp/client_input
+            echo "[Control] Sent input with newline: '$INPUT'"
+        fi
         
         echo "[Control] Input sent successfully to named pipe"
         

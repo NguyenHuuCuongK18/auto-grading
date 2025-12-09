@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Domain.Models;
 using SolutionGrader.UI.Models;
 using SolutionGrader.Core.Services;
 
@@ -459,7 +460,7 @@ namespace SolutionGrader.UI.Services
                 
                 _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
                 
-                var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+                var dockerConfig = new DockerGradingConfig
                 {
                     // Component requirements (from Grade_Content or UI checkboxes)
                     HasClient = hasClient,
@@ -505,7 +506,7 @@ namespace SolutionGrader.UI.Services
                 StudentProgressUpdated?.Invoke(this, student);
 
                 // Step 4: Interpret results from DockerGradingResult
-                if (result.Passed || result.TotalMark > 0)
+                if (string.IsNullOrEmpty(result.ErrorMessage) || result.TotalMark > 0)
                 {
                     student.Status = GradingStatus.Success;
                     student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
@@ -815,7 +816,7 @@ namespace SolutionGrader.UI.Services
         {
             _logger.LogInfo("Disposing all Docker containers...");
             
-            var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+            var dockerConfig = new DockerGradingConfig
             {
                 DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
                 DockerNetwork = config.DockerNetwork ?? "auto-grading-network"

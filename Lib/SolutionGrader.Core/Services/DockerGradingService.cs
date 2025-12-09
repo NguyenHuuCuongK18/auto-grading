@@ -10,6 +10,7 @@ using ClosedXML.Excel;
 using EnvironmentBuilder.DockerCommand;
 using EnvironmentBuilder.CommandSupporter;
 using Domain.Entities.Docker.DockerSupporter.Entity;
+using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Helpers;
 using SolutionGrader.Core.Keywords;
@@ -216,6 +217,34 @@ namespace SolutionGrader.Core.Services
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
                 
+                // CRITICAL: Apply DefaultGradeContent from test kit to determine HasServer/HasClient
+                // This overrides the default behavior based on what the test kit expects students to submit
+                if (!string.IsNullOrEmpty(testKitConfig.DefaultGradeContent))
+                {
+                    OnProgress($"[TestKit] Applying DefaultGradeContent from test kit: {testKitConfig.DefaultGradeContent}");
+                    if (testKitConfig.DefaultGradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Students submit ONLY server - use golden client
+                        config.HasServer = true;
+                        config.HasClient = false;
+                        OnProgress($"[TestKit] Students submit SERVER only → HasServer=true, HasClient=false");
+                    }
+                    else if (testKitConfig.DefaultGradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Students submit ONLY client - use golden server
+                        config.HasServer = false;
+                        config.HasClient = true;
+                        OnProgress($"[TestKit] Students submit CLIENT only → HasServer=false, HasClient=true");
+                    }
+                    else // "Client/Server" or default
+                    {
+                        // Students submit BOTH - no golden needed
+                        config.HasServer = true;
+                        config.HasClient = true;
+                        OnProgress($"[TestKit] Students submit BOTH → HasServer=true, HasClient=true");
+                    }
+                }
+                
                 // CRITICAL FIX: Create unique database name for this student
                 // Format: {BaseName}_{StudentCode} to ensure isolation
                 var baseDatabaseName = testKitConfig.DatabaseName ?? "Library";
@@ -390,8 +419,7 @@ namespace SolutionGrader.Core.Services
                 
                 // Calculate totals
                 result.TotalMark = result.TestCaseResults.Sum(tc => tc.EarnedMark);
-                // CRITICAL FIX: Student passes ONLY if ALL test cases pass (not ANY)
-                result.Passed = result.TestCaseResults.All(tc => tc.Passed);
+                // Note: No "Passed" status at grading level - individual test cases have Pass/Fail
                 
                 // Write overall summary
                 await WriteOverallSummaryAsync(studentResultPath, result.TestCaseResults);
@@ -1799,7 +1827,16 @@ namespace SolutionGrader.Core.Services
                         var key = row.Cell(1).GetString()?.Trim();
                         var value = row.Cell(2).GetString()?.Trim();
                         if (key?.Equals("Protocol", StringComparison.OrdinalIgnoreCase) == true)
+                        {
                             tkConfig.Protocol = value ?? "TCP";
+                        }
+                        else if (key?.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            // Store Grade_Content from test kit root Header.xlsx
+                            // This determines whether students submit Server, Client, or Both
+                            tkConfig.DefaultGradeContent = value ?? "Client/Server";
+                            OnProgress($"[TestKit] Root Header.xlsx Grade_Content: {tkConfig.DefaultGradeContent}");
+                        }
                     }
                 }
             }
@@ -2503,19 +2540,19 @@ namespace SolutionGrader.Core.Services
             // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
             // We override the -w argument to use our custom filename
             
-            // CRITICAL: Capture on loopback interface specifically
+            // CRITICAL: Capture on loopback interface for localhost traffic
             // Client and server communicate via localhost (127.0.0.1) in unified container
-            // Using -i lo captures this traffic; -i any was capturing external eth0 instead
+            // Using -i lo is less noisy than -i any (which captures eth0 traffic too)
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
                            $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i lo -n -U -v -w /data/{pcapFileName}";  // CRITICAL: Write to /data/ (mounted volume)
+                           $"-i lo -n -U -w /data/{pcapFileName}";  // CRITICAL: -i lo for loopback, NO -v (breaks parser with multi-line format)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
-            OnProgress($"[Monitor] Capturing on loopback (lo) - ALL traffic (no port filter)");
+            OnProgress($"[Monitor] Capturing on loopback (lo) interface - localhost traffic only (less noisy than -i any)");
             OnProgress($"[Monitor] Output will be saved to: {pcapOutputPath}");
             
             try
@@ -3319,76 +3356,7 @@ namespace SolutionGrader.Core.Services
         }
     }
     
-    #region Model Classes
-    
-    /// <summary>
-    /// Configuration for Docker-based grading.
-    /// </summary>
-    public class DockerGradingConfig
-    {
-        /// <summary>
-        /// Whether the examiner expects the student to provide a CLIENT component.
-        /// If true, the grader will search for the client DLL in student's solution.
-        /// If false and a client is needed, use the golden client from Meta/Given/Client.
-        /// </summary>
-        public bool HasClient { get; set; } = true;
-        
-        /// <summary>
-        /// Whether the examiner expects the student to provide a SERVER component.
-        /// If true, the grader will search for the server DLL in student's solution.
-        /// If false and a server is needed, use the golden server from Meta/Given/Server.
-        /// </summary>
-        public bool HasServer { get; set; } = true;
-        
-        /// <summary>
-        /// Project name for the client DLL (e.g., "Project12" searches for "Project12.dll")
-        /// </summary>
-        public string ClientProjectName { get; set; } = "Project12";
-        
-        /// <summary>
-        /// Project name for the server DLL (e.g., "Project11" searches for "Project11.dll")
-        /// </summary>
-        public string ServerProjectName { get; set; } = "Project11";
-        
-        public int CodeContainerInternalPort { get; set; } = 8000;
-        public int CodeContainerHostPort { get; set; } = 8000;
-        public string DockerNetwork { get; set; } = "auto-grading-network";
-        
-        // Database container settings
-        public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
-        public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
-        public int DatabaseContainerInternalPort { get; set; } = 1433;
-        public int DatabaseContainerHostPort { get; set; } = 1434;
-        public string? DatabaseUsername { get; set; } = "sa";
-        public string? DatabasePassword { get; set; }
-        
-        /// <summary>
-        /// Total grading timeout in seconds (overall timeout for all test cases).
-        /// Default: 60 seconds.
-        /// </summary>
-        public int GradingTimeoutSeconds { get; set; } = 60;
-        
-        /// <summary>
-        /// Per-test-case timeout in seconds. If a test case takes longer than this,
-        /// it is stopped and marked as failed. Default: 15 seconds.
-        /// </summary>
-        public int TestCaseTimeoutSeconds { get; set; } = 15;
-        
-        /// <summary>
-        /// Enables DLL modification fallback when appsettings.json is not found.
-        /// When enabled and appsettings.json doesn't exist, the system will attempt to 
-        /// directly patch the compiled DLL files to set correct IP addresses and ports.
-        /// Default: false (disabled).
-        /// </summary>
-        public bool UseDllModificationFallback { get; set; } = false;
-        
-        /// <summary>
-        /// Image name for unified containers that run both client and server processes.
-        /// This image has supervisord installed for process management.
-        /// Default: "fptuxaes/aes-dotnet8-console:latest"
-        /// </summary>
-        public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
-    }
+    #region Internal Model Classes
     
     /// <summary>
     /// Test kit configuration loaded from Environment.xlsx and Header.xlsx.
@@ -3402,6 +3370,13 @@ namespace SolutionGrader.Core.Services
         public string DatabaseName { get; set; } = "Library";
         public string DatabasePassword { get; set; } = "";
         public string Protocol { get; set; } = "TCP";
+        
+        /// <summary>
+        /// Default Grade_Content from test kit root Header.xlsx Config sheet.
+        /// Determines what students submit: "Server", "Client", or "Client/Server".
+        /// This is used to automatically set HasServer and HasClient if not explicitly provided.
+        /// </summary>
+        public string DefaultGradeContent { get; set; } = "Client/Server";
         
         /// <summary>
         /// Path to the given/golden server DLL from Meta/Given/Server folder.
@@ -3443,91 +3418,13 @@ namespace SolutionGrader.Core.Services
         public string GradeContent { get; set; } = "Client/Server";
     }
     
-    internal class ExpectedNetworkFlow
+    public class ExpectedNetworkFlow
     {
         public int Stage { get; set; }
         public string? Flags { get; set; }
         public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
-    }
-    
-    /// <summary>
-    /// Result of Docker-based grading for a single student.
-    /// </summary>
-    public class DockerGradingResult
-    {
-        public string StudentCode { get; set; } = "";
-        public double TotalMark { get; set; }
-        public double MaxMark { get; set; }
-        public bool Passed { get; set; }
-        public string? ErrorMessage { get; set; }
-        public List<TestCaseResult> TestCaseResults { get; set; } = new();
-    }
-    
-    /// <summary>
-    /// Result of a single test case - matches SampleLogging format.
-    /// </summary>
-    public class TestCaseResult
-    {
-        public string TestCaseName { get; set; } = "";
-        public double EarnedMark { get; set; }
-        public double MaxMark { get; set; }
-        public bool Passed { get; set; }
-        public string? ErrorMessage { get; set; }
-        
-        /// <summary>Actions executed (StartClient, StartServer, Input, etc.) - for User sheet</summary>
-        public List<ActionRecord> Actions { get; set; } = new();
-        
-        /// <summary>Client console output comparisons - for Client sheet</summary>
-        public List<ComparisonResult> ClientComparisons { get; set; } = new();
-        
-        /// <summary>Server console output comparisons - for Server sheet</summary>
-        public List<ComparisonResult> ServerComparisons { get; set; } = new();
-        
-        /// <summary>Network flow comparisons - for Network sheet (expected vs actual)</summary>
-        public List<ComparisonResult> NetworkComparisons { get; set; } = new();
-        
-        /// <summary>Captured network packets - for Network sheet (raw captures)</summary>
-        public List<CapturedNetworkPacket> NetworkCaptures { get; set; } = new();
-    }
-    
-    /// <summary>
-    /// Action record for User sheet (StartClient, StartServer, Input, etc.)
-    /// </summary>
-    public class ActionRecord
-    {
-        public int Stage { get; set; }
-        public string? Input { get; set; }
-        public string? ActionType { get; set; }
-    }
-    
-    /// <summary>
-    /// Comparison result for console output or network - extended with SampleLogging fields.
-    /// </summary>
-    public class ComparisonResult
-    {
-        public string Source { get; set; } = "";
-        public int Stage { get; set; }
-        public string? Expected { get; set; }
-        public string? Actual { get; set; }
-        public bool Passed { get; set; }
-        
-        // Additional fields for SampleLogging format
-        public double PointsAwarded { get; set; }
-        public double PointsPossible { get; set; }
-        public double DurationMs { get; set; }
-        public string? Message { get; set; }
-    }
-    
-    
-    /// <summary>
-    /// Event arguments for grading progress updates.
-    /// </summary>
-    public class GradingProgressEventArgs : EventArgs
-    {
-        public string Message { get; }
-        public GradingProgressEventArgs(string message) => Message = message;
     }
     
     #endregion
