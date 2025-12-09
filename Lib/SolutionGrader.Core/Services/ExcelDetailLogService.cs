@@ -1049,6 +1049,8 @@ namespace SolutionGrader.Core.Services
                     GradingKeywords.Col_ActualSourceRole,
                     GradingKeywords.Col_ActualDestRole,
                     GradingKeywords.Col_ActualData,
+                    GradingKeywords.Col_ActualSourcePort,
+                    GradingKeywords.Col_ActualDestPort,
                     GradingKeywords.Col_NetworkResult
                 });
                 var hdr = GetHeaderIndex(networkWs);
@@ -1216,6 +1218,8 @@ namespace SolutionGrader.Core.Services
             int actualSrcRoleCol = TryGetColumnIndex(hdr, "ActualSourceRole", "Actual_SourceRole");
             int actualDstRoleCol = TryGetColumnIndex(hdr, "ActualDestRole", "Actual_DestinationRole");
             int actualDataCol = TryGetColumnIndex(hdr, "ActualData", "Actual_Data");
+            int actualSrcPortCol = TryGetColumnIndex(hdr, "ActualSourcePort", "Actual_SourcePort");
+            int actualDstPortCol = TryGetColumnIndex(hdr, "ActualDestPort", "Actual_DestinationPort");
             int resultCol = TryGetColumnIndex(hdr, "NetworkResult", "Result");
             
             // Get expected data column indices for comparison - also support both conventions
@@ -1255,6 +1259,10 @@ namespace SolutionGrader.Core.Services
                         ws.Cell(row.RowNumber(), actualSrcRoleCol).Value = actualPacket.SourceRole ?? "";
                     if (actualDstRoleCol > 0)
                         ws.Cell(row.RowNumber(), actualDstRoleCol).Value = actualPacket.DestinationRole ?? "";
+                    if (actualSrcPortCol > 0)
+                        ws.Cell(row.RowNumber(), actualSrcPortCol).Value = actualPacket.SourcePort;
+                    if (actualDstPortCol > 0)
+                        ws.Cell(row.RowNumber(), actualDstPortCol).Value = actualPacket.DestinationPort;
                     if (actualDataCol > 0 && !string.IsNullOrEmpty(actualPacket.Data))
                     {
                         var dataPreview = actualPacket.Data.Length > PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS 

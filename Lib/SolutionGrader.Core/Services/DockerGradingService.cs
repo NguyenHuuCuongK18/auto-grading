@@ -3263,7 +3263,8 @@ namespace SolutionGrader.Core.Services
                 // Use --rm to auto-remove container after execution
                 // Mount snapshot directory as read-only volume
                 // The network-monitor image has ENTRYPOINT ["tcpdump"], so we just pass the arguments
-                var dockerCmd = $"docker run --rm -v \"{snapshotDir}:/pcap:ro\" fptuxaes/network-monitor:latest -r /pcap/{snapshotFile} -nn -tttt tcp";
+                // -A flag shows ASCII payload data for actual content extraction (not just byte count)
+                var dockerCmd = $"docker run --rm -v \"{snapshotDir}:/pcap:ro\" fptuxaes/network-monitor:latest -r /pcap/{snapshotFile} -nn -tttt -A tcp";
                 
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Running: {dockerCmd}");
                 
@@ -3295,17 +3296,17 @@ namespace SolutionGrader.Core.Services
                 
                 foreach (var line in newPackets)
                 {
-                    if (string.IsNullOrWhiteSpace(line) || !line.Contains(" > ")) continue;
+                    if (string.IsNullOrWhiteSpace(line)) continue;
                     
                     try
                     {
-                        // Parse packet details
+                        // Parse packet details (handles multi-line payload with -A flag)
                         var packet = ParseTcpdumpLine(line, currentStage, port);
                         if (packet != null)
                         {
                             // Add to RunContext for this stage
                             var studentCode = _currentStudentCode ?? "";
-                            OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}");
+                            OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
                             _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
                             
                             // Verify it was added
@@ -3321,6 +3322,23 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
+                // Finalize any remaining packet being parsed
+                if (_currentParsingPacket != null)
+                {
+                    var collectedPayload = _currentPayloadBuffer.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(collectedPayload))
+                    {
+                        _currentParsingPacket.Data = collectedPayload;
+                    }
+                    
+                    var studentCode = _currentStudentCode ?? "";
+                    OnProgress($"[NetworkMonitor] DEBUG: Finalizing last packet - StudentCode='{studentCode}', Stage={currentStage}, Flags={_currentParsingPacket.Flags}, Data={_currentParsingPacket.Data ?? "(empty)"}");
+                    _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), _currentParsingPacket);
+                    
+                    _currentParsingPacket = null;
+                    _currentPayloadBuffer.Clear();
+                }
+                
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = lines.Length;
                 
@@ -3333,20 +3351,84 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Current packet being parsed (for multi-line tcpdump -A output).
+        /// When tcpdump uses -A flag, payload appears on lines after the header line.
+        /// </summary>
+        private CapturedNetworkPacket? _currentParsingPacket = null;
+        private StringBuilder _currentPayloadBuffer = new StringBuilder();
+        
+        /// <summary>
         /// Parse a single tcpdump output line into CapturedNetworkPacket.
-        /// Example line: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
+        /// With -A flag, tcpdump outputs:
+        /// Line 1: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [P.], seq 1:5, ack 1, win 512, length 4"
+        /// Line 2+: ASCII payload data (hex offset + printable chars)
+        /// Example payload lines:
+        ///   0x0000:  4500 0038 ...   E..8...
+        ///   0x0010:  ... S123       (actual data)
         /// </summary>
         private CapturedNetworkPacket? ParseTcpdumpLine(string line, int stage, int expectedPort)
         {
+            // Check if this is a payload line (hex dump format from -A flag)
+            // Payload lines start with spaces/tabs followed by 0x or just hex data
+            // Example: "	0x0000:  4500 0038 ..." or data continuation lines
+            if (line.TrimStart().StartsWith("0x") || (line.StartsWith("\t") || line.StartsWith(" ")) && !line.Contains(" IP "))
+            {
+                // This is a payload line for the current packet
+                if (_currentParsingPacket != null)
+                {
+                    // Extract ASCII data from the hex dump line
+                    // Format: "	0x0000:  4500 0038 ...  E..8...S123" 
+                    // We want the part after the hex bytes (the ASCII representation)
+                    var parts = line.Split(new[] { "  " }, StringSplitOptions.None);
+                    if (parts.Length >= 2)
+                    {
+                        // Last part typically contains ASCII representation
+                        var asciiPart = parts[parts.Length - 1].Trim();
+                        // Filter out non-printable characters but keep readable text
+                        var readable = new string(asciiPart.Where(c => c >= 32 && c < 127).ToArray());
+                        if (!string.IsNullOrWhiteSpace(readable))
+                        {
+                            _currentPayloadBuffer.Append(readable);
+                        }
+                    }
+                }
+                return null; // Don't return yet, still collecting payload
+            }
+            
+            // If we were parsing a packet and hit a new header line, finalize the previous packet
+            CapturedNetworkPacket? completedPacket = null;
+            if (_currentParsingPacket != null)
+            {
+                // Finalize the previous packet with collected payload
+                var collectedPayload = _currentPayloadBuffer.ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(collectedPayload))
+                {
+                    _currentParsingPacket.Data = collectedPayload;
+                }
+                completedPacket = _currentParsingPacket;
+                _currentParsingPacket = null;
+                _currentPayloadBuffer.Clear();
+            }
+            
+            // Now parse the new header line
             // Extract timestamp
             var timestampMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)");
-            DateTime timestamp = timestampMatch.Success && DateTime.TryParse(timestampMatch.Groups[1].Value, out var dt) 
+            if (!timestampMatch.Success)
+            {
+                // Not a header line, return the completed packet if any
+                return completedPacket;
+            }
+            
+            DateTime timestamp = DateTime.TryParse(timestampMatch.Groups[1].Value, out var dt) 
                 ? dt 
                 : DateTime.Now;
             
             // Extract source and destination: "IP 127.0.0.1.47044 > 127.0.0.1.4000:"
             var addressMatch = System.Text.RegularExpressions.Regex.Match(line, @"IP (\d+\.\d+\.\d+\.\d+)\.(\d+) > (\d+\.\d+\.\d+\.\d+)\.(\d+)");
-            if (!addressMatch.Success) return null;
+            if (!addressMatch.Success)
+            {
+                return completedPacket;
+            }
             
             var srcIp = addressMatch.Groups[1].Value;
             var srcPort = int.Parse(addressMatch.Groups[2].Value);
@@ -3367,11 +3449,11 @@ namespace SolutionGrader.Core.Services
             }
             else
             {
-                // Not related to our expected port
-                return null;
+                // Not related to our expected port, return completed packet
+                return completedPacket;
             }
             
-            // Extract flags: [S] = SYN, [S.] = SYN-ACK, [.] = ACK, [P.] = PSH-ACK, [F.] = FIN-ACK, [R] = RST
+            // Extract flags: [S] = SYN, [S.] = SYN-ACK, [.] = ACK, [P.] = PSH-ACK, [F.] = FIN-ACK, [R] = RST, [R.] = RST-ACK
             string flags = "UNKNOWN";
             string state = "";
             
@@ -3385,7 +3467,7 @@ namespace SolutionGrader.Core.Services
                 flags = "SYN-ACK";
                 state = "SYN_RECEIVED";
             }
-            else if (line.Contains("Flags [.]") && !line.Contains("Flags [P.]") && !line.Contains("Flags [F.]"))
+            else if (line.Contains("Flags [.]") && !line.Contains("Flags [P.]") && !line.Contains("Flags [F.]") && !line.Contains("Flags [R.]"))
             {
                 flags = "ACK";
                 state = "ESTABLISHED";
@@ -3400,20 +3482,25 @@ namespace SolutionGrader.Core.Services
                 flags = "FIN-ACK";
                 state = "FIN_WAIT";
             }
+            else if (line.Contains("Flags [R.]"))
+            {
+                // RST+ACK - server rejecting connection
+                flags = "RST-ACK";
+                state = "RESET";
+            }
             else if (line.Contains("Flags [R]"))
             {
+                // RST only
                 flags = "RST";
                 state = "RESET";
             }
             
-            // Extract payload (if any)
-            // Look for "length N" at the end
+            // Extract payload length (for logging/debugging)
             var lengthMatch = System.Text.RegularExpressions.Regex.Match(line, @"length (\d+)");
-            string data = lengthMatch.Success && int.Parse(lengthMatch.Groups[1].Value) > 0 
-                ? $"{lengthMatch.Groups[1].Value} bytes"
-                : "";
+            int payloadLength = lengthMatch.Success ? int.Parse(lengthMatch.Groups[1].Value) : 0;
             
-            return new CapturedNetworkPacket
+            // Create new packet for this header line
+            var newPacket = new CapturedNetworkPacket
             {
                 Stage = stage,
                 Timestamp = timestamp,
@@ -3421,10 +3508,31 @@ namespace SolutionGrader.Core.Services
                 State = state,
                 SourceRole = srcRole,
                 DestinationRole = dstRole,
-                Data = data,
+                Data = "", // Will be filled by subsequent payload lines or left empty
                 SourcePort = srcPort,
                 DestinationPort = dstPort
             };
+            
+            // If this packet has payload, start collecting it
+            if (payloadLength > 0)
+            {
+                _currentParsingPacket = newPacket;
+                _currentPayloadBuffer.Clear();
+                // Return the completed previous packet if any
+                return completedPacket;
+            }
+            else
+            {
+                // No payload, return this packet immediately (and the completed one if exists)
+                // If there was a previous packet, we need to handle it
+                if (completedPacket != null)
+                {
+                    // We can only return one packet at a time, so store the new one for next call
+                    _currentParsingPacket = newPacket;
+                    return completedPacket;
+                }
+                return newPacket;
+            }
         }
         
 
