@@ -71,6 +71,7 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
+        private readonly PcapParsingService _pcapParser; // PCAP parsing service (single responsibility)
         private string? _currentStudentCode; // Track current student for logging
         
         // Network monitoring for sidecar pattern
@@ -96,6 +97,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
+            _pcapParser = new PcapParsingService(); // Initialize PCAP parser
         }
         
         /// <summary>
@@ -3435,7 +3437,7 @@ namespace SolutionGrader.Core.Services
                     try
                     {
                         // Parse packet details (handles multi-line payload with -A flag)
-                        var packet = ParseTcpdumpLine(line, currentStage, port);
+                        var packet = _pcapParser.ParseTcpdumpLine(line, currentStage, port);
                         if (packet != null)
                         {
                             // Add to RunContext for this stage
@@ -3457,20 +3459,12 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Finalize any remaining packet being parsed
-                if (_currentParsingPacket != null)
+                var finalPacket = _pcapParser.FinalizeCurrentPacket();
+                if (finalPacket != null)
                 {
-                    var collectedPayload = _currentPayloadBuffer.ToString().Trim();
-                    if (!string.IsNullOrWhiteSpace(collectedPayload))
-                    {
-                        _currentParsingPacket.Data = collectedPayload;
-                    }
-                    
                     var studentCode = _currentStudentCode ?? "";
-                    OnProgress($"[NetworkMonitor] DEBUG: Finalizing last packet - StudentCode='{studentCode}', Stage={currentStage}, Flags={_currentParsingPacket.Flags}, Data={_currentParsingPacket.Data ?? "(empty)"}");
-                    _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), _currentParsingPacket);
-                    
-                    _currentParsingPacket = null;
-                    _currentPayloadBuffer.Clear();
+                    OnProgress($"[NetworkMonitor] DEBUG: Finalizing last packet - StudentCode='{studentCode}', Stage={currentStage}, Flags={finalPacket.Flags}, Data={finalPacket.Data ?? "(empty)"}");
+                    _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), finalPacket);
                 }
                 
                 // Update counter to skip these packets next time
