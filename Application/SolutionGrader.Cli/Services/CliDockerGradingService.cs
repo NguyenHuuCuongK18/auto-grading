@@ -425,36 +425,33 @@ namespace SolutionGrader.Cli.Services
                 // Once allocated, a port is NEVER recycled during or between sessions (unless manually cleared)
                 // This prevents race conditions where a port could be reused while still in use by another student
                 //
-                // Pass the starting port from Environment.xlsx to ensure consistent port allocation
-                // Based on test-grader reference: https://github.com/NguyenHuuCuongK18/test-grader.git
-                using var portAllocator = new PortAllocator(startingPortFromEnv);
-                int allocatedPort = portAllocator.AllocatePort();
+                // PORT ALLOCATION REMOVED: All students use the same internal port
+                // Docker containers are isolated, so there's no port conflict
+                // DLL modification ensures all students use the same internal port (from Environment.xlsx)
+                // No need for PortAllocator - unified containers communicate via localhost
                 
-                if (allocatedPort == -1)
-                {
-                    Console.WriteLine($"[ERROR] Failed to allocate port for student {student.StudentCode}");
-                    result.ErrorMessage = "Failed to allocate port for grading";
-                    return result;
-                }
+                // Use the starting port from Environment.xlsx as the fixed internal port for ALL students
+                int internalPort = startingPortFromEnv;
+                Console.WriteLine($"[{student.StudentCode}] Using unified internal port: {internalPort} (no port allocation needed - Docker isolated)");
 
                 // Create student result path - simplified to: {saveResultFolder}/{studentCode}
                 // This matches the UI's simplified structure
                 var studentResultPath = Path.Combine(config.SaveResultFolderPath, student.StudentCode);
                 Directory.CreateDirectory(studentResultPath);
 
-                // Build DockerGradingConfig with DYNAMICALLY ALLOCATED port
-                // Internal and external ports MUST MATCH for direct mapping (critical for network monitoring)
-                // Example: Student 1 gets port 8000 (8000:8000), Student 2 gets port 8001 (8001:8001)
+                // Build DockerGradingConfig with FIXED port (same for all students)
+                // Docker containers are isolated, so all students can use the same internal port
+                // Example: All students use port 4000 internally (no conflicts due to container isolation)
                 var dockerConfig = new DockerGradingConfig
                 {
                     HasClient = config.HasClient,
                     HasServer = config.HasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
-                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
-                    // This ensures each student's client reaches their own server via host.docker.internal
-                    CodeContainerInternalPort = allocatedPort,
-                    CodeContainerHostPort = allocatedPort,
+                    // ALL students use the same internal port (no allocation)
+                    // Docker containers are isolated, so no conflicts
+                    CodeContainerInternalPort = internalPort,
+                    CodeContainerHostPort = internalPort,
                     DockerNetwork = config.DockerNetwork,
                     DatabaseImageName = config.DatabaseImageName,
                     // Use same database container name for all students (shared container, different database instances)
@@ -472,7 +469,7 @@ namespace SolutionGrader.Cli.Services
                     UseDllModificationFallback = config.UseDllModificationFallback
                 };
 
-                Console.WriteLine($"[{student.StudentCode}] Using dynamically allocated port: {allocatedPort}");
+                // Port logging already done above - no need to repeat
 
                 // Create the SHARED services (same as SolutionGrader.UI)
                 IRunContext runContext = new RunContext();

@@ -2404,15 +2404,19 @@ namespace SolutionGrader.Core.Services
             }
             
             // Apply config overrides
-            OnProgress($"[Port Config] LoadTestKitConfig - Before override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
-            OnProgress($"[Port Config] LoadTestKitConfig - Config values: config.CodeContainerInternalPort={config.CodeContainerInternalPort}, config.CodeContainerHostPort={config.CodeContainerHostPort}");
+            // CRITICAL: Do NOT override with allocated port - all students use same internal port (4000)
+            // Docker containers are isolated, so there's no port conflict
+            // The allocated port is no longer needed since we removed port allocation logic
+            OnProgress($"[Port Config] LoadTestKitConfig - TestKit default: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}");
+            OnProgress($"[Port Config] LoadTestKitConfig - Allocated port (IGNORED): config.CodeContainerInternalPort={config.CodeContainerInternalPort}");
             
-            if (config.CodeContainerInternalPort > 0)
-                tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
-            if (config.CodeContainerHostPort > 0)
-                tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
+            // Do NOT override - keep the testkit default (4000)
+            // if (config.CodeContainerInternalPort > 0)
+            //     tkConfig.CodeContainerInternalPort = config.CodeContainerInternalPort;
+            // if (config.CodeContainerHostPort > 0)
+            //     tkConfig.CodeContainerHostPort = config.CodeContainerHostPort;
             
-            OnProgress($"[Port Config] LoadTestKitConfig - After override: tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}, tkConfig.CodeContainerHostPort={tkConfig.CodeContainerHostPort}");
+            OnProgress($"[Port Config] LoadTestKitConfig - Final (using testkit default): tkConfig.CodeContainerInternalPort={tkConfig.CodeContainerInternalPort}");
             
             return tkConfig;
         }
