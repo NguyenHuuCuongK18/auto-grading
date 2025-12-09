@@ -539,6 +539,10 @@ namespace SolutionGrader.Core.Services
                     Directory.CreateDirectory(tcResultPath);
                     await WriteTestCaseResultAsync(tcResultPath, testCase.Name, testCase.Path, tcResult);
                     
+                    // Move per-stage PCAP snapshots to TC folder for better organization
+                    // Format: snapshot_TC3_stage1.pcap -> TC3/snapshot_TC3_stage1.pcap
+                    MoveSnapshotsToTCFolder(studentResultPath, tcResultPath, testCase.Name);
+                    
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
                 
@@ -3607,6 +3611,47 @@ namespace SolutionGrader.Core.Services
             ws.Columns().AdjustToContents();
             wb.SaveAs(summaryPath);
             await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Move per-stage PCAP snapshots from student root to TC-specific folder.
+        /// This organizes network captures per test case for easier debugging.
+        /// Format: snapshot_TC3_stage1.pcap -> TC3/snapshot_TC3_stage1.pcap
+        /// </summary>
+        private void MoveSnapshotsToTCFolder(string studentResultPath, string tcResultPath, string testCaseName)
+        {
+            try
+            {
+                // Find all snapshot files for this test case
+                var snapshotPattern = $"snapshot_{testCaseName}_stage*.pcap";
+                var snapshotFiles = Directory.GetFiles(studentResultPath, snapshotPattern, SearchOption.TopDirectoryOnly);
+                
+                if (snapshotFiles.Length > 0)
+                {
+                    OnProgress($"[TC Organization] Moving {snapshotFiles.Length} snapshot files to {testCaseName} folder...");
+                    
+                    foreach (var snapshotFile in snapshotFiles)
+                    {
+                        var fileName = Path.GetFileName(snapshotFile);
+                        var destPath = Path.Combine(tcResultPath, fileName);
+                        
+                        try
+                        {
+                            // Move (not copy) to avoid duplication
+                            File.Move(snapshotFile, destPath, overwrite: true);
+                            OnProgress($"[TC Organization] Moved {fileName} to {testCaseName}/");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[TC Organization] WARNING: Failed to move {fileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[TC Organization] WARNING: Failed to move snapshots for {testCaseName}: {ex.Message}");
+            }
         }
         
         #endregion
