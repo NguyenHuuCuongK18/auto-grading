@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace DotNetEnvironmentManagerHelper.Test.helpers
 {
-    internal class FileHelper
+    public class FileHelper
     {
         private FileHelper() { }
 
@@ -29,6 +29,16 @@ namespace DotNetEnvironmentManagerHelper.Test.helpers
         public static string GetResourcePath(string resourceName)
         {
             string fullPath = Path.Combine(GetProjectRootPath(), ResourceConstant.ResourceFolderName, resourceName);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+            return string.Empty;
+        }
+
+        public static string GetResourcePath(string resourceName, string subfolder)
+        {
+            string fullPath = Path.Combine(GetProjectRootPath(), ResourceConstant.ResourceFolderName, subfolder, resourceName);
             if (File.Exists(fullPath))
             {
                 return fullPath;

@@ -1,4 +1,4 @@
-﻿using Domain.Entities.Main;
+﻿using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,10 +11,11 @@ namespace DotNetEnvironmentManagerHelper.Test.helpers
     {
         private DataHelper() { }
 
-        public static global::Domain.Entities.Main.Environment CreateDummyEnvironment()
+        public static string? ReadConnString(JObject json)
         {
-
-            return null;
+            var connStrings = json["ConnectionStrings"]?["MyCnn"]?.ToString();
+            if (!string.IsNullOrEmpty(connStrings)) return connStrings;
+            return json["ConnectionString"]?["MyCnn"]?.ToString();
         }
     }
 }

@@ -10,18 +10,26 @@ namespace Common.commons
     {
         public static readonly string AppSettingsTemplate = """
         {
-          "IpAddress": "127.0.0.1",
-          "Port": "5000"
+          "IpAddress": "{0}",
+          "Port": "{1}"
         }
         """;
 
         public static readonly string AppSettingsWithDBTemplate = """
         {
-          "IpAddress": "127.0.0.1",
-          "Port": "5000",
-          "ConnectionString": {
-            "MyCnn" : "licmaballs"
+          "IpAddress": "{0}",
+          "Port": "{1}",
+          "ConnectionStrings": {
+            "MyCnn" : "{2}"
           }
+        }
+        """;
+
+        public static readonly string AppSettingsWithDBTemplateNoCnn = """
+        {
+          "IpAddress": "{0}",
+          "Port": "{1}",
+          "ConnectionStrings": {}
         }
         """;
     }

@@ -7,33 +7,25 @@ using System.Threading.Tasks;
 
 namespace DotNetEnvironmentManagerHelper.Test.helpers
 {
-    internal class TestInitHelper
+    public class TestInitHelper
     {
         private TestInitHelper() { }
 
         public static void ResetAllResources(bool useDB)
         {
-            string clientAppSettingsPath = FileHelper.GetResourcePath(ResourceConstant.ClientAppSettingsName);
-            string serverAppSettingsPath = FileHelper.GetResourcePath(ResourceConstant.ServerAppSettingsName);
-
-            if (string.IsNullOrEmpty(clientAppSettingsPath) || string.IsNullOrEmpty(serverAppSettingsPath))
-            {
-                clientAppSettingsPath = FileHelper.CreateResourcePath(ResourceConstant.ClientAppSettingsName);
-                serverAppSettingsPath = FileHelper.CreateResourcePath(ResourceConstant.ServerAppSettingsName);
-            }
+            string clientAppSettingsPath = FileHelper.GetResourcePath(ResourceConstant.AppSettingsName, ResourceConstant.ClientResourceFolderName);
+            string serverAppSettingsPath = FileHelper.GetResourcePath(ResourceConstant.AppSettingsName, ResourceConstant.ServerResourceFolderName);
 
             if (useDB)
             {
-                FileHelper.WriteToFile(clientAppSettingsPath, ResouceTemplate.AppSettingsTemplate);
                 FileHelper.WriteToFile(serverAppSettingsPath, ResouceTemplate.AppSettingsWithDBTemplate);
             }
             else
             {
-                FileHelper.WriteToFile(clientAppSettingsPath, ResouceTemplate.AppSettingsTemplate);
                 FileHelper.WriteToFile(serverAppSettingsPath, ResouceTemplate.AppSettingsTemplate);
             }
+
+            FileHelper.WriteToFile(clientAppSettingsPath, ResouceTemplate.AppSettingsTemplate);
         }
-
-
     }
 }

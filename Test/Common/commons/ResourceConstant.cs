@@ -13,7 +13,9 @@ namespace Common.commons
         
         public static readonly string ResourceFolderName = "resources";
 
-        public static readonly string ClientAppSettingsName = "client-appsettings.json";
-        public static readonly string ServerAppSettingsName = "server-appsettings.json";
+        public static readonly string ClientResourceFolderName = "client";
+        public static readonly string ServerResourceFolderName = "server";
+
+        public static readonly string AppSettingsName = "appsettings.json";
     }
 }
