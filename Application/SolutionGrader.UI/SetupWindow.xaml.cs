@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using SolutionGrader.UI.Models;
+using SolutionGrader.UI.Services;
 
 namespace SolutionGrader.UI
 {
@@ -9,10 +10,16 @@ namespace SolutionGrader.UI
     /// Setup window for configuring grading parameters.
     /// 
     /// This window is displayed first and allows the user to:
+    /// - Validate Docker images (ensures correct image is built from Dockerfile.unified)
     /// - Select the Submit folder containing student solutions
     /// - Select the Test Kit folder containing test cases
     /// - Select the save location for grading results
     /// - Configure project names and their roles (client/server) for DLL lookup
+    /// 
+    /// Docker Validation:
+    /// - CRITICAL: Validates that the Docker image has the correct entrypoint
+    /// - Detects when users have built with old Dockerfile instead of Dockerfile.unified
+    /// - Prevents the error: "exec /scripts/unified-entrypoint.sh: no such file or directory"
     /// 
     /// Project Configuration:
     /// - Users can specify 1 or 2 project names (e.g., Q1, Q2, Project11, Project12)
@@ -30,11 +37,14 @@ namespace SolutionGrader.UI
     public partial class SetupWindow : Window
     {
         private readonly GradingConfiguration _configuration;
+        private readonly DockerImageValidator _dockerValidator;
+        private bool _dockerValidationPassed = false;
 
         public SetupWindow()
         {
             InitializeComponent();
             _configuration = new GradingConfiguration();
+            _dockerValidator = new DockerImageValidator();
 
             // Initialize with default values - but roles are now flexible
             // Default to Project 1 being server (typically Q1 is server in many scenarios)
@@ -44,6 +54,9 @@ namespace SolutionGrader.UI
             
             // Initially hide role toggles until projects are specified
             UpdateRoleToggleVisibility();
+            
+            // Validate Docker images on startup
+            _ = ValidateDockerImagesAsync();
         }
 
         /// <summary>
