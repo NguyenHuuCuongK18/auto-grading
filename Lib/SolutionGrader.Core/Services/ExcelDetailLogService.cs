@@ -1405,30 +1405,21 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
                 return false;
             
-            // Normalize flags by splitting on both comma and hyphen
-            // Template format: "SYN, ACK" or "PSH, ACK"
-            // Actual format: "SYN-ACK" or "PSH-ACK"
-            // Both should be treated as equivalent
-            var expectedFlags = expected.Split(new[] { ',', '-' }, StringSplitOptions.RemoveEmptyEntries)
+            // Normalize flags by splitting on all common delimiters: comma, period, hyphen, space
+            // Template formats: "SYN, ACK" or "SYN.ACK" or "SYN-ACK" or "SYN ACK"
+            // All should be treated as equivalent sets of flags
+            var expectedFlags = expected.Split(new[] { ',', '.', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
-                .OrderBy(f => f)
-                .ToList();
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
             
-            var actualFlags = actual.Split(new[] { ',', '-' }, StringSplitOptions.RemoveEmptyEntries)
+            var actualFlags = actual.Split(new[] { ',', '.', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
-                .OrderBy(f => f)
-                .ToList();
+                .Where(f => !string.IsNullOrEmpty(f))
+                .ToHashSet();
             
-            if (expectedFlags.Count != actualFlags.Count)
-                return false;
-            
-            for (int i = 0; i < expectedFlags.Count; i++)
-            {
-                if (expectedFlags[i] != actualFlags[i])
-                    return false;
-            }
-            
-            return true;
+            // Use set equality - order doesn't matter, just the flags present
+            return expectedFlags.SetEquals(actualFlags);
         }
         
         /// <summary>
