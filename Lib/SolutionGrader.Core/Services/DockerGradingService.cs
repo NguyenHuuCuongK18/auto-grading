@@ -414,6 +414,18 @@ namespace SolutionGrader.Core.Services
                     Directory.CreateDirectory(tcResultPath);
                     await WriteTestCaseResultAsync(tcResultPath, testCase.Name, testCase.Path, tcResult);
                     
+                    // Export logs for THIS test case to its own directory
+                    try
+                    {
+                        OnProgress($"[Unified] Exporting logs for {testCase.Name} to {tcResultPath}...");
+                        await ExportLogsForTestCaseAsync(unifiedContainer, tcResultPath, testCase.Name);
+                        OnProgress($"[Unified] Logs exported for {testCase.Name}");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[Unified] WARNING: Failed to export logs for {testCase.Name}: {ex.Message}");
+                    }
+                    
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
                 
@@ -436,17 +448,8 @@ namespace SolutionGrader.Core.Services
             }
             finally
             {
-                // UNIFIED CONTAINER: Export per-stage log files from container to student directory
-                try
-                {
-                    OnProgress($"[Unified] Exporting per-stage log files from container...");
-                    await ExportLogsFromUnifiedContainerAsync(unifiedContainer, studentResultPath);
-                    OnProgress($"[Unified] Per-stage log files exported successfully");
-                }
-                catch (Exception ex)
-                {
-                    OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
-                }
+                // NOTE: Logs are now exported per-test-case (inside the loop above)
+                // No need for global export here anymore
                 
                 // Cleanup network monitor container (sidecar pattern)
                 var monitorContainer = $"ag-monitor-{studentCode}";
@@ -1152,8 +1155,9 @@ namespace SolutionGrader.Core.Services
                 }).ToList();
                 
                 // Execute actions and capture outputs - UNIFIED CONTAINER (default)
+                // Pass test case name to include in log file paths
                 var outputs = await ExecuteActionsForUnifiedContainerAsync(
-                    actions, config, unifiedContainer, ct);
+                    actions, config, unifiedContainer, testCase.Name, ct);
                 var clientOutputs = outputs.Item1;
                 var serverOutputs = outputs.Item2;
                 
@@ -1313,12 +1317,14 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Execute test case actions for UNIFIED container (client and server in same container).
         /// Uses unified-control.sh script to start/stop processes via supervisord.
-        /// Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// Logs are written per stage to /apps/server/server-{testCaseName}-stage-N.log and /apps/client/client-{testCaseName}-stage-N.log.
+        /// Test case name is included in file paths to preserve logs across multiple test cases.
         /// </summary>
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsForUnifiedContainerAsync(
             List<(int Stage, string Input, string Action)> actions,
             DockerGradingConfig config,
             string unifiedContainer,
+            string testCaseName,
             CancellationToken ct)
         {
             var clientOutputs = new Dictionary<int, string>();
@@ -1337,30 +1343,33 @@ namespace SolutionGrader.Core.Services
                 {
                     case "STARTSERVER":
                         // Use unified-control.sh to start server via supervisord
-                        var startServerCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartServer {stage}";
+                        // Pass test case name to include in log file paths
+                        var startServerCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartServer {stage} {testCaseName}";
                         _commandExecutor.RunCommand(startServerCmd, null, null, 30000);
                         
                         await Task.Delay(StartupDelayMs);
                         
-                        OnProgress($"    Server started for stage {stage} (logging to /apps/server/server-stage-{stage}.log)");
+                        OnProgress($"    Server started for stage {stage} (logging to /apps/server/server-{testCaseName}-stage-{stage}.log)");
                         break;
                         
                     case "STARTCLIENT":
                         // Use unified-control.sh to start client via supervisord
-                        var startClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartClient {stage}";
+                        // Pass test case name to include in log file paths
+                        var startClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StartClient {stage} {testCaseName}";
                         _commandExecutor.RunCommand(startClientCmd, null, null, 30000);
                         
                         await Task.Delay(StartupDelayMs);
                         
-                        OnProgress($"    Client started for stage {stage} (logging to /apps/client/client-stage-{stage}.log)");
+                        OnProgress($"    Client started for stage {stage} (logging to /apps/client/client-{testCaseName}-stage-{stage}.log)");
                         break;
                         
                     case "INPUT":
                         // INPUT action: Send the input value to the client
-                        // Only send if there's actual content
+                        // Pass test case name and input to unified-control.sh
+                        // Note: Input is now the 4th parameter (after ACTION, STAGE, TESTCASE)
                         if (!string.IsNullOrWhiteSpace(input))
                         {
-                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
+                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} {testCaseName} \"{input}\"";
                             try
                             {
                                 _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
@@ -1419,7 +1428,8 @@ namespace SolutionGrader.Core.Services
                 if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath))
                 {
                     // Using sidecar pattern - parse pcap file for this stage
-                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort);
+                    // Pass test case name to include in snapshot filename
+                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort, testCaseName);
                 }
                 else
                 {
@@ -1430,17 +1440,17 @@ namespace SolutionGrader.Core.Services
             }
             
             // After all actions complete, read log files from container for each stage
-            OnProgress($"[Unified] Reading per-stage log files from container...");
+            OnProgress($"[Unified] Reading per-stage log files for {testCaseName} from container...");
             
             // Collect all stages that had actions
             var allStages = actions.Select(a => a.Stage).Distinct().OrderBy(s => s).ToList();
             
             foreach (var stage in allStages)
             {
-                // Read server log for this stage
+                // Read server log for this stage (with test case name)
                 try
                 {
-                    var serverLogPath = $"/apps/server/server-stage-{stage}.log";
+                    var serverLogPath = $"/apps/server/server-{testCaseName}-stage-{stage}.log";
                     var serverLog = ReadFileFromContainer(unifiedContainer, serverLogPath);
                     if (!string.IsNullOrEmpty(serverLog))
                     {
@@ -1454,10 +1464,10 @@ namespace SolutionGrader.Core.Services
                     serverOutputs[stage] = "";
                 }
                 
-                // Read client log for this stage
+                // Read client log for this stage (with test case name)
                 try
                 {
-                    var clientLogPath = $"/apps/client/client-stage-{stage}.log";
+                    var clientLogPath = $"/apps/client/client-{testCaseName}-stage-{stage}.log";
                     var clientLog = ReadFileFromContainer(unifiedContainer, clientLogPath);
                     if (!string.IsNullOrEmpty(clientLog))
                     {
@@ -2345,13 +2355,13 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Cleans up code containers (server, client) after each student.
-        /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
-        /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
-        /// </summary>
-        /// <summary>
-        /// Export per-stage log files from unified container to student result directory.
-        /// Logs are in /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// Export per-stage log files from unified container to student result directory (LEGACY).
+        /// NOTE: This method is kept for backward compatibility but is NO LONGER USED in normal grading.
+        /// Logs are now exported per-test-case using ExportLogsForTestCaseAsync().
+        /// 
+        /// Log file format with test case names:
+        /// - /apps/server/server-{testCaseName}-stage-N.log
+        /// - /apps/client/client-{testCaseName}-stage-N.log
         /// </summary>
         private async Task ExportLogsFromUnifiedContainerAsync(string unifiedContainer, string studentResultPath)
         {
@@ -2413,11 +2423,113 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Export per-stage log files for a SPECIFIC test case from unified container to test case result directory.
+        /// Only copies log files matching the test case name pattern (server-{testCaseName}-stage-*.log).
+        /// This ensures each test case's logs are preserved in its own directory.
+        /// </summary>
+        private async Task ExportLogsForTestCaseAsync(string unifiedContainer, string testCaseResultPath, string testCaseName)
+        {
+            var logsDir = Path.Combine(testCaseResultPath, "ProcessLogs");
+            Directory.CreateDirectory(logsDir);
+            
+            OnProgress($"[Unified] Exporting logs for {testCaseName} to {logsDir}");
+            
+            // Export server log files for this test case
+            try
+            {
+                // Use wildcard to copy only files matching this test case
+                var serverPattern = $"server-{testCaseName}-stage-*.log";
+                var serverCopyCmd = $"docker exec {unifiedContainer} /bin/bash -c \"if ls /apps/server/{serverPattern} 1> /dev/null 2>&1; then cat /apps/server/{serverPattern}; fi\"";
+                var serverLogsResult = _commandExecutor.RunCommandAndCaptureOutput(serverCopyCmd, null, null, 10000);
+                
+                if (serverLogsResult.ExitCode == 0 && serverLogsResult.Output.Count > 0)
+                {
+                    // Get list of matching files
+                    var listCmd = $"docker exec {unifiedContainer} ls /apps/server/{serverPattern}";
+                    var listResult = _commandExecutor.RunCommandAndCaptureOutput(listCmd, null, null, 5000);
+                    if (listResult.ExitCode == 0)
+                    {
+                        foreach (var logFile in listResult.Output)
+                        {
+                            var fileName = Path.GetFileName(logFile.Trim());
+                            if (!string.IsNullOrEmpty(fileName))
+                            {
+                                var copyCmd = $"docker cp {unifiedContainer}:/apps/server/{fileName} {logsDir}/{fileName}";
+                                _commandExecutor.RunCommand(copyCmd, null, null, 5000);
+                            }
+                        }
+                    }
+                    OnProgress($"[Unified] Exported server logs for {testCaseName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to export server logs for {testCaseName}: {ex.Message}");
+            }
+            
+            // Export client log files for this test case
+            try
+            {
+                var clientPattern = $"client-{testCaseName}-stage-*.log";
+                var listCmd = $"docker exec {unifiedContainer} ls /apps/client/{clientPattern}";
+                var listResult = _commandExecutor.RunCommandAndCaptureOutput(listCmd, null, null, 5000);
+                if (listResult.ExitCode == 0)
+                {
+                    foreach (var logFile in listResult.Output)
+                    {
+                        var fileName = Path.GetFileName(logFile.Trim());
+                        if (!string.IsNullOrEmpty(fileName))
+                        {
+                            var copyCmd = $"docker cp {unifiedContainer}:/apps/client/{fileName} {logsDir}/{fileName}";
+                            _commandExecutor.RunCommand(copyCmd, null, null, 5000);
+                        }
+                    }
+                    OnProgress($"[Unified] Exported client logs for {testCaseName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to export client logs for {testCaseName}: {ex.Message}");
+            }
+            
+            // Also copy snapshot pcap files for this test case to the test case directory
+            try
+            {
+                var pcapPattern = $"snapshot-{testCaseName}-stage*.pcap";
+                var studentResultPath = Path.GetDirectoryName(testCaseResultPath);
+                if (!string.IsNullOrEmpty(studentResultPath))
+                {
+                    var pcapFiles = Directory.GetFiles(studentResultPath, pcapPattern);
+                    foreach (var pcapFile in pcapFiles)
+                    {
+                        var destPath = Path.Combine(testCaseResultPath, Path.GetFileName(pcapFile));
+                        File.Copy(pcapFile, destPath, overwrite: true);
+                    }
+                    if (pcapFiles.Length > 0)
+                    {
+                        OnProgress($"[Unified] Copied {pcapFiles.Length} snapshot pcap files for {testCaseName}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] WARNING: Failed to copy pcap files for {testCaseName}: {ex.Message}");
+            }
+            
+            await Task.CompletedTask;
+        }
+        
+        /// <summary>
         /// Clear old stage log files in the unified container before executing a new test case.
-        /// This prevents log accumulation across test cases (same container is reused).
+        /// NO LONGER NEEDED - we now include test case name in file paths, so files don't conflict.
+        /// Kept as no-op for backward compatibility.
         /// </summary>
         private void ClearStageLogsInContainer(string unifiedContainer)
         {
+            // NO-OP: Files now include test case name, so no need to clear between test cases
+            // This preserves all test case logs instead of overwriting them
+            OnProgress($"[Unified] Skipping log clear - files include test case names");
+            /*
             try
             {
                 // Remove all server stage log files
@@ -2434,6 +2546,7 @@ namespace SolutionGrader.Core.Services
             {
                 OnProgress($"[Unified] WARNING: Failed to clear old logs: {ex.Message}");
             }
+            */
         }
         
         /// <summary>
@@ -3053,8 +3166,9 @@ namespace SolutionGrader.Core.Services
         /// Creates an internal snapshot copy inside the container to bypass file locking issues,
         /// then copies the snapshot to host for parsing.
         /// This enables per-stage network validation without stopping the monitor.
+        /// Test case name is included in snapshot filename to preserve files across test cases.
         /// </summary>
-        private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
+        private async Task ParsePcapForCurrentStageAsync(int currentStage, int port, string testCaseName)
         {
             if (string.IsNullOrEmpty(_currentPcapFilePath) || string.IsNullOrEmpty(_currentMonitorContainer))
             {
@@ -3064,7 +3178,8 @@ namespace SolutionGrader.Core.Services
             
             var monitorContainer = _currentMonitorContainer; // Use the saved container name
             var pcapFileName = Path.GetFileName(_currentPcapFilePath);
-            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_stage{currentStage}.pcap");
+            // Include test case name in snapshot filename to avoid overwriting between test cases
+            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot-{testCaseName}-stage{currentStage}.pcap");
             
             try
             {
@@ -3116,36 +3231,57 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 var fileSize = new FileInfo(snapshotPath).Length;
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump via Docker");
                 
                 // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
-                // Use tcpdump to read pcap
+                // 
+                // CROSS-PLATFORM FIX: Use Docker to run tcpdump instead of relying on host installation
+                // This ensures the parsing works on Windows, Linux, and macOS without requiring tcpdump to be installed on the host.
+                // We use the same network-monitor Docker image that captured the traffic to parse it.
+                //
+                // The snapshot file is already on the host, so we mount it into a temporary Docker container,
+                // run tcpdump to read and parse it, then remove the container.
+                //
+                // Command: docker run --rm -v "<host-snapshot-dir>:/pcap:ro" fptuxaes/network-monitor:latest -r /pcap/snapshot.pcap -nn -tttt tcp
+                //
                 // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
                 // Single-line format: "timestamp IP src > dst: Flags [S], ..."
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt tcp",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
                 
-                using var process = Process.Start(psi);
-                if (process == null)
+                var snapshotDir = Path.GetDirectoryName(snapshotPath);
+                var snapshotFile = Path.GetFileName(snapshotPath);
+                
+                if (string.IsNullOrEmpty(snapshotDir))
                 {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to start tcpdump process");
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: ERROR - Could not determine snapshot directory");
                     return;
                 }
                 
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string errorOutput = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
+                // Convert to absolute path and ensure proper formatting for Docker volume mount
+                snapshotDir = Path.GetFullPath(snapshotDir);
                 
-                if (!string.IsNullOrEmpty(errorOutput))
+                // Build docker run command to parse pcap using the network-monitor image
+                // Use --rm to auto-remove container after execution
+                // Mount snapshot directory as read-only volume
+                // The network-monitor image has ENTRYPOINT ["tcpdump"], so we just pass the arguments
+                var dockerCmd = $"docker run --rm -v \"{snapshotDir}:/pcap:ro\" fptuxaes/network-monitor:latest -r /pcap/{snapshotFile} -nn -tttt tcp";
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Running: {dockerCmd}");
+                
+                // Execute docker command and capture output
+                var result = _commandExecutor.RunCommandAndCaptureOutput(dockerCmd, null, null, 30000);
+                
+                if (result.ExitCode != 0)
                 {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
+                    var errorOutput = string.Join("\n", result.Output);
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump via Docker failed (exit code {result.ExitCode}): {errorOutput}");
+                    return;
+                }
+                
+                string output = string.Join("\n", result.Output);
+                
+                if (string.IsNullOrEmpty(output))
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: WARNING - tcpdump produced no output (pcap might be empty or corrupted)");
                 }
                 
                 // Parse tcpdump output
@@ -3291,69 +3427,7 @@ namespace SolutionGrader.Core.Services
             };
         }
         
-        /// <summary>
-        /// Parse pcap file using tcpdump to extract network flows.
-        /// Returns list of packets with SYN/ACK/PSH/RST flags.
-        /// </summary>
-        private async Task<List<Dictionary<string, string>>> ParsePcapFileAsync(string pcapFile)
-        {
-            var flows = new List<Dictionary<string, string>>();
-            
-            try
-            {
-                // Use tcpdump to read the pcap file
-                // Format: timestamp src > dst: flags [...]
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{pcapFile}\" -nn -tttt",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using (var process = Process.Start(psi))
-                {
-                    if (process == null)
-                    {
-                        OnProgress("[NetworkMonitor] Failed to start tcpdump for parsing");
-                        return flows;
-                    }
-                    
-                    string output = await process.StandardOutput.ReadToEndAsync();
-                    await process.WaitForExitAsync();
-                    
-                    // Parse tcpdump output
-                    // Example: "2024-12-08 05:00:00.123456 IP 172.18.0.2.54321 > 172.18.0.3.4000: Flags [S], ..."
-                    var lines = output.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (string.IsNullOrWhiteSpace(line)) continue;
-                        
-                        var packet = new Dictionary<string, string>();
-                        
-                        // Extract flags: [S] = SYN, [.] = ACK, [P] = PSH, [R] = RST, [F] = FIN
-                        if (line.Contains("Flags [S]")) packet["Flags"] = "SYN";
-                        else if (line.Contains("Flags [S.]")) packet["Flags"] = "SYN-ACK";
-                        else if (line.Contains("Flags [.]")) packet["Flags"] = "ACK";
-                        else if (line.Contains("Flags [P.]")) packet["Flags"] = "PSH-ACK";
-                        else if (line.Contains("Flags [R]")) packet["Flags"] = "RST";
-                        else if (line.Contains("Flags [F.]")) packet["Flags"] = "FIN-ACK";
-                        else packet["Flags"] = "OTHER";
-                        
-                        packet["RawLine"] = line;
-                        flows.Add(packet);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnProgress($"[NetworkMonitor] Error parsing pcap: {ex.Message}");
-            }
-            
-            return flows;
-        }
+
     }
     
     #region Internal Model Classes
