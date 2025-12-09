@@ -30,10 +30,12 @@ RUN mkdir -p /apps/server /apps/client /scripts
 # Copy supervisord configuration
 COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Copy control script and entrypoint
+# Copy control script, entrypoint, and wrapper scripts
 COPY unified-control.sh /scripts/unified-control.sh
 COPY unified-entrypoint.sh /scripts/unified-entrypoint.sh
-RUN chmod +x /scripts/unified-control.sh /scripts/unified-entrypoint.sh
+COPY server-wrapper.sh /scripts/server-wrapper.sh
+COPY client-wrapper.sh /scripts/client-wrapper.sh
+RUN chmod +x /scripts/unified-control.sh /scripts/unified-entrypoint.sh /scripts/server-wrapper.sh /scripts/client-wrapper.sh
 
 # Set environment variables for .NET
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1

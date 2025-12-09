@@ -57,16 +57,10 @@ case "$ACTION" in
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
         
-        # Update stage environment variable
-        # We need to update the supervisord config to use the new STAGE value
-        # Use sed to update the STAGE value in the environment line
-        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        # Write STAGE to file for wrapper script to read
+        echo "$STAGE" > /tmp/server_stage
         
-        # Reread and update supervisord config
-        $SUPERVISORCTL reread 2>/dev/null || true
-        $SUPERVISORCTL update 2>/dev/null || true
-        
-        # Start server with new stage
+        # Start server - wrapper script will read stage from file
         $SUPERVISORCTL start server
         
         if wait_for_start server; then
@@ -105,14 +99,10 @@ case "$ACTION" in
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
-        # Update stage environment variable
-        sed -i "s/environment=\(.*\),STAGE=[0-9]*/environment=\1,STAGE=$STAGE/" /etc/supervisor/conf.d/supervisord.conf
+        # Write STAGE to file for wrapper script to read
+        echo "$STAGE" > /tmp/client_stage
         
-        # Reread and update supervisord config
-        $SUPERVISORCTL reread 2>/dev/null || true
-        $SUPERVISORCTL update 2>/dev/null || true
-        
-        # Start client with new stage
+        # Start client - wrapper script will read stage from file
         $SUPERVISORCTL start client
         
         if wait_for_start client; then
