@@ -3116,36 +3116,57 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 var fileSize = new FileInfo(snapshotPath).Length;
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump via Docker");
                 
                 // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
-                // Use tcpdump to read pcap
+                // 
+                // CROSS-PLATFORM FIX: Use Docker to run tcpdump instead of relying on host installation
+                // This ensures the parsing works on Windows, Linux, and macOS without requiring tcpdump to be installed on the host.
+                // We use the same network-monitor Docker image that captured the traffic to parse it.
+                //
+                // The snapshot file is already on the host, so we mount it into a temporary Docker container,
+                // run tcpdump to read and parse it, then remove the container.
+                //
+                // Command: docker run --rm -v "<host-snapshot-dir>:/pcap:ro" fptuxaes/network-monitor:latest -r /pcap/snapshot.pcap -nn -tttt tcp
+                //
                 // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
                 // Single-line format: "timestamp IP src > dst: Flags [S], ..."
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt tcp",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
                 
-                using var process = Process.Start(psi);
-                if (process == null)
+                var snapshotDir = Path.GetDirectoryName(snapshotPath);
+                var snapshotFile = Path.GetFileName(snapshotPath);
+                
+                if (string.IsNullOrEmpty(snapshotDir))
                 {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to start tcpdump process");
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: ERROR - Could not determine snapshot directory");
                     return;
                 }
                 
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string errorOutput = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
+                // Convert to absolute path and ensure proper formatting for Docker volume mount
+                snapshotDir = Path.GetFullPath(snapshotDir);
                 
-                if (!string.IsNullOrEmpty(errorOutput))
+                // Build docker run command to parse pcap using the network-monitor image
+                // Use --rm to auto-remove container after execution
+                // Mount snapshot directory as read-only volume
+                // The network-monitor image has ENTRYPOINT ["tcpdump"], so we just pass the arguments
+                var dockerCmd = $"docker run --rm -v \"{snapshotDir}:/pcap:ro\" fptuxaes/network-monitor:latest -r /pcap/{snapshotFile} -nn -tttt tcp";
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Running: {dockerCmd}");
+                
+                // Execute docker command and capture output
+                var result = _commandExecutor.RunCommandAndCaptureOutput(dockerCmd, null, null, 30000);
+                
+                if (result.ExitCode != 0)
                 {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
+                    var errorOutput = string.Join("\n", result.Output);
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump via Docker failed (exit code {result.ExitCode}): {errorOutput}");
+                    return;
+                }
+                
+                string output = string.Join("\n", result.Output);
+                
+                if (string.IsNullOrEmpty(output))
+                {
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: WARNING - tcpdump produced no output (pcap might be empty or corrupted)");
                 }
                 
                 // Parse tcpdump output
@@ -3291,69 +3312,7 @@ namespace SolutionGrader.Core.Services
             };
         }
         
-        /// <summary>
-        /// Parse pcap file using tcpdump to extract network flows.
-        /// Returns list of packets with SYN/ACK/PSH/RST flags.
-        /// </summary>
-        private async Task<List<Dictionary<string, string>>> ParsePcapFileAsync(string pcapFile)
-        {
-            var flows = new List<Dictionary<string, string>>();
-            
-            try
-            {
-                // Use tcpdump to read the pcap file
-                // Format: timestamp src > dst: flags [...]
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{pcapFile}\" -nn -tttt",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using (var process = Process.Start(psi))
-                {
-                    if (process == null)
-                    {
-                        OnProgress("[NetworkMonitor] Failed to start tcpdump for parsing");
-                        return flows;
-                    }
-                    
-                    string output = await process.StandardOutput.ReadToEndAsync();
-                    await process.WaitForExitAsync();
-                    
-                    // Parse tcpdump output
-                    // Example: "2024-12-08 05:00:00.123456 IP 172.18.0.2.54321 > 172.18.0.3.4000: Flags [S], ..."
-                    var lines = output.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (string.IsNullOrWhiteSpace(line)) continue;
-                        
-                        var packet = new Dictionary<string, string>();
-                        
-                        // Extract flags: [S] = SYN, [.] = ACK, [P] = PSH, [R] = RST, [F] = FIN
-                        if (line.Contains("Flags [S]")) packet["Flags"] = "SYN";
-                        else if (line.Contains("Flags [S.]")) packet["Flags"] = "SYN-ACK";
-                        else if (line.Contains("Flags [.]")) packet["Flags"] = "ACK";
-                        else if (line.Contains("Flags [P.]")) packet["Flags"] = "PSH-ACK";
-                        else if (line.Contains("Flags [R]")) packet["Flags"] = "RST";
-                        else if (line.Contains("Flags [F.]")) packet["Flags"] = "FIN-ACK";
-                        else packet["Flags"] = "OTHER";
-                        
-                        packet["RawLine"] = line;
-                        flows.Add(packet);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnProgress($"[NetworkMonitor] Error parsing pcap: {ex.Message}");
-            }
-            
-            return flows;
-        }
+
     }
     
     #region Internal Model Classes
