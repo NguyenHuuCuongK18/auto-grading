@@ -1268,6 +1268,7 @@ namespace SolutionGrader.Core.Services
             int expFlagsCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Flags, "Expected_Flags");
             int expSrcRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_SourceRole, "Expected_SourceRole");
             int expDstRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_DestinationRole, "Expected_DestinationRole");
+            int expDataCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Data, "Expected_Data");
             
             // Track per-stage packet indices for matching with captured data
             var stagePacketIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1348,6 +1349,26 @@ namespace SolutionGrader.Core.Services
                             !string.Equals(expectedDstRole, actualDstRole, StringComparison.OrdinalIgnoreCase))
                         {
                             matched = false;
+                        }
+                    }
+                    
+                    // Compare Data payload if expected data is provided
+                    // Note: Excel uses null, empty string, or "None" to indicate "no data expected"
+                    // We only validate data if the expected value is non-empty and not "None"
+                    if (matched && expDataCol > 0)
+                    {
+                        var expectedData = row.Cell(expDataCol).GetString()?.Trim() ?? "";
+                        var actualData = actualPacket.Data ?? "";
+                        
+                        // Only compare if expected data is specified and not "None"
+                        if (!string.IsNullOrEmpty(expectedData) && 
+                            !expectedData.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Trim and compare case-insensitively
+                            if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                            {
+                                matched = false;
+                            }
                         }
                     }
                     

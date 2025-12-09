@@ -1493,24 +1493,26 @@ namespace SolutionGrader.Core.Services
                         
                     case "INPUT":
                         // INPUT action: Send the input value to the client
-                        // Only send if there's actual content
-                        if (!string.IsNullOrWhiteSpace(input))
+                        // IMPORTANT: Always send input when Input action is specified, even if empty
+                        // The client application may be waiting for input (including empty lines)
+                        // Not sending input causes the client to hang waiting for stdin
+                        var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
+                        try
                         {
-                            var sendInputCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh SendInput {stage} \"{input}\"";
-                            try
+                            _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
+                            await Task.Delay(InputProcessingDelayMs);
+                            if (string.IsNullOrWhiteSpace(input))
                             {
-                                _commandExecutor.RunCommand(sendInputCmd, null, null, 5000);
-                                await Task.Delay(InputProcessingDelayMs);
+                                OnProgress($"    Empty input sent (newline) for stage {stage}");
+                            }
+                            else
+                            {
                                 OnProgress($"    Input sent: '{input}'");
                             }
-                            catch (Exception ex)
-                            {
-                                OnProgress($"    WARNING: Failed to send input: {ex.Message}");
-                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            OnProgress($"    Skipping empty input for stage {stage}");
+                            OnProgress($"    WARNING: Failed to send input: {ex.Message}");
                         }
                         break;
                         
@@ -1751,34 +1753,74 @@ namespace SolutionGrader.Core.Services
                 {
                     // Check if it's an exact match (PASS) or partial match (PARTIAL)
                     bool exactMatch = true;
+                    var mismatchReasons = new List<string>();
                     
                     // Compare flags using set comparison (already matched in FirstOrDefault above)
                     // This is redundant but kept for clarity
                     if (!string.IsNullOrEmpty(exp.Flags) && !FlagsMatch(exp.Flags, matchingPacket.Flags))
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"flags: expected '{exp.Flags}' but got '{matchingPacket.Flags}'");
+                    }
                     
                     // Compare roles exactly
                     if (!string.IsNullOrEmpty(exp.SourceRole) && matchingPacket.SourceRole != exp.SourceRole)
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"source role: expected '{exp.SourceRole}' but got '{matchingPacket.SourceRole}'");
+                    }
                     if (!string.IsNullOrEmpty(exp.DestinationRole) && matchingPacket.DestinationRole != exp.DestinationRole)
+                    {
                         exactMatch = false;
+                        mismatchReasons.Add($"dest role: expected '{exp.DestinationRole}' but got '{matchingPacket.DestinationRole}'");
+                    }
+                    
+                    // Compare Data payload if expected data is provided
+                    // Note: Expected data from Excel uses null or empty string to indicate "no data expected"
+                    // We need to check if exp.Data is not null/empty AND not the string "None" (which Excel uses for null)
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var actualData = matchingPacket.Data ?? "";
+                        var expectedData = exp.Data;
+                        
+                        // Compare data - trim whitespace and use case-insensitive comparison for now
+                        // TODO: Make this configurable per test case if needed
+                        if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            var expPreview = expectedData.Length > 50 ? expectedData.Substring(0, 50) + "..." : expectedData;
+                            var actPreview = actualData.Length > 50 ? actualData.Substring(0, 50) + "..." : actualData;
+                            mismatchReasons.Add($"data: expected '{expPreview}' but got '{actPreview}'");
+                        }
+                    }
                     
                     // Log detailed comparison
                     if (exactMatch)
                     {
-                        OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}");
+                        var dataInfo = (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase)) 
+                            ? $" with data='{exp.Data}'" : "";
+                        OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}{dataInfo}");
                     }
                     else
                     {
-                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: Expected {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}, Found {matchingPacket.Flags} from {matchingPacket.SourceRole} to {matchingPacket.DestinationRole} (role mismatch)");
+                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: {string.Join(", ", mismatchReasons)}");
+                    }
+                    
+                    var expectedStr = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}";
+                    var actualStr = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}";
+                    
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        expectedStr += $", Data={exp.Data}";
+                        actualStr += $", Data={matchingPacket.Data ?? "(empty)"}";
                     }
                     
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
-                        Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                        Actual = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}",
+                        Expected = expectedStr,
+                        Actual = actualStr,
                         Passed = exactMatch
                     });
                 }
