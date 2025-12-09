@@ -3,11 +3,15 @@
 # Manages server and client processes via supervisorctl
 # Called from DockerGradingService to execute test case actions
 #
-# Usage: unified-control.sh <ACTION> [STAGE]
+# Usage: unified-control.sh <ACTION> <STAGE> [TESTCASE]
 # Actions: StartServer, StartClient, CloseServer, CloseClient, Status
+# 
+# TESTCASE parameter (optional): Test case name to include in log file paths
+# This prevents log files from being overwritten between test cases
 
 ACTION=$1
 STAGE=${2:-0}
+TESTCASE=${3:-"default"}  # Default to "default" if not provided for backward compatibility
 
 # Use Unix socket for supervisorctl
 SUPERVISORCTL="supervisorctl -c /etc/supervisor/conf.d/supervisord.conf"
@@ -43,7 +47,7 @@ update_stage_env() {
 
 case "$ACTION" in
     StartServer)
-        echo "[Control] Starting server for stage $STAGE"
+        echo "[Control] Starting server for stage $STAGE (test case: $TESTCASE)"
         
         # CRITICAL: Add delay before starting server to ensure network monitor is capturing
         # The sidecar monitor needs ~1-2 seconds to fully initialize tcpdump
@@ -57,14 +61,15 @@ case "$ACTION" in
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
         
-        # Write STAGE to file for wrapper script to read
+        # Write STAGE and TESTCASE to files for wrapper script to read
         echo "$STAGE" > /tmp/server_stage
+        echo "$TESTCASE" > /tmp/server_testcase
         
-        # Start server - wrapper script will read stage from file
+        # Start server - wrapper script will read stage and testcase from files
         $SUPERVISORCTL start server
         
         if wait_for_start server; then
-            echo "[Control] Server started successfully for stage $STAGE (logging to /apps/server/server-stage-$STAGE.log)"
+            echo "[Control] Server started successfully for stage $STAGE (logging to /apps/server/server-$TESTCASE-stage-$STAGE.log)"
             # Wait for server to bind to port
             sleep 1
         else
@@ -73,7 +78,7 @@ case "$ACTION" in
         ;;
     
     StartClient)
-        echo "[Control] Starting client for stage $STAGE"
+        echo "[Control] Starting client for stage $STAGE (test case: $TESTCASE)"
         
         # Named pipe is created by the entrypoint script before Supervisord starts
         # The pipe is held open by a background 'sleep infinity' keeper process
@@ -99,14 +104,15 @@ case "$ACTION" in
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
-        # Write STAGE to file for wrapper script to read
+        # Write STAGE and TESTCASE to files for wrapper script to read
         echo "$STAGE" > /tmp/client_stage
+        echo "$TESTCASE" > /tmp/client_testcase
         
-        # Start client - wrapper script will read stage from file
+        # Start client - wrapper script will read stage and testcase from files
         $SUPERVISORCTL start client
         
         if wait_for_start client; then
-            echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-stage-$STAGE.log)"
+            echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-$TESTCASE-stage-$STAGE.log)"
             echo "[Control] Client is reading from named pipe /tmp/client_input"
         else
             echo "[Control] WARNING: Client may not have started for stage $STAGE"
@@ -115,8 +121,8 @@ case "$ACTION" in
     
     SendInput)
         # Send input to the client process via named pipe
-        # Input is provided as third parameter
-        INPUT="${3:-}"
+        # Input is provided as FOURTH parameter (after ACTION, STAGE, TESTCASE)
+        INPUT="${4:-}"
         
         echo "[Control] Sending input to client via named pipe: '$INPUT'"
         
