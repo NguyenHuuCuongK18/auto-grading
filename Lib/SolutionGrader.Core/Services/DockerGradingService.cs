@@ -504,18 +504,34 @@ namespace SolutionGrader.Core.Services
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
                     
-                    // CRITICAL: Flush network capture RunContext between test cases
+                    // CRITICAL: Flush network capture between test cases
                     // This prevents packets from previous test cases from being included in comparisons
-                    // The PCAP file accumulates, but we clear RunContext so each TC comparison is isolated
                     if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
                     {
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case (captures will accumulate)...");
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Cumulative packet count: {_lastParsedPacketCount}");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case - flushing network...");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Prev cumulative packet count: {_lastParsedPacketCount}");
                         
-                        // Clear previous test case packets from RunContext
-                        // The PCAP file continues to grow, but RunContext only has current TC packets
+                        // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Cleared RunContext for fresh test case comparison");
+                        
+                        // CRITICAL: Delete and recreate the PCAP file to prevent accumulation
+                        // The monitor container continuously writes to network_capture.pcap
+                        // We need to truncate it between test cases for proper isolation
+                        try
+                        {
+                            // Truncate the PCAP file in the monitor container
+                            var truncateCmd = $"{_currentMonitorContainer} sh -c 'truncate -s 0 /data/network_capture.pcap'";
+                            _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Truncated PCAP file in container");
+                            
+                            // Reset packet counter since PCAP file is now empty
+                            _lastParsedPacketCount = 0;
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Reset packet counter to 0");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] WARNING: Failed to truncate PCAP: {ex.Message}");
+                        }
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -1816,15 +1832,6 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     OnProgress($"[NetworkMonitor] Stage {stage}: Skipping parse - using legacy network monitor or no pcap path");
-                }
-                
-                // CRITICAL: Flush network captures after grading each stage
-                // This prevents accumulation across stages within the same test case
-                if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath) && _currentStudentCode != null)
-                {
-                    OnProgress($"[NetworkMonitor] Stage {stage}: Flushing network captures after stage grading");
-                    _runContext.ClearCapturedNetworkPackets(_currentStudentCode);
-                    OnProgress($"[NetworkMonitor] Stage {stage}: Network captures flushed - fresh for next stage");
                 }
                 
                 await Task.Delay(10);  // Brief delay between actions
