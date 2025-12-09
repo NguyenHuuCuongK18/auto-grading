@@ -1650,8 +1650,6 @@ namespace SolutionGrader.Core.Services
                 // Filter packets by stage from the complete set
                 var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
                 
-                OnProgress($"[CompareNetwork] Stage {exp.Stage}: Expected flags='{exp.Flags}' from '{exp.SourceRole}' to '{exp.DestinationRole}', Found {capturedPackets.Count} packets for this stage");
-                
                 // Find matching packet by flags
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
                     !string.IsNullOrEmpty(exp.Flags) && 
@@ -1672,6 +1670,16 @@ namespace SolutionGrader.Core.Services
                     if (!string.IsNullOrEmpty(exp.DestinationRole) && matchingPacket.DestinationRole != exp.DestinationRole)
                         exactMatch = false;
                     
+                    // Log detailed comparison
+                    if (exactMatch)
+                    {
+                        OnProgress($"[CompareNetwork] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}");
+                    }
+                    else
+                    {
+                        OnProgress($"[CompareNetwork] ~ PARTIAL - Stage {exp.Stage}: Expected {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}, Found {matchingPacket.Flags} from {matchingPacket.SourceRole} to {matchingPacket.DestinationRole}");
+                    }
+                    
                     // CRITICAL FIX: Track PASS vs PARTIAL in ComparisonResult
                     // PASS = exact match (flags + roles match)
                     // PARTIAL = flags match but roles don't match
@@ -1688,6 +1696,8 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     // No matching packet found - FAIL
+                    OnProgress($"[CompareNetwork] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(capturedPackets.Any() ? string.Join(", ", capturedPackets.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
+                    
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
