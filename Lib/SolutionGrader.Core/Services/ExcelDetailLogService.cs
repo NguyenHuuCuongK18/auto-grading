@@ -1405,12 +1405,16 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
                 return false;
             
-            var expectedFlags = expected.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            // Normalize flags by splitting on both comma and hyphen
+            // Template format: "SYN, ACK" or "PSH, ACK"
+            // Actual format: "SYN-ACK" or "PSH-ACK"
+            // Both should be treated as equivalent
+            var expectedFlags = expected.Split(new[] { ',', '-' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
                 .OrderBy(f => f)
                 .ToList();
             
-            var actualFlags = actual.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            var actualFlags = actual.Split(new[] { ',', '-' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
                 .OrderBy(f => f)
                 .ToList();
