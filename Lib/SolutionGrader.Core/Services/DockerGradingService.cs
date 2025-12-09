@@ -512,7 +512,13 @@ namespace SolutionGrader.Core.Services
                         
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared for fresh comparison");
+                        
+                        // CRITICAL FIX: Reset packet counter when clearing RunContext between test cases
+                        // This ensures ParsePcapForCurrentStageAsync starts fresh for the new test case
+                        // Without this, accumulated packets from previous test case would be skipped
+                        _lastParsedPacketCount = 0;
+                        
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared and packet counter reset for fresh comparison");
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -3824,28 +3830,24 @@ namespace SolutionGrader.Core.Services
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = packets.Count;
                 
-                // CRITICAL: Truncate PCAP after parsing if new packets were captured and graded
-                // This isolates network flows between stages (e.g., TC6 has flows in stage 3 AND stage 6)
-                // With all-or-nothing grading: only expected flows are checked, extra flows are ignored
-                if (newPackets.Count > 0 && !string.IsNullOrEmpty(_currentMonitorContainer))
-                {
-                    try
-                    {
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: Captured {newPackets.Count} new packets - truncating PCAP for next stage");
-                        var truncateCmd = $"docker exec {_currentMonitorContainer} sh -c 'truncate -s 0 /data/{pcapFileName}'";
-                        _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
-                        
-                        // Reset packet counter since PCAP file is now empty
-                        _lastParsedPacketCount = 0;
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: PCAP truncated and counter reset (ready for next stage with network flows)");
-                    }
-                    catch (Exception ex)
-                    {
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: WARNING: Failed to truncate PCAP: {ex.Message}");
-                    }
-                }
+                // CRITICAL FIX: DO NOT truncate PCAP file between stages!
+                // Previous approach: Truncate PCAP after each stage to isolate flows
+                // Problem: tcpdump keeps file open with buffering - truncation doesn't prevent buffered data from being written
+                // Result: Next stage sees old data from previous stage (e.g., TC4 Stage 1 sees TC3 Stage 3 data)
+                //
+                // Current approach: Let PCAP accumulate ALL packets, use _lastParsedPacketCount to track progress
+                // - PCAP grows throughout test case execution (all stages append to same file)
+                // - Each ParsePcapForCurrentStageAsync call only processes NEW packets (skip _lastParsedPacketCount)
+                // - RunContext is cleared between test cases (line 514) to prevent cross-contamination
+                // - Snapshot files are saved per-stage for debugging and per-TC organization
+                //
+                // This ensures:
+                // 1. No data loss from tcpdump buffering
+                // 2. Correct stage-to-packet mapping (packets tagged with actual execution stage)
+                // 3. Clean separation between test cases (RunContext cleared)
+                // 4. Proper cumulative parsing within each test case
                 
-                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count}");
+                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count} (cumulative parsing - RunContext cleared between test cases)");
             }
             catch (Exception ex)
             {
