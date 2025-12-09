@@ -1,0 +1,23 @@
+﻿====================================================================================================
+GRADING SESSION LOG - 2025-12-09 21:00:43
+====================================================================================================
+
+[2025-12-09 21:00:43.854] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-09 21:00:43.861] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-09 21:00:43.898] [Info] [AnhDThe187386] Started grading for student: AnhDThe187386 (Paper 1)
+
+[2025-12-09 21:00:43.898] [Info] [dungtdhe186461] Started grading for student: dungtdhe186461 (Paper 1)
+
+[2025-12-09 21:02:41.638] [Info] [AnhDThe187386] Completed grading for student: AnhDThe187386 - Score: 0/5
+
+[2025-12-09 21:02:55.657] [Info] [dungtdhe186461] Completed grading for student: dungtdhe186461 - Score: 0/5
+
+[2025-12-09 21:02:55.918] [Info] [SYSTEM] Grading session completed. Total students: 2
+
+
+====================================================================================================
+SESSION ENDED - 2025-12-09 21:02:55
+Total messages: 7
+====================================================================================================

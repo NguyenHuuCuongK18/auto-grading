@@ -1,5 +1,5 @@
 #!/bin/bash
-# Client wrapper script - reads STAGE and TESTCASE from files and redirects logs accordingly
+# Client wrapper script - reads STAGE from file and redirects logs accordingly
 
 # Read STAGE from file (default to 0 if not set)
 STAGE=0
@@ -7,15 +7,8 @@ if [ -f /tmp/client_stage ]; then
     STAGE=$(cat /tmp/client_stage)
 fi
 
-# Read TESTCASE from file (default to "default" if not set)
-TESTCASE="default"
-if [ -f /tmp/client_testcase ]; then
-    TESTCASE=$(cat /tmp/client_testcase)
-fi
-
 # Export for dotnet process
 export STAGE
-export TESTCASE
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_RUNNING_IN_CONTAINER=true
 export DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1
@@ -40,5 +33,5 @@ if [ -z "$DLL" ]; then
     exit 1
 fi
 
-# Run dotnet with stdin from pipe and output redirected to test-case-specific and stage-specific log file
-exec dotnet "$DLL" < /tmp/client_input >> "/apps/client/client-${TESTCASE}-stage-${STAGE}.log" 2>&1
+# Run dotnet with stdin from pipe and output redirected to stage-specific log file
+exec dotnet "$DLL" < /tmp/client_input >> "/apps/client/client-stage-${STAGE}.log" 2>&1
