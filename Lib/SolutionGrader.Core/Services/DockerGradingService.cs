@@ -346,7 +346,8 @@ namespace SolutionGrader.Core.Services
                 // Each student gets their own database instance (e.g., Library_student1)
                 OnProgress($"[Database] Creating database instance for {studentCode}...");
                 
-                // Look for SQL initialization script in test kit
+                // Look for SQL initialization script in test kit Environment.xlsx
+                // Key name: Default_Database_File_Path
                 string? sqlScriptPath = null;
                 var environmentExcelPath = Path.Combine(testKitPath, "Environment.xlsx");
                 if (File.Exists(environmentExcelPath))
@@ -356,19 +357,23 @@ namespace SolutionGrader.Core.Services
                         using var envWb = new XLWorkbook(environmentExcelPath);
                         if (envWb.TryGetWorksheet("Config", out var envWs))
                         {
-                            // Look for DatabaseScriptPath or similar config
+                            // Look for Default_Database_File_Path in Environment.xlsx Config sheet
                             foreach (var row in envWs.RowsUsed().Skip(1))
                             {
-                                var key = row.Cell(1).GetValue<string>()?.Trim()?.ToLowerInvariant();
+                                var key = row.Cell(1).GetValue<string>()?.Trim();
                                 var value = row.Cell(2).GetValue<string>()?.Trim();
                                 
-                                if (key == "databasescriptpath" || key == "sqlscriptpath" || key == "databasefilepath")
+                                // Match exact key name: Default_Database_File_Path
+                                // Also support legacy key names for backward compatibility
+                                if (key != null && (
+                                    key.Equals("Default_Database_File_Path", StringComparison.OrdinalIgnoreCase) ||
+                                    key.Replace("_", "").Equals("DefaultDatabaseFilePath", StringComparison.OrdinalIgnoreCase)))
                                 {
                                     if (!string.IsNullOrEmpty(value))
                                     {
                                         // Resolve relative path from test kit folder
                                         sqlScriptPath = Path.IsPathRooted(value) ? value : Path.Combine(testKitPath, value);
-                                        OnProgress($"[Database] Found SQL script path in Environment.xlsx: {sqlScriptPath}");
+                                        OnProgress($"[Database] Found SQL script path in Environment.xlsx (key '{key}'): {sqlScriptPath}");
                                     }
                                     break;
                                 }
@@ -689,6 +694,13 @@ namespace SolutionGrader.Core.Services
             var databaseContainer = config.DatabaseContainerName;
             var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
             var databaseUsername = config.DatabaseUsername ?? "sa";
+            
+            // SECURITY: Validate database name to prevent SQL injection
+            // Database names should only contain alphanumeric characters, underscores, and hyphens
+            if (!System.Text.RegularExpressions.Regex.IsMatch(databaseName, @"^[a-zA-Z0-9_\-]+$"))
+            {
+                throw new ArgumentException($"Invalid database name '{databaseName}'. Database names must contain only letters, numbers, underscores, and hyphens.", nameof(databaseName));
+            }
             
             OnProgress($"[Database] Creating database instance '{databaseName}' in container {databaseContainer}");
             
