@@ -71,7 +71,7 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
-        private readonly PcapParsingService _pcapParser; // PCAP parsing service (single responsibility)
+        private readonly SharpPcapParsingService _sharpPcapParser; // SharpPcap parser for robust PCAP reading
         private string? _currentStudentCode; // Track current student for logging
         private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
         
@@ -98,7 +98,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
-            _pcapParser = new PcapParsingService(); // Initialize PCAP parser
+            _sharpPcapParser = new SharpPcapParsingService(); // Initialize SharpPcap parser
         }
         
         /// <summary>
@@ -2958,7 +2958,7 @@ namespace SolutionGrader.Core.Services
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"auto-grader-network-monitor:latest " +  // Local Debian + tcpdump image with ENTRYPOINT
+                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
                            $"-i lo -n -U -w /data/{pcapFileName}";  // CRITICAL: -i lo for loopback, NO -v (breaks parser with multi-line format)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
