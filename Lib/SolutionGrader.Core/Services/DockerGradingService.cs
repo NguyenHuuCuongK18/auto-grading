@@ -2513,7 +2513,7 @@ namespace SolutionGrader.Core.Services
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
                            $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i any -n -U -w /data/{pcapFileName}";  // CRITICAL: -i any for shared namespace, NO -v flag
+                           $"-i any -n -U -w /data/{pcapFileName}";  // CRITICAL: -i any for shared namespace, NO -v (breaks parser with multi-line format)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
             OnProgress($"[Monitor] Capturing on any interface - captures localhost traffic in shared namespace");
