@@ -3148,11 +3148,13 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
                 
                 // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
-                // Use tcpdump to read pcap with detailed output
+                // Use tcpdump to read pcap
+                // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
+                // Single-line format: "timestamp IP src > dst: Flags [S], ..."
                 var psi = new ProcessStartInfo
                 {
                     FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -v tcp",
+                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt tcp",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
