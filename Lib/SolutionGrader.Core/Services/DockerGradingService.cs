@@ -1650,18 +1650,19 @@ namespace SolutionGrader.Core.Services
                 // Filter packets by stage from the complete set
                 var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
                 
-                // Find matching packet by flags
+                // Find matching packet by flags using set comparison (order-independent)
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
                     !string.IsNullOrEmpty(exp.Flags) && 
-                    NormalizeFlags(exp.Flags) == NormalizeFlags(p.Flags));
+                    FlagsMatch(exp.Flags, p.Flags));
                 
                 if (matchingPacket != null)
                 {
                     // Check if it's an exact match (PASS) or partial match (PARTIAL)
                     bool exactMatch = true;
                     
-                    // Compare flags - exact match required (but order-normalized)
-                    if (!string.IsNullOrEmpty(exp.Flags) && NormalizeFlags(exp.Flags) != NormalizeFlags(matchingPacket.Flags))
+                    // Compare flags using set comparison (already matched in FirstOrDefault above)
+                    // This is redundant but kept for clarity
+                    if (!string.IsNullOrEmpty(exp.Flags) && !FlagsMatch(exp.Flags, matchingPacket.Flags))
                         exactMatch = false;
                     
                     // Compare roles exactly
@@ -1758,12 +1759,46 @@ namespace SolutionGrader.Core.Services
         {
             if (string.IsNullOrWhiteSpace(flags)) return "";
             
+            // CRITICAL FIX: Replace hyphens with commas so tcpdump format matches Excel format
+            // tcpdump outputs: "SYN-ACK", "PSH-ACK", "FIN-ACK"
+            // Excel expects: "SYN, ACK", "PSH, ACK", "FIN, ACK"
+            flags = flags.Replace("-", ", ");
+            
             var flagList = flags.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => f.Trim().ToUpperInvariant())
                 .OrderBy(f => f)
                 .ToList();
             
             return string.Join(", ", flagList);
+        }
+        
+        /// <summary>
+        /// Parse flags string into a HashSet of individual flags for comparison
+        /// Handles both comma-separated (Excel) and hyphen-separated (tcpdump) formats
+        /// </summary>
+        private static HashSet<string> ParseFlagsToSet(string flags)
+        {
+            if (string.IsNullOrWhiteSpace(flags))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            
+            // Replace hyphens with commas to handle both formats
+            flags = flags.Replace("-", ",");
+            
+            return flags.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(f => f.Trim().ToUpperInvariant())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        
+        /// <summary>
+        /// Compare two flag strings as sets (order-independent, format-independent)
+        /// Returns true if both contain the same flags, false otherwise
+        /// </summary>
+        private static bool FlagsMatch(string flags1, string flags2)
+        {
+            var set1 = ParseFlagsToSet(flags1);
+            var set2 = ParseFlagsToSet(flags2);
+            
+            return set1.SetEquals(set2);
         }
         
         #endregion
