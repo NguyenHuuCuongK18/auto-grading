@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 
-namespace SolutionGrader.Core.Models
+namespace Domain.Models
 {
     /// <summary>
     /// Complete grading result for a student containing all test case results.

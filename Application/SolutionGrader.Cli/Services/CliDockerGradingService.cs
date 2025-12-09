@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
+using Domain.Models;
 using EnvironmentBuilder.DockerCommand;
 using FileMaster.FileEngine;
 using SolutionGrader.Core.Abstractions;
