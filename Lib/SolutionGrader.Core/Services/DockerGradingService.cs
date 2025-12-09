@@ -3279,23 +3279,7 @@ namespace SolutionGrader.Core.Services
                 string errorOutput = await process.StandardError.ReadToEndAsync();
                 await process.WaitForExitAsync();
                 
-<<<<<<< HEAD
-                // Build docker run command to parse pcap using the network-monitor image
-                // Use --rm to auto-remove container after execution
-                // Mount snapshot directory as read-only volume
-                // The network-monitor image has ENTRYPOINT ["tcpdump"], so we just pass the arguments
-                // -A flag shows ASCII payload data for actual content extraction (not just byte count)
-                var dockerCmd = $"docker run --rm -v \"{snapshotDir}:/pcap:ro\" fptuxaes/network-monitor:latest -r /pcap/{snapshotFile} -nn -tttt -A tcp";
-                
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Running: {dockerCmd}");
-                
-                // Execute docker command and capture output
-                var result = _commandExecutor.RunCommandAndCaptureOutput(dockerCmd, null, null, 30000);
-                
-                if (result.ExitCode != 0)
-=======
                 if (!string.IsNullOrEmpty(errorOutput))
->>>>>>> parent of 55a7412 (Merge pull request #137 from NguyenHuuCuongK18/copilot/fix-pcap-parsing-issue)
                 {
                     OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
                 }
