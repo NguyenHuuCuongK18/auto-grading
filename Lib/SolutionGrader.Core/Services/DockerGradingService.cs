@@ -408,34 +408,46 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
+                // Attempt to create database instance - failure will not stop grading
+                // SQL server container will remain running even if database creation fails
+                try
                 {
-                    OnProgress($"[Database] Creating database '{studentDatabaseName}' from SQL script: {Path.GetFileName(sqlScriptPath)}");
-                    
-                    // Read SQL script and replace database name with student-specific name
-                    var sqlContent = File.ReadAllText(sqlScriptPath);
-                    
-                    // Replace the default database name with student-specific name
-                    // Common patterns: CREATE DATABASE [DatabaseName], USE [DatabaseName]
-                    if (!string.IsNullOrEmpty(baseDatabaseName))
+                    if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
                     {
-                        sqlContent = sqlContent.Replace($"[{baseDatabaseName}]", $"[{studentDatabaseName}]");
-                        sqlContent = sqlContent.Replace($"{baseDatabaseName}", studentDatabaseName);
+                        OnProgress($"[Database] Creating database '{studentDatabaseName}' from SQL script: {Path.GetFileName(sqlScriptPath)}");
+                        
+                        // Read SQL script and replace database name with student-specific name
+                        var sqlContent = File.ReadAllText(sqlScriptPath);
+                        
+                        // Replace the default database name with student-specific name
+                        // Common patterns: CREATE DATABASE [DatabaseName], USE [DatabaseName]
+                        if (!string.IsNullOrEmpty(baseDatabaseName))
+                        {
+                            sqlContent = sqlContent.Replace($"[{baseDatabaseName}]", $"[{studentDatabaseName}]");
+                            sqlContent = sqlContent.Replace($"{baseDatabaseName}", studentDatabaseName);
+                        }
+                        
+                        // Create temporary SQL file with student-specific database name
+                        var tempSqlPath = Path.Combine(Path.GetTempPath(), $"{studentDatabaseName}.sql");
+                        File.WriteAllText(tempSqlPath, sqlContent);
+                        
+                        await CreateDatabaseInstanceAsync(config, studentDatabaseName, tempSqlPath);
+                        
+                        // Clean up temp file
+                        try { File.Delete(tempSqlPath); } catch { }
                     }
-                    
-                    // Create temporary SQL file with student-specific database name
-                    var tempSqlPath = Path.Combine(Path.GetTempPath(), $"{studentDatabaseName}.sql");
-                    File.WriteAllText(tempSqlPath, sqlContent);
-                    
-                    await CreateDatabaseInstanceAsync(config, studentDatabaseName, tempSqlPath);
-                    
-                    // Clean up temp file
-                    try { File.Delete(tempSqlPath); } catch { }
+                    else
+                    {
+                        OnProgress($"[Database] No SQL script found - skipping database instance creation");
+                        OnProgress($"[Database] SQL server container will remain running for the session");
+                        // Don't create empty database if no script is found - just skip
+                    }
                 }
-                else
+                catch (Exception dbEx)
                 {
-                    OnProgress($"[Database] No SQL script found - creating empty database '{studentDatabaseName}'");
-                    await CreateDatabaseInstanceAsync(config, studentDatabaseName, null);
+                    OnProgress($"[Database] Failed to create database instance: {dbEx.Message}");
+                    OnProgress($"[Database] Continuing with grading - SQL server container remains running");
+                    // Don't throw - allow grading to continue
                 }
                 
                 // Setup unified container
@@ -745,7 +757,8 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"[Database] ERROR: Failed to create database from script: {scriptOutput}");
+                        OnProgress($"[Database] WARNING: Failed to create database from script: {scriptOutput}");
+                        OnProgress($"[Database] SQL server container will remain running, but database instance was not created");
                         throw new Exception($"Failed to create database from SQL script: {scriptOutput}");
                     }
                 }
@@ -765,7 +778,8 @@ namespace SolutionGrader.Core.Services
                     }
                     else
                     {
-                        OnProgress($"[Database] ERROR: Failed to create database: {createOutput}");
+                        OnProgress($"[Database] WARNING: Failed to create database: {createOutput}");
+                        OnProgress($"[Database] SQL server container will remain running, but database instance was not created");
                         throw new Exception($"Failed to create database: {createOutput}");
                     }
                 }
@@ -785,8 +799,10 @@ namespace SolutionGrader.Core.Services
             }
             catch (Exception ex)
             {
-                OnProgress($"[Database] CRITICAL ERROR: Failed to create database instance '{databaseName}': {ex.Message}");
-                throw;
+                OnProgress($"[Database] WARNING: Failed to create database instance '{databaseName}': {ex.Message}");
+                OnProgress($"[Database] Skipping database creation but keeping SQL server container running");
+                // Don't throw - allow grading to continue without database
+                // The SQL server container will remain running for the session
             }
         }
         
