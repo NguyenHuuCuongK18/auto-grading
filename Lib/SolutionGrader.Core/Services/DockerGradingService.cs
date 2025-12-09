@@ -2504,19 +2504,19 @@ namespace SolutionGrader.Core.Services
             // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
             // We override the -w argument to use our custom filename
             
-            // CRITICAL: Capture on any interface to catch localhost traffic in shared namespace
+            // CRITICAL: Capture on loopback interface for localhost traffic
             // Client and server communicate via localhost (127.0.0.1) in unified container
-            // Using -i any captures traffic correctly in --net=container: mode (verified by manual test)
+            // Using -i lo is less noisy than -i any (which captures eth0 traffic too)
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
                            $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i any -n -U -w /data/{pcapFileName}";  // CRITICAL: -i any for shared namespace, NO -v (breaks parser with multi-line format)
+                           $"-i lo -n -U -w /data/{pcapFileName}";  // CRITICAL: -i lo for loopback, NO -v (breaks parser with multi-line format)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
-            OnProgress($"[Monitor] Capturing on any interface - captures localhost traffic in shared namespace");
+            OnProgress($"[Monitor] Capturing on loopback (lo) interface - localhost traffic only (less noisy than -i any)");
             OnProgress($"[Monitor] Output will be saved to: {pcapOutputPath}");
             
             try
