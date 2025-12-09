@@ -199,6 +199,10 @@ public static class GradingKeywords
     public const string Col_ActualDestRole  = "ActualDestRole";
     /// <summary>Column for actual captured data payload</summary>
     public const string Col_ActualData      = "ActualData";
+    /// <summary>Column for actual captured source port</summary>
+    public const string Col_ActualSourcePort = "ActualSourcePort";
+    /// <summary>Column for actual captured destination port</summary>
+    public const string Col_ActualDestPort  = "ActualDestPort";
     /// <summary>Column for network validation result (PASS/FAIL)</summary>
     public const string Col_NetworkResult   = "NetworkResult";
     

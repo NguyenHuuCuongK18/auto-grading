@@ -103,6 +103,7 @@ public static class AppsettingKeywords
     public const string LOG_PREFIX_APPSETTINGS = "[Appsettings]";
     public const string LOG_PREFIX_DATABASE = "[Database]";
     public const string LOG_PREFIX_APPSETTINGS_CREATION = "[AppsettingsCreation]";
+    public const string LOG_PREFIX_APPSETTINGS_MODIFICATION = "[AppsettingsModification]";
     
     // Messages
     public const string MSG_GENERATING_FROM_HEADER = "Generating appsettings.json from Header.xlsx configuration...";

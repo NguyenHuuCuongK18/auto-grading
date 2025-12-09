@@ -64,6 +64,31 @@ namespace Domain.Models
         public bool UseDllModificationFallback { get; set; } = false;
         
         /// <summary>
+        /// Use shared MSSQL container for all students instead of per-student containers.
+        /// When enabled:
+        /// - Single MSSQL container is created for entire grading session
+        /// - Each student gets their own database (Student_{StudentCode})
+        /// - Massive resource savings (1 container vs N containers)
+        /// - Faster database reset (drop/create DB vs restart container)
+        /// Default: true (enabled).
+        /// </summary>
+        public bool UseSharedDatabaseContainer { get; set; } = true;
+        
+        /// <summary>
+        /// Name of the shared MSSQL container.
+        /// Only used when UseSharedDatabaseContainer is true.
+        /// Default: "auto-grading-mssql-shared"
+        /// </summary>
+        public string SharedDatabaseContainerName { get; set; } = "auto-grading-mssql-shared";
+        
+        /// <summary>
+        /// Port for the shared MSSQL container.
+        /// Only used when UseSharedDatabaseContainer is true.
+        /// Default: 1433
+        /// </summary>
+        public int SharedDatabasePort { get; set; } = 1433;
+        
+        /// <summary>
         /// Image name for unified containers that run both client and server processes.
         /// This image has supervisord installed for process management.
         /// Default: "fptuxaes/aes-dotnet8-console:latest"
