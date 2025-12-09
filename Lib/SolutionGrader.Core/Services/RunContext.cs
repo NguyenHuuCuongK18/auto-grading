@@ -201,6 +201,26 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Clears captured network packets for a specific student/question code.
+        /// Used to flush packets between test cases to prevent accumulation.
+        /// This ensures each test case starts with a clean slate for comparison.
+        /// </summary>
+        public void ClearCapturedNetworkPackets(string questionCode)
+        {
+            // Clear all packets for this question code (across all stages)
+            var keysToRemove = _capturedPackets.Keys
+                .Where(k => k.StartsWith(questionCode + "-", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            
+            foreach (var key in keysToRemove)
+            {
+                _capturedPackets.TryRemove(key, out _);
+            }
+            
+            Console.WriteLine($"[RunContext] Cleared {keysToRemove.Count} packet collections for {questionCode}");
+        }
+        
+        /// <summary>
         /// Static empty array for returning when no packets are captured.
         /// Avoids creating new empty arrays on each call.
         /// </summary>

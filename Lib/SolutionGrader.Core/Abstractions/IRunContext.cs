@@ -58,5 +58,11 @@ namespace SolutionGrader.Core.Abstractions
         /// Used when you need to retrieve all packets regardless of context.
         /// </summary>
         IReadOnlyList<CapturedNetworkPacket> GetAllCapturedNetworkPackets();
+        
+        /// <summary>
+        /// Clears captured network packets for a specific student/question code.
+        /// Used to flush packets between test cases to prevent accumulation.
+        /// </summary>
+        void ClearCapturedNetworkPackets(string questionCode);
     }
 }

@@ -503,6 +503,20 @@ namespace SolutionGrader.Core.Services
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
                     
+                    // CRITICAL: Flush network capture RunContext between test cases
+                    // This prevents packets from previous test cases from being included in comparisons
+                    // The PCAP file accumulates, but we clear RunContext so each TC comparison is isolated
+                    if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
+                    {
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case (captures will accumulate)...");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Cumulative packet count: {_lastParsedPacketCount}");
+                        
+                        // Clear previous test case packets from RunContext
+                        // The PCAP file continues to grow, but RunContext only has current TC packets
+                        _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Cleared RunContext for fresh test case comparison");
+                    }
+                    
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
                     var testCaseTimeout = testCase.TimeoutSeconds;
                     OnProgress($"[TEST_CASE] Starting {testCase.Name} (timeout: {testCaseTimeout}s)");
