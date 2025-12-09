@@ -56,7 +56,19 @@ namespace SolutionGrader.UI
             UpdateRoleToggleVisibility();
             
             // Validate Docker images on startup
-            _ = ValidateDockerImagesAsync();
+            // Use fire-and-forget with exception handling to avoid blocking UI initialization
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ValidateDockerImagesAsync();
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't crash - user can manually validate later
+                    System.Diagnostics.Debug.WriteLine($"Docker validation failed: {ex.Message}");
+                }
+            });
         }
 
         /// <summary>

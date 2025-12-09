@@ -1,8 +1,9 @@
 # Auto Grading System - Git Attributes Configuration
 # This file ensures proper line endings across different operating systems
 
-# Default behavior: Use LF for all files unless specified otherwise
-* text=auto eol=lf
+# Default behavior: Use auto detection for text files
+# Let Git determine which files are text and handle line endings appropriately
+* text=auto
 
 # Shell scripts MUST use LF line endings (Unix/Linux style)
 # Windows CRLF line endings cause "no such file or directory" errors in Docker containers

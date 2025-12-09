@@ -185,13 +185,27 @@ namespace SolutionGrader.UI.Services
                             }
                             
                             // Entrypoint exists but doesn't have unified-entrypoint.sh
+                            // Format the entrypoint array for display
+                            var entrypointDisplay = "Unknown";
+                            try
+                            {
+                                var entrypointList = new System.Collections.Generic.List<string>();
+                                foreach (var item in entrypoint.EnumerateArray())
+                                {
+                                    var value = item.GetString();
+                                    if (value != null) entrypointList.Add(value);
+                                }
+                                entrypointDisplay = string.Join(", ", entrypointList);
+                            }
+                            catch { }
+                            
                             return new ValidationResult
                             {
                                 IsValid = false,
                                 Message = $"❌ WRONG DOCKER IMAGE DETECTED!\n\n" +
                                          $"Your '{imageName}' image was built with the OLD Dockerfile.\n" +
                                          $"The current system requires an image built with Dockerfile.unified.\n\n" +
-                                         $"Current entrypoint: {entrypoint}\n" +
+                                         $"Current entrypoint: {entrypointDisplay}\n" +
                                          $"Required entrypoint: {ExpectedEntrypoint}\n\n" +
                                          $"This is why you're getting the error:\n" +
                                          $"  'exec /scripts/unified-entrypoint.sh: no such file or directory'\n\n" +
