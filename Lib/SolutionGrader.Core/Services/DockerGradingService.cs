@@ -2958,7 +2958,7 @@ namespace SolutionGrader.Core.Services
                            $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
                            $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
+                           $"auto-grader-network-monitor:latest " +  // Local Debian + tcpdump image with ENTRYPOINT
                            $"-i lo -n -U -w /data/{pcapFileName}";  // CRITICAL: -i lo for loopback, NO -v (breaks parser with multi-line format)
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
