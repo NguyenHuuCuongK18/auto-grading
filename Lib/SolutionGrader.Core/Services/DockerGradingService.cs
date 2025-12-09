@@ -341,6 +341,98 @@ namespace SolutionGrader.Core.Services
                 // No per-student registration needed - monitor captures all traffic on loopback
                 // and filters by port number (each student gets unique port)
                 
+                // CRITICAL: Create database instance for this student
+                // Database container must be running before creating instance
+                // Each student gets their own database instance (e.g., Library_student1)
+                OnProgress($"[Database] Creating database instance for {studentCode}...");
+                
+                // Look for SQL initialization script in test kit
+                string? sqlScriptPath = null;
+                var environmentExcelPath = Path.Combine(testKitPath, "Environment.xlsx");
+                if (File.Exists(environmentExcelPath))
+                {
+                    try
+                    {
+                        using var envWb = new XLWorkbook(environmentExcelPath);
+                        if (envWb.TryGetWorksheet("Config", out var envWs))
+                        {
+                            // Look for DatabaseScriptPath or similar config
+                            foreach (var row in envWs.RowsUsed().Skip(1))
+                            {
+                                var key = row.Cell(1).GetValue<string>()?.Trim()?.ToLowerInvariant();
+                                var value = row.Cell(2).GetValue<string>()?.Trim();
+                                
+                                if (key == "databasescriptpath" || key == "sqlscriptpath" || key == "databasefilepath")
+                                {
+                                    if (!string.IsNullOrEmpty(value))
+                                    {
+                                        // Resolve relative path from test kit folder
+                                        sqlScriptPath = Path.IsPathRooted(value) ? value : Path.Combine(testKitPath, value);
+                                        OnProgress($"[Database] Found SQL script path in Environment.xlsx: {sqlScriptPath}");
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[Database] Warning: Failed to read SQL script path from Environment.xlsx: {ex.Message}");
+                    }
+                }
+                
+                // If no SQL script in Environment.xlsx, check for default locations
+                if (string.IsNullOrEmpty(sqlScriptPath))
+                {
+                    var defaultScriptLocations = new[]
+                    {
+                        Path.Combine(testKitPath, $"{baseDatabaseName}.sql"),
+                        Path.Combine(testKitPath, "database.sql"),
+                        Path.Combine(testKitPath, "init.sql"),
+                        Path.Combine(Path.GetDirectoryName(testKitPath) ?? "", $"{baseDatabaseName}.sql")
+                    };
+                    
+                    foreach (var location in defaultScriptLocations)
+                    {
+                        if (File.Exists(location))
+                        {
+                            sqlScriptPath = location;
+                            OnProgress($"[Database] Found SQL script at default location: {sqlScriptPath}");
+                            break;
+                        }
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
+                {
+                    OnProgress($"[Database] Creating database '{studentDatabaseName}' from SQL script: {Path.GetFileName(sqlScriptPath)}");
+                    
+                    // Read SQL script and replace database name with student-specific name
+                    var sqlContent = File.ReadAllText(sqlScriptPath);
+                    
+                    // Replace the default database name with student-specific name
+                    // Common patterns: CREATE DATABASE [DatabaseName], USE [DatabaseName]
+                    if (!string.IsNullOrEmpty(baseDatabaseName))
+                    {
+                        sqlContent = sqlContent.Replace($"[{baseDatabaseName}]", $"[{studentDatabaseName}]");
+                        sqlContent = sqlContent.Replace($"{baseDatabaseName}", studentDatabaseName);
+                    }
+                    
+                    // Create temporary SQL file with student-specific database name
+                    var tempSqlPath = Path.Combine(Path.GetTempPath(), $"{studentDatabaseName}.sql");
+                    File.WriteAllText(tempSqlPath, sqlContent);
+                    
+                    await CreateDatabaseInstanceAsync(config, studentDatabaseName, tempSqlPath);
+                    
+                    // Clean up temp file
+                    try { File.Delete(tempSqlPath); } catch { }
+                }
+                else
+                {
+                    OnProgress($"[Database] No SQL script found - creating empty database '{studentDatabaseName}'");
+                    await CreateDatabaseInstanceAsync(config, studentDatabaseName, null);
+                }
+                
                 // Setup unified container
                 OnProgress($"Setting up unified Docker container for {studentCode}...");
                 // Logs will be exported from container after grading
@@ -583,6 +675,107 @@ namespace SolutionGrader.Core.Services
             // Wait for MSSQL to fully start with polling instead of fixed delay
             OnProgress("[Docker] Waiting for MSSQL to start...");
             await WaitForContainerRunningAsync(databaseContainer, maxWaitSeconds: 20);
+        }
+        
+        /// <summary>
+        /// Creates a database instance within the shared MSSQL container for a student.
+        /// This ensures each student has their own isolated database even when sharing the container.
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
+        /// <param name="databaseName">Name of the database to create (e.g., Library_student1)</param>
+        /// <param name="sqlScriptPath">Optional path to SQL initialization script on host machine</param>
+        private async Task CreateDatabaseInstanceAsync(DockerGradingConfig config, string databaseName, string? sqlScriptPath = null)
+        {
+            var databaseContainer = config.DatabaseContainerName;
+            var databasePassword = config.DatabasePassword ?? DefaultDatabasePassword;
+            var databaseUsername = config.DatabaseUsername ?? "sa";
+            
+            OnProgress($"[Database] Creating database instance '{databaseName}' in container {databaseContainer}");
+            
+            try
+            {
+                // Step 1: Check if database already exists
+                var checkDbSql = $"SELECT name FROM sys.databases WHERE name = '{databaseName}'";
+                var checkCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{checkDbSql}\" -h -1";
+                
+                var (checkSuccess, checkOutput) = _dockerExecutor.ExecDockerCommandWithOutput(checkCommand, 5000);
+                
+                if (checkSuccess && checkOutput.Contains(databaseName))
+                {
+                    OnProgress($"[Database] Database '{databaseName}' already exists, dropping it first");
+                    
+                    // Drop existing database
+                    var dropSql = $"USE master; ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}];";
+                    var dropCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{dropSql}\"";
+                    _dockerExecutor.ExecDockerCommand(dropCommand, 10000);
+                    
+                    OnProgress($"[Database] Dropped existing database '{databaseName}'");
+                    await Task.Delay(1000); // Wait for drop to complete
+                }
+                
+                // Step 2: Create database
+                if (!string.IsNullOrEmpty(sqlScriptPath) && File.Exists(sqlScriptPath))
+                {
+                    // Create database from SQL script
+                    OnProgress($"[Database] Creating database '{databaseName}' from SQL script: {sqlScriptPath}");
+                    
+                    // Copy SQL script to container
+                    var containerSqlPath = $"/tmp/{databaseName}.sql";
+                    _dockerExecutor.CopyFileToContainer(databaseContainer, sqlScriptPath, containerSqlPath);
+                    
+                    // Execute SQL script
+                    var execScriptCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -i {containerSqlPath}";
+                    var (scriptSuccess, scriptOutput) = _dockerExecutor.ExecDockerCommandWithOutput(execScriptCommand, 30000);
+                    
+                    if (scriptSuccess)
+                    {
+                        OnProgress($"[Database] Successfully created database '{databaseName}' from script");
+                    }
+                    else
+                    {
+                        OnProgress($"[Database] ERROR: Failed to create database from script: {scriptOutput}");
+                        throw new Exception($"Failed to create database from SQL script: {scriptOutput}");
+                    }
+                }
+                else
+                {
+                    // Create empty database (no SQL script provided)
+                    OnProgress($"[Database] Creating empty database '{databaseName}' (no SQL script provided)");
+                    
+                    var createDbSql = $"CREATE DATABASE [{databaseName}]";
+                    var createCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{createDbSql}\"";
+                    
+                    var (createSuccess, createOutput) = _dockerExecutor.ExecDockerCommandWithOutput(createCommand, 10000);
+                    
+                    if (createSuccess)
+                    {
+                        OnProgress($"[Database] Successfully created empty database '{databaseName}'");
+                    }
+                    else
+                    {
+                        OnProgress($"[Database] ERROR: Failed to create database: {createOutput}");
+                        throw new Exception($"Failed to create database: {createOutput}");
+                    }
+                }
+                
+                // Step 3: Verify database was created
+                var verifyCommand = $"exec {databaseContainer} /opt/mssql-tools/bin/sqlcmd -S localhost -U {databaseUsername} -P \"{databasePassword}\" -Q \"{checkDbSql}\" -h -1";
+                var (verifySuccess, verifyOutput) = _dockerExecutor.ExecDockerCommandWithOutput(verifyCommand, 5000);
+                
+                if (verifySuccess && verifyOutput.Contains(databaseName))
+                {
+                    OnProgress($"[Database] Verified database '{databaseName}' exists and is ready");
+                }
+                else
+                {
+                    OnProgress($"[Database] WARNING: Could not verify database '{databaseName}' exists");
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Database] CRITICAL ERROR: Failed to create database instance '{databaseName}': {ex.Message}");
+                throw;
+            }
         }
         
         /// <summary>
@@ -2242,6 +2435,7 @@ namespace SolutionGrader.Core.Services
                     
                     var flags = row.Cell(6).GetValue<string>();
                     var state = row.Cell(7).GetValue<string>();
+                    var data = row.Cell(8).GetValue<string>();  // Column H: Data payload
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
                     
@@ -2252,6 +2446,7 @@ namespace SolutionGrader.Core.Services
                             Stage = stage,
                             Flags = flags,
                             State = state,
+                            Data = data,
                             SourceRole = sourceRole,
                             DestinationRole = destRole
                         });
@@ -3702,6 +3897,7 @@ namespace SolutionGrader.Core.Services
         public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
+        public string? Data { get; set; }
     }
     
     #endregion
