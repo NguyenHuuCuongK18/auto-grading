@@ -47,7 +47,7 @@ public class PcapParsingService
                 {
                     // Filter: Only accept 2-character or 4-character hex strings (byte pairs)
                     // Ignore offset (e.g., "0x0030:"), ignore ASCII representation
-                    if ((token.Length == 2 || token.Length == 4) && IsHexString(token))
+                    if ((token.Length == 2 || token.Length == 4) && token.All(c => "0123456789abcdefABCDEF".Contains(c)))
                     {
                         // Parse hex bytes
                         for (int i = 0; i < token.Length; i += 2)
@@ -215,7 +215,7 @@ public class PcapParsingService
         if (payloadLength > 0)
         {
             _currentParsingPacket = newPacket;
-            _currentPayloadBuffer.Clear();
+            _currentPayloadBytes.Clear();
             // Return the completed previous packet if any
             return completedPacket;
         }
@@ -242,15 +242,28 @@ public class PcapParsingService
     {
         if (_currentParsingPacket != null)
         {
-            var collectedPayload = _currentPayloadBuffer.ToString().Trim();
-            if (!string.IsNullOrWhiteSpace(collectedPayload))
+            // Convert collected hex bytes to ASCII string
+            if (_currentPayloadBytes.Count > 0)
             {
-                _currentParsingPacket.Data = collectedPayload;
+                var sb = new StringBuilder();
+                foreach (var b in _currentPayloadBytes)
+                {
+                    if ((b >= 32 && b <= 126)) // Printable ASCII
+                    {
+                        sb.Append((char)b);
+                    }
+                }
+                
+                var payload = sb.ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(payload) && payload.Any(char.IsLetterOrDigit))
+                {
+                    _currentParsingPacket.Data = payload;
+                }
             }
             
             var finalPacket = _currentParsingPacket;
             _currentParsingPacket = null;
-            _currentPayloadBuffer.Clear();
+            _currentPayloadBytes.Clear();
             return finalPacket;
         }
         return null;
@@ -262,6 +275,6 @@ public class PcapParsingService
     public void Reset()
     {
         _currentParsingPacket = null;
-        _currentPayloadBuffer.Clear();
+        _currentPayloadBytes.Clear();
     }
 }

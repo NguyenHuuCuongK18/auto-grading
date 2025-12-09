@@ -3531,92 +3531,42 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 var fileSize = new FileInfo(snapshotPath).Length;
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with tcpdump");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with SharpPcap");
                 
-                // SNAPSHOT STRATEGY Step 3: Parse the snapshot (cumulative - contains all packets so far)
-                // Use tcpdump to read pcap
-                // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
-                // Single-line format: "timestamp IP src > dst: Flags [S], ..."
-                // CRITICAL: -X flag outputs payload in HEX+ASCII format for data extraction
-                // -X provides: "0x0000:  4500 0038 ...  E..8...S001" format
-                // -A only provides raw ASCII which our parser doesn't handle correctly
-                // PcapParsingService expects hex dump format with "0x" prefix and double-space separator
-                var psi = new ProcessStartInfo
+                // SNAPSHOT STRATEGY Step 3: Parse the snapshot using SharpPcap
+                // This is more robust than tcpdump text parsing - works cross-platform
+                var packets = _sharpPcapParser.ParsePcapFile(snapshotPath, currentStage, port);
+                
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsed {packets.Count} total packets");
+                
+                // Skip packets we've already processed (cumulative parsing)
+                var newPackets = packets.Skip(_lastParsedPacketCount).ToList();
+                
+                foreach (var packet in newPackets)
                 {
-                    FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -X tcp",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using var process = Process.Start(psi);
-                if (process == null)
-                {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to start tcpdump process");
-                    return;
-                }
-                
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string errorOutput = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
-                
-                if (!string.IsNullOrEmpty(errorOutput))
-                {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump stderr: {errorOutput}");
-                }
-                
-                // Parse tcpdump output
-                // Example: "2024-12-08 11:08:03.543348 IP 127.0.0.1.47044 > 127.0.0.1.4000: Flags [S], seq 3911487358, ..."
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: tcpdump output has {lines.Length} lines");
-                
-                // Skip packets we've already processed
-                var newPackets = lines.Skip(_lastParsedPacketCount).ToList();
-                
-                foreach (var line in newPackets)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    
                     try
                     {
-                        // Parse packet details (handles multi-line payload with -A flag)
-                        var packet = _pcapParser.ParseTcpdumpLine(line, currentStage, port);
-                        if (packet != null)
-                        {
-                            // Add to RunContext for this stage
-                            var studentCode = _currentStudentCode ?? "";
-                            OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
-                            _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
-                            
-                            // Verify it was added
-                            var allPackets = _runContext.GetAllCapturedNetworkPackets();
-                            OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
-                        }
+                        // Add to RunContext for this stage
+                        var studentCode = _currentStudentCode ?? "";
+                        OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
+                        _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
+                        
+                        // Verify it was added
+                        var allPackets = _runContext.GetAllCapturedNetworkPackets();
+                        OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
                     }
                     catch (Exception ex)
                     {
                         // Log the exception instead of silently swallowing it
-                        OnProgress($"[NETWORK] ERROR parsing packet: {ex.Message}");
+                        OnProgress($"[NETWORK] ERROR adding packet: {ex.Message}");
                         continue;
                     }
                 }
                 
-                // Finalize any remaining packet being parsed
-                var finalPacket = _pcapParser.FinalizeCurrentPacket();
-                if (finalPacket != null)
-                {
-                    var studentCode = _currentStudentCode ?? "";
-                    OnProgress($"[NetworkMonitor] DEBUG: Finalizing last packet - StudentCode='{studentCode}', Stage={currentStage}, Flags={finalPacket.Flags}, Data={finalPacket.Data ?? "(empty)"}");
-                    _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), finalPacket);
-                }
-                
                 // Update counter to skip these packets next time
-                _lastParsedPacketCount = lines.Length;
+                _lastParsedPacketCount = packets.Count;
                 
-                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {lines.Length}");
+                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count}");
             }
             catch (Exception ex)
             {

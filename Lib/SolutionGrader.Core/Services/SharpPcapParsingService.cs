@@ -38,11 +38,12 @@ public class SharpPcapParsingService
             device.Open();
             
             // Read all packets from the file
-            RawCapture rawCapture;
-            while ((rawCapture = device.GetNextPacket()) != null)
+            PacketCapture e;
+            while (device.GetNextPacket(out e) == SharpPcap.GetPacketStatus.PacketRead)
             {
                 try
                 {
+                    var rawCapture = e.GetPacket();
                     // Parse the raw packet using PacketDotNet
                     var packet = Packet.ParsePacket(rawCapture.LinkLayerType, rawCapture.Data);
                     
@@ -100,15 +101,17 @@ public class SharpPcapParsingService
                     {
                         Timestamp = rawCapture.Timeval.Date,
                         Stage = stage,
-                        SourceIp = ipPacket.SourceAddress.ToString(),
-                        DestinationIp = ipPacket.DestinationAddress.ToString(),
+                        Source = $"{ipPacket.SourceAddress}:{srcPort}",
+                        Destination = $"{ipPacket.DestinationAddress}:{dstPort}",
                         SourcePort = srcPort,
                         DestinationPort = dstPort,
                         Flags = flags,
                         State = state,
                         SourceRole = srcRole,
                         DestinationRole = dstRole,
-                        Data = string.IsNullOrWhiteSpace(payloadData) ? null : payloadData
+                        Data = string.IsNullOrWhiteSpace(payloadData) ? null : payloadData,
+                        Protocol = "TCP",
+                        Length = tcpPacket.PayloadData?.Length ?? 0
                     };
                     
                     packets.Add(capturedPacket);
