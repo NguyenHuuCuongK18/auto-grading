@@ -1405,17 +1405,16 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
                 return false;
             
-            // Normalize flags by splitting on all common delimiters: comma, period, hyphen, space
-            // Template formats: "SYN, ACK" or "SYN.ACK" or "SYN-ACK" or "SYN ACK"
-            // All should be treated as equivalent sets of flags
-            var expectedFlags = expected.Split(new[] { ',', '.', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
+            // Use regex to extract flag names, ignoring all delimiters (comma, period, hyphen, space, pipe, underscore, etc.)
+            // This is more robust than trying to list every possible separator
+            // Pattern [a-zA-Z]+ matches one or more letters (e.g., "SYN", "ACK", "PSH", "FIN", "RST")
+            // Handles formats: "SYN, ACK", "SYN.ACK", "SYN-ACK", "SYN ACK", "SYN|ACK", "SYN_ACK"
+            var expectedFlags = System.Text.RegularExpressions.Regex.Matches(expected, @"[a-zA-Z]+")
+                .Select(m => m.Value.ToUpperInvariant())
                 .ToHashSet();
             
-            var actualFlags = actual.Split(new[] { ',', '.', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(f => f.Trim().ToUpperInvariant())
-                .Where(f => !string.IsNullOrEmpty(f))
+            var actualFlags = System.Text.RegularExpressions.Regex.Matches(actual, @"[a-zA-Z]+")
+                .Select(m => m.Value.ToUpperInvariant())
                 .ToHashSet();
             
             // Use set equality - order doesn't matter, just the flags present
