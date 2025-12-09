@@ -1,5 +1,27 @@
 # Docker Image Build Instructions
 
+## Quick Start
+
+```bash
+cd DockerImage
+bash build.sh
+```
+
+This builds both required Docker images with automatic line ending fixes.
+
+## Important Notes
+
+**Line Endings Fix:** The Dockerfile includes `dos2unix` to automatically convert Windows line endings (CRLF) to Unix line endings (LF). This prevents the common error:
+```
+exec /scripts/unified-entrypoint.sh: no such file or directory
+```
+
+If you see this error, simply rebuild the image using the command above. The `dos2unix` conversion ensures all scripts work correctly regardless of which operating system they were edited on.
+
+For more details about line endings, see: [../LINE_ENDINGS_FIX.md](../LINE_ENDINGS_FIX.md)
+
+---
+
 ## Unified Container Image
 
 **Image Name**: `fptuxaes/aes-dotnet8-console:latest`
