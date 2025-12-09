@@ -63,20 +63,31 @@ public class SharpPcapParsingService
                     var dstPort = tcpPacket.DestinationPort;
                     
                     // Determine roles based on port
+                    // CRITICAL FIX: Be lenient with port matching since students may hardcode ports
+                    // The grading system assigns different ports (4000, 4001, 4002...) to avoid conflicts,
+                    // but students often hardcode port 4000. We should accept ANY port in the 4000-4010 range
+                    // and use heuristics to determine client vs server based on connection direction.
                     string srcRole, dstRole;
-                    if (srcPort == expectedPort)
+                    
+                    // Check if either port matches expected port OR is in the common range (4000-4010)
+                    bool srcIsServerPort = (srcPort == expectedPort) || (srcPort >= 4000 && srcPort <= 4010 && srcPort < dstPort);
+                    bool dstIsServerPort = (dstPort == expectedPort) || (dstPort >= 4000 && dstPort <= 4010 && dstPort < srcPort);
+                    
+                    if (srcIsServerPort)
                     {
                         srcRole = "Server";
                         dstRole = "Client";
                     }
-                    else if (dstPort == expectedPort)
+                    else if (dstIsServerPort)
                     {
                         srcRole = "Client";
                         dstRole = "Server";
                     }
                     else
                     {
-                        continue; // Skip packets not related to our port
+                        // Neither port looks like a server port - skip
+                        // This happens with unrelated traffic
+                        continue;
                     }
                     
                     // Parse TCP flags
