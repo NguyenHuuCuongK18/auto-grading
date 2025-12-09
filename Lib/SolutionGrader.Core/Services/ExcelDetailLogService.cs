@@ -1041,7 +1041,11 @@ namespace SolutionGrader.Core.Services
             IXLWorksheet? networkWs;
             if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out networkWs))
             {
-                // Network sheet exists in template - add actual data columns
+                // Network sheet exists in template - preserve expected Data column and add actual data columns
+                // CRITICAL FIX: The template's Network sheet Data column contains expected values (e.g., "S123", JSON responses)
+                // These values must be preserved when creating the graded output for comparison
+                // ClosedXML sometimes treats empty/populated cells inconsistently, so we explicitly preserve Data values
+                
                 EnsureColumns(networkWs, new[] 
                 { 
                     GradingKeywords.Col_ActualFlags,
@@ -1054,6 +1058,12 @@ namespace SolutionGrader.Core.Services
                     GradingKeywords.Col_NetworkResult
                 });
                 var hdr = GetHeaderIndex(networkWs);
+                
+                // IMPORTANT: Preserve expected Data column values from template
+                // The template Detail.xlsx contains expected Data values that must be shown for comparison
+                // This ensures instructors can see both expected and actual data side-by-side
+                PreserveNetworkExpectedData(networkWs, hdr);
+                
                 PopulateNetworkActualColumns(networkWs, hdr);
             }
             else
@@ -1188,6 +1198,38 @@ namespace SolutionGrader.Core.Services
                 }
             }
             return 0;
+        }
+        
+        
+        /// <summary>
+        /// Preserves expected Data column values from the Network sheet template.
+        /// The template Detail.xlsx contains expected payload values (e.g., "S123", JSON responses)
+        /// that must be retained in the graded output for side-by-side comparison with actual captured data.
+        /// 
+        /// This method is a workaround for ClosedXML potentially treating empty/populated cells inconsistently.
+        /// By explicitly reading and re-writing the Data column values, we ensure they are preserved.
+        /// </summary>
+        private void PreserveNetworkExpectedData(IXLWorksheet ws, Dictionary<string, int> hdr)
+        {
+            if (!hdr.TryGetValue(NetworkKeywords.Col_Data, out var dataCol)) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Read all Data column values and re-write them to ensure they're preserved
+            // This forces ClosedXML to recognize the values and keep them when saving
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                var dataCell = ws.Cell(row.RowNumber(), dataCol);
+                var dataValue = dataCell.GetString();
+                
+                // Re-assign the value to ensure it's preserved (even if empty)
+                // This prevents ClosedXML from treating it as "never set" and clearing it
+                if (!string.IsNullOrEmpty(dataValue))
+                {
+                    dataCell.Value = dataValue;
+                }
+            }
         }
         
         /// <summary>
