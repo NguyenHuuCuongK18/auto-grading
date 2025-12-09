@@ -30,7 +30,7 @@
     <ProjectReference Include="..\Domain\Domain.csproj" />
     <ProjectReference Include="..\EnvironmentBuilder\EnvironmentBuilder.csproj" />
     <ProjectReference Include="..\FileMaster\FileMaster.csproj" />
-    <ProjectReference Include="..\ProcessLauncher\ProcessLauncher.csproj" />
+
     <ProjectReference Include="..\DllMod\DllMod.csproj" />
   </ItemGroup>
 </Project>
