@@ -3528,10 +3528,12 @@ namespace SolutionGrader.Core.Services
                 // Use tcpdump to read pcap
                 // CRITICAL: Don't use -v (verbose) flag - it outputs multi-line format that breaks parsing
                 // Single-line format: "timestamp IP src > dst: Flags [S], ..."
+                // CRITICAL: -A flag outputs payload in ASCII for data extraction
+                // Without -A, we only get headers and no payload data (Data column will be empty)
                 var psi = new ProcessStartInfo
                 {
                     FileName = "tcpdump",
-                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt tcp",
+                    Arguments = $"-r \"{snapshotPath}\" -nn -tttt -A tcp",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
