@@ -1223,48 +1223,23 @@ namespace SolutionGrader.Core.Services
             {
                 var dataCell = ws.Cell(row.RowNumber(), dataCol);
                 
-                // CRITICAL FIX: Use CachedValue property to get the actual cell value
-                // GetString() may return empty even when there's a value
-                // CachedValue preserves the original value from the file
-                var cachedValue = dataCell.CachedValue;
-                
-                // If there's a cached value, preserve it
-                if (!cachedValue.IsBlank)
+                // CRITICAL FIX: Get the actual string value directly
+                // Don't use cellValue.IsBlank or cellValue.IsText as they may not work correctly
+                // for all cell types. Just get the string representation and re-assign it.
+                try
                 {
-                    // For text values, get the actual text
-                    if (cachedValue.IsText)
-                    {
-                        dataCell.Value = cachedValue.GetText();
-                    }
-                    else if (cachedValue.IsNumber)
-                    {
-                        dataCell.Value = cachedValue.GetNumber();
-                    }
-                    else if (cachedValue.IsBoolean)
-                    {
-                        dataCell.Value = cachedValue.GetBoolean();
-                    }
-                    else
-                    {
-                        // For other types, convert to string
-                        dataCell.Value = cachedValue.ToString();
-                    }
+                    var dataValue = dataCell.GetString();
+                    // Re-assign to force ClosedXML to preserve it
+                    // Even if empty or "None", we want to keep it
+                    dataCell.Value = dataValue;
                 }
-                else
+                catch
                 {
-                    // Even blank cells - try GetString() as fallback
-                    // This handles cells that appear blank but have content
-                    try
+                    // If GetString() fails, try getting as Value
+                    var cellValue = dataCell.Value;
+                    if (!cellValue.IsBlank)
                     {
-                        var str = dataCell.GetString();
-                        if (!string.IsNullOrEmpty(str))
-                        {
-                            dataCell.Value = str;
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore - cell is truly blank
+                        dataCell.Value = cellValue.ToString() ?? "";
                     }
                 }
             }
