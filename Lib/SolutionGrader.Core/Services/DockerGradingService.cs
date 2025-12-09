@@ -895,7 +895,7 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // Configure appsettings.json (modify existing or rely on DLL mod)
-                ConfigureAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
+                ConfigureAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer, _currentStudentCode ?? "Unknown");
             }
             finally
             {
@@ -962,17 +962,39 @@ namespace SolutionGrader.Core.Services
         /// 4. If not exists AND UseDllModificationFallback=false: Log warning (may fail at runtime)
         /// 
         /// This approach respects student configuration while enabling grading.
+        /// 
+        /// Connection String Logic:
+        /// - If UseSharedDatabaseContainer=true: Connects to Student_{StudentCode} database on shared container
+        /// - If UseSharedDatabaseContainer=false: Connects to database specified in testKitConfig
         /// </summary>
         private void ConfigureAppsettingsInUnifiedContainer(
             DockerGradingConfig config,
             TestKitConfig testKitConfig,
-            string unifiedContainer)
+            string unifiedContainer,
+            string studentCode)
         {
-            var connectionString = ConnectionStringHelper.BuildForDocker(
-                config.DatabaseContainerHostPort,
-                testKitConfig.DatabaseName,
-                config.DatabaseUsername,
-                config.DatabasePassword ?? DefaultDatabasePassword);
+            // Build connection string based on database container architecture
+            string connectionString;
+            if (config.UseSharedDatabaseContainer)
+            {
+                // Shared container: Each student gets Student_{StudentCode} database
+                connectionString = ConnectionStringHelper.BuildForStudentDatabase(
+                    config.SharedDatabasePort,
+                    studentCode,
+                    config.DatabaseUsername,
+                    config.DatabasePassword ?? DefaultDatabasePassword);
+                OnProgress($"[Database] Using shared container with database: Student_{studentCode}");
+            }
+            else
+            {
+                // Legacy: Use database name from testKitConfig (e.g., Library_StudentCode)
+                connectionString = ConnectionStringHelper.BuildForDocker(
+                    config.DatabaseContainerHostPort,
+                    testKitConfig.DatabaseName,
+                    config.DatabaseUsername,
+                    config.DatabasePassword ?? DefaultDatabasePassword);
+                OnProgress($"[Database] Using per-student container with database: {testKitConfig.DatabaseName}");
+            }
             
             // UNIFIED CONTAINER: Both client and server use localhost (127.0.0.1)
             var serverIpAddress = "127.0.0.1";  // Bind to localhost
