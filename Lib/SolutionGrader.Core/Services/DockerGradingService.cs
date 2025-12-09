@@ -74,6 +74,7 @@ namespace SolutionGrader.Core.Services
         private readonly SharpPcapParsingService _sharpPcapParser; // SharpPcap parser for robust PCAP reading
         private string? _currentStudentCode; // Track current student for logging
         private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
+        private string? _currentTestKitProtocol; // Track protocol type (TCP or HTTP) from testkit Header.xlsx
         
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
@@ -219,6 +220,10 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"Loading test kit configuration from {testKitPath}...");
                 var testKitConfig = LoadTestKitConfig(testKitPath, config);
                 result.MaxMark = testKitConfig.TotalMaxMark;
+                
+                // Store the protocol type for use in network capture parsing
+                _currentTestKitProtocol = testKitConfig.Protocol ?? "TCP";
+                OnProgress($"[TestKit] Protocol type: {_currentTestKitProtocol}");
                 
                 // CRITICAL: Apply DefaultGradeContent from test kit to determine HasServer/HasClient
                 // This overrides the default behavior based on what the test kit expects students to submit
@@ -2005,7 +2010,7 @@ namespace SolutionGrader.Core.Services
                         mismatchReasons.Add($"dest role: expected '{exp.DestinationRole}' but got '{matchingPacket.DestinationRole}'");
                     }
                     
-                    // Compare Data payload if expected data is provided
+                    // Compare Data payload if expected data is provided (for TCP)
                     // Note: Expected data from Excel uses null or empty string to indicate "no data expected"
                     // We need to check if exp.Data is not null/empty AND not the string "None" (which Excel uses for null)
                     if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
@@ -2021,6 +2026,59 @@ namespace SolutionGrader.Core.Services
                             var expPreview = expectedData.Length > 50 ? expectedData.Substring(0, 50) + "..." : expectedData;
                             var actPreview = actualData.Length > 50 ? actualData.Substring(0, 50) + "..." : actualData;
                             mismatchReasons.Add($"data: expected '{expPreview}' but got '{actPreview}'");
+                        }
+                    }
+                    
+                    // Compare HTTP-specific fields if expected (for HTTP protocol)
+                    if (!string.IsNullOrEmpty(exp.URI))
+                    {
+                        var actualURI = matchingPacket.URI ?? "";
+                        if (!actualURI.Equals(exp.URI, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            mismatchReasons.Add($"URI: expected '{exp.URI}' but got '{actualURI}'");
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(exp.Method))
+                    {
+                        var actualMethod = matchingPacket.Method ?? "";
+                        if (!actualMethod.Equals(exp.Method, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            mismatchReasons.Add($"Method: expected '{exp.Method}' but got '{actualMethod}'");
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(exp.Status))
+                    {
+                        var actualStatus = matchingPacket.Status ?? "";
+                        if (!actualStatus.Contains(exp.Status, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            mismatchReasons.Add($"Status: expected '{exp.Status}' but got '{actualStatus}'");
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(exp.HttpVersion))
+                    {
+                        var actualHttpVersion = matchingPacket.HttpVersion ?? "";
+                        if (!actualHttpVersion.Equals(exp.HttpVersion, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            mismatchReasons.Add($"HttpVersion: expected '{exp.HttpVersion}' but got '{actualHttpVersion}'");
+                        }
+                    }
+                    
+                    if (!string.IsNullOrEmpty(exp.HttpBody))
+                    {
+                        var actualHttpBody = matchingPacket.HttpBody ?? "";
+                        if (!actualHttpBody.Trim().Equals(exp.HttpBody.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            exactMatch = false;
+                            var expPreview = exp.HttpBody.Length > 50 ? exp.HttpBody.Substring(0, 50) + "..." : exp.HttpBody;
+                            var actPreview = actualHttpBody.Length > 50 ? actualHttpBody.Substring(0, 50) + "..." : actualHttpBody;
+                            mismatchReasons.Add($"HttpBody: expected '{expPreview}' but got '{actPreview}'");
                         }
                     }
                     
@@ -2472,9 +2530,17 @@ namespace SolutionGrader.Core.Services
                     
                     var flags = row.Cell(6).GetValue<string>();
                     var state = row.Cell(7).GetValue<string>();
-                    var data = row.Cell(8).GetValue<string>();  // Column H: Data payload
+                    var data = row.Cell(8).GetValue<string>();  // Column H: Data payload (for TCP)
                     var sourceRole = row.Cell(9).GetValue<string>();
                     var destRole = row.Cell(10).GetValue<string>();
+                    
+                    // HTTP-specific fields (columns 11-15, if present)
+                    // For HTTP protocol: URI, Method, Status, HttpVersion, HttpBody
+                    var uri = row.Cell(11).GetValue<string>();
+                    var method = row.Cell(12).GetValue<string>();
+                    var status = row.Cell(13).GetValue<string>();
+                    var httpVersion = row.Cell(14).GetValue<string>();
+                    var httpBody = row.Cell(15).GetValue<string>();
                     
                     if (int.TryParse(stageStr, out var stage))
                     {
@@ -2485,7 +2551,13 @@ namespace SolutionGrader.Core.Services
                             State = state,
                             Data = data,
                             SourceRole = sourceRole,
-                            DestinationRole = destRole
+                            DestinationRole = destRole,
+                            // HTTP fields
+                            URI = uri,
+                            Method = method,
+                            Status = status,
+                            HttpVersion = httpVersion,
+                            HttpBody = httpBody
                         });
                     }
                 }
@@ -3195,6 +3267,10 @@ namespace SolutionGrader.Core.Services
                 .GroupBy(p => p.Stage)
                 .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
             
+            // Determine protocol type once for the entire Network sheet
+            var protocol = _currentTestKitProtocol ?? "TCP";
+            bool isHttpProtocol = protocol.Equals("HTTP", StringComparison.OrdinalIgnoreCase);
+            
             // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
             // Show ALL expected flows with their matching actual captures
             if (expectedNetworkFlows.Count > 0)
@@ -3203,17 +3279,35 @@ namespace SolutionGrader.Core.Services
                 
                 foreach (var expectedFlow in expectedNetworkFlows.OrderBy(f => f.Stage))
                 {
-                    // Write expected network flow (columns 1-10)
-                    netWs.Cell(netRow, 1).Value = expectedFlow.Stage;  // Stage
-                    netWs.Cell(netRow, 2).Value = "";  // Time (from testkit - not always available)
-                    netWs.Cell(netRow, 3).Value = "TCP";  // Info
-                    netWs.Cell(netRow, 4).Value = "";  // Source (IP from testkit if available)
-                    netWs.Cell(netRow, 5).Value = "";  // Destination (IP from testkit if available)
-                    netWs.Cell(netRow, 6).Value = expectedFlow.Flags ?? "";  // Flags
-                    netWs.Cell(netRow, 7).Value = expectedFlow.State ?? "";  // State
-                    netWs.Cell(netRow, 8).Value = "";  // Data
-                    netWs.Cell(netRow, 9).Value = expectedFlow.SourceRole ?? "";  // SourceRole
-                    netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
+                    int col = 1;
+                    
+                    // Common columns for both TCP and HTTP
+                    netWs.Cell(netRow, col++).Value = expectedFlow.Stage;  // Stage
+                    netWs.Cell(netRow, col++).Value = "";  // Time (from testkit - not always available)
+                    netWs.Cell(netRow, col++).Value = protocol;  // Info (TCP or HTTP)
+                    netWs.Cell(netRow, col++).Value = "";  // Source (IP from testkit if available)
+                    netWs.Cell(netRow, col++).Value = "";  // Destination (IP from testkit if available)
+                    netWs.Cell(netRow, col++).Value = expectedFlow.Flags ?? "";  // Flags
+                    netWs.Cell(netRow, col++).Value = expectedFlow.State ?? "";  // State
+                    
+                    if (isHttpProtocol)
+                    {
+                        // HTTP-specific expected columns
+                        netWs.Cell(netRow, col++).Value = expectedFlow.URI ?? "";  // URI
+                        netWs.Cell(netRow, col++).Value = expectedFlow.Method ?? "";  // Method
+                        netWs.Cell(netRow, col++).Value = expectedFlow.Status ?? "";  // Status
+                        netWs.Cell(netRow, col++).Value = expectedFlow.HttpVersion ?? "";  // HttpVersion
+                        netWs.Cell(netRow, col++).Value = expectedFlow.HttpBody ?? "";  // HttpBody
+                        netWs.Cell(netRow, col++).Value = expectedFlow.SourceRole ?? "";  // SourceRole
+                        netWs.Cell(netRow, col++).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
+                    }
+                    else
+                    {
+                        // TCP-specific expected columns
+                        netWs.Cell(netRow, col++).Value = expectedFlow.Data ?? "";  // Data
+                        netWs.Cell(netRow, col++).Value = expectedFlow.SourceRole ?? "";  // SourceRole
+                        netWs.Cell(netRow, col++).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
+                    }
                     
                     // Find matching actual packet(s) for this expected flow
                     var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
@@ -3229,16 +3323,33 @@ namespace SolutionGrader.Core.Services
                     
                     if (matchingPacket != null)
                     {
-                        // Found matching packet - write actual data (columns 11-17)
-                        netWs.Cell(netRow, 11).Value = matchingPacket.Flags;  // ActualFlags
-                        netWs.Cell(netRow, 12).Value = matchingPacket.State;  // ActualState
-                        netWs.Cell(netRow, 13).Value = matchingPacket.SourceRole;  // ActualSourceRole
-                        netWs.Cell(netRow, 14).Value = matchingPacket.DestinationRole;  // ActualDestRole
-                        netWs.Cell(netRow, 15).Value = matchingPacket.Data ?? "";  // ActualData
+                        // Found matching packet - write actual data
+                        // Column index continues from where expected columns ended
+                        netWs.Cell(netRow, col++).Value = matchingPacket.Flags;  // ActualFlags
+                        netWs.Cell(netRow, col++).Value = matchingPacket.State;  // ActualState
                         
-                        // CRITICAL FIX: Write source and destination ports for debugging
-                        netWs.Cell(netRow, 16).Value = matchingPacket.SourcePort;  // ActualSourcePort
-                        netWs.Cell(netRow, 17).Value = matchingPacket.DestinationPort;  // ActualDestPort
+                        if (isHttpProtocol)
+                        {
+                            // HTTP-specific actual columns
+                            netWs.Cell(netRow, col++).Value = matchingPacket.URI ?? "";  // ActualURI
+                            netWs.Cell(netRow, col++).Value = matchingPacket.Method ?? "";  // ActualMethod
+                            netWs.Cell(netRow, col++).Value = matchingPacket.Status ?? "";  // ActualStatus
+                            netWs.Cell(netRow, col++).Value = matchingPacket.HttpVersion ?? "";  // ActualHttpVersion
+                            netWs.Cell(netRow, col++).Value = matchingPacket.HttpBody ?? "";  // ActualHttpBody
+                            netWs.Cell(netRow, col++).Value = matchingPacket.SourceRole;  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = matchingPacket.DestinationRole;  // ActualDestRole
+                        }
+                        else
+                        {
+                            // TCP-specific actual columns
+                            netWs.Cell(netRow, col++).Value = matchingPacket.SourceRole;  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = matchingPacket.DestinationRole;  // ActualDestRole
+                            netWs.Cell(netRow, col++).Value = matchingPacket.Data ?? "";  // ActualData
+                        }
+                        
+                        // Port columns (common for both protocols)
+                        netWs.Cell(netRow, col++).Value = matchingPacket.SourcePort;  // ActualSourcePort
+                        netWs.Cell(netRow, col++).Value = matchingPacket.DestinationPort;  // ActualDestPort
                         
                         // Check if it's an exact match or just partial
                         // Flags must match exactly (but order doesn't matter - normalize both)
@@ -3254,8 +3365,27 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
                             exactMatch = false;
                         
-                        netWs.Cell(netRow, 18).Value = exactMatch ? "PASS" : "PARTIAL";
-                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        // Compare protocol-specific fields
+                        if (isHttpProtocol)
+                        {
+                            if (!string.IsNullOrEmpty(expectedFlow.URI) && matchingPacket.URI != expectedFlow.URI)
+                                exactMatch = false;
+                            if (!string.IsNullOrEmpty(expectedFlow.Method) && matchingPacket.Method != expectedFlow.Method)
+                                exactMatch = false;
+                            if (!string.IsNullOrEmpty(expectedFlow.Status) && !(matchingPacket.Status ?? "").Contains(expectedFlow.Status))
+                                exactMatch = false;
+                            if (!string.IsNullOrEmpty(expectedFlow.HttpBody) && matchingPacket.HttpBody != expectedFlow.HttpBody)
+                                exactMatch = false;
+                        }
+                        else
+                        {
+                            // TCP: Compare Data field
+                            if (!string.IsNullOrEmpty(expectedFlow.Data) && matchingPacket.Data != expectedFlow.Data)
+                                exactMatch = false;
+                        }
+                        
+                        netWs.Cell(netRow, col).Value = exactMatch ? "PASS" : "PARTIAL";
+                        netWs.Cell(netRow, col).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
                         
                         // Remove from list so we can identify extra packets later
                         actualPacketsForStage.Remove(matchingPacket);
@@ -3263,15 +3393,33 @@ namespace SolutionGrader.Core.Services
                     else
                     {
                         // No matching packet found - expected flow is MISSING
-                        netWs.Cell(netRow, 11).Value = "(MISSING - not captured)";  // ActualFlags
-                        netWs.Cell(netRow, 12).Value = "";  // ActualState
-                        netWs.Cell(netRow, 13).Value = "";  // ActualSourceRole
-                        netWs.Cell(netRow, 14).Value = "";  // ActualDestRole
-                        netWs.Cell(netRow, 15).Value = "";  // ActualData
-                        netWs.Cell(netRow, 16).Value = "";  // ActualSourcePort
-                        netWs.Cell(netRow, 17).Value = "";  // ActualDestPort
-                        netWs.Cell(netRow, 18).Value = "FAIL";
-                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightPink;
+                        // Fill in empty actual columns
+                        netWs.Cell(netRow, col++).Value = "(MISSING - not captured)";  // ActualFlags
+                        netWs.Cell(netRow, col++).Value = "";  // ActualState
+                        
+                        if (isHttpProtocol)
+                        {
+                            // HTTP: Empty actual columns
+                            netWs.Cell(netRow, col++).Value = "";  // ActualURI
+                            netWs.Cell(netRow, col++).Value = "";  // ActualMethod
+                            netWs.Cell(netRow, col++).Value = "";  // ActualStatus
+                            netWs.Cell(netRow, col++).Value = "";  // ActualHttpVersion
+                            netWs.Cell(netRow, col++).Value = "";  // ActualHttpBody
+                            netWs.Cell(netRow, col++).Value = "";  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = "";  // ActualDestRole
+                        }
+                        else
+                        {
+                            // TCP: Empty actual columns
+                            netWs.Cell(netRow, col++).Value = "";  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = "";  // ActualDestRole
+                            netWs.Cell(netRow, col++).Value = "";  // ActualData
+                        }
+                        
+                        netWs.Cell(netRow, col++).Value = "";  // ActualSourcePort
+                        netWs.Cell(netRow, col++).Value = "";  // ActualDestPort
+                        netWs.Cell(netRow, col).Value = "FAIL";
+                        netWs.Cell(netRow, col).Style.Fill.BackgroundColor = XLColor.LightPink;
                         
                         OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
@@ -3297,26 +3445,46 @@ namespace SolutionGrader.Core.Services
                     
                     foreach (var packet in remainingPackets)
                     {
-                        // No expected flow for this packet - shown for information only
-                        netWs.Cell(netRow, 1).Value = packet.Stage;  // Stage
-                        netWs.Cell(netRow, 2).Value = "(Not validated by this test case)";  // Time
-                        // Leave expected columns 3-10 empty
-                        for (int i = 3; i <= 10; i++) 
-                            netWs.Cell(netRow, i).Value = "";
+                        int col = 1;
                         
-                        // Write actual packet data (columns 11-17)
-                        netWs.Cell(netRow, 11).Value = packet.Flags;  // ActualFlags
-                        netWs.Cell(netRow, 12).Value = packet.State;  // ActualState
-                        netWs.Cell(netRow, 13).Value = packet.SourceRole;  // ActualSourceRole
-                        netWs.Cell(netRow, 14).Value = packet.DestinationRole;  // ActualDestRole
-                        netWs.Cell(netRow, 15).Value = packet.Data ?? "";  // ActualData
+                        // Common columns
+                        netWs.Cell(netRow, col++).Value = packet.Stage;  // Stage
+                        netWs.Cell(netRow, col++).Value = "(Not validated by this test case)";  // Time
                         
-                        // CRITICAL FIX: Write source and destination ports for debugging
-                        netWs.Cell(netRow, 16).Value = packet.SourcePort;  // ActualSourcePort
-                        netWs.Cell(netRow, 17).Value = packet.DestinationPort;  // ActualDestPort
+                        // Leave expected columns empty (Info, Source, Destination, Flags, State, protocol fields, roles)
+                        int expectedColumnCount = isHttpProtocol ? 12 : 8;  // HTTP has more columns
+                        for (int i = 0; i < expectedColumnCount; i++) 
+                            netWs.Cell(netRow, col++).Value = "";
                         
-                        netWs.Cell(netRow, 18).Value = "INFO";  // Informational - not validated
-                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightGray;
+                        // Write actual packet data
+                        netWs.Cell(netRow, col++).Value = packet.Flags;  // ActualFlags
+                        netWs.Cell(netRow, col++).Value = packet.State;  // ActualState
+                        
+                        if (isHttpProtocol)
+                        {
+                            // HTTP-specific actual columns
+                            netWs.Cell(netRow, col++).Value = packet.URI ?? "";  // ActualURI
+                            netWs.Cell(netRow, col++).Value = packet.Method ?? "";  // ActualMethod
+                            netWs.Cell(netRow, col++).Value = packet.Status ?? "";  // ActualStatus
+                            netWs.Cell(netRow, col++).Value = packet.HttpVersion ?? "";  // ActualHttpVersion
+                            netWs.Cell(netRow, col++).Value = packet.HttpBody ?? "";  // ActualHttpBody
+                            netWs.Cell(netRow, col++).Value = packet.SourceRole;  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = packet.DestinationRole;  // ActualDestRole
+                        }
+                        else
+                        {
+                            // TCP-specific actual columns
+                            netWs.Cell(netRow, col++).Value = packet.SourceRole;  // ActualSourceRole
+                            netWs.Cell(netRow, col++).Value = packet.DestinationRole;  // ActualDestRole
+                            netWs.Cell(netRow, col++).Value = packet.Data ?? "";  // ActualData
+                        }
+                        
+                        // Port columns (common)
+                        netWs.Cell(netRow, col++).Value = packet.SourcePort;  // ActualSourcePort
+                        netWs.Cell(netRow, col++).Value = packet.DestinationPort;  // ActualDestPort
+                        
+                        netWs.Cell(netRow, col).Value = "INFO";  // Informational - not validated
+                        netWs.Cell(netRow, col).Style.Fill.BackgroundColor = XLColor.LightGray;
                         
                         netRow++;
                     }
@@ -3368,22 +3536,47 @@ namespace SolutionGrader.Core.Services
             ws.Row(1).Style.Font.Bold = true;
         }
         
-        private static void SetNetworkSheetHeaders(IXLWorksheet ws)
+        /// <summary>
+        /// Set Network sheet headers dynamically based on protocol (TCP or HTTP).
+        /// TCP: Stage, Time, Info, Source, Destination, Flags, State, Data, SourceRole, DestinationRole, Actual*, NetworkResult
+        /// HTTP: Same as TCP plus URI, Method, Status, HttpVersion, HttpBody columns
+        /// </summary>
+        private void SetNetworkSheetHeaders(IXLWorksheet ws)
         {
             // Network sheet format matching ExcelDetailLogService naming convention (NO underscores).
             // Format: Stage, expected columns (Time, Flags, etc.), then Actual* columns, then NetworkResult.
             // CRITICAL FIX: Added SourcePort and DestPort columns for debugging network traffic
             // This ensures consistency across both Docker and regular grading flows.
-            var headers = new[] { 
-                "Stage",  // Test stage number
-                "Time", "Info", "Source", "Destination", 
-                "Flags", "State", "Data", "SourceRole", "DestinationRole",
-                "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData",
-                "ActualSourcePort", "ActualDestPort",  // CRITICAL FIX: Added port columns for debugging
-                "NetworkResult"  // PASS or FAIL for network flow matching
-            };
-            for (int i = 0; i < headers.Length; i++)
-                ws.Cell(1, i + 1).Value = headers[i];
+            
+            var protocol = _currentTestKitProtocol ?? "TCP";
+            
+            if (protocol.Equals("HTTP", StringComparison.OrdinalIgnoreCase))
+            {
+                // HTTP protocol: Include HTTP-specific fields
+                var headers = new[] { 
+                    "Stage", "Time", "Info", "Source", "Destination", 
+                    "Flags", "State", "URI", "Method", "Status", "HttpVersion", "HttpBody", "SourceRole", "DestinationRole",
+                    "ActualFlags", "ActualState", "ActualURI", "ActualMethod", "ActualStatus", "ActualHttpVersion", "ActualHttpBody",
+                    "ActualSourceRole", "ActualDestRole", "ActualSourcePort", "ActualDestPort",
+                    "NetworkResult"
+                };
+                for (int i = 0; i < headers.Length; i++)
+                    ws.Cell(1, i + 1).Value = headers[i];
+            }
+            else
+            {
+                // TCP protocol: Traditional format with Data field
+                var headers = new[] { 
+                    "Stage", "Time", "Info", "Source", "Destination", 
+                    "Flags", "State", "Data", "SourceRole", "DestinationRole",
+                    "ActualFlags", "ActualState", "ActualSourceRole", "ActualDestRole", "ActualData",
+                    "ActualSourcePort", "ActualDestPort",
+                    "NetworkResult"
+                };
+                for (int i = 0; i < headers.Length; i++)
+                    ws.Cell(1, i + 1).Value = headers[i];
+            }
+            
             ws.Row(1).Style.Font.Bold = true;
         }
         
@@ -3535,7 +3728,9 @@ namespace SolutionGrader.Core.Services
                 
                 // SNAPSHOT STRATEGY Step 3: Parse the snapshot using SharpPcap
                 // This is more robust than tcpdump text parsing - works cross-platform
-                var packets = _sharpPcapParser.ParsePcapFile(snapshotPath, currentStage, port);
+                // Pass the protocol type from testkit configuration (TCP or HTTP)
+                var protocol = _currentTestKitProtocol ?? "TCP";
+                var packets = _sharpPcapParser.ParsePcapFile(snapshotPath, currentStage, port, protocol);
                 
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsed {packets.Count} total packets");
                 
@@ -3886,14 +4081,29 @@ namespace SolutionGrader.Core.Services
         public string GradeContent { get; set; } = "Client/Server";
     }
     
+    /// <summary>
+    /// Represents expected network flow data read from Detail.xlsx.
+    /// Supports both TCP and HTTP protocols.
+    /// For TCP: Validates Flags, State, Data, SourceRole, DestinationRole
+    /// For HTTP: Validates Flags, State, URI, Method, Status, HttpVersion, HttpBody, SourceRole, DestinationRole
+    /// </summary>
     public class ExpectedNetworkFlow
     {
         public int Stage { get; set; }
+        
+        // Common fields (TCP and HTTP)
         public string? Flags { get; set; }
         public string? State { get; set; }
         public string? SourceRole { get; set; }
         public string? DestinationRole { get; set; }
-        public string? Data { get; set; }
+        public string? Data { get; set; }  // For TCP payload data
+        
+        // HTTP-specific fields
+        public string? URI { get; set; }
+        public string? Method { get; set; }
+        public string? Status { get; set; }
+        public string? HttpVersion { get; set; }
+        public string? HttpBody { get; set; }
     }
     
     #endregion
