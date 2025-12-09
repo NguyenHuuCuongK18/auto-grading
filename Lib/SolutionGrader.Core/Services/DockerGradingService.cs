@@ -2001,10 +2001,20 @@ namespace SolutionGrader.Core.Services
                 // Filter packets by stage from the complete set
                 var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
                 
-                // Find matching packet by flags using set comparison (order-independent)
+                // CRITICAL FIX: Match by FLAGS **AND** ROLES (direction)
+                // Previous bug: Only matched by flags, could match wrong direction (Client→Server vs Server→Client)
+                // For example: Both "Client sends S123" and "Server responds JSON" have PSH-ACK flags
+                // Without role matching, we'd match the request packet against the expected response!
+                //
+                // Match criteria (all must match):
+                // 1. Flags (PSH-ACK, SYN, FIN-ACK, etc.)
+                // 2. Source role (Client or Server)
+                // 3. Destination role (Server or Client)
                 var matchingPacket = capturedPackets.FirstOrDefault(p =>
                     !string.IsNullOrEmpty(exp.Flags) && 
-                    FlagsMatch(exp.Flags, p.Flags));
+                    FlagsMatch(exp.Flags, p.Flags) &&
+                    (string.IsNullOrEmpty(exp.SourceRole) || p.SourceRole == exp.SourceRole) &&
+                    (string.IsNullOrEmpty(exp.DestinationRole) || p.DestinationRole == exp.DestinationRole));
                 
                 if (matchingPacket != null)
                 {
