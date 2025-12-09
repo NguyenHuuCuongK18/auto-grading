@@ -2355,13 +2355,13 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Cleans up code containers (server, client) after each student.
-        /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
-        /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
-        /// </summary>
-        /// <summary>
-        /// Export per-stage log files from unified container to student result directory.
-        /// Logs are in /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// Export per-stage log files from unified container to student result directory (LEGACY).
+        /// NOTE: This method is kept for backward compatibility but is NO LONGER USED in normal grading.
+        /// Logs are now exported per-test-case using ExportLogsForTestCaseAsync().
+        /// 
+        /// Log file format with test case names:
+        /// - /apps/server/server-{testCaseName}-stage-N.log
+        /// - /apps/client/client-{testCaseName}-stage-N.log
         /// </summary>
         private async Task ExportLogsFromUnifiedContainerAsync(string unifiedContainer, string studentResultPath)
         {
