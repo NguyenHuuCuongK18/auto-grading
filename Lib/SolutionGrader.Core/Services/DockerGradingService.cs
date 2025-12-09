@@ -341,52 +341,13 @@ namespace SolutionGrader.Core.Services
                 ContainersReady?.Invoke(this, EventArgs.Empty);
                 
                 // Execute test cases
-                bool isFirstTestCase = true;
                 foreach (var testCase in testKitConfig.TestCases)
                 {
                     ct.ThrowIfCancellationRequested();
                     
-                    // CRITICAL FIX: For EACH test case, determine which files to copy based on Grade_Content
-                    // This ensures we use golden server when grading client, and golden client when grading server
-                    string? serverPath = actualServerDllPath;
-                    string? clientPath = actualClientDllPath;
-                    
-                    if (!string.IsNullOrEmpty(testCase.GradeContent))
-                    {
-                        if (testCase.GradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Grading client implementation -> use golden (given) server
-                            serverPath = testKitConfig.GivenServerPath;
-                            clientPath = actualClientDllPath;
-                            OnProgress($"[TestCase {testCase.Name}] Grade_Content='Client' -> Using golden server + student client");
-                        }
-                        else if (testCase.GradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Grading server implementation -> use golden (given) client
-                            serverPath = actualServerDllPath;
-                            clientPath = testKitConfig.GivenClientPath;
-                            OnProgress($"[TestCase {testCase.Name}] Grade_Content='Server' -> Using student server + golden client");
-                            OnProgress($"[TestCase {testCase.Name}] Student server path: {serverPath ?? "(NULL)"}");
-                            OnProgress($"[TestCase {testCase.Name}] Golden client path: {clientPath ?? "(NULL)"}");
-                            if (!string.IsNullOrEmpty(clientPath))
-                            {
-                                OnProgress($"[TestCase {testCase.Name}] Golden client filename: {Path.GetFileName(clientPath)}");
-                            }
-                        }
-                    }
-                    
                     // CRITICAL: Clear old stage log files before executing new test case
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
-                    
-                    // Copy files to unified container (will overwrite existing files)
-                    OnProgress($"Copying files for test case {testCase.Name}...");
-                    await CopyFilesToUnifiedContainerAsync(serverPath, clientPath, config, testKitConfig, unifiedContainer);
-                    
-                    // Generate appsettings.json in unified container
-                    GenerateAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
-                    
-                    isFirstTestCase = false;
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
                     var testCaseTimeout = testCase.TimeoutSeconds;
@@ -1313,20 +1274,10 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Gets all captured network packets from the NetworkMonitor.
-        /// 
-        /// SIDECAR PATTERN (NEW - LIVE GRADING):
         /// Packets are parsed from pcap file PER-STAGE and added to RunContext during execution.
-        /// This enables live per-stage validation for all-or-nothing grading strategy.
-        /// 
-        /// LEGACY PATTERN (OLD):
-        /// Uses SharedNetworkMonitorService on HOST to capture packets in real-time.
         /// </summary>
         private List<CapturedNetworkPacket> GetCapturedNetworkPackets()
         {
-            // Get ALL captured packets from the RunContext (across all stages)
-            // This works for both:
-            // - Sidecar pattern: Packets parsed per-stage from pcap and added to RunContext
-            // - Legacy pattern: Packets captured real-time by SharedNetworkMonitorService
             return _runContext.GetAllCapturedNetworkPackets().ToList();
         }
         
@@ -1978,9 +1929,8 @@ namespace SolutionGrader.Core.Services
                     return (timeout, gradeContent);
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
                 // Silently use defaults if header cannot be read
             }
             
@@ -2937,27 +2887,6 @@ namespace SolutionGrader.Core.Services
             netWs.Columns().AdjustToContents();
             
             wb.SaveAs(detailPath);
-            
-            // NO LONGER NEEDED: {TestCase}_Result.xlsx files are not logging anything useful
-            // They were redundant with GradeDetail.xlsx and OverallSummary.xlsx
-            // Removed per user requirement: "remove the excessive sheet {testcasename}_Result under each student folder"
-            /*
-            // Also write TC_Result.xlsx (summary file per test case)
-            var resultFilePath = Path.Combine(tcResultPath, $"{tcName}_Result.xlsx");
-            using var resultWb = new XLWorkbook();
-            var resultWs = resultWb.Worksheets.Add("Result");
-            resultWs.Cell(1, 1).Value = "TestCase";
-            resultWs.Cell(1, 2).Value = "Passed";
-            resultWs.Cell(1, 3).Value = "EarnedMark";
-            resultWs.Cell(1, 4).Value = "MaxMark";
-            resultWs.Row(1).Style.Font.Bold = true;
-            resultWs.Cell(2, 1).Value = tcName;
-            resultWs.Cell(2, 2).Value = result.Passed ? "PASS" : "FAIL";
-            resultWs.Cell(2, 3).Value = result.EarnedMark;
-            resultWs.Cell(2, 4).Value = result.MaxMark;
-            resultWs.Columns().AdjustToContents();
-            resultWb.SaveAs(resultFilePath);
-            */
             
             await Task.CompletedTask;
         }
