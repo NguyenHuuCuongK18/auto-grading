@@ -504,34 +504,15 @@ namespace SolutionGrader.Core.Services
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
                     
-                    // CRITICAL: Flush network capture between test cases
+                    // CRITICAL: Clear RunContext at START of each test case for proper isolation
                     // This prevents packets from previous test cases from being included in comparisons
                     if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
                     {
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case - flushing network...");
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Prev cumulative packet count: {_lastParsedPacketCount}");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] Starting test case - clearing RunContext...");
                         
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
-                        
-                        // CRITICAL: Delete and recreate the PCAP file to prevent accumulation
-                        // The monitor container continuously writes to network_capture.pcap
-                        // We need to truncate it between test cases for proper isolation
-                        try
-                        {
-                            // Truncate the PCAP file in the monitor container
-                            var truncateCmd = $"{_currentMonitorContainer} sh -c 'truncate -s 0 /data/network_capture.pcap'";
-                            _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Truncated PCAP file in container");
-                            
-                            // Reset packet counter since PCAP file is now empty
-                            _lastParsedPacketCount = 0;
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Reset packet counter to 0");
-                        }
-                        catch (Exception ex)
-                        {
-                            OnProgress($"[NetworkMonitor] [{testCase.Name}] WARNING: Failed to truncate PCAP: {ex.Message}");
-                        }
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared for fresh comparison");
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -575,6 +556,30 @@ namespace SolutionGrader.Core.Services
                     MoveSnapshotsToTCFolder(studentResultPath, tcResultPath, testCase.Name);
                     
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
+                    
+                    // CRITICAL: Truncate PCAP file AFTER test case completes (not before)
+                    // This ensures tcpdump has created the file and captured packets
+                    // Truncation prepares for next test case by clearing the capture file
+                    if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
+                    {
+                        try
+                        {
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Test case completed - truncating PCAP for next TC...");
+                            
+                            // Truncate the PCAP file in the monitor container
+                            var truncateCmd = $"docker exec {_currentMonitorContainer} sh -c 'truncate -s 0 /data/network_capture.pcap'";
+                            _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Truncated PCAP file (ready for next TC)");
+                            
+                            // Reset packet counter since PCAP file is now empty
+                            _lastParsedPacketCount = 0;
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] Reset packet counter to 0");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"[NetworkMonitor] [{testCase.Name}] WARNING: Failed to truncate PCAP: {ex.Message}");
+                        }
+                    }
                 }
                 
                 // Calculate totals
