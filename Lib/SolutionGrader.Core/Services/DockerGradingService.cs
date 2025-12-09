@@ -341,6 +341,11 @@ namespace SolutionGrader.Core.Services
                 // No per-student registration needed - monitor captures all traffic on loopback
                 // and filters by port number (each student gets unique port)
                 
+                // CRITICAL: Setup database container FIRST before creating instance
+                // The database container must be running before we can create database instances
+                OnProgress($"[Database] Ensuring database container is running...");
+                await SetupDatabaseContainerAsync(config);
+                
                 // CRITICAL: Create database instance for this student
                 // Database container must be running before creating instance
                 // Each student gets their own database instance (e.g., Library_student1)

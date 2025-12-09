@@ -1203,11 +1203,11 @@ namespace SolutionGrader.Core.Services
         
         /// <summary>
         /// Preserves expected Data column values from the Network sheet template.
-        /// The template Detail.xlsx contains expected payload values (e.g., "S123", JSON responses)
+        /// The template Detail.xlsx contains expected payload values (e.g., "S123", "None", JSON responses)
         /// that must be retained in the graded output for side-by-side comparison with actual captured data.
         /// 
-        /// This method is a workaround for ClosedXML potentially treating empty/populated cells inconsistently.
-        /// By explicitly reading and re-writing the Data column values, we ensure they are preserved.
+        /// This method explicitly reads and re-writes ALL Data column values to ensure they are preserved.
+        /// ClosedXML sometimes treats cells inconsistently, so we force preservation of all values.
         /// </summary>
         private void PreserveNetworkExpectedData(IXLWorksheet ws, Dictionary<string, int> hdr)
         {
@@ -1218,16 +1218,26 @@ namespace SolutionGrader.Core.Services
             
             // Read all Data column values and re-write them to ensure they're preserved
             // This forces ClosedXML to recognize the values and keep them when saving
+            // CRITICAL: Preserve ALL values including "None", empty strings, and null
             foreach (var row in rng.RowsUsed().Skip(1))
             {
                 var dataCell = ws.Cell(row.RowNumber(), dataCol);
-                var dataValue = dataCell.GetString();
                 
-                // Re-assign the value to ensure it's preserved (even if empty)
+                // Get the value (could be string, null, etc.)
+                var cellValue = dataCell.Value;
+                
+                // Re-assign the value to ensure it's preserved
                 // This prevents ClosedXML from treating it as "never set" and clearing it
-                if (!string.IsNullOrEmpty(dataValue))
+                // For null/empty cells, we explicitly set them to preserve the cell state
+                if (cellValue.IsBlank || cellValue.IsText)
                 {
-                    dataCell.Value = dataValue;
+                    var dataValue = dataCell.GetString();
+                    dataCell.Value = dataValue ?? "";  // Preserve even empty strings
+                }
+                else
+                {
+                    // For other types, preserve as-is
+                    dataCell.Value = cellValue;
                 }
             }
         }
