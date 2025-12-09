@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Services;
 

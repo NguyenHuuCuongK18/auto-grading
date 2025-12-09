@@ -2,12 +2,21 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <!-- 
-      Cross-platform Docker grading CLI (dockergrade, list, validate commands)
-      Works on any platform with Docker installed (Linux/macOS/Windows)
+      Multi-target framework: 
+      - net8.0: Cross-platform Docker grading (dockergrade, list, validate commands)
+      - net8.0-windows: Windows-only local grading (executesuite, executepaper commands)
+      
+      The dockergrade command works on any platform with Docker installed.
+      The executesuite/executepaper commands require Windows for native pcap support.
     -->
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+  </PropertyGroup>
+  
+  <!-- Windows-specific properties -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
   
   <ItemGroup>
@@ -26,7 +35,8 @@
     <ProjectReference Include="..\..\Lib\EnvironmentBuilder\EnvironmentBuilder.csproj" />
     <!-- Domain entities for environment configuration -->
     <ProjectReference Include="..\..\Lib\Domain\Domain.csproj" />
-
+    <!-- Environment setup helper for Docker container management -->
+    <ProjectReference Include="..\EnvironmentManagerHelper\DotNetEnvironmentManagerHelper\DotNetEnvironmentManagerHelper.csproj" />
     <!-- Network monitoring for packet capture (cross-platform via libpcap) -->
     <ProjectReference Include="..\..\Lib\NetworkMonitor\NetworkMonitor.csproj" />
     <!-- Core grading services from Lib folder - now cross-platform -->
