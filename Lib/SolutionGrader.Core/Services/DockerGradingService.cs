@@ -3375,7 +3375,7 @@ namespace SolutionGrader.Core.Services
         public string GradeContent { get; set; } = "Client/Server";
     }
     
-    internal class ExpectedNetworkFlow
+    public class ExpectedNetworkFlow
     {
         public int Stage { get; set; }
         public string? Flags { get; set; }
