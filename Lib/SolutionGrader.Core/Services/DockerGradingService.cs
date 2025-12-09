@@ -894,8 +894,8 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Generate appsettings.json in both folders
-                GenerateAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
+                // Configure appsettings.json (modify existing or rely on DLL mod)
+                ConfigureAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer);
             }
             finally
             {
@@ -954,7 +954,16 @@ namespace SolutionGrader.Core.Services
         /// Server goes to /apps/server/appsettings.json, Client goes to /apps/client/appsettings.json.
         /// Both use localhost (127.0.0.1) for communication within the same container.
         /// </summary>
-        private void GenerateAppsettingsInUnifiedContainer(
+        /// <summary>
+        /// Configures appsettings.json in the unified container using modification-first approach:
+        /// 1. Check if appsettings.json exists in /apps/server and /apps/client
+        /// 2. If exists: Modify only Port, IpAddress, ConnectionString (preserves student settings)
+        /// 3. If not exists AND UseDllModificationFallback=true: DLL mod already applied during copy
+        /// 4. If not exists AND UseDllModificationFallback=false: Log warning (may fail at runtime)
+        /// 
+        /// This approach respects student configuration while enabling grading.
+        /// </summary>
+        private void ConfigureAppsettingsInUnifiedContainer(
             DockerGradingConfig config,
             TestKitConfig testKitConfig,
             string unifiedContainer)
@@ -966,71 +975,174 @@ namespace SolutionGrader.Core.Services
                 config.DatabasePassword ?? DefaultDatabasePassword);
             
             // UNIFIED CONTAINER: Both client and server use localhost (127.0.0.1)
-            // Server binds to 127.0.0.1, Client connects to 127.0.0.1
             var serverIpAddress = "127.0.0.1";  // Bind to localhost
             var clientIpAddress = "127.0.0.1";  // Connect to localhost
-            
             var port = config.CodeContainerInternalPort;
-            var serverPort = port.ToString();
-            var clientPort = port.ToString();
             
-            OnProgress($"[Unified] Generating appsettings for localhost communication (127.0.0.1:{port})");
+            OnProgress($"[Unified] Configuring appsettings for localhost communication (127.0.0.1:{port})");
             
-            // Generate SERVER appsettings
-            var serverConfig = $@"{{
-  ""ConnectionStrings"": {{ ""MyCnn"": ""{connectionString}"" }},
-  ""IpAddress"": ""{serverIpAddress}"",
-  ""Port"": ""{serverPort}""
-}}";
+            // Try to modify SERVER appsettings if it exists
+            TryModifyAppsettingsInContainer(
+                unifiedContainer,
+                "/apps/server/appsettings.json",
+                serverIpAddress,
+                port,
+                connectionString,
+                "Server",
+                config.UseDllModificationFallback);
             
-            string? tempServerFile = null;
+            // Try to modify CLIENT appsettings if it exists
+            TryModifyAppsettingsInContainer(
+                unifiedContainer,
+                "/apps/client/appsettings.json",
+                clientIpAddress,
+                port,
+                null, // Client doesn't need connection string
+                "Client",
+                config.UseDllModificationFallback);
+        }
+        
+        /// <summary>
+        /// Attempts to modify an existing appsettings.json file inside a container.
+        /// If the file doesn't exist, logs a message about DLL mod fallback status.
+        /// </summary>
+        private void TryModifyAppsettingsInContainer(
+            string container,
+            string appsettingsPath,
+            string ipAddress,
+            int port,
+            string? connectionString,
+            string componentName,
+            bool dllModFallbackEnabled)
+        {
+            // Check if appsettings.json exists
+            var checkCmd = $"{container} test -f {appsettingsPath}";
+            var (exists, _) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 3000);
+            
+            if (!exists)
+            {
+                if (dllModFallbackEnabled)
+                {
+                    OnProgress($"[Unified] {componentName} appsettings not found at {appsettingsPath} - DLL modification already applied during copy");
+                }
+                else
+                {
+                    OnProgress($"[Unified] WARNING: {componentName} appsettings not found at {appsettingsPath} and DLL mod is disabled - may fail at runtime");
+                }
+                return;
+            }
+            
+            // Appsettings exists - download, modify, upload
+            OnProgress($"[Unified] Found {componentName} appsettings at {appsettingsPath}, modifying...");
+            
+            string? tempFile = null;
             try
             {
-                // Remove any existing appsettings from student files
-                OnProgress($"[Unified] Removing old server appsettings");
-                _dockerExecutor.ExecDockerCommand($"{unifiedContainer} rm -f /apps/server/appsettings.json", 3000);
+                // Download appsettings from container
+                tempFile = Path.Combine(Path.GetTempPath(), $"appsettings_{componentName}_{Guid.NewGuid()}.json");
+                var copyFromCmd = $"docker cp {container}:{appsettingsPath} \"{tempFile}\"";
+                var copyResult = _commandExecutor.RunCommandAndCaptureOutput(copyFromCmd, null, null, 5000);
                 
-                tempServerFile = Path.Combine(Path.GetTempPath(), $"appsettings_unified_server_{Guid.NewGuid()}.json");
-                File.WriteAllText(tempServerFile, serverConfig);
-                _dockerExecutor.CopyFileToContainer(tempServerFile, $"{unifiedContainer}:/apps/server/appsettings.json");
-                OnProgress($"[Unified] Server appsettings: 127.0.0.1:{serverPort} -> /apps/server/appsettings.json");
+                if (copyResult.ExitCode != 0)
+                {
+                    OnProgress($"[Unified] WARNING: Failed to download {componentName} appsettings for modification");
+                    return;
+                }
+                
+                // Modify the file
+                var modified = ModifyAppsettingsFile(tempFile, ipAddress, port, connectionString, componentName);
+                
+                if (!modified)
+                {
+                    OnProgress($"[Unified] WARNING: {componentName} appsettings modification failed or no changes needed");
+                    return;
+                }
+                
+                // Upload modified appsettings back to container
+                _dockerExecutor.CopyFileToContainer(tempFile, $"{container}:{appsettingsPath}");
+                OnProgress($"[Unified] {componentName} appsettings modified: IpAddress={ipAddress}, Port={port}");
             }
             catch (Exception ex)
             {
-                OnProgress($"[Unified] WARNING: Failed to generate server appsettings: {ex.Message}");
+                OnProgress($"[Unified] ERROR modifying {componentName} appsettings: {ex.Message}");
             }
             finally
             {
-                if (tempServerFile != null && File.Exists(tempServerFile))
-                    try { File.Delete(tempServerFile); } catch { }
+                if (tempFile != null && File.Exists(tempFile))
+                {
+                    try { File.Delete(tempFile); } catch { }
+                }
             }
-            
-            // Generate CLIENT appsettings
-            var clientConfig = $@"{{
-  ""IpAddress"": ""{clientIpAddress}"",
-  ""Port"": ""{clientPort}""
-}}";
-            
-            string? tempClientFile = null;
+        }
+        
+        /// <summary>
+        /// Modifies an appsettings.json file, preserving all existing settings while updating specific values.
+        /// Returns true if modification was successful.
+        /// </summary>
+        private bool ModifyAppsettingsFile(string filePath, string ipAddress, int port, string? connectionString, string componentName)
+        {
             try
             {
-                // Remove any existing appsettings from student files
-                OnProgress($"[Unified] Removing old client appsettings");
-                _dockerExecutor.ExecDockerCommand($"{unifiedContainer} rm -f /apps/client/appsettings.json", 3000);
+                var jsonText = File.ReadAllText(filePath);
+                var jsonNode = System.Text.Json.Nodes.JsonNode.Parse(jsonText);
                 
-                tempClientFile = Path.Combine(Path.GetTempPath(), $"appsettings_unified_client_{Guid.NewGuid()}.json");
-                File.WriteAllText(tempClientFile, clientConfig);
-                _dockerExecutor.CopyFileToContainer(tempClientFile, $"{unifiedContainer}:/apps/client/appsettings.json");
-                OnProgress($"[Unified] Client appsettings: 127.0.0.1:{clientPort} -> /apps/client/appsettings.json");
+                if (jsonNode == null || jsonNode is not System.Text.Json.Nodes.JsonObject jsonObj)
+                {
+                    OnProgress($"[Unified] ERROR: Invalid JSON in {componentName} appsettings");
+                    return false;
+                }
+                
+                var modified = false;
+                
+                // Update ConnectionStrings.MyCnn if it exists (server only)
+                if (connectionString != null && jsonObj["ConnectionStrings"] is System.Text.Json.Nodes.JsonObject connStrings)
+                {
+                    if (connStrings["MyCnn"] != null)
+                    {
+                        connStrings["MyCnn"] = connectionString;
+                        modified = true;
+                        OnProgress($"[Unified] Updated {componentName} ConnectionStrings.MyCnn");
+                    }
+                }
+                
+                // Update IpAddress if it exists
+                if (jsonObj["IpAddress"] != null)
+                {
+                    jsonObj["IpAddress"] = ipAddress;
+                    modified = true;
+                }
+                
+                // Update Port if it exists (handle both string and number formats)
+                if (jsonObj["Port"] != null)
+                {
+                    var originalPort = jsonObj["Port"];
+                    if (originalPort?.GetValueKind() == System.Text.Json.JsonValueKind.String)
+                    {
+                        jsonObj["Port"] = port.ToString();
+                    }
+                    else
+                    {
+                        jsonObj["Port"] = port;
+                    }
+                    modified = true;
+                }
+                
+                if (modified)
+                {
+                    var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+                    File.WriteAllText(filePath, jsonNode.ToJsonString(options));
+                    return true;
+                }
+                else
+                {
+                    OnProgress($"[Unified] WARNING: No matching properties found to modify in {componentName} appsettings");
+                    return false;
+                }
             }
             catch (Exception ex)
             {
-                OnProgress($"[Unified] WARNING: Failed to generate client appsettings: {ex.Message}");
-            }
-            finally
-            {
-                if (tempClientFile != null && File.Exists(tempClientFile))
-                    try { File.Delete(tempClientFile); } catch { }
+                OnProgress($"[Unified] ERROR modifying {componentName} appsettings file: {ex.Message}");
+                return false;
             }
         }
         
