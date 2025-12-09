@@ -480,10 +480,11 @@ namespace SolutionGrader.Core.Services
                 Directory.CreateDirectory(studentResultPath);
                 
                 OnProgress($"Setting up network monitor container for {studentCode}...");
+                // Use CodeContainerInternalPort for network monitoring (no port allocation needed)
                 await SetupNetworkMonitorContainerAsync(
                     monitorContainer,
                     unifiedContainer,
-                    config.CodeContainerHostPort,
+                    config.CodeContainerInternalPort,
                     pcapFilePath,
                     testKitConfig.Protocol);
                 
@@ -1054,31 +1055,30 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // Apply DLL modification fallback if enabled
-                            if (config.UseDllModificationFallback)
-                            {
-                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(tempStagingDir);
-                                tempDirectories.Add(tempStagingDir);
-                                
-                                CopyDirectory(serverDir, tempStagingDir);
-                                OnProgress($"[Unified] Copied server files to temp for modification");
-                                
-                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
-                                // We DON'T force IP replacement - student code should already use correct IP
-                                // We ONLY modify PORT for parallel grading
-                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
-                                var result = dllModService.CheckAndPatchIfNeeded(
-                                    tempStagingDir,
-                                    config.ServerProjectName,
-                                    isServer: true,
-                                    targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
-                                );
-                                
-                                OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
-                                dirToCopy = tempStagingDir;
-                            }
+                            // ALWAYS apply DLL modification to ensure port consistency
+                            // Since Docker containers are isolated, all students use the same internal port
+                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
+                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
+                            Directory.CreateDirectory(tempStagingDir);
+                            tempDirectories.Add(tempStagingDir);
+                            
+                            CopyDirectory(serverDir, tempStagingDir);
+                            OnProgress($"[Unified] Copied server files to temp for modification");
+                            
+                            // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
+                            // We DON'T force IP replacement - student code should already use correct IP
+                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                            // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
+                            var result = dllModService.CheckAndPatchIfNeeded(
+                                tempStagingDir,
+                                config.ServerProjectName,
+                                isServer: true,
+                                targetPort: config.CodeContainerInternalPort,
+                                targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
+                            );
+                            
+                            OnProgress($"[Unified] Server DLL mod (always enabled): {result.GetSummary()}");
+                            dirToCopy = tempStagingDir;
                             
                             // Copy to /apps/server
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1105,31 +1105,30 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // Apply DLL modification fallback if enabled
-                            if (config.UseDllModificationFallback)
-                            {
-                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(tempStagingDir);
-                                tempDirectories.Add(tempStagingDir);
-                                
-                                CopyDirectory(clientDir, tempStagingDir);
-                                OnProgress($"[Unified] Copied client files to temp for modification");
-                                
-                                // Client connects to localhost/127.0.0.1 in unified container
-                                // We DON'T force IP replacement - student code should already use localhost
-                                // We ONLY modify PORT for parallel grading
-                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
-                                var result = dllModService.CheckAndPatchIfNeeded(
-                                    tempStagingDir,
-                                    config.ClientProjectName,
-                                    isServer: false,
-                                    targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
-                                );
-                                
-                                OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
-                                dirToCopy = tempStagingDir;
-                            }
+                            // ALWAYS apply DLL modification to ensure port consistency
+                            // Since Docker containers are isolated, all students use the same internal port
+                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
+                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
+                            Directory.CreateDirectory(tempStagingDir);
+                            tempDirectories.Add(tempStagingDir);
+                            
+                            CopyDirectory(clientDir, tempStagingDir);
+                            OnProgress($"[Unified] Copied client files to temp for modification");
+                            
+                            // Client connects to localhost/127.0.0.1 in unified container
+                            // We DON'T force IP replacement - student code should already use localhost
+                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                            // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
+                            var result = dllModService.CheckAndPatchIfNeeded(
+                                tempStagingDir,
+                                config.ClientProjectName,
+                                isServer: false,
+                                targetPort: config.CodeContainerInternalPort,
+                                targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
+                            );
+                            
+                            OnProgress($"[Unified] Client DLL mod (always enabled): {result.GetSummary()}");
+                            dirToCopy = tempStagingDir;
                             
                             // Copy to /apps/client
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1256,6 +1255,7 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Unified] Configuring appsettings for localhost communication (127.0.0.1:{port})");
             
             // Try to modify SERVER appsettings if it exists
+            // DLL mod is always applied, so appsettings is supplementary
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/server/appsettings.json",
@@ -1263,9 +1263,10 @@ namespace SolutionGrader.Core.Services
                 port,
                 connectionString,
                 "Server",
-                config.UseDllModificationFallback);
+                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
             
             // Try to modify CLIENT appsettings if it exists
+            // DLL mod is always applied, so appsettings is supplementary
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/client/appsettings.json",
@@ -1273,7 +1274,7 @@ namespace SolutionGrader.Core.Services
                 port,
                 null, // Client doesn't need connection string
                 "Client",
-                config.UseDllModificationFallback);
+                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
         }
         
         /// <summary>
@@ -1558,7 +1559,7 @@ namespace SolutionGrader.Core.Services
                 
                 // CRITICAL DEBUGGING: Log detailed packet information
                 OnProgress($"[NetworkMonitor] Captured {capturedPackets.Count} packets for test case {testCase.Name}");
-                OnProgress($"[NetworkMonitor] Student: {_currentStudentCode}, Port: {config.CodeContainerHostPort}");
+                OnProgress($"[NetworkMonitor] Student: {_currentStudentCode}, Port: {config.CodeContainerInternalPort}");
                 
                 if (capturedPackets.Count > 0)
                 {
@@ -1810,11 +1811,20 @@ namespace SolutionGrader.Core.Services
                 if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath))
                 {
                     // Using sidecar pattern - parse pcap file for this stage
-                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerHostPort);
+                    await ParsePcapForCurrentStageAsync(stage, config.CodeContainerInternalPort);
                 }
                 else
                 {
                     OnProgress($"[NetworkMonitor] Stage {stage}: Skipping parse - using legacy network monitor or no pcap path");
+                }
+                
+                // CRITICAL: Flush network captures after grading each stage
+                // This prevents accumulation across stages within the same test case
+                if (_networkMonitor == null && !string.IsNullOrEmpty(_currentPcapFilePath) && _currentStudentCode != null)
+                {
+                    OnProgress($"[NetworkMonitor] Stage {stage}: Flushing network captures after stage grading");
+                    _runContext.ClearCapturedNetworkPackets(_currentStudentCode);
+                    OnProgress($"[NetworkMonitor] Stage {stage}: Network captures flushed - fresh for next stage");
                 }
                 
                 await Task.Delay(10);  // Brief delay between actions
