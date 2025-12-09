@@ -3,8 +3,9 @@ using System;
 namespace Domain.Models
 {
     /// <summary>
-    /// Represents a captured network packet with TCP flow information.
-    /// Used for grading TCP handshake and connection lifecycle.
+    /// Represents a captured network packet with TCP/HTTP flow information.
+    /// Used for grading TCP handshake, connection lifecycle, and HTTP request/response validation.
+    /// Supports both TCP and HTTP protocols based on the testkit configuration.
     /// </summary>
     public class CapturedNetworkPacket
     {
@@ -24,17 +25,41 @@ namespace Domain.Models
         public string Source { get; set; } = "";
         /// <summary>Destination address (IP:Port)</summary>
         public string Destination { get; set; } = "";
-        /// <summary>Protocol (typically TCP)</summary>
+        /// <summary>Protocol (TCP or HTTP)</summary>
         public string Protocol { get; set; } = "";
         /// <summary>Packet length in bytes</summary>
         public int Length { get; set; }
         /// <summary>Additional information</summary>
         public string Info { get; set; } = "";
-        /// <summary>Payload data (for PSH packets)</summary>
+        /// <summary>Payload data (for PSH packets in TCP, or raw data)</summary>
         public string? Data { get; set; }
         /// <summary>Source port</summary>
         public int SourcePort { get; set; }
         /// <summary>Destination port</summary>
         public int DestinationPort { get; set; }
+        
+        // ====== HTTP-specific fields ======
+        // These fields are only populated when Protocol = "HTTP"
+        
+        /// <summary>HTTP Request URI (e.g., "/api/students" or "/students/S001")</summary>
+        public string? URI { get; set; }
+        
+        /// <summary>HTTP method (GET, POST, PUT, DELETE, etc.)</summary>
+        public string? Method { get; set; }
+        
+        /// <summary>HTTP status code (e.g., "200 OK", "404 Not Found")</summary>
+        public string? Status { get; set; }
+        
+        /// <summary>HTTP version (e.g., "HTTP/1.1")</summary>
+        public string? HttpVersion { get; set; }
+        
+        /// <summary>HTTP request/response body content</summary>
+        public string? HttpBody { get; set; }
+        
+        /// <summary>HTTP headers as a concatenated string</summary>
+        public string? HttpHeaders { get; set; }
+        
+        /// <summary>Indicates if this is an HTTP request (true) or response (false)</summary>
+        public bool IsHttpRequest { get; set; }
     }
 }
