@@ -390,7 +390,7 @@ namespace SolutionGrader.Core.Services
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
                     var testCaseTimeout = testCase.TimeoutSeconds;
-                    OnProgress($"Executing test case: {testCase.Name} (timeout: {testCaseTimeout}s)...");
+                    OnProgress($"[TEST_CASE] Starting {testCase.Name} (timeout: {testCaseTimeout}s)");
                     
                     using var testCaseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     testCaseCts.CancelAfter(TimeSpan.FromSeconds(testCaseTimeout));
@@ -406,7 +406,7 @@ namespace SolutionGrader.Core.Services
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
                         // Test case timed out (not overall cancellation)
-                        OnProgress($"Student timed out during {testCase.Name} (timeout: {testCaseTimeout}s)");
+                        OnProgress($"[TEST_CASE] {testCase.Name} TIMED OUT after {testCaseTimeout}s");
                         tcResult = new TestCaseResult
                         {
                             TestCaseName = testCase.Name,
@@ -512,14 +512,13 @@ namespace SolutionGrader.Core.Services
             TestKitConfig testKitConfig,
             string unifiedContainer)
         {
-            OnProgress($"[Unified] Creating unified container: {unifiedContainer}");
+            OnProgress($"[SETUP] Creating unified container: {unifiedContainer}");
             
             // Remove existing unified container if any
             _commandExecutor.RunCommand($"docker rm -f {unifiedContainer} 2>/dev/null || true", null, null, 10000);
             
             // Create the unified container with supervisord
-            // CRITICAL: Processes are NOT started automatically
-            // They are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
+            // Processes are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
             // Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log
             var dockerCmd = $"docker run -d --name {unifiedContainer} " +
                            $"--network {config.DockerNetwork} " +
@@ -527,7 +526,7 @@ namespace SolutionGrader.Core.Services
                            $"{config.CodeImageName}";
             
             _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
-            OnProgress($"[Unified] Container created - supervisord running, processes idle");
+            OnProgress($"[SETUP] Unified container ready - supervisord running, processes idle");
             
             // Wait for supervisord to be ready
             await Task.Delay(1000);
@@ -1245,56 +1244,35 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 // ALL-OR-NOTHING GRADING STRATEGY FOR NETWORK FLOWS
-                // - If ANY flow has FAIL status, entire test FAILS
-                // - CRITICAL FIX: PARTIAL is treated as FAIL (flags match but roles don't - wrong packet source/dest)
+                // - If ANY flow FAILS, entire test FAILS
                 // - Only EXACT matches (flags + roles + correct source/dest) count as PASS
+                // - Role mismatches count as FAIL (not PARTIAL)
                 // - Only flows recorded in Detail.xlsx are validated
                 // - Flows NOT in Detail.xlsx are ignored (even if captured)
                 
                 int totalNetworkFlows = networkComparisons.Count;
                 int passCount = networkComparisons.Count(c => c.Passed);
-                int partialCount = networkComparisons.Count(c => c.IsPartial);
-                // CRITICAL FIX: Count ALL !Passed items as failures (including PARTIAL)
-                // This prevents NGINX from passing tests with correct flags but wrong roles
                 int failCount = networkComparisons.Count(c => !c.Passed);
                 
-                // DIRECT FILE LOGGING FOR DEBUGGING
-                var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-                try {
-                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Network Scoring: Total={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
-                } catch { }
-                
-                OnProgress($"[Network Scoring] networkComparisons.Count={totalNetworkFlows}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+                OnProgress($"[SCORING] Network flows: Total={totalNetworkFlows}, PASS={passCount}, FAIL={failCount}");
                 
                 // ALL-OR-NOTHING: Test passes ONLY if ALL flows passed (failCount == 0)
-                // PARTIAL matches count as FAIL - only EXACT matches (flags + roles) pass
                 bool networkFlowsPassed = failCount == 0 || totalNetworkFlows == 0;
                 
-                try {
-                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] networkFlowsPassed={networkFlowsPassed} (failCount={failCount})\n");
-                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] passed={passed}, networkCheckPassed={networkCheckPassed}\n");
-                } catch { }
-                
-                OnProgress($"[Network Scoring] networkFlowsPassed={networkFlowsPassed} (failCount={failCount}, totalNetworkFlows={totalNetworkFlows})");
-                OnProgress($"[Network Scoring] Output comparison passed={passed}, networkCheckPassed={networkCheckPassed}");
+                OnProgress($"[SCORING] NetworkFlows={networkFlowsPassed} (FAIL={failCount}, Total={totalNetworkFlows})");
+                OnProgress($"[SCORING] Output={passed}, NetworkCheck={networkCheckPassed}");
                 
                 // Final result: must pass both output comparison AND network check
                 // No partial credit - ALL or NOTHING
                 result.EarnedMark = (passed && networkCheckPassed && networkFlowsPassed) ? earnedMark : 0;
                 result.Passed = passed && networkCheckPassed && networkFlowsPassed;
                 
-                try {
-                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}\n");
-                    if (!result.Passed) {
-                        File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Test FAILED: output={passed}, netCheck={networkCheckPassed}, netFlows={networkFlowsPassed}\n");
-                    }
-                } catch { }
-                
-                OnProgress($"[Network Scoring] FINAL TEST RESULT: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
+                OnProgress($"[SCORING] FINAL: Passed={result.Passed}, EarnedMark={result.EarnedMark}/{earnedMark}");
                 if (!result.Passed)
                 {
-                    OnProgress($"[Network Scoring] Test FAILED because: outputPassed={passed}, networkCheckPassed={networkCheckPassed}, networkFlowsPassed={networkFlowsPassed}");
+                    OnProgress($"[SCORING] Test FAILED - Output={passed}, NetworkCheck={networkCheckPassed}, NetworkFlows={networkFlowsPassed}");
                 }
+                
                 result.ClientComparisons = comparisons.Where(c => c.Source == "Client").ToList();
                 result.ServerComparisons = comparisons.Where(c => c.Source == "Server").ToList();
                 result.NetworkComparisons = networkComparisons;
@@ -1304,7 +1282,7 @@ namespace SolutionGrader.Core.Services
                 
                 if (!networkCheckPassed)
                 {
-                    errorMessages.Add("Network monitoring failed: No packets captured. Run with sudo and ensure libpcap/NPcap is installed.");
+                    errorMessages.Add("Network monitoring failed: No packets captured");
                 }
                 
                 if (!passed)
@@ -1316,8 +1294,7 @@ namespace SolutionGrader.Core.Services
                 
                 if (totalNetworkFlows > 0 && failCount > 0)
                 {
-                    // Show detailed breakdown: which flows failed
-                    errorMessages.Add($"Network flows: {failCount} FAIL (ALL-OR-NOTHING: test FAILED), {partialCount} PARTIAL, {passCount} PASS");
+                    errorMessages.Add($"Network flows: {failCount} FAIL (ALL-OR-NOTHING), {passCount} PASS");
                 }
                 
                 if (errorMessages.Any())
@@ -1674,30 +1651,26 @@ namespace SolutionGrader.Core.Services
                     // Log detailed comparison
                     if (exactMatch)
                     {
-                        OnProgress($"[CompareNetwork] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}");
+                        OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}");
                     }
                     else
                     {
-                        OnProgress($"[CompareNetwork] ~ PARTIAL - Stage {exp.Stage}: Expected {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}, Found {matchingPacket.Flags} from {matchingPacket.SourceRole} to {matchingPacket.DestinationRole}");
+                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: Expected {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}, Found {matchingPacket.Flags} from {matchingPacket.SourceRole} to {matchingPacket.DestinationRole} (role mismatch)");
                     }
                     
-                    // CRITICAL FIX: Track PASS vs PARTIAL in ComparisonResult
-                    // PASS = exact match (flags + roles match)
-                    // PARTIAL = flags match but roles don't match
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
                         Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
                         Actual = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}",
-                        Passed = exactMatch,  // true for PASS, false for PARTIAL
-                        IsPartial = !exactMatch && true  // PARTIAL if matched flags but not exact
+                        Passed = exactMatch
                     });
                 }
                 else
                 {
                     // No matching packet found - FAIL
-                    OnProgress($"[CompareNetwork] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(capturedPackets.Any() ? string.Join(", ", capturedPackets.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
+                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(capturedPackets.Any() ? string.Join(", ", capturedPackets.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
                     
                     results.Add(new ComparisonResult
                     {
@@ -1705,30 +1678,19 @@ namespace SolutionGrader.Core.Services
                         Stage = exp.Stage,
                         Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
                         Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
-                        Passed = false,
-                        IsPartial = false  // Complete FAIL - missing packet
+                        Passed = false
                     });
                 }
             }
             
-            // DIAGNOSTIC LOGGING - Summary of comparison results
+            // Summary of comparison results
             int passCount = results.Count(r => r.Passed);
-            int partialCount = results.Count(r => r.IsPartial);
-            int failCount = results.Count(r => !r.Passed && !r.IsPartial);
+            int failCount = results.Count(r => !r.Passed);
             
-            // DIRECT FILE LOGGING
-            debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-            try {
-                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] RESULTS: Total={results.Count}, PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}\n");
-                if (failCount > 0) {
-                    File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: {failCount} FAIL flows - test should FAIL!\n");
-                }
-            } catch { }
-            
-            OnProgress($"[CompareNetwork] RESULTS: {results.Count} total comparisons - PASS={passCount}, PARTIAL={partialCount}, FAIL={failCount}");
+            OnProgress($"[COMPARISON] RESULTS: {results.Count} total - PASS={passCount}, FAIL={failCount}");
             if (failCount > 0)
             {
-                OnProgress($"[CompareNetwork] WARNING: {failCount} FAIL network flows detected - test should FAIL!");
+                OnProgress($"[COMPARISON] WARNING: {failCount} network flows FAILED - test will FAIL (ALL-OR-NOTHING)");
             }
             
             return results;
@@ -2552,12 +2514,12 @@ namespace SolutionGrader.Core.Services
             string pcapOutputPath,
             string protocol)
         {
-            OnProgress($"[Monitor] Creating sidecar network monitor for {unifiedContainer}");
+            OnProgress($"[SETUP] Creating network monitor sidecar: {monitorContainer}");
             
-            // === CRITICAL FIX: Save monitor container name to class field ===
+            // === CRITICAL: Save monitor container name to class field ===
             _currentMonitorContainer = monitorContainer;
             _currentPcapFilePath = pcapOutputPath;
-            // ================================================================
+            // =============================================================
             
             // Remove existing monitor container if any
             try
@@ -2575,7 +2537,6 @@ namespace SolutionGrader.Core.Services
             {
                 Directory.CreateDirectory(outputDir);
                 // CRITICAL: Convert to absolute path for Docker volume mount
-                // Docker requires absolute paths for volume mounts, relative paths will fail
                 outputDir = Path.GetFullPath(outputDir);
             }
             
@@ -2587,7 +2548,6 @@ namespace SolutionGrader.Core.Services
             // - Use --net=container:{unifiedContainer} to attach to student's network namespace
             // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for tcpdump permissions
             // - Capture on loopback interface (-i lo) to catch localhost traffic
-            // - NO port filtering - capture everything to detect student mistakes
             // - Write to /data/{pcapFileName} inside container (bind-mounted to host)
             //
             // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
@@ -3254,7 +3214,7 @@ namespace SolutionGrader.Core.Services
                     catch (Exception ex)
                     {
                         // Log the exception instead of silently swallowing it
-                        OnProgress($"[NetworkMonitor] ERROR parsing packet: {ex.Message}");
+                        OnProgress($"[NETWORK] ERROR parsing packet: {ex.Message}");
                         continue;
                     }
                 }
@@ -3262,11 +3222,11 @@ namespace SolutionGrader.Core.Services
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = lines.Length;
                 
-                OnProgress($"[NetworkMonitor] Parsed {newPackets.Count} new packets for stage {currentStage}, total packets: {lines.Length}");
+                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {lines.Length}");
             }
             catch (Exception ex)
             {
-                OnProgress($"[NetworkMonitor] Error parsing pcap for stage {currentStage}: {ex.Message}");
+                OnProgress($"[NETWORK] Error parsing pcap for stage {currentStage}: {ex.Message}");
             }
         }
         
@@ -3623,12 +3583,6 @@ namespace SolutionGrader.Core.Services
         public string? Expected { get; set; }
         public string? Actual { get; set; }
         public bool Passed { get; set; }
-        
-        /// <summary>
-        /// Indicates if this is a PARTIAL match (flags match but roles don't).
-        /// PARTIAL matches should count as passing with partial credit.
-        /// </summary>
-        public bool IsPartial { get; set; }
         
         // Additional fields for SampleLogging format
         public double PointsAwarded { get; set; }
