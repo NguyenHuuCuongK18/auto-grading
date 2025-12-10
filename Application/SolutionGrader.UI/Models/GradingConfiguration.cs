@@ -333,7 +333,8 @@ namespace SolutionGrader.UI.Models
         /// - Container runs on port 8001
         /// - Client connects to 8001 → success!
         /// 
-        /// Default: true (enabled for reliable batch grading)
+        /// Default: false (prefer appsettings.json modification)
+        /// Set to true to enable DLL patching for students who hardcode ports/IPs without appsettings.json
         /// </summary>
         public bool UseDllModificationFallback
         {
