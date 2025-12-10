@@ -306,13 +306,9 @@ namespace SolutionGrader.UI.Services
             };
             
             // Start or reset batch timer (write after 2 seconds of inactivity)
-            lock (_fileLock)
-            {
-                _batchTimer?.Dispose();
-                _batchTimer = new System.Threading.Timer(_ => {
-                    ProcessPendingUpdates();
-                }, null, 2000, Timeout.Infinite);
-            }
+            var oldTimer = Interlocked.Exchange(ref _batchTimer, 
+                new System.Threading.Timer(_ => ProcessPendingUpdates(), null, 2000, Timeout.Infinite));
+            oldTimer?.Dispose();
         }
         
         /// <summary>
