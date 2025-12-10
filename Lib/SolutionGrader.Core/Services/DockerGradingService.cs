@@ -1058,30 +1058,37 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // ALWAYS apply DLL modification to ensure port consistency
-                            // Since Docker containers are isolated, all students use the same internal port
-                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
-                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(tempStagingDir);
-                            tempDirectories.Add(tempStagingDir);
-                            
-                            CopyDirectory(serverDir, tempStagingDir);
-                            OnProgress($"[Unified] Copied server files to temp for modification");
-                            
-                            // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
-                            // We DON'T force IP replacement - student code should already use correct IP
-                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                            // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                tempStagingDir,
-                                config.ServerProjectName,
-                                isServer: true,
-                                targetPort: config.CodeContainerInternalPort,
-                                targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
-                            );
-                            
-                            OnProgress($"[Unified] Server DLL mod (always enabled): {result.GetSummary()}");
-                            dirToCopy = tempStagingDir;
+                            // Apply DLL modification only if fallback is enabled
+                            // Preferred: Use appsettings.json modification (handled later)
+                            // Fallback: Patch DLLs when appsettings.json is not found
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(serverDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied server files to temp for DLL modification");
+                                
+                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
+                                // We DON'T force IP replacement - student code should already use correct IP
+                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ServerProjectName,
+                                    isServer: true,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
+                                );
+                                
+                                OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            else
+                            {
+                                OnProgress($"[Unified] Server DLL modification fallback disabled - will use appsettings.json modification");
+                            }
                             
                             // Copy to /apps/server
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1108,30 +1115,37 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // ALWAYS apply DLL modification to ensure port consistency
-                            // Since Docker containers are isolated, all students use the same internal port
-                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
-                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(tempStagingDir);
-                            tempDirectories.Add(tempStagingDir);
-                            
-                            CopyDirectory(clientDir, tempStagingDir);
-                            OnProgress($"[Unified] Copied client files to temp for modification");
-                            
-                            // Client connects to localhost/127.0.0.1 in unified container
-                            // We DON'T force IP replacement - student code should already use localhost
-                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                            // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                tempStagingDir,
-                                config.ClientProjectName,
-                                isServer: false,
-                                targetPort: config.CodeContainerInternalPort,
-                                targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
-                            );
-                            
-                            OnProgress($"[Unified] Client DLL mod (always enabled): {result.GetSummary()}");
-                            dirToCopy = tempStagingDir;
+                            // Apply DLL modification only if fallback is enabled
+                            // Preferred: Use appsettings.json modification (handled later)
+                            // Fallback: Patch DLLs when appsettings.json is not found
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(clientDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied client files to temp for DLL modification");
+                                
+                                // Client connects to localhost/127.0.0.1 in unified container
+                                // We DON'T force IP replacement - student code should already use localhost
+                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ClientProjectName,
+                                    isServer: false,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
+                                );
+                                
+                                OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            else
+                            {
+                                OnProgress($"[Unified] Client DLL modification fallback disabled - will use appsettings.json modification");
+                            }
                             
                             // Copy to /apps/client
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1258,7 +1272,7 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Unified] Configuring appsettings for localhost communication (127.0.0.1:{port})");
             
             // Try to modify SERVER appsettings if it exists
-            // DLL mod is always applied, so appsettings is supplementary
+            // Appsettings modification is preferred; DLL mod is fallback
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/server/appsettings.json",
@@ -1266,10 +1280,10 @@ namespace SolutionGrader.Core.Services
                 port,
                 connectionString,
                 "Server",
-                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
+                dllModFallbackEnabled: config.UseDllModificationFallback);
             
             // Try to modify CLIENT appsettings if it exists
-            // DLL mod is always applied, so appsettings is supplementary
+            // Appsettings modification is preferred; DLL mod is fallback
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/client/appsettings.json",
@@ -1277,7 +1291,7 @@ namespace SolutionGrader.Core.Services
                 port,
                 null, // Client doesn't need connection string
                 "Client",
-                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
+                dllModFallbackEnabled: config.UseDllModificationFallback);
         }
         
         /// <summary>

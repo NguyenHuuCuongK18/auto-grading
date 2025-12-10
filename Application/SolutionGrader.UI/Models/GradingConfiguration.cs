@@ -69,9 +69,10 @@ namespace SolutionGrader.UI.Models
         private int _endIndex = -1; // -1 means grade all students
         
         // DLL modification fallback settings
-        // CRITICAL: Default to true for batch grading to ensure port overrides work
-        // This patches hardcoded ports in student DLLs to match allocated container ports
-        private bool _useDllModificationFallback = true;
+        // PREFERRED: Use appsettings.json modification when available
+        // This is a FALLBACK that patches DLLs when appsettings.json is not found
+        // Default: false (prefer appsettings modification)
+        private bool _useDllModificationFallback = false;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
