@@ -1,0 +1,35 @@
+﻿====================================================================================================
+GRADING SESSION LOG - 2025-12-10 10:46:39
+====================================================================================================
+
+[2025-12-10 10:46:39.457] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-10 10:46:39.461] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-10 10:46:39.473] [Info] [SYSTEM] Excel log file initialized successfully
+
+[2025-12-10 10:46:39.473] [Info] [cuongnhhe186494] Started grading for student: cuongnhhe186494 (Paper 1)
+
+[2025-12-10 10:46:39.473] [Info] [hoangbsthe186345] Started grading for student: hoangbsthe186345 (Paper 1)
+
+[2025-12-10 10:46:39.474] [Info] [dongnvhe172649] Started grading for student: dongnvhe172649 (Paper 1)
+
+[2025-12-10 10:46:39.479] [StudentError] [cuongnhhe186494] Failed to extract or locate solution folder - will attempt to continue with grading
+
+[2025-12-10 10:46:39.480] [StudentError] [hoangbsthe186345] Failed to extract or locate solution folder - will attempt to continue with grading
+
+[2025-12-10 10:46:39.480] [StudentError] [dongnvhe172649] Failed to extract or locate solution folder - will attempt to continue with grading
+
+[2025-12-10 10:47:46.578] [Info] [hoangbsthe186345] Completed grading for student: hoangbsthe186345 - Score: 2/5
+
+[2025-12-10 10:47:46.714] [Info] [cuongnhhe186494] Completed grading for student: cuongnhhe186494 - Score: 2/5
+
+[2025-12-10 10:47:46.833] [Info] [dongnvhe172649] Completed grading for student: dongnvhe172649 - Score: 2/5
+
+[2025-12-10 10:47:47.994] [Info] [SYSTEM] Grading session completed. Total students: 3
+
+
+====================================================================================================
+SESSION ENDED - 2025-12-10 10:47:48
+Total messages: 13
+====================================================================================================
