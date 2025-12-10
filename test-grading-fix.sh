@@ -16,7 +16,9 @@ NC='\033[0m' # No Color
 
 # Check if solution builds
 echo "Step 1: Building solution..."
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || { echo "Failed to change to script directory"; exit 1; }
+
 if dotnet build SolutionGrader.sln -c Release > /tmp/build.log 2>&1; then
     echo -e "${GREEN}✓ Build successful${NC}"
 else

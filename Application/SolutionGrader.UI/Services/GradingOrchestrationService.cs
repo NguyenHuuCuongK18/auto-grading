@@ -178,11 +178,22 @@ namespace SolutionGrader.UI.Services
                 
                 _logger.LogInfo($"[Grading Loop] Total students to grade: {students.Count}");
                 
-                // Diagnostic logging: Report student statuses for debugging
-                var statusGroups = students.GroupBy(s => s.Status).OrderBy(g => g.Key);
-                foreach (var group in statusGroups)
+                // Diagnostic logging: Report student statuses for debugging (optimized single-pass count)
+                if (students.Count > 0)
                 {
-                    _logger.LogInfo($"[Grading Loop]   - {group.Count()} student(s) with Status={group.Key}");
+                    var statusCounts = new Dictionary<GradingStatus, int>();
+                    foreach (var s in students)
+                    {
+                        if (statusCounts.ContainsKey(s.Status))
+                            statusCounts[s.Status]++;
+                        else
+                            statusCounts[s.Status] = 1;
+                    }
+                    
+                    foreach (var kvp in statusCounts.OrderBy(x => x.Key))
+                    {
+                        _logger.LogInfo($"[Grading Loop]   - {kvp.Value} student(s) with Status={kvp.Key}");
+                    }
                 }
                 
                 // Grade ALL students passed to this service - no filtering by status
