@@ -82,6 +82,10 @@ namespace SolutionGrader.Core.Services
         private string? _currentPcapFilePath; // Path to pcap file being written by network monitor
         private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
         
+        // Stage output tracking for per-test-case log export
+        private Dictionary<int, string>? _lastTestCaseClientOutputs; // Track last test case client outputs by stage
+        private Dictionary<int, string>? _lastTestCaseServerOutputs; // Track last test case server outputs by stage
+        
         /// <summary>
         /// Event raised when grading progress is updated.
         /// </summary>
@@ -562,6 +566,9 @@ namespace SolutionGrader.Core.Services
                     // Format: snapshot_TC3_stage1.pcap -> TC3/snapshot_TC3_stage1.pcap
                     MoveSnapshotsToTCFolder(studentResultPath, tcResultPath, testCase.Name);
                     
+                    // Export per-stage logs from container to ProcessLogs/TC# subdirectory
+                    await ExportStageLogsForTestCaseAsync(unifiedContainer, studentResultPath, testCase.Name);
+                    
                     OnProgress($"Test case {testCase.Name}: {(tcResult.Passed ? "PASS" : "FAIL")} ({tcResult.EarnedMark:F2}/{tcResult.MaxMark:F2})");
                 }
                 
@@ -584,17 +591,18 @@ namespace SolutionGrader.Core.Services
             }
             finally
             {
-                // UNIFIED CONTAINER: Export per-stage log files from container to student directory
-                try
-                {
-                    OnProgress($"[Unified] Exporting per-stage log files from container...");
-                    await ExportLogsFromUnifiedContainerAsync(unifiedContainer, studentResultPath);
-                    OnProgress($"[Unified] Per-stage log files exported successfully");
-                }
-                catch (Exception ex)
-                {
-                    OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
-                }
+                // UNIFIED CONTAINER: Logs are now exported per test case in ExportStageLogsForTestCaseAsync
+                // No need to export here - commenting out old code
+                // try
+                // {
+                //     OnProgress($"[Unified] Exporting per-stage log files from container...");
+                //     await ExportLogsFromUnifiedContainerAsync(unifiedContainer, studentResultPath);
+                //     OnProgress($"[Unified] Per-stage log files exported successfully");
+                // }
+                // catch (Exception ex)
+                // {
+                //     OnProgress($"[Unified] WARNING: Failed to export log files: {ex.Message}");
+                // }
                 
                 // Cleanup network monitor container (sidecar pattern)
                 var monitorContainer = $"ag-monitor-{studentCode}";
@@ -640,7 +648,8 @@ namespace SolutionGrader.Core.Services
         /// Setup unified container that runs both client and server processes.
         /// Processes are managed by supervisord and started/stopped by test case actions.
         /// CLIENT AND SERVER ARE NOT STARTED AUTOMATICALLY - they start only when test case Detail.xlsx says so.
-        /// Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// Logs are written to unified files: /apps/server/server.log and /apps/client/client.log
+        /// The C# code reads these files incrementally after each action to separate output by stage.
         /// </summary>
         private async Task SetupUnifiedContainerAsync(
             string? serverDllPath,
@@ -656,7 +665,8 @@ namespace SolutionGrader.Core.Services
             
             // Create the unified container with supervisord
             // Processes are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
-            // Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log
+            // Logs are written to unified files: /apps/server/server.log and /apps/client/client.log
+            // The C# code reads these files incrementally after each action to separate output by stage
             var dockerCmd = $"docker run -d --name {unifiedContainer} " +
                            $"--network {config.DockerNetwork} " +
                            $"-t " +  // TTY for unbuffered logs
@@ -677,7 +687,8 @@ namespace SolutionGrader.Core.Services
                 unifiedContainer);
             
             OnProgress($"[Unified] Container ready - processes will start when test cases execute StartClient/StartServer actions");
-            OnProgress($"[Unified] Logs will be written per stage: /apps/server/server-stage-N.log and /apps/client/client-stage-N.log");
+            OnProgress($"[Unified] Logs will be written to unified files: /apps/server/server.log and /apps/client/client.log");
+            OnProgress($"[Unified] C# code reads these files incrementally to separate output by stage");
         }
         
         /// <summary>
@@ -1721,7 +1732,8 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Execute test case actions for UNIFIED container (client and server in same container).
         /// Uses unified-control.sh script to start/stop processes via supervisord.
-        /// Logs are written per stage to /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// Logs are written to unified files: /apps/server/server.log and /apps/client/client.log
+        /// This method reads logs incrementally after each action to separate output by stage.
         /// </summary>
         private async Task<(Dictionary<int, string> clientOutputs, Dictionary<int, string> serverOutputs)> ExecuteActionsForUnifiedContainerAsync(
             List<(int Stage, string Input, string Action)> actions,
@@ -1731,6 +1743,10 @@ namespace SolutionGrader.Core.Services
         {
             var clientOutputs = new Dictionary<int, string>();
             var serverOutputs = new Dictionary<int, string>();
+            
+            // Track file positions for incremental reading
+            long clientLogPosition = 0;
+            long serverLogPosition = 0;
             
             foreach (var (stage, input, action) in actions.OrderBy(a => a.Stage))
             {
@@ -1750,7 +1766,7 @@ namespace SolutionGrader.Core.Services
                         
                         await Task.Delay(StartupDelayMs);
                         
-                        OnProgress($"    Server started for stage {stage} (logging to /apps/server/server-stage-{stage}.log)");
+                        OnProgress($"    Server started for stage {stage} (logging to /apps/server/server.log)");
                         break;
                         
                     case "STARTCLIENT":
@@ -1760,7 +1776,7 @@ namespace SolutionGrader.Core.Services
                         
                         await Task.Delay(StartupDelayMs);
                         
-                        OnProgress($"    Client started for stage {stage} (logging to /apps/client/client-stage-{stage}.log)");
+                        OnProgress($"    Client started for stage {stage} (logging to /apps/client/client.log)");
                         break;
                         
                     case "INPUT":
@@ -1823,6 +1839,49 @@ namespace SolutionGrader.Core.Services
                         break;
                 }
                 
+                // CRITICAL: Read logs incrementally AFTER each action to capture stage-specific output
+                // This separates output by stage even when processes continue running
+                
+                // Read new server output for this stage
+                try
+                {
+                    var (newServerOutput, newServerPosition) = ReadFileFromContainerIncremental(
+                        unifiedContainer, 
+                        "/apps/server/server.log", 
+                        serverLogPosition);
+                    
+                    if (!string.IsNullOrEmpty(newServerOutput))
+                    {
+                        serverOutputs[stage] = newServerOutput;
+                        serverLogPosition = newServerPosition;
+                        OnProgress($"    Server output for stage {stage}: {newServerOutput.Length} chars (position: {serverLogPosition})");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"    WARNING: Could not read server log for stage {stage}: {ex.Message}");
+                }
+                
+                // Read new client output for this stage
+                try
+                {
+                    var (newClientOutput, newClientPosition) = ReadFileFromContainerIncremental(
+                        unifiedContainer, 
+                        "/apps/client/client.log", 
+                        clientLogPosition);
+                    
+                    if (!string.IsNullOrEmpty(newClientOutput))
+                    {
+                        clientOutputs[stage] = newClientOutput;
+                        clientLogPosition = newClientPosition;
+                        OnProgress($"    Client output for stage {stage}: {newClientOutput.Length} chars (position: {clientLogPosition})");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"    WARNING: Could not read client log for stage {stage}: {ex.Message}");
+                }
+                
                 // LIVE GRADING: Parse network packets for current stage
                 // This enables per-stage validation (all-or-nothing grading strategy)
                 OnProgress($"[NetworkMonitor] Stage {stage}: _networkMonitor={(_networkMonitor == null ? "null" : "not-null")}, _currentPcapFilePath={_currentPcapFilePath ?? "null"}");
@@ -1839,48 +1898,9 @@ namespace SolutionGrader.Core.Services
                 await Task.Delay(10);  // Brief delay between actions
             }
             
-            // After all actions complete, read log files from container for each stage
-            OnProgress($"[Unified] Reading per-stage log files from container...");
-            
-            // Collect all stages that had actions
-            var allStages = actions.Select(a => a.Stage).Distinct().OrderBy(s => s).ToList();
-            
-            foreach (var stage in allStages)
-            {
-                // Read server log for this stage
-                try
-                {
-                    var serverLogPath = $"/apps/server/server-stage-{stage}.log";
-                    var serverLog = ReadFileFromContainer(unifiedContainer, serverLogPath);
-                    if (!string.IsNullOrEmpty(serverLog))
-                    {
-                        serverOutputs[stage] = serverLog;
-                        OnProgress($"    Server stage {stage}: {serverLog.Length} chars");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    OnProgress($"    WARNING: Could not read server log for stage {stage}: {ex.Message}");
-                    serverOutputs[stage] = "";
-                }
-                
-                // Read client log for this stage
-                try
-                {
-                    var clientLogPath = $"/apps/client/client-stage-{stage}.log";
-                    var clientLog = ReadFileFromContainer(unifiedContainer, clientLogPath);
-                    if (!string.IsNullOrEmpty(clientLog))
-                    {
-                        clientOutputs[stage] = clientLog;
-                        OnProgress($"    Client stage {stage}: {clientLog.Length} chars");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    OnProgress($"    WARNING: Could not read client log for stage {stage}: {ex.Message}");
-                    clientOutputs[stage] = "";
-                }
-            }
+            // Store outputs for later export
+            _lastTestCaseClientOutputs = new Dictionary<int, string>(clientOutputs);
+            _lastTestCaseServerOutputs = new Dictionary<int, string>(serverOutputs);
             
             return (clientOutputs, serverOutputs);
         }
@@ -2888,13 +2908,62 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
+        /// Read a file from container starting from a specific byte position.
+        /// Returns the new content and the updated file position.
+        /// This enables incremental reading to separate output by stage.
+        /// </summary>
+        /// <param name="containerName">Container name</param>
+        /// <param name="filePath">Path to file in container</param>
+        /// <param name="startPosition">Byte position to start reading from</param>
+        /// <returns>Tuple of (new content, updated position)</returns>
+        private (string newContent, long newPosition) ReadFileFromContainerIncremental(
+            string containerName, 
+            string filePath, 
+            long startPosition)
+        {
+            // Use tail with byte offset to read from specific position
+            // tail -c +N reads from byte N (1-indexed, so we add 1 to 0-indexed position)
+            var tailPosition = startPosition + 1;
+            
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "docker",
+                    Arguments = $"exec {containerName} tail -c +{tailPosition} {filePath}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            
+            process.Start();
+            var newContent = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            
+            if (process.ExitCode != 0)
+            {
+                // File doesn't exist yet or other error - return empty content and same position
+                return ("", startPosition);
+            }
+            
+            // Calculate new position (old position + bytes read)
+            var bytesRead = Encoding.UTF8.GetByteCount(newContent);
+            var newPosition = startPosition + bytesRead;
+            
+            return (newContent, newPosition);
+        }
+        
+        /// <summary>
         /// Cleans up code containers (server, client) after each student.
         /// CRITICAL: Database container is SHARED and NOT removed - only server/client containers are removed.
         /// Database instance cleanup is handled separately via CleanupDatabaseInstanceAsync.
         /// </summary>
         /// <summary>
         /// Export per-stage log files from unified container to student result directory.
-        /// Logs are in /apps/server/server-stage-N.log and /apps/client/client-stage-N.log.
+        /// NOTE: This method is deprecated - logs are now exported per test case in ExportStageLogsForTestCaseAsync.
+        /// Keeping this method for reference but it's no longer called.
         /// </summary>
         private async Task ExportLogsFromUnifiedContainerAsync(string unifiedContainer, string studentResultPath)
         {
@@ -2956,22 +3025,87 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Clear old stage log files in the unified container before executing a new test case.
+        /// Export per-stage log files for a specific test case to ProcessLogs/TC# subdirectory.
+        /// Logs are organized as: ProcessLogs/TC1/client-TC1-stage-1.log, ProcessLogs/TC1/server-TC1-stage-2.log, etc.
+        /// This method is called after each test case completes.
+        /// </summary>
+        /// <param name="unifiedContainer">Container name</param>
+        /// <param name="studentResultPath">Student result directory path</param>
+        /// <param name="testCaseName">Test case name (e.g., "TC1")</param>
+        private async Task ExportStageLogsForTestCaseAsync(string unifiedContainer, string studentResultPath, string testCaseName)
+        {
+            // Create ProcessLogs/TC# subdirectory
+            var tcLogsDir = Path.Combine(studentResultPath, "ProcessLogs", testCaseName);
+            Directory.CreateDirectory(tcLogsDir);
+            
+            OnProgress($"[Unified] Exporting stage logs for {testCaseName} to {tcLogsDir}");
+            
+            // Export client stage logs
+            if (_lastTestCaseClientOutputs != null && _lastTestCaseClientOutputs.Count > 0)
+            {
+                foreach (var (stage, output) in _lastTestCaseClientOutputs.OrderBy(kv => kv.Key))
+                {
+                    if (!string.IsNullOrEmpty(output))
+                    {
+                        var logFileName = $"client-{testCaseName}-stage-{stage}.log";
+                        var logFilePath = Path.Combine(tcLogsDir, logFileName);
+                        
+                        try
+                        {
+                            await File.WriteAllTextAsync(logFilePath, output);
+                            OnProgress($"  Exported {logFileName} ({output.Length} chars)");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"  WARNING: Failed to export {logFileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            
+            // Export server stage logs
+            if (_lastTestCaseServerOutputs != null && _lastTestCaseServerOutputs.Count > 0)
+            {
+                foreach (var (stage, output) in _lastTestCaseServerOutputs.OrderBy(kv => kv.Key))
+                {
+                    if (!string.IsNullOrEmpty(output))
+                    {
+                        var logFileName = $"server-{testCaseName}-stage-{stage}.log";
+                        var logFilePath = Path.Combine(tcLogsDir, logFileName);
+                        
+                        try
+                        {
+                            await File.WriteAllTextAsync(logFilePath, output);
+                            OnProgress($"  Exported {logFileName} ({output.Length} chars)");
+                        }
+                        catch (Exception ex)
+                        {
+                            OnProgress($"  WARNING: Failed to export {logFileName}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            
+            OnProgress($"[Unified] Stage logs for {testCaseName} exported successfully");
+        }
+        
+        /// <summary>
+        /// Clear old log files in the unified container before executing a new test case.
         /// This prevents log accumulation across test cases (same container is reused).
         /// </summary>
         private void ClearStageLogsInContainer(string unifiedContainer)
         {
             try
             {
-                // Remove all server stage log files
-                var clearServerCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/server/server-stage-*.log\"";
+                // Remove unified server log file
+                var clearServerCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/server/server.log\"";
                 _commandExecutor.RunCommand(clearServerCmd, null, null, 5000);
                 
-                // Remove all client stage log files
-                var clearClientCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/client/client-stage-*.log\"";
+                // Remove unified client log file
+                var clearClientCmd = $"docker exec {unifiedContainer} /bin/bash -c \"rm -f /apps/client/client.log\"";
                 _commandExecutor.RunCommand(clearClientCmd, null, null, 5000);
                 
-                OnProgress($"[Unified] Cleared old stage log files for new test case");
+                OnProgress($"[Unified] Cleared old log files for new test case");
             }
             catch (Exception ex)
             {
