@@ -201,15 +201,37 @@ namespace SolutionGrader.UI
                 var paperNumbers = students.Select(s => s.PaperNo).Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : 0);
                 foreach (var paper in paperNumbers) { cmbPaperSelection.Items.Add($"Paper {paper}"); }
                 
+                // FIX: Pre-load max marks for each paper to display in the Max column
+                // This is efficient because we only load once per paper, not per student
+                // Previously, MaxMark was only set during grading, so it showed 0 before grading started
+                var paperMaxMarks = new Dictionary<string, double>();
+                foreach (var paperNo in paperNumbers)
+                {
+                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, paperNo);
+                    if (!string.IsNullOrEmpty(testKitPath))
+                    {
+                        var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                        paperMaxMarks[paperNo] = maxMark;
+                        _logger.LogInfo($"Paper {paperNo}: Max mark = {maxMark} (from {Path.GetFileName(testKitPath)})");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Paper {paperNo}: No test kit found, max mark will be 0");
+                    }
+                }
+                
                 int idx = 1; // 1-based ids for clarity
                 foreach (var student in students)
                 {
                     // assign 1-based Id
                     student.Id = idx++;
                     
-                    // DON'T load test kit config during discovery - too expensive!
-                    // Test kits will be loaded lazily during grading when actually needed
-                    // This makes discovery instant even with 150+ students
+                    // Set MaxMark from the pre-loaded paper max marks
+                    // This ensures the Max column shows the correct value before grading starts
+                    if (paperMaxMarks.TryGetValue(student.PaperNo, out var maxMark))
+                    {
+                        student.MaxMark = maxMark;
+                    }
                     
                     _students.Add(student);
                 }
