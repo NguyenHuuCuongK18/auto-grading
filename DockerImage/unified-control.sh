@@ -57,14 +57,11 @@ case "$ACTION" in
         $SUPERVISORCTL stop server 2>/dev/null || true
         sleep 0.2
         
-        # Write STAGE to file for wrapper script to read
-        echo "$STAGE" > /tmp/server_stage
-        
-        # Start server - wrapper script will read stage from file
+        # Start server - output goes to unified log file
         $SUPERVISORCTL start server
         
         if wait_for_start server; then
-            echo "[Control] Server started successfully for stage $STAGE (logging to /apps/server/server-stage-$STAGE.log)"
+            echo "[Control] Server started successfully for stage $STAGE (logging to /apps/server/server.log)"
             # Wait for server to bind to port
             sleep 1
         else
@@ -99,14 +96,11 @@ case "$ACTION" in
         $SUPERVISORCTL stop client 2>/dev/null || true
         sleep 0.2
         
-        # Write STAGE to file for wrapper script to read
-        echo "$STAGE" > /tmp/client_stage
-        
-        # Start client - wrapper script will read stage from file
+        # Start client - output goes to unified log file
         $SUPERVISORCTL start client
         
         if wait_for_start client; then
-            echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client-stage-$STAGE.log)"
+            echo "[Control] Client started successfully for stage $STAGE (logging to /apps/client/client.log)"
             echo "[Control] Client is reading from named pipe /tmp/client_input"
         else
             echo "[Control] WARNING: Client may not have started for stage $STAGE"

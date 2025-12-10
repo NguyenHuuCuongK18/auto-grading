@@ -1,0 +1,681 @@
+========================================
+SolutionGrader CLI - Docker Grading Mode
+========================================
+
+Submit folder: Submit
+TestKit folder: TestKit
+Output folder: test_output
+Server project: Project11 (has-server: True)
+Client project: Project12 (has-client: True)
+Paper filter: 1
+Student filter: cuongnhhe186494
+
+[CLI] Starting Docker grading using SHARED DockerGradingService...
+[CLI] This ensures IDENTICAL behavior between CLI and UI.
+
+[ThreadPool Configuration]
+  CPU Cores: 4
+  MaxParallelStudents: 1
+  Parallelism Ratio: 0.25x CPU cores
+  Worker Threads: Min=8 (was 4), Max=16 (was 32767)
+  I/O Threads: Min=8 (was 1), Max=16 (was 1000)
+[ThreadPool] Configured for optimal I/O-bound workload performance
+[CLI] Clearing port allocation from previous sessions...
+[PortAllocator] No port tracking file to clear
+[CLI] Found 1 student(s) total, grading 1 student(s) in index range [0, end].
+[CLI] Parallel grading: 1 student(s) at a time.
+[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.
+
+
+=                                                           
+[1/1] Grading student: cuongnhhe186494 (Paper 1)
+=                                                           
+[TestKit Discovery] Found test kit via Mapping.xlsx: Q1 for paper 1
+[cuongnhhe186494] No zip file found for extraction in Submit/1/cuongnhhe186494/1
+[WARNING] Failed to extract or find solution for cuongnhhe186494 - will attempt to continue with grading
+[Port Config] Reading starting port from Environment.xlsx: TestKit/Q1/Environment.xlsx
+[Port Config] Successfully read Code_Container_Internal_Port=8000 from Environment.xlsx.
+[Port Config] PortAllocator will start from port 8000 and allocate sequentially (N, N+1, N+2, ...)
+[cuongnhhe186494] Using unified internal port: 8000 (no port allocation needed - Docker isolated)
+  [cuongnhhe186494] [Database] Resetting database container auto-grading-sqlserver for new student...
+Docker Command:Error response from daemon: No such container: auto-grading-sqlserver
+Docker Command:Error response from daemon: No such container: auto-grading-sqlserver
+  [cuongnhhe186494] [Docker Cleanup] Container auto-grading-sqlserver successfully removed (waited 0ms)
+  [cuongnhhe186494] [Docker] Creating new MSSQL database container auto-grading-sqlserver...
+Docker Command0c159387faaaa56f454af63899fa6ecbe5514f48158b72f0c2d32e124f7aa5c3
+[Docker] Network auto-grading-network created successfully
+Docker Command:Unable to find image 'mcr.microsoft.com/mssql/server:2019-latest' locally
+  [cuongnhhe186494] [Docker] Database container auto-grading-sqlserver created with port 1434:1433 exposed
+  [cuongnhhe186494] [Docker] Waiting for MSSQL to start...
+  [cuongnhhe186494] [Docker] Warning: Container auto-grading-sqlserver may not be fully ready after 20s
+  [cuongnhhe186494] [Database] Database container reset complete
+  [cuongnhhe186494] [cuongnhhe186494] Loading test kit configuration from TestKit/Q1...
+  [cuongnhhe186494] [cuongnhhe186494] [TestKit] Found given server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [Port Config] LoadTestKitConfig - TestKit default: tkConfig.CodeContainerInternalPort=8000
+  [cuongnhhe186494] [cuongnhhe186494] [Port Config] LoadTestKitConfig - Allocated port (IGNORED): config.CodeContainerInternalPort=8000
+  [cuongnhhe186494] [cuongnhhe186494] [Port Config] LoadTestKitConfig - Final (using testkit default): tkConfig.CodeContainerInternalPort=8000
+  [cuongnhhe186494] [cuongnhhe186494] [TestKit] Protocol type: TCP
+  [cuongnhhe186494] [cuongnhhe186494] [TestKit] Applying DefaultGradeContent from test kit: Client/Server
+  [cuongnhhe186494] [cuongnhhe186494] [TestKit] Students submit BOTH → HasServer=true, HasClient=true
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Student cuongnhhe186494 will use database instance: PE_PRN_Sum25B5_WA_cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Database container auto-grading-sqlserver is shared, but instance is unique per student
+  [cuongnhhe186494] [cuongnhhe186494] [SERVER DISCOVERY] config.HasServer=True, serverDllPath=Submit/1/cuongnhhe186494/1/solution/Q11/Q11_cuongnhhe186494/Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] Discovered student's server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [SERVER DISCOVERY] Using STUDENT's server: Submit/1/cuongnhhe186494/1/solution/Q11/Q11_cuongnhhe186494/Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] Discovered student's client: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494] Available Server DLL: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] Available Client DLL: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494] NOTE: Each test case will select DLLs based on its Grade_Content field
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Ensuring database container is running...
+  [cuongnhhe186494] [cuongnhhe186494] [Docker] Creating new MSSQL database container auto-grading-sqlserver...
+[Docker] Network auto-grading-network already exists, skipping creation
+Docker Command:Unable to find image 'mcr.microsoft.com/mssql/server:2019-latest' locally
+  [cuongnhhe186494] [cuongnhhe186494] [Docker] Database container auto-grading-sqlserver created with port 1434:1433 exposed
+  [cuongnhhe186494] [cuongnhhe186494] [Docker] Waiting for MSSQL to start...
+  [cuongnhhe186494] [cuongnhhe186494] [Docker] Warning: Container auto-grading-sqlserver may not be fully ready after 20s
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Creating database instance for cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Found SQL script path in Environment.xlsx (key 'Default_Database_File_Path'): TestKit/Q1/Meta\database.sql
+  [cuongnhhe186494] [cuongnhhe186494] [Database] No SQL script found - skipping database instance creation
+  [cuongnhhe186494] [cuongnhhe186494] [Database] SQL server container will remain running for the session
+  [cuongnhhe186494] [cuongnhhe186494] Setting up unified Docker container for cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [SETUP] Creating unified container: ag-unified-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [SETUP] Unified container ready - supervisord running, processes idle
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Server DLL modification fallback disabled - will use appsettings.json modification
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Copied server files to /apps/server
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Client DLL modification fallback disabled - will use appsettings.json modification
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Copied client files to /apps/client
+  [cuongnhhe186494] [cuongnhhe186494] [Database] Using shared container with database: Student_cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Configuring appsettings for localhost communication (127.0.0.1:8000)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Found Server appsettings at /apps/server/appsettings.json, modifying...
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Server appsettings modified: IpAddress=127.0.0.1, Port=8000
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Found Client appsettings at /apps/client/appsettings.json, modifying...
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Client appsettings modified: IpAddress=127.0.0.1, Port=8000
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Container ready - processes will start when test cases execute StartClient/StartServer actions
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Logs will be written to unified files: /apps/server/server.log and /apps/client/client.log
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] C# code reads these files incrementally to separate output by stage
+  [cuongnhhe186494] [cuongnhhe186494] Setting up network monitor container for cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [SETUP] Creating network monitor sidecar: ag-monitor-cuongnhhe186494
+Docker Command:Error response from daemon: No such container: ag-monitor-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Command: docker run -d --name ag-monitor-cuongnhhe186494 --net=container:ag-unified-cuongnhhe186494 --cap-add=NET_ADMIN --cap-add=NET_RAW -v "/home/runner/work/auto-grading/auto-grading/test_output/cuongnhhe186494:/data" fptuxaes/network-monitor:latest -i lo -n -U -w /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Capturing on loopback (lo) interface - localhost traffic only (less noisy than -i any)
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Output will be saved to: test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Sidecar monitor ag-monitor-cuongnhhe186494 started successfully
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Verified ag-monitor-cuongnhhe186494 is running and ready to capture
+  [cuongnhhe186494] [cuongnhhe186494] Docker containers ready for cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Cleared old log files for new test case
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC1] Starting test case - clearing RunContext...
+[RunContext] Cleared 0 packet collections for cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC1] RunContext cleared and packet counter reset for fresh comparison
+  [cuongnhhe186494] [cuongnhhe186494] [TEST_CASE] Starting TC1 (timeout: 120s)
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] TC1: Grade_Content = 'Client'
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] Using student CLIENT + golden SERVER
+  [cuongnhhe186494] [cuongnhhe186494]   Client: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494]   Server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC1] Starting test case (captures will accumulate)...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC1] Cumulative packet count: 0
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC1/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 4 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 3 flows
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] StartClient
+Docker Command:client: ERROR (not running)
+  [cuongnhhe186494] [cuongnhhe186494]     Client started for stage 1 (logging to /apps/client/client.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Client output for stage 1: 34 chars (position: 34)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot downloaded (24 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Parsed 0 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 0 new packets for stage 1, cumulative total: 0 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] StartServer
+Docker Command:server: ERROR (not running)
+  [cuongnhhe186494] [cuongnhhe186494]     Server started for stage 2 (logging to /apps/server/server.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 2: 37 chars (position: 37)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot downloaded (24 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Parsed 0 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 0 new packets for stage 2, cumulative total: 0 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Input input='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Input sent: '1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 3: 37 chars (position: 74)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot downloaded (621 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Parsed 7 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 7 new packets for stage 3, cumulative total: 7 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] Client comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   Comparison summary: 2/2 checks passed, earned 1.00/1.00 marks
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected network flows from Detail.xlsx: 3
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Total captured packets in RunContext: 7
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected stages: 3
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Captured stages: 3
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] RESULTS: 3 total - PASS=3, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Captured 7 packets for test case TC1
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Student: cuongnhhe186494, Port: 8000
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] First packet details: Stage=3, Flags=SYN, SrcRole=Client, DstRole=Server
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Packet timestamps range: 04:16:10.876 to 04:16:10.878
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Expected 3 network flows - will be validated from pcap after grading
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Network flows: Total=3, PASS=3, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] NetworkFlows=True (FAIL=0, Total=3)
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Output=True, NetworkCheck=True
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] FINAL: Passed=True, EarnedMark=1/1
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC1/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 4 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 3 flows
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Writing 3 expected network flows...
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 4 additional (not validated) packets at stage 3
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moving 3 snapshot files to TC1 folder...
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC1_stage2.pcap to TC1/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC1_stage1.pcap to TC1/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC1_stage3.pcap to TC1/
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Exporting stage logs for TC1 to test_output/cuongnhhe186494/ProcessLogs/TC1
+  [cuongnhhe186494] [cuongnhhe186494]   Exported client-TC1-stage-1.log (34 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC1-stage-2.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC1-stage-3.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Stage logs for TC1 exported successfully
+  [cuongnhhe186494] [cuongnhhe186494] Test case TC1: PASS (1.00/1.00)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Cleared old log files for new test case
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC2_Send] Starting test case - clearing RunContext...
+[RunContext] Cleared 1 packet collections for cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC2_Send] RunContext cleared and packet counter reset for fresh comparison
+  [cuongnhhe186494] [cuongnhhe186494] [TEST_CASE] Starting TC2_Send (timeout: 120s)
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] TC2_Send: Grade_Content = 'Client'
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] Using student CLIENT + golden SERVER
+  [cuongnhhe186494] [cuongnhhe186494]   Client: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494]   Server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC2_Send] Starting test case (captures will accumulate)...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC2_Send] Cumulative packet count: 0
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC2_Send/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 6 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 5 flows
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] StartClient
+  [cuongnhhe186494] [cuongnhhe186494]     Client started for stage 1 (logging to /apps/client/client.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Client output for stage 1: 34 chars (position: 34)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot downloaded (785 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Parsed 9 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 9 new packets for stage 1, cumulative total: 9 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] StartServer
+  [cuongnhhe186494] [cuongnhhe186494]     Server started for stage 2 (logging to /apps/server/server.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 2: 37 chars (position: 37)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot downloaded (949 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Parsed 11 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 11 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Input input='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Input sent: '1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 3: 37 chars (position: 74)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot downloaded (1546 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Parsed 18 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 7 new packets for stage 3, cumulative total: 18 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] Client comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   Comparison summary: 2/2 checks passed, earned 1.00/1.00 marks
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected network flows from Detail.xlsx: 5
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Total captured packets in RunContext: 18
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected stages: 3
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Captured stages: 1, 2, 3
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] RESULTS: 5 total - PASS=5, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Captured 18 packets for test case TC2_Send
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Student: cuongnhhe186494, Port: 8000
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Packet timestamps range: 04:16:10.876 to 04:16:23.471
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Expected 5 network flows - will be validated from pcap after grading
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Network flows: Total=5, PASS=5, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] NetworkFlows=True (FAIL=0, Total=5)
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Output=True, NetworkCheck=True
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] FINAL: Passed=True, EarnedMark=1/1
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC2_Send/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 6 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 5 flows
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Writing 5 expected network flows...
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 9 additional (not validated) packets at stage 1
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 2 additional (not validated) packets at stage 3
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moving 3 snapshot files to TC2_Send folder...
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC2_Send_stage1.pcap to TC2_Send/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC2_Send_stage2.pcap to TC2_Send/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC2_Send_stage3.pcap to TC2_Send/
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Exporting stage logs for TC2_Send to test_output/cuongnhhe186494/ProcessLogs/TC2_Send
+  [cuongnhhe186494] [cuongnhhe186494]   Exported client-TC2_Send-stage-1.log (34 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC2_Send-stage-2.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC2_Send-stage-3.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Stage logs for TC2_Send exported successfully
+  [cuongnhhe186494] [cuongnhhe186494] Test case TC2_Send: PASS (1.00/1.00)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Cleared old log files for new test case
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC3_ReqResNotC] Starting test case - clearing RunContext...
+[RunContext] Cleared 3 packet collections for cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC3_ReqResNotC] RunContext cleared and packet counter reset for fresh comparison
+  [cuongnhhe186494] [cuongnhhe186494] [TEST_CASE] Starting TC3_ReqResNotC (timeout: 120s)
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] TC3_ReqResNotC: Grade_Content = 'Client'
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] Using student CLIENT + golden SERVER
+  [cuongnhhe186494] [cuongnhhe186494]   Client: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494]   Server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC3_ReqResNotC] Starting test case (captures will accumulate)...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC3_ReqResNotC] Cumulative packet count: 0
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC3_ReqResNotC/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 8 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 7 flows
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] StartClient
+  [cuongnhhe186494] [cuongnhhe186494]     Client started for stage 1 (logging to /apps/client/client.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Client output for stage 1: 34 chars (position: 34)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot downloaded (1710 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Parsed 20 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 19
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 20
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 20 new packets for stage 1, cumulative total: 20 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] StartServer
+  [cuongnhhe186494] [cuongnhhe186494]     Server started for stage 2 (logging to /apps/server/server.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 2: 37 chars (position: 37)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot downloaded (1874 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Parsed 22 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 21
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 22
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 22 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Input input='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Input sent: '1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 3: 37 chars (position: 74)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot downloaded (2471 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Parsed 29 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 23
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 24
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 25
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 26
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 27
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 28
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 29
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 7 new packets for stage 3, cumulative total: 29 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] Client comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Client comparison: FAIL
+  [cuongnhhe186494] [cuongnhhe186494]     Expected (contains): '3
+Enter operation (format as A X B):'
+  [cuongnhhe186494] [cuongnhhe186494]     Actual output: ''
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   Comparison summary: 3/4 checks passed, earned 0.00/1.00 marks
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected network flows from Detail.xlsx: 7
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Total captured packets in RunContext: 29
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected stages: 3
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Captured stages: 1, 2, 3
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Server to Client with data='3'
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] RESULTS: 7 total - PASS=7, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Captured 29 packets for test case TC3_ReqResNotC
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Student: cuongnhhe186494, Port: 8000
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Packet timestamps range: 04:16:10.876 to 04:16:35.804
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Expected 7 network flows - will be validated from pcap after grading
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Network flows: Total=7, PASS=7, FAIL=0
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] NetworkFlows=True (FAIL=0, Total=7)
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Output=False, NetworkCheck=True
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] FINAL: Passed=False, EarnedMark=0/0
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Test FAILED - Output=False, NetworkCheck=True, NetworkFlows=True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC3_ReqResNotC/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 8 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 7 flows
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Writing 7 expected network flows...
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 20 additional (not validated) packets at stage 1
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moving 3 snapshot files to TC3_ReqResNotC folder...
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage3.pcap to TC3_ReqResNotC/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage2.pcap to TC3_ReqResNotC/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage1.pcap to TC3_ReqResNotC/
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Exporting stage logs for TC3_ReqResNotC to test_output/cuongnhhe186494/ProcessLogs/TC3_ReqResNotC
+  [cuongnhhe186494] [cuongnhhe186494]   Exported client-TC3_ReqResNotC-stage-1.log (34 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC3_ReqResNotC-stage-2.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC3_ReqResNotC-stage-3.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Stage logs for TC3_ReqResNotC exported successfully
+  [cuongnhhe186494] [cuongnhhe186494] Test case TC3_ReqResNotC: FAIL (0.00/1.00)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Cleared old log files for new test case
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC4_Full] Starting test case - clearing RunContext...
+[RunContext] Cleared 3 packet collections for cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC4_Full] RunContext cleared and packet counter reset for fresh comparison
+  [cuongnhhe186494] [cuongnhhe186494] [TEST_CASE] Starting TC4_Full (timeout: 120s)
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] TC4_Full: Grade_Content = 'Client'
+  [cuongnhhe186494] [cuongnhhe186494] [TestCase] Using student CLIENT + golden SERVER
+  [cuongnhhe186494] [cuongnhhe186494]   Client: Project12.dll
+  [cuongnhhe186494] [cuongnhhe186494]   Server: Project11.dll
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC4_Full] Starting test case (captures will accumulate)...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] [TC4_Full] Cumulative packet count: 0
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC4_Full/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 10 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 9 flows
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] StartClient
+  [cuongnhhe186494] [cuongnhhe186494]     Client started for stage 1 (logging to /apps/client/client.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Client output for stage 1: 34 chars (position: 34)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Snapshot downloaded (2635 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 1: Parsed 31 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 19
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 20
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 21
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 22
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 23
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 24
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 25
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 26
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 27
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 28
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 29
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 30
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=1, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 31
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 31 new packets for stage 1, cumulative total: 31 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] StartServer
+  [cuongnhhe186494] [cuongnhhe186494]     Server started for stage 2 (logging to /apps/server/server.log)
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 2: 37 chars (position: 37)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Snapshot downloaded (2799 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 2: Parsed 33 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 32
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=2, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 33
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 33 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Input input='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Input sent: '1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494]     Server output for stage 3: 37 chars (position: 74)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output/cuongnhhe186494/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Snapshot downloaded (3396 bytes), parsing with SharpPcap
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Stage 3: Parsed 40 total packets
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 34
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 35
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 36
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 37
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 38
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=PSH-ACK, Data=3
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 39
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='cuongnhhe186494', Stage=3, Flags=ACK, Data=(empty)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 40
+  [cuongnhhe186494] [cuongnhhe186494] [NETWORK] Parsed 7 new packets for stage 3, cumulative total: 40 (cumulative parsing - RunContext cleared between test cases)
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 1] Client comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Client comparison: FAIL
+  [cuongnhhe186494] [cuongnhhe186494]     Expected (contains): '3
+Enter operation (format as A X B):'
+  [cuongnhhe186494] [cuongnhhe186494]     Actual output: ''
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 3] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   [Stage 2] Server comparison: PASS
+  [cuongnhhe186494] [cuongnhhe186494]   Comparison summary: 3/4 checks passed, earned 0.00/2.00 marks
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected network flows from Detail.xlsx: 9
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Total captured packets in RunContext: 40
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Expected stages: 3
+  [cuongnhhe186494] [cuongnhhe186494] [CompareNetwork] Captured stages: 1, 2, 3
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Server to Client with data='3'
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✗ FAIL - Stage 3: MISSING FIN, ACK from Client to Server (position 7) - Captured: SYN(Client→Server), SYN-ACK(Server→Client), ACK(Client→Server), PSH-ACK(Client→Server), ACK(Server→Client), PSH-ACK(Server→Client), ACK(Client→Server)
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] ✗ FAIL - Stage 3: MISSING ACK from Server to Client (position 8) - Captured: SYN(Client→Server), SYN-ACK(Server→Client), ACK(Client→Server), PSH-ACK(Client→Server), ACK(Server→Client), PSH-ACK(Server→Client), ACK(Client→Server)
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] RESULTS: 9 total - PASS=7, FAIL=2
+  [cuongnhhe186494] [cuongnhhe186494] [COMPARISON] WARNING: 2 network flows FAILED - test will FAIL (ALL-OR-NOTHING)
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Captured 40 packets for test case TC4_Full
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Student: cuongnhhe186494, Port: 8000
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Packet timestamps range: 04:16:10.876 to 04:16:48.184
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [cuongnhhe186494] [cuongnhhe186494] [NetworkMonitor] Expected 9 network flows - will be validated from pcap after grading
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Network flows: Total=9, PASS=7, FAIL=2
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] NetworkFlows=False (FAIL=2, Total=9)
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Output=False, NetworkCheck=True
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] FINAL: Passed=False, EarnedMark=0/0
+  [cuongnhhe186494] [cuongnhhe186494] [SCORING] Test FAILED - Output=False, NetworkCheck=True, NetworkFlows=False
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC4_Full/Detail.xlsx
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] File exists: True
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] 'Network' worksheet found with 10 rows
+  [cuongnhhe186494] [cuongnhhe186494] [ReadExpectedNetwork] Returning 9 flows
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Writing 9 expected network flows...
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Expected flow MISSING at stage 3: Flags=FIN, ACK, SourceRole=Client, DestRole=Server
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Expected flow MISSING at stage 3: Flags=ACK, SourceRole=Server, DestRole=Client
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 31 additional (not validated) packets at stage 1
+  [cuongnhhe186494] [cuongnhhe186494] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moving 3 snapshot files to TC4_Full folder...
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC4_Full_stage1.pcap to TC4_Full/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC4_Full_stage3.pcap to TC4_Full/
+  [cuongnhhe186494] [cuongnhhe186494] [TC Organization] Moved snapshot_TC4_Full_stage2.pcap to TC4_Full/
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Exporting stage logs for TC4_Full to test_output/cuongnhhe186494/ProcessLogs/TC4_Full
+  [cuongnhhe186494] [cuongnhhe186494]   Exported client-TC4_Full-stage-1.log (34 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC4_Full-stage-2.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494]   Exported server-TC4_Full-stage-3.log (37 chars)
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Stage logs for TC4_Full exported successfully
+  [cuongnhhe186494] [cuongnhhe186494] Test case TC4_Full: FAIL (0.00/2.00)
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Stopping and extracting pcap from ag-monitor-cuongnhhe186494...
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Cleaning up ag-monitor-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Stopping container to flush tcpdump buffer...
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Network capture saved: test_output/cuongnhhe186494/network_capture.pcap (3396 bytes)
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Removed container ag-monitor-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Monitor] Network monitor cleanup completed
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Starting cleanup for ag-unified-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Stopped all processes in ag-unified-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Unified] Removed container ag-unified-cuongnhhe186494
+  [cuongnhhe186494] [cuongnhhe186494] [Database Cleanup] Dropping database instance 'PE_PRN_Sum25B5_WA_cuongnhhe186494' in container auto-grading-sqlserver
+  [cuongnhhe186494] [cuongnhhe186494] [Database Cleanup] Warning: Failed to drop database instance 'PE_PRN_Sum25B5_WA_cuongnhhe186494': 
+[CLI] Result: Completed - 2.00/5.00
+
+=                                                           
+[CLI] Grading Complete!
+Total students: 1
+With errors: 0
+Completed: 1
+Results saved to: test_output
+=                                                           
