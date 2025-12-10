@@ -854,8 +854,9 @@ public sealed class SharedNetworkMonitorService : IDisposable
     /// </summary>
     private void StorePayloadToRunContext(IRunContext runContext, string srcRole, string payload, string questionCode, string stage)
     {
-        // Get protocol type for this port (default to TCP if not found)
-        string protocolType = NetworkKeywords.Protocol_TCP;
+        // Note: Protocol lookup would require port parameter. For now, treat all as TCP.
+        // HTTP parsing is retained for future extension when port is passed.
+        string protocolType = NetworkKeywords.Protocol_TCP; // TODO: Lookup from _portProtocols when port is available
         
         // Parse HTTP data if this is HTTP protocol
         if (protocolType.Equals(NetworkKeywords.Protocol_HTTP, StringComparison.OrdinalIgnoreCase))
