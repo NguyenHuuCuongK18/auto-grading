@@ -1,0 +1,695 @@
+========================================
+SolutionGrader CLI - Docker Grading Mode
+========================================
+
+Submit folder: Submit
+TestKit folder: TestKit
+Output folder: test_output3
+Server project: Project11 (has-server: True)
+Client project: Project12 (has-client: True)
+Paper filter: 1
+Student filter: dongnvhe172649
+
+[CLI] Starting Docker grading using SHARED DockerGradingService...
+[CLI] This ensures IDENTICAL behavior between CLI and UI.
+
+[ThreadPool Configuration]
+  CPU Cores: 4
+  MaxParallelStudents: 1
+  Parallelism Ratio: 0.25x CPU cores
+  Worker Threads: Min=8 (was 4), Max=16 (was 32767)
+  I/O Threads: Min=8 (was 1), Max=16 (was 1000)
+[ThreadPool] Configured for optimal I/O-bound workload performance
+[CLI] Clearing port allocation from previous sessions...
+[PortAllocator] No port tracking file to clear
+[CLI] Found 1 student(s) total, grading 1 student(s) in index range [0, end].
+[CLI] Parallel grading: 1 student(s) at a time.
+[CLI] Port allocation: Ports are allocated once per student and NEVER reused during this session.
+
+
+=                                                           
+[1/1] Grading student: dongnvhe172649 (Paper 1)
+=                                                           
+[TestKit Discovery] Found test kit via Mapping.xlsx: Q1 for paper 1
+[dongnvhe172649] No zip file found for extraction in Submit/1/dongnvhe172649/1
+[WARNING] Failed to extract or find solution for dongnvhe172649 - will attempt to continue with grading
+[Port Config] Reading starting port from Environment.xlsx: TestKit/Q1/Environment.xlsx
+[Port Config] Successfully read Code_Container_Internal_Port=8000 from Environment.xlsx.
+[Port Config] PortAllocator will start from port 8000 and allocate sequentially (N, N+1, N+2, ...)
+[dongnvhe172649] Using unified internal port: 8000 (no port allocation needed - Docker isolated)
+  [dongnvhe172649] [Database] Resetting database container auto-grading-sqlserver for new student...
+Docker Command:Error response from daemon: No such container: auto-grading-sqlserver
+Docker Command:Error response from daemon: No such container: auto-grading-sqlserver
+  [dongnvhe172649] [Docker Cleanup] Container auto-grading-sqlserver successfully removed (waited 0ms)
+  [dongnvhe172649] [Docker] Creating new MSSQL database container auto-grading-sqlserver...
+[Docker] Network auto-grading-network already exists, skipping creation
+Docker Command:Unable to find image 'mcr.microsoft.com/mssql/server:2019-latest' locally
+  [dongnvhe172649] [Docker] Database container auto-grading-sqlserver created with port 1434:1433 exposed
+  [dongnvhe172649] [Docker] Waiting for MSSQL to start...
+  [dongnvhe172649] [Docker] Warning: Container auto-grading-sqlserver may not be fully ready after 20s
+  [dongnvhe172649] [Database] Database container reset complete
+  [dongnvhe172649] [dongnvhe172649] Loading test kit configuration from TestKit/Q1...
+  [dongnvhe172649] [dongnvhe172649] [TestKit] Found given server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [Port Config] LoadTestKitConfig - TestKit default: tkConfig.CodeContainerInternalPort=8000
+  [dongnvhe172649] [dongnvhe172649] [Port Config] LoadTestKitConfig - Allocated port (IGNORED): config.CodeContainerInternalPort=8000
+  [dongnvhe172649] [dongnvhe172649] [Port Config] LoadTestKitConfig - Final (using testkit default): tkConfig.CodeContainerInternalPort=8000
+  [dongnvhe172649] [dongnvhe172649] [TestKit] Protocol type: TCP
+  [dongnvhe172649] [dongnvhe172649] [TestKit] Applying DefaultGradeContent from test kit: Client/Server
+  [dongnvhe172649] [dongnvhe172649] [TestKit] Students submit BOTH → HasServer=true, HasClient=true
+  [dongnvhe172649] [dongnvhe172649] [Database] Student dongnvhe172649 will use database instance: PE_PRN_Sum25B5_WA_dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Database] Database container auto-grading-sqlserver is shared, but instance is unique per student
+  [dongnvhe172649] [dongnvhe172649] [SERVER DISCOVERY] config.HasServer=True, serverDllPath=Submit/1/dongnvhe172649/1/solution/Q11/Q11_dongnvhe172649/Project11.dll
+  [dongnvhe172649] [dongnvhe172649] Discovered student's server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [SERVER DISCOVERY] Using STUDENT's server: Submit/1/dongnvhe172649/1/solution/Q11/Q11_dongnvhe172649/Project11.dll
+  [dongnvhe172649] [dongnvhe172649] Discovered student's client: Project12.dll
+  [dongnvhe172649] [dongnvhe172649] Available Server DLL: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] Available Client DLL: Project12.dll
+  [dongnvhe172649] [dongnvhe172649] NOTE: Each test case will select DLLs based on its Grade_Content field
+  [dongnvhe172649] [dongnvhe172649] [Database] Ensuring database container is running...
+  [dongnvhe172649] [dongnvhe172649] [Docker] Creating new MSSQL database container auto-grading-sqlserver...
+[Docker] Network auto-grading-network already exists, skipping creation
+Docker Command:Unable to find image 'mcr.microsoft.com/mssql/server:2019-latest' locally
+  [dongnvhe172649] [dongnvhe172649] [Docker] Database container auto-grading-sqlserver created with port 1434:1433 exposed
+  [dongnvhe172649] [dongnvhe172649] [Docker] Waiting for MSSQL to start...
+  [dongnvhe172649] [dongnvhe172649] [Docker] Warning: Container auto-grading-sqlserver may not be fully ready after 20s
+  [dongnvhe172649] [dongnvhe172649] [Database] Creating database instance for dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [Database] Found SQL script path in Environment.xlsx (key 'Default_Database_File_Path'): TestKit/Q1/Meta\database.sql
+  [dongnvhe172649] [dongnvhe172649] [Database] No SQL script found - skipping database instance creation
+  [dongnvhe172649] [dongnvhe172649] [Database] SQL server container will remain running for the session
+  [dongnvhe172649] [dongnvhe172649] Setting up unified Docker container for dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [SETUP] Creating unified container: ag-unified-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [SETUP] Unified container ready - supervisord running, processes idle
+  [dongnvhe172649] [dongnvhe172649] [Unified] Server DLL modification fallback disabled - will use appsettings.json modification
+  [dongnvhe172649] [dongnvhe172649] [Unified] Copied server files to /apps/server
+  [dongnvhe172649] [dongnvhe172649] [Unified] Client DLL modification fallback disabled - will use appsettings.json modification
+  [dongnvhe172649] [dongnvhe172649] [Unified] Copied client files to /apps/client
+  [dongnvhe172649] [dongnvhe172649] [Database] Using shared container with database: Student_dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Unified] Configuring appsettings for localhost communication (127.0.0.1:8000)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Found Server appsettings at /apps/server/appsettings.json, modifying...
+  [dongnvhe172649] [dongnvhe172649] [Unified] Updated Server ConnectionStrings.MyCnn
+  [dongnvhe172649] [dongnvhe172649] [Unified] Server appsettings modified: IpAddress=127.0.0.1, Port=8000
+  [dongnvhe172649] [dongnvhe172649] [Unified] Found Client appsettings at /apps/client/appsettings.json, modifying...
+  [dongnvhe172649] [dongnvhe172649] [Unified] Client appsettings modified: IpAddress=127.0.0.1, Port=8000
+  [dongnvhe172649] [dongnvhe172649] [Unified] Container ready - processes will start when test cases execute StartClient/StartServer actions
+  [dongnvhe172649] [dongnvhe172649] [Unified] Logs will be written to unified files: /apps/server/server.log and /apps/client/client.log
+  [dongnvhe172649] [dongnvhe172649] [Unified] C# code reads these files incrementally to separate output by stage
+  [dongnvhe172649] [dongnvhe172649] Setting up network monitor container for dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [SETUP] Creating network monitor sidecar: ag-monitor-dongnvhe172649
+Docker Command:Error response from daemon: No such container: ag-monitor-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Command: docker run -d --name ag-monitor-dongnvhe172649 --net=container:ag-unified-dongnvhe172649 --cap-add=NET_ADMIN --cap-add=NET_RAW -v "/home/runner/work/auto-grading/auto-grading/test_output3/dongnvhe172649:/data" fptuxaes/network-monitor:latest -i lo -n -U -w /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Capturing on loopback (lo) interface - localhost traffic only (less noisy than -i any)
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Output will be saved to: test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Sidecar monitor ag-monitor-dongnvhe172649 started successfully
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Verified ag-monitor-dongnvhe172649 is running and ready to capture
+  [dongnvhe172649] [dongnvhe172649] Docker containers ready for dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Unified] Cleared old log files for new test case
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC1] Starting test case - clearing RunContext...
+[RunContext] Cleared 0 packet collections for dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC1] RunContext cleared and packet counter reset for fresh comparison
+  [dongnvhe172649] [dongnvhe172649] [TEST_CASE] Starting TC1 (timeout: 120s)
+  [dongnvhe172649] [dongnvhe172649] [TestCase] TC1: Grade_Content = 'Client'
+  [dongnvhe172649] [dongnvhe172649] [TestCase] Using student CLIENT + golden SERVER
+  [dongnvhe172649] [dongnvhe172649]   Client: Project12.dll
+  [dongnvhe172649] [dongnvhe172649]   Server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC1] Starting test case (captures will accumulate)...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC1] Cumulative packet count: 0
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC1/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 4 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 3 flows
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] StartClient
+Docker Command:client: ERROR (not running)
+  [dongnvhe172649] [dongnvhe172649]     Client started for stage 1 (logging to /apps/client/client.log)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 1: 34 chars (position: 34)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot downloaded (24 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Parsed 0 total packets
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 0 new packets for stage 1, cumulative total: 0 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] StartServer
+Docker Command:server: ERROR (not running)
+  [dongnvhe172649] [dongnvhe172649]     Server started for stage 2 (logging to /apps/server/server.log)
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 2: 37 chars (position: 37)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot downloaded (24 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Parsed 0 total packets
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 0 new packets for stage 2, cumulative total: 0 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Input input='1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Input sent: '1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 3: 37 chars (position: 74)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 3: 36 chars (position: 70)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot downloaded (784 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Parsed 9 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 9 new packets for stage 3, cumulative total: 9 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   Comparison summary: 2/2 checks passed, earned 1.00/1.00 marks
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected network flows from Detail.xlsx: 3
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Total captured packets in RunContext: 9
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected stages: 3
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Captured stages: 3
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] RESULTS: 3 total - PASS=3, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Captured 9 packets for test case TC1
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Student: dongnvhe172649, Port: 8000
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] First packet details: Stage=3, Flags=SYN, SrcRole=Client, DstRole=Server
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Packet timestamps range: 04:23:16.213 to 04:23:16.256
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Expected 3 network flows - will be validated from pcap after grading
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Network flows: Total=3, PASS=3, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [SCORING] NetworkFlows=True (FAIL=0, Total=3)
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Output=True, NetworkCheck=True
+  [dongnvhe172649] [dongnvhe172649] [SCORING] FINAL: Passed=True, EarnedMark=1/1
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC1/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 4 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 3 flows
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Writing 3 expected network flows...
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 6 additional (not validated) packets at stage 3
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moving 3 snapshot files to TC1 folder...
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC1_stage2.pcap to TC1/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC1_stage1.pcap to TC1/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC1_stage3.pcap to TC1/
+  [dongnvhe172649] [dongnvhe172649] [Unified] Exporting stage logs for TC1 to test_output3/dongnvhe172649/ProcessLogs/TC1
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC1-stage-1.log (34 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC1-stage-3.log (36 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC1-stage-2.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC1-stage-3.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Stage logs for TC1 exported successfully
+  [dongnvhe172649] [dongnvhe172649] Test case TC1: PASS (1.00/1.00)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Cleared old log files for new test case
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC2_Send] Starting test case - clearing RunContext...
+[RunContext] Cleared 1 packet collections for dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC2_Send] RunContext cleared and packet counter reset for fresh comparison
+  [dongnvhe172649] [dongnvhe172649] [TEST_CASE] Starting TC2_Send (timeout: 120s)
+  [dongnvhe172649] [dongnvhe172649] [TestCase] TC2_Send: Grade_Content = 'Client'
+  [dongnvhe172649] [dongnvhe172649] [TestCase] Using student CLIENT + golden SERVER
+  [dongnvhe172649] [dongnvhe172649]   Client: Project12.dll
+  [dongnvhe172649] [dongnvhe172649]   Server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC2_Send] Starting test case (captures will accumulate)...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC2_Send] Cumulative packet count: 0
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC2_Send/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 6 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 5 flows
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] StartClient
+  [dongnvhe172649] [dongnvhe172649]     Client started for stage 1 (logging to /apps/client/client.log)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 1: 34 chars (position: 34)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot downloaded (784 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Parsed 9 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 9 new packets for stage 1, cumulative total: 9 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] StartServer
+  [dongnvhe172649] [dongnvhe172649]     Server started for stage 2 (logging to /apps/server/server.log)
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 2: 37 chars (position: 37)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot downloaded (948 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Parsed 11 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 11 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Input input='1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Input sent: '1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 3: 37 chars (position: 74)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 3: 36 chars (position: 70)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot downloaded (1708 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Parsed 20 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 19
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 20
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 9 new packets for stage 3, cumulative total: 20 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   Comparison summary: 2/2 checks passed, earned 1.00/1.00 marks
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected network flows from Detail.xlsx: 5
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Total captured packets in RunContext: 20
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected stages: 3
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Captured stages: 1, 2, 3
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] RESULTS: 5 total - PASS=5, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Captured 20 packets for test case TC2_Send
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Student: dongnvhe172649, Port: 8000
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Packet timestamps range: 04:23:16.213 to 04:23:28.796
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Expected 5 network flows - will be validated from pcap after grading
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Network flows: Total=5, PASS=5, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [SCORING] NetworkFlows=True (FAIL=0, Total=5)
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Output=True, NetworkCheck=True
+  [dongnvhe172649] [dongnvhe172649] [SCORING] FINAL: Passed=True, EarnedMark=1/1
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC2_Send/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 6 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 5 flows
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Writing 5 expected network flows...
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 9 additional (not validated) packets at stage 1
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 4 additional (not validated) packets at stage 3
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moving 3 snapshot files to TC2_Send folder...
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC2_Send_stage1.pcap to TC2_Send/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC2_Send_stage2.pcap to TC2_Send/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC2_Send_stage3.pcap to TC2_Send/
+  [dongnvhe172649] [dongnvhe172649] [Unified] Exporting stage logs for TC2_Send to test_output3/dongnvhe172649/ProcessLogs/TC2_Send
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC2_Send-stage-1.log (34 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC2_Send-stage-3.log (36 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC2_Send-stage-2.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC2_Send-stage-3.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Stage logs for TC2_Send exported successfully
+  [dongnvhe172649] [dongnvhe172649] Test case TC2_Send: PASS (1.00/1.00)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Cleared old log files for new test case
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC3_ReqResNotC] Starting test case - clearing RunContext...
+[RunContext] Cleared 3 packet collections for dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC3_ReqResNotC] RunContext cleared and packet counter reset for fresh comparison
+  [dongnvhe172649] [dongnvhe172649] [TEST_CASE] Starting TC3_ReqResNotC (timeout: 120s)
+  [dongnvhe172649] [dongnvhe172649] [TestCase] TC3_ReqResNotC: Grade_Content = 'Client'
+  [dongnvhe172649] [dongnvhe172649] [TestCase] Using student CLIENT + golden SERVER
+  [dongnvhe172649] [dongnvhe172649]   Client: Project12.dll
+  [dongnvhe172649] [dongnvhe172649]   Server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC3_ReqResNotC] Starting test case (captures will accumulate)...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC3_ReqResNotC] Cumulative packet count: 0
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC3_ReqResNotC/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 8 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 7 flows
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] StartClient
+  [dongnvhe172649] [dongnvhe172649]     Client started for stage 1 (logging to /apps/client/client.log)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 1: 34 chars (position: 34)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot downloaded (1708 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Parsed 20 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 19
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 20
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 20 new packets for stage 1, cumulative total: 20 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] StartServer
+  [dongnvhe172649] [dongnvhe172649]     Server started for stage 2 (logging to /apps/server/server.log)
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 2: 37 chars (position: 37)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot downloaded (1872 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Parsed 22 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 21
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 22
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 22 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Input input='1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Input sent: '1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 3: 37 chars (position: 74)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 3: 36 chars (position: 70)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot downloaded (2632 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Parsed 31 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 23
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 24
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 25
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 26
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 27
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 28
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 29
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 30
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 31
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 9 new packets for stage 3, cumulative total: 31 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   Comparison summary: 4/4 checks passed, earned 1.00/1.00 marks
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected network flows from Detail.xlsx: 7
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Total captured packets in RunContext: 31
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected stages: 3
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Captured stages: 1, 2, 3
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Server to Client with data='3'
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] RESULTS: 7 total - PASS=7, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Captured 31 packets for test case TC3_ReqResNotC
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Student: dongnvhe172649, Port: 8000
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Packet timestamps range: 04:23:16.213 to 04:23:41.149
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Expected 7 network flows - will be validated from pcap after grading
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Network flows: Total=7, PASS=7, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [SCORING] NetworkFlows=True (FAIL=0, Total=7)
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Output=True, NetworkCheck=True
+  [dongnvhe172649] [dongnvhe172649] [SCORING] FINAL: Passed=True, EarnedMark=1/1
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC3_ReqResNotC/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 8 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 7 flows
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Writing 7 expected network flows...
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 20 additional (not validated) packets at stage 1
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 2 additional (not validated) packets at stage 3
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moving 3 snapshot files to TC3_ReqResNotC folder...
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage3.pcap to TC3_ReqResNotC/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage2.pcap to TC3_ReqResNotC/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC3_ReqResNotC_stage1.pcap to TC3_ReqResNotC/
+  [dongnvhe172649] [dongnvhe172649] [Unified] Exporting stage logs for TC3_ReqResNotC to test_output3/dongnvhe172649/ProcessLogs/TC3_ReqResNotC
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC3_ReqResNotC-stage-1.log (34 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC3_ReqResNotC-stage-3.log (36 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC3_ReqResNotC-stage-2.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC3_ReqResNotC-stage-3.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Stage logs for TC3_ReqResNotC exported successfully
+  [dongnvhe172649] [dongnvhe172649] Test case TC3_ReqResNotC: PASS (1.00/1.00)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Cleared old log files for new test case
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC4_Full] Starting test case - clearing RunContext...
+[RunContext] Cleared 3 packet collections for dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC4_Full] RunContext cleared and packet counter reset for fresh comparison
+  [dongnvhe172649] [dongnvhe172649] [TEST_CASE] Starting TC4_Full (timeout: 120s)
+  [dongnvhe172649] [dongnvhe172649] [TestCase] TC4_Full: Grade_Content = 'Client'
+  [dongnvhe172649] [dongnvhe172649] [TestCase] Using student CLIENT + golden SERVER
+  [dongnvhe172649] [dongnvhe172649]   Client: Project12.dll
+  [dongnvhe172649] [dongnvhe172649]   Server: Project11.dll
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC4_Full] Starting test case (captures will accumulate)...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] [TC4_Full] Cumulative packet count: 0
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC4_Full/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 10 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 9 flows
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] StartClient
+  [dongnvhe172649] [dongnvhe172649]     Client started for stage 1 (logging to /apps/client/client.log)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 1: 34 chars (position: 34)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Snapshot downloaded (2632 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 1: Parsed 31 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 1
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 4
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 5
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 6
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 7
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 8
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 9
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 10
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 11
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 12
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 13
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 14
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 15
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 16
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 17
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 18
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 19
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 20
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 21
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 22
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 23
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 24
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 25
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 26
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 27
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 28
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 29
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 30
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=1, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 31
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 31 new packets for stage 1, cumulative total: 31 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] StartServer
+  [dongnvhe172649] [dongnvhe172649]     Server started for stage 2 (logging to /apps/server/server.log)
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 2: 37 chars (position: 37)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Snapshot downloaded (2796 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 2: Parsed 33 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 32
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=2, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 33
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 2 new packets for stage 2, cumulative total: 33 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Input input='1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Input sent: '1 + 2'
+  [dongnvhe172649] [dongnvhe172649]     Server output for stage 3: 37 chars (position: 74)
+  [dongnvhe172649] [dongnvhe172649]     Client output for stage 3: 36 chars (position: 70)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: _networkMonitor=null, _currentPcapFilePath=test_output3/dongnvhe172649/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Flushing tcpdump buffer in ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Creating snapshot from /data/network_capture.pcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot created, downloading to host
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Snapshot downloaded (3556 bytes), parsing with SharpPcap
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Stage 3: Parsed 42 total packets
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 34
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=SYN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 35
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 36
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=1 + 2
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 37
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 38
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=PSH-ACK, Data=3
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 39
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 40
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=FIN-ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 41
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='dongnvhe172649', Stage=3, Flags=ACK, Data=(empty)
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] DEBUG: After adding, total packets in RunContext: 42
+  [dongnvhe172649] [dongnvhe172649] [NETWORK] Parsed 9 new packets for stage 3, cumulative total: 42 (cumulative parsing - RunContext cleared between test cases)
+  [dongnvhe172649] [dongnvhe172649]   [Stage 1] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Client comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 3] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   [Stage 2] Server comparison: PASS
+  [dongnvhe172649] [dongnvhe172649]   Comparison summary: 4/4 checks passed, earned 2.00/2.00 marks
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected network flows from Detail.xlsx: 9
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Total captured packets in RunContext: 42
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Expected stages: 3
+  [dongnvhe172649] [dongnvhe172649] [CompareNetwork] Captured stages: 1, 2, 3
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: SYN, ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Client to Server with data='1 + 2'
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: PSH, ACK from Server to Client with data='3'
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: FIN, ACK from Client to Server
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] ✓ PASS - Stage 3: ACK from Server to Client
+  [dongnvhe172649] [dongnvhe172649] [COMPARISON] RESULTS: 9 total - PASS=9, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Captured 42 packets for test case TC4_Full
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Student: dongnvhe172649, Port: 8000
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] First packet details: Stage=1, Flags=SYN, SrcRole=Client, DstRole=Server
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Packet timestamps range: 04:23:16.213 to 04:23:53.482
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Using sidecar pattern - network traffic being captured to pcap file
+  [dongnvhe172649] [dongnvhe172649] [NetworkMonitor] Expected 9 network flows - will be validated from pcap after grading
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Network flows: Total=9, PASS=9, FAIL=0
+  [dongnvhe172649] [dongnvhe172649] [SCORING] NetworkFlows=True (FAIL=0, Total=9)
+  [dongnvhe172649] [dongnvhe172649] [SCORING] Output=True, NetworkCheck=True
+  [dongnvhe172649] [dongnvhe172649] [SCORING] FINAL: Passed=True, EarnedMark=2/2
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Called with Detail.xlsx path: TestKit/Q1/TC4_Full/Detail.xlsx
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] File exists: True
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Workbook loaded, checking for 'Network' worksheet
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] 'Network' worksheet found with 10 rows
+  [dongnvhe172649] [dongnvhe172649] [ReadExpectedNetwork] Returning 9 flows
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Writing 9 expected network flows...
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 31 additional (not validated) packets at stage 1
+  [dongnvhe172649] [dongnvhe172649] [Network Sheet] Found 2 additional (not validated) packets at stage 2
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moving 3 snapshot files to TC4_Full folder...
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC4_Full_stage1.pcap to TC4_Full/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC4_Full_stage3.pcap to TC4_Full/
+  [dongnvhe172649] [dongnvhe172649] [TC Organization] Moved snapshot_TC4_Full_stage2.pcap to TC4_Full/
+  [dongnvhe172649] [dongnvhe172649] [Unified] Exporting stage logs for TC4_Full to test_output3/dongnvhe172649/ProcessLogs/TC4_Full
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC4_Full-stage-1.log (34 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported client-TC4_Full-stage-3.log (36 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC4_Full-stage-2.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649]   Exported server-TC4_Full-stage-3.log (37 chars)
+  [dongnvhe172649] [dongnvhe172649] [Unified] Stage logs for TC4_Full exported successfully
+  [dongnvhe172649] [dongnvhe172649] Test case TC4_Full: PASS (2.00/2.00)
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Stopping and extracting pcap from ag-monitor-dongnvhe172649...
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Cleaning up ag-monitor-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Stopping container to flush tcpdump buffer...
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Network capture saved: test_output3/dongnvhe172649/network_capture.pcap (3556 bytes)
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Removed container ag-monitor-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Monitor] Network monitor cleanup completed
+  [dongnvhe172649] [dongnvhe172649] [Unified] Starting cleanup for ag-unified-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Unified] Stopped all processes in ag-unified-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Unified] Removed container ag-unified-dongnvhe172649
+  [dongnvhe172649] [dongnvhe172649] [Database Cleanup] Dropping database instance 'PE_PRN_Sum25B5_WA_dongnvhe172649' in container auto-grading-sqlserver
+  [dongnvhe172649] [dongnvhe172649] [Database Cleanup] Warning: Failed to drop database instance 'PE_PRN_Sum25B5_WA_dongnvhe172649': 
+[CLI] Result: Completed - 5.00/5.00
+
+=                                                           
+[CLI] Grading Complete!
+Total students: 1
+With errors: 0
+Completed: 1
+Results saved to: test_output3
+=                                                           
