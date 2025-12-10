@@ -392,9 +392,9 @@ namespace SolutionGrader.UI
             // Read DLL modification fallback setting from UI
             _configuration.UseDllModificationFallback = chkUseDllModFallback.IsChecked == true;
             
-            // FIXED: Enhanced logging and validation to debug selection issues
             _logger.LogInfo($"=== Starting Grading Session ===");
             _logger.LogInfo($"Mode: {(selectedOnly ? "Selected Only" : "All Students")}");
+            _logger.LogInfo($"DLL Modification Fallback: {(_configuration.UseDllModificationFallback ? "ENABLED" : "DISABLED")} (Checkbox: {(chkUseDllModFallback.IsChecked == true ? "Checked" : "Unchecked")})");
             _logger.LogInfo($"Total students loaded: {_students.Count}");
             _logger.LogInfo($"Students in filtered view: {_students.Count}");
             
@@ -1128,6 +1128,7 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
                 _logger.LogInfo($"Using Code_Container_Internal_Port: {internalPort} (no port allocation - matches CLI behavior)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {cachedTestKit.config.TotalMaxMark}");
+                _logger.LogInfo($"[{student.StudentCode}] DLL Modification Fallback: {(studentConfig.UseDllModificationFallback ? "ENABLED" : "DISABLED")}");
                 _logger.LogInfo($"[Parallel Grading] Starting container setup for {student.StudentCode} (no serialization)");
                 
                 try
