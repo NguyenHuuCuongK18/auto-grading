@@ -398,6 +398,22 @@ namespace SolutionGrader.UI
             _logger.LogInfo($"Total students loaded: {_students.Count}");
             _logger.LogInfo($"Students in filtered view: {_students.Count}");
             
+            // CRITICAL FIX: Consistent status filtering for both "Start All" and "Start Selected"
+            // Both modes should exclude ONLY students that have already been successfully graded.
+            // This allows re-running failed students, which is essential for batch grading workflows.
+            //
+            // Previous buggy logic for "Start All":
+            //   .Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused)
+            // This excluded students with Status == Failed, InProgress, or Disposed, preventing re-grading.
+            //
+            // New consistent logic:
+            //   Both modes: Exclude only Status == Success
+            //   Include: Not_Run, Failed, InProgress, Paused, Disposed
+            //
+            // This matches user expectations:
+            // - "Start All" = Grade all students that haven't succeeded yet
+            // - "Start Selected" = Grade selected students that haven't succeeded yet
+            
             if (selectedOnly)
             {
                 var selectedStudents = _students.Where(s => s.IsSelected).ToList();
@@ -405,25 +421,47 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Students with IsSelected=true: {selectedStudents.Count}");
                 _logger.LogInfo($"Students with IsSelected=true AND Status!=Success: {notSuccessStudents.Count}");
                 
-                // Log detailed info about selected students
+                // Log detailed info about selected students for debugging
                 foreach (var s in selectedStudents)
                 {
                     _logger.LogInfo($"  - Student {s.Id}: {s.StudentCode}, IsSelected={s.IsSelected}, Status={s.Status}");
                 }
             }
+            else
+            {
+                // Log status distribution for "Start All" mode
+                var statusGroups = _students.GroupBy(s => s.Status).OrderBy(g => g.Key);
+                _logger.LogInfo("Status distribution of all students:");
+                foreach (var group in statusGroups)
+                {
+                    _logger.LogInfo($"  - {group.Key}: {group.Count()} student(s)");
+                }
+            }
             
             // Get students to grade based on selection
+            // FIXED: Both modes now use the same filtering logic - exclude only Success status
             var studentsToGrade = selectedOnly
                 ? _students.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
-                : _students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
+                : _students.Where(s => s.Status != GradingStatus.Success).ToList();
             
             _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
+            
+            // Log which statuses are included in this grading session for verification
+            if (studentsToGrade.Count > 0)
+            {
+                var includedStatuses = studentsToGrade.GroupBy(s => s.Status).OrderBy(g => g.Key);
+                _logger.LogInfo("Students to be graded by status:");
+                foreach (var group in includedStatuses)
+                {
+                    _logger.LogInfo($"  - {group.Key}: {group.Count()} student(s)");
+                }
+            }
             
             if (studentsToGrade.Count == 0)
             {
                 var message = selectedOnly 
                     ? "No students to grade.\n\nPossible reasons:\n- No students are selected (check the 'Select' checkboxes)\n- All selected students have already been successfully graded\n\nTip: Use 'Apply' button after entering index range to select students."
-                    : "No students to grade.\n\nAll students have been graded or there are no students loaded.";
+                    : "No students to grade.\n\nAll students have already been successfully graded.\n\nNote: Only students with Status != Success are re-graded.\nUse 'Reset' to clear student status if you want to re-grade successful students.";
                     
                 _logger.LogWarning(message);
                 System.Windows.MessageBox.Show(message, "No Students to Grade", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -622,15 +660,42 @@ namespace SolutionGrader.UI
                     // Producer task: Feed students into the channel
                     var producerTask = Task.Run(async () =>
                     {
-                        foreach (var student in studentsToGrade)
+                        try
                         {
-                            // Check for cancellation before adding to channel
-                            if (_cancellationTokenSource.Token.IsCancellationRequested)
-                                break;
+                            _logger.LogInfo($"[Producer] Starting to feed {studentsToGrade.Count} students into channel");
+                            int queuedCount = 0;
+                            
+                            foreach (var student in studentsToGrade)
+                            {
+                                // Check for cancellation before adding to channel
+                                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    _logger.LogInfo($"[Producer] Cancellation requested after queuing {queuedCount}/{studentsToGrade.Count} students");
+                                    break;
+                                }
                                 
-                            await channel.Writer.WriteAsync(student, _cancellationTokenSource.Token);
+                                _logger.LogDebug($"[Producer] Queuing student {queuedCount + 1}/{studentsToGrade.Count}: {student.StudentCode}");
+                                await channel.Writer.WriteAsync(student, _cancellationTokenSource.Token);
+                                queuedCount++;
+                            }
+                            
+                            _logger.LogInfo($"[Producer] Finished queuing {queuedCount}/{studentsToGrade.Count} students");
                         }
-                        channel.Writer.Complete();
+                        catch (OperationCanceledException)
+                        {
+                            _logger.LogInfo("[Producer] Cancelled while queuing students");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError("[Producer] Unexpected error while queuing students", ex);
+                        }
+                        finally
+                        {
+                            // CRITICAL: Always complete the channel writer, even if there was an exception
+                            // This ensures workers don't wait forever for more students
+                            channel.Writer.Complete();
+                            _logger.LogInfo("[Producer] Channel writer marked as complete");
+                        }
                     }, _cancellationTokenSource.Token);
                     
                     // Consumer tasks: Pull students from channel and grade them
@@ -640,55 +705,113 @@ namespace SolutionGrader.UI
                         var localWorkerId = workerId;
                         var workerTask = Task.Run(async () =>
                         {
+                            _logger.LogInfo($"[Worker-{localWorkerId}] Started and ready to process students");
+                            int studentsProcessed = 0;
+                            
                             // Each worker continuously pulls students from the queue until empty
                             try
                             {
                                 await foreach (var student in channel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
                                 {
-                                    // Wait while paused - pass cancellation token for responsive shutdown
-                                    while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                    try
                                     {
-                                        await Task.Delay(500, _cancellationTokenSource.Token);
+                                        // Wait while paused - pass cancellation token for responsive shutdown
+                                        while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                        {
+                                            await Task.Delay(500, _cancellationTokenSource.Token);
+                                        }
+                                        
+                                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                        {
+                                            _logger.LogInfo($"[Worker-{localWorkerId}] Cancellation requested, stopping after {studentsProcessed} students");
+                                            break;
+                                        }
+                                        
+                                        int currentStartIndex;
+                                        lock (completedLock)
+                                        {
+                                            // Index for the student we're about to start (completedCount + 1)
+                                            currentStartIndex = completedCount + 1;
+                                        }
+                                        
+                                        _logger.LogInfo($"[Worker-{localWorkerId}] [{currentStartIndex}/{studentsToGrade.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
+                                        
+                                        // Grade the student (port allocation happens inside via PortAllocator)
+                                        // TRUE PARALLEL: No lock - multiple students can create containers simultaneously
+                                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                        
+                                        // Write results after each student
+                                        // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
+                                        // No need for lock - the ResultWriter handles thread safety internally
+                                        _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                        
+                                        int currentCompletedIndex;
+                                        lock (completedLock)
+                                        {
+                                            completedCount++;
+                                            currentCompletedIndex = completedCount;
+                                        }
+                                        
+                                        studentsProcessed++;
+                                        _logger.LogInfo($"[Worker-{localWorkerId}] [{currentCompletedIndex}/{studentsToGrade.Count}] Completed: {student.StudentCode}");
+                                        _logger.LogInfo($"[Progress] {currentCompletedIndex}/{studentsToGrade.Count} students completed, {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count - currentCompletedIndex)} students currently in progress");
+                                        
+                                        // Update UI on UI thread
+                                        await Dispatcher.InvokeAsync(() => UpdateStatusBar());
                                     }
-                                    
-                                    if (_cancellationTokenSource.Token.IsCancellationRequested)
-                                        break;
-                                    
-                                    int currentStartIndex;
-                                    lock (completedLock)
+                                    catch (OperationCanceledException)
                                     {
-                                        // Index for the student we're about to start (completedCount + 1)
-                                        currentStartIndex = completedCount + 1;
+                                        _logger.LogInfo($"[Worker-{localWorkerId}] Grading cancelled for student {student.StudentCode}");
+                                        // Re-throw to exit the worker loop
+                                        throw;
                                     }
-                                    
-                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentStartIndex}/{studentsToGrade.Count}] Starting grading for: {student.StudentCode} (Paper {student.PaperNo})");
-                                    
-                                    // Grade the student (port allocation happens inside via PortAllocator)
-                                    // TRUE PARALLEL: No lock - multiple students can create containers simultaneously
-                                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
-                                    
-                                    // Write results after each student
-                                    // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
-                                    // No need for lock - the ResultWriter handles thread safety internally
-                                    _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
-                                    
-                                    int currentCompletedIndex;
-                                    lock (completedLock)
+                                    catch (Exception ex)
                                     {
-                                        completedCount++;
-                                        currentCompletedIndex = completedCount;
+                                        // CRITICAL FIX: Catch ALL exceptions during student grading
+                                        // Without this, a single student error would crash the entire worker thread,
+                                        // leaving remaining students in the queue unprocessed
+                                        _logger.LogError($"[Worker-{localWorkerId}] CRITICAL ERROR while grading {student.StudentCode}: {ex.Message}", ex);
+                                        _logger.LogError($"[Worker-{localWorkerId}] Stack trace: {ex.StackTrace}");
+                                        
+                                        // Ensure student is marked as failed so user knows it wasn't processed
+                                        try
+                                        {
+                                            student.Status = GradingStatus.Failed;
+                                            student.StatusMessage = $"Worker crashed: {ex.Message}";
+                                            student.EndTime = DateTime.Now;
+                                            UpdateStudentInUI(student);
+                                            _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                            
+                                            int currentCompletedIndex;
+                                            lock (completedLock)
+                                            {
+                                                completedCount++;
+                                                currentCompletedIndex = completedCount;
+                                            }
+                                            
+                                            _logger.LogWarning($"[Worker-{localWorkerId}] Marked {student.StudentCode} as Failed and continuing with next student");
+                                        }
+                                        catch (Exception cleanupEx)
+                                        {
+                                            _logger.LogError($"[Worker-{localWorkerId}] Failed to mark student as failed: {cleanupEx.Message}", cleanupEx);
+                                        }
+                                        
+                                        // Continue processing next student - don't let one failure stop the entire worker
                                     }
-                                    
-                                    _logger.LogInfo($"[Worker-{localWorkerId}] [{currentCompletedIndex}/{studentsToGrade.Count}] Completed: {student.StudentCode}");
-                                    _logger.LogInfo($"[Progress] {currentCompletedIndex}/{studentsToGrade.Count} students completed, {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count - currentCompletedIndex)} students currently in progress");
-                                    
-                                    // Update UI on UI thread
-                                    await Dispatcher.InvokeAsync(() => UpdateStatusBar());
                                 }
                             }
                             catch (OperationCanceledException)
                             {
-                                _logger.LogInfo($"[Worker-{localWorkerId}] Cancelled");
+                                _logger.LogInfo($"[Worker-{localWorkerId}] Cancelled after processing {studentsProcessed} students");
+                            }
+                            catch (Exception ex)
+                            {
+                                // Catch any other unexpected errors in the worker loop itself
+                                _logger.LogError($"[Worker-{localWorkerId}] Worker thread crashed unexpectedly after processing {studentsProcessed} students", ex);
+                            }
+                            finally
+                            {
+                                _logger.LogInfo($"[Worker-{localWorkerId}] Finished. Total students processed: {studentsProcessed}");
                             }
                         }, _cancellationTokenSource.Token);
                         workerTasks.Add(workerTask);
@@ -698,12 +821,58 @@ namespace SolutionGrader.UI
                     try
                     {
                         await producerTask;
+                        _logger.LogInfo("[Batch Processing] Producer task completed");
+                        
                         await Task.WhenAll(workerTasks);
+                        _logger.LogInfo($"[Batch Processing] All {workerTasks.Count} worker tasks completed");
                         _logger.LogInfo($"[Optimization] Continuous batch processing complete: All {studentsToGrade.Count} students graded with maximum efficiency");
+                        
+                        // CRITICAL VERIFICATION: Check if any students were lost during processing
+                        // This detects the bug where students remain in "Not Run" status after grading
+                        var lostStudents = studentsToGrade.Where(s => s.Status == GradingStatus.Not_Run).ToList();
+                        if (lostStudents.Count > 0)
+                        {
+                            _logger.LogError($"[CRITICAL BUG DETECTED] {lostStudents.Count} student(s) were queued for grading but never processed!");
+                            _logger.LogError("[CRITICAL BUG DETECTED] These students remain in 'Not Run' status:");
+                            foreach (var lost in lostStudents)
+                            {
+                                _logger.LogError($"  - {lost.StudentCode} (Paper {lost.PaperNo})");
+                                
+                                // Mark these students as Failed with a clear error message
+                                lost.Status = GradingStatus.Failed;
+                                lost.StatusMessage = "ERROR: Student was queued for grading but worker thread did not process it. This indicates a critical bug in the batch processing system.";
+                                lost.EndTime = DateTime.Now;
+                                UpdateStudentInUI(lost);
+                            }
+                            
+                            // Write final results with updated statuses
+                            _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                            
+                            _logger.LogError($"[CRITICAL BUG DETECTED] Marked {lostStudents.Count} lost students as Failed");
+                            _logger.LogError("[CRITICAL BUG DETECTED] Please report this bug with the log files");
+                        }
+                        else
+                        {
+                            _logger.LogInfo("[Verification] All queued students were successfully processed (no lost students detected)");
+                        }
                     }
                     catch (OperationCanceledException)
                     {
                         _logger.LogInfo("[Optimization] Continuous batch processing cancelled");
+                    }
+                    catch (Exception ex)
+                    {
+                        // This catches aggregated exceptions from Task.WhenAll
+                        _logger.LogError("[Batch Processing] One or more worker tasks encountered errors", ex);
+                        
+                        // Log individual task exceptions if available
+                        if (ex is AggregateException aggEx)
+                        {
+                            foreach (var innerEx in aggEx.InnerExceptions)
+                            {
+                                _logger.LogError($"[Batch Processing] Task exception: {innerEx.Message}", innerEx);
+                            }
+                        }
                     }
                 }
             }
