@@ -384,27 +384,37 @@ namespace SolutionGrader.UI.Services
                 // Check for missing DLLs - fail early with clear error message for UI display
                 // This ensures students without required DLLs are notified in the Message column
                 var missingDllMessages = new List<string>();
-                
-                if (config.HasClient && string.IsNullOrEmpty(clientDllPath))
+
+                if (config.HasClient && config.HasServer && string.IsNullOrEmpty(clientDllPath) && string.IsNullOrEmpty(serverDllPath))
                 {
                     var errorMsg = GradingMessageCatalog.Format(
-                        GradingMessageCatalog.StudentError.MissingClientDll, 
+                        GradingMessageCatalog.StudentError.MissingClientDll,
                         config.ClientProjectName);
                     _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
                     _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
-                    missingDllMessages.Add($"Missing client DLL: {config.ClientProjectName}.dll");
+                    missingDllMessages.Add($"Missing DLL: {config.ClientProjectName}.dll");
                 }
-                
-                if (config.HasServer && string.IsNullOrEmpty(serverDllPath))
+                else
                 {
-                    var errorMsg = GradingMessageCatalog.Format(
-                        GradingMessageCatalog.StudentError.MissingServerDll, 
-                        config.ServerProjectName);
-                    _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
-                    _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
-                    missingDllMessages.Add($"Missing server DLL: {config.ServerProjectName}.dll");
+                    if (config.HasClient && string.IsNullOrEmpty(serverDllPath))
+                    {
+                        var errorMsg = GradingMessageCatalog.Format(
+                            GradingMessageCatalog.StudentError.MissingServerDll,
+                            config.ClientProjectName);
+                        _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                        _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                        missingDllMessages.Add($"Missing Client DLL: {config.ClientProjectName}.dll");
+                    }
+                    if (config.HasServer && string.IsNullOrEmpty(serverDllPath))
+                    {
+                        var errorMsg = GradingMessageCatalog.Format(
+                            GradingMessageCatalog.StudentError.MissingServerDll,
+                            config.ServerProjectName);
+                        _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                        _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                        missingDllMessages.Add($"Missing server DLL: {config.ServerProjectName}.dll");
+                    }
                 }
-                
                 // If any required DLLs are missing, fail the student immediately with clear message
                 if (missingDllMessages.Count > 0)
                 {

@@ -186,7 +186,6 @@
                       CanUserAddRows="False"
                       CanUserDeleteRows="False"
                       SelectionMode="Extended"
-                      AlternatingRowBackground="#FAFAFA"
                       GridLinesVisibility="Horizontal"
                       HorizontalGridLinesBrush="#EEEEEE"
                       VerticalGridLinesBrush="Transparent"
