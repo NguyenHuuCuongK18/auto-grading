@@ -186,6 +186,10 @@ namespace SolutionGrader.UI.Services
         /// Writes the students solution summary to a specific file path.
         /// FIX: Always recreates workbook with ALL students to avoid data loss in parallel grading.
         /// Each call writes the complete current state, not incremental updates.
+        /// 
+        /// UPDATE: Now includes MaxMark (PossiblePoints) column to properly display
+        /// the maximum possible points for each student based on their paper's test kit.
+        /// This fixes the issue where max points were not being displayed in the output.
         /// </summary>
         private void WriteStudentsSolutionSummaryToFile(string filePath, List<StudentSolution> students)
         {
@@ -200,14 +204,15 @@ namespace SolutionGrader.UI.Services
                 using var workbook = new XLWorkbook();
                 var worksheet = workbook.Worksheets.Add("Sheet1");
 
-                // Header row - matching SampleLogging format exactly
+                // Header row - matching SampleLogging format with MaxMark (PossiblePoints) column
                 worksheet.Cell(1, 1).Value = "No";
                 worksheet.Cell(1, 2).Value = "StudentCode";
                 worksheet.Cell(1, 3).Value = "ExamPaper";
-                worksheet.Cell(1, 4).Value = "Status";
-                worksheet.Cell(1, 5).Value = "FinalResult";
-                worksheet.Cell(1, 6).Value = "StartDate";
-                worksheet.Cell(1, 7).Value = "EndDate";
+                worksheet.Cell(1, 4).Value = "PossiblePoints";  // MaxMark column - FIX: was missing
+                worksheet.Cell(1, 5).Value = "EarnedPoints";     // FinalResult renamed for clarity
+                worksheet.Cell(1, 6).Value = "Status";
+                worksheet.Cell(1, 7).Value = "StartDate";
+                worksheet.Cell(1, 8).Value = "EndDate";
 
                 // Style header
                 var headerRow = worksheet.Row(1);
@@ -222,13 +227,14 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(row, 1).Value = no.ToString();
                     worksheet.Cell(row, 2).Value = student.StudentCode;
                     worksheet.Cell(row, 3).Value = student.PaperNo;
-                    worksheet.Cell(row, 4).Value = student.StatusDisplay;
-                    worksheet.Cell(row, 5).Value = student.Mark.ToString("0.##");
-                    worksheet.Cell(row, 6).Value = student.StartTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
-                    worksheet.Cell(row, 7).Value = student.EndTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
+                    worksheet.Cell(row, 4).Value = student.MaxMark.ToString("0.##");  // MaxMark (PossiblePoints) - FIX: was missing
+                    worksheet.Cell(row, 5).Value = student.Mark.ToString("0.##");      // EarnedPoints (was FinalResult at col 5)
+                    worksheet.Cell(row, 6).Value = student.StatusDisplay;               // Status (was at col 4)
+                    worksheet.Cell(row, 7).Value = student.StartTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
+                    worksheet.Cell(row, 8).Value = student.EndTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
 
                     // Color code rows based on status
-                    var rowRange = worksheet.Range(row, 1, row, 7);
+                    var rowRange = worksheet.Range(row, 1, row, 8);  // Updated to include new column
                     switch (student.Status)
                     {
                         case GradingStatus.Success:
