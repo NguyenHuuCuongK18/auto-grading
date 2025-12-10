@@ -81,6 +81,7 @@ namespace SolutionGrader.Core.Services
                     var questionFolder2 = Path.Combine(studentDir, "solution", "1");
                     
                     string? solutionPath = null;
+                    string? warningMessage = null;
                     
                     // Check first structure: {studentCode}/1/
                     if (Directory.Exists(questionFolder1))
@@ -99,7 +100,8 @@ namespace SolutionGrader.Core.Services
                         // Student doesn't have expected folder structure, but still add them
                         // The grading phase will handle this and log appropriate error message
                         solutionPath = studentDir; // Use student dir as fallback
-                        logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}) - WARNING: No question folder /1 or /solution/1 found, will handle during grading");
+                        warningMessage = "Missing question folder: expected /1 or /solution/1 folder structure";
+                        logger?.Invoke($"Found student: {studentCode} (Paper {paperNo}) - WARNING: {warningMessage}");
                     }
 
                     // Load ALL students - grading phase will validate files and log errors as needed
@@ -109,7 +111,8 @@ namespace SolutionGrader.Core.Services
                         PaperNo = paperNo!,
                         SolutionPath = solutionPath,
                         ServerDllPath = null, // Will be found during grading
-                        ClientDllPath = null  // Will be found during grading
+                        ClientDllPath = null, // Will be found during grading
+                        WarningMessage = warningMessage
                     });
                 }
             }
@@ -388,5 +391,12 @@ namespace SolutionGrader.Core.Services
         public string SolutionPath { get; set; } = "";
         public string? ServerDllPath { get; set; }
         public string? ClientDllPath { get; set; }
+        
+        /// <summary>
+        /// Warning message for issues detected during discovery.
+        /// This is displayed in the UI Message column to notify users about problems
+        /// like missing question folder (/1) or missing DLL files.
+        /// </summary>
+        public string? WarningMessage { get; set; }
     }
 }

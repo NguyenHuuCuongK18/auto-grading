@@ -61,9 +61,15 @@ public class TestKitConfig
     public List<TestCaseInfo> TestCases { get; set; } = new();
     
     /// <summary>
-    /// Total max mark for this test kit (sum of all test case marks)
+    /// Total max mark for this test kit (sum of all test case marks).
+    /// 
+    /// FIX: Now sums from TestCaseMarks dictionary first (populated from Header.xlsx QuestionMark sheet),
+    /// falling back to TestCases list if dictionary is empty.
+    /// Previously this only summed from TestCases list which was never populated, causing MaxMark to always be 0.
     /// </summary>
-    public double TotalMaxMark => TestCases.Sum(tc => tc.MaxMark);
+    public double TotalMaxMark => TestCaseMarks.Count > 0 
+        ? TestCaseMarks.Values.Sum() 
+        : TestCases.Sum(tc => tc.MaxMark);
 }
 
 /// <summary>
