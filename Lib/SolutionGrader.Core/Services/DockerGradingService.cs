@@ -14,6 +14,7 @@ using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Helpers;
 using SolutionGrader.Core.Keywords;
+using SolutionGrader.Core.Domain.Models;
 
 namespace SolutionGrader.Core.Services
 {
@@ -512,7 +513,13 @@ namespace SolutionGrader.Core.Services
                         
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared for fresh comparison");
+                        
+                        // CRITICAL FIX: Reset packet counter when clearing RunContext between test cases
+                        // This ensures ParsePcapForCurrentStageAsync starts fresh for the new test case
+                        // Without this, accumulated packets from previous test case would be skipped
+                        _lastParsedPacketCount = 0;
+                        
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared and packet counter reset for fresh comparison");
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -1052,30 +1059,37 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // ALWAYS apply DLL modification to ensure port consistency
-                            // Since Docker containers are isolated, all students use the same internal port
-                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
-                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(tempStagingDir);
-                            tempDirectories.Add(tempStagingDir);
-                            
-                            CopyDirectory(serverDir, tempStagingDir);
-                            OnProgress($"[Unified] Copied server files to temp for modification");
-                            
-                            // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
-                            // We DON'T force IP replacement - student code should already use correct IP
-                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                            // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                tempStagingDir,
-                                config.ServerProjectName,
-                                isServer: true,
-                                targetPort: config.CodeContainerInternalPort,
-                                targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
-                            );
-                            
-                            OnProgress($"[Unified] Server DLL mod (always enabled): {result.GetSummary()}");
-                            dirToCopy = tempStagingDir;
+                            // Apply DLL modification only if fallback is enabled
+                            // Preferred: Use appsettings.json modification (handled later)
+                            // Fallback: Patch DLLs when appsettings.json is not found
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(serverDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied server files to temp for DLL modification");
+                                
+                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
+                                // We DON'T force IP replacement - student code should already use correct IP
+                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ServerProjectName,
+                                    isServer: true,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
+                                );
+                                
+                                OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            else
+                            {
+                                OnProgress($"[Unified] Server DLL modification fallback disabled - will use appsettings.json modification");
+                            }
                             
                             // Copy to /apps/server
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1102,30 +1116,37 @@ namespace SolutionGrader.Core.Services
                         
                         try
                         {
-                            // ALWAYS apply DLL modification to ensure port consistency
-                            // Since Docker containers are isolated, all students use the same internal port
-                            // No need for port allocation - DLL mod always sets to CodeContainerInternalPort
-                            var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(tempStagingDir);
-                            tempDirectories.Add(tempStagingDir);
-                            
-                            CopyDirectory(clientDir, tempStagingDir);
-                            OnProgress($"[Unified] Copied client files to temp for modification");
-                            
-                            // Client connects to localhost/127.0.0.1 in unified container
-                            // We DON'T force IP replacement - student code should already use localhost
-                            // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                            // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
-                            var result = dllModService.CheckAndPatchIfNeeded(
-                                tempStagingDir,
-                                config.ClientProjectName,
-                                isServer: false,
-                                targetPort: config.CodeContainerInternalPort,
-                                targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
-                            );
-                            
-                            OnProgress($"[Unified] Client DLL mod (always enabled): {result.GetSummary()}");
-                            dirToCopy = tempStagingDir;
+                            // Apply DLL modification only if fallback is enabled
+                            // Preferred: Use appsettings.json modification (handled later)
+                            // Fallback: Patch DLLs when appsettings.json is not found
+                            if (config.UseDllModificationFallback)
+                            {
+                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(tempStagingDir);
+                                tempDirectories.Add(tempStagingDir);
+                                
+                                CopyDirectory(clientDir, tempStagingDir);
+                                OnProgress($"[Unified] Copied client files to temp for DLL modification");
+                                
+                                // Client connects to localhost/127.0.0.1 in unified container
+                                // We DON'T force IP replacement - student code should already use localhost
+                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
+                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
+                                var result = dllModService.CheckAndPatchIfNeeded(
+                                    tempStagingDir,
+                                    config.ClientProjectName,
+                                    isServer: false,
+                                    targetPort: config.CodeContainerInternalPort,
+                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
+                                );
+                                
+                                OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
+                                dirToCopy = tempStagingDir;
+                            }
+                            else
+                            {
+                                OnProgress($"[Unified] Client DLL modification fallback disabled - will use appsettings.json modification");
+                            }
                             
                             // Copy to /apps/client
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
@@ -1252,7 +1273,7 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Unified] Configuring appsettings for localhost communication (127.0.0.1:{port})");
             
             // Try to modify SERVER appsettings if it exists
-            // DLL mod is always applied, so appsettings is supplementary
+            // Appsettings modification is preferred; DLL mod is fallback
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/server/appsettings.json",
@@ -1260,10 +1281,10 @@ namespace SolutionGrader.Core.Services
                 port,
                 connectionString,
                 "Server",
-                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
+                dllModFallbackEnabled: config.UseDllModificationFallback);
             
             // Try to modify CLIENT appsettings if it exists
-            // DLL mod is always applied, so appsettings is supplementary
+            // Appsettings modification is preferred; DLL mod is fallback
             TryModifyAppsettingsInContainer(
                 unifiedContainer,
                 "/apps/client/appsettings.json",
@@ -1271,7 +1292,7 @@ namespace SolutionGrader.Core.Services
                 port,
                 null, // Client doesn't need connection string
                 "Client",
-                dllModFallbackEnabled: true);  // Always true - DLL mod always applied
+                dllModFallbackEnabled: config.UseDllModificationFallback);
         }
         
         /// <summary>
@@ -1990,15 +2011,33 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
+            // CRITICAL FIX: Positional/Sequential matching within each stage
+            // Network flow order matters! Must match flow-by-flow in sequence.
+            // Expected flow[0] must match Captured flow[0], not just "any flow with matching flags"
+            // This catches errors like "Server closes connection before Client" which violates protocol.
+            //
+            // Group expected flows by stage to handle per-stage sequential matching
+            var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            var capturedByStage = allCapturedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            
             foreach (var exp in expected)
             {
-                // Filter packets by stage from the complete set
-                var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
+                // Get all flows for this stage (both expected and captured)
+                var expectedFlowsForStage = expectedByStage[exp.Stage];
+                var capturedFlowsForStage = capturedByStage.ContainsKey(exp.Stage) 
+                    ? capturedByStage[exp.Stage] 
+                    : new List<CapturedNetworkPacket>();
                 
-                // Find matching packet by flags using set comparison (order-independent)
-                var matchingPacket = capturedPackets.FirstOrDefault(p =>
-                    !string.IsNullOrEmpty(exp.Flags) && 
-                    FlagsMatch(exp.Flags, p.Flags));
+                // Find position of this expected flow within its stage
+                var positionInStage = expectedFlowsForStage.IndexOf(exp);
+                
+                // SEQUENTIAL MATCHING: Match by position within stage
+                // If we expect the 3rd flow in stage 5, we check the 3rd captured flow in stage 5
+                CapturedNetworkPacket? matchingPacket = null;
+                if (positionInStage >= 0 && positionInStage < capturedFlowsForStage.Count)
+                {
+                    matchingPacket = capturedFlowsForStage[positionInStage];
+                }
                 
                 if (matchingPacket != null)
                 {
@@ -2133,14 +2172,14 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     // No matching packet found - FAIL
-                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(capturedPackets.Any() ? string.Join(", ", capturedPackets.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
+                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} (position {positionInStage}) - Captured: {(capturedFlowsForStage.Any() ? string.Join(", ", capturedFlowsForStage.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
                     
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
                         Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                        Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
+                        Actual = capturedFlowsForStage.Any() ? string.Join("; ", capturedFlowsForStage.Select(p => p.Flags)) : "(no captures)",
                         Passed = false
                     });
                 }
@@ -3824,28 +3863,24 @@ namespace SolutionGrader.Core.Services
                 // Update counter to skip these packets next time
                 _lastParsedPacketCount = packets.Count;
                 
-                // CRITICAL: Truncate PCAP after parsing if new packets were captured and graded
-                // This isolates network flows between stages (e.g., TC6 has flows in stage 3 AND stage 6)
-                // With all-or-nothing grading: only expected flows are checked, extra flows are ignored
-                if (newPackets.Count > 0 && !string.IsNullOrEmpty(_currentMonitorContainer))
-                {
-                    try
-                    {
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: Captured {newPackets.Count} new packets - truncating PCAP for next stage");
-                        var truncateCmd = $"docker exec {_currentMonitorContainer} sh -c 'truncate -s 0 /data/{pcapFileName}'";
-                        _dockerExecutor.ExecDockerCommandWithOutput(truncateCmd, 2000);
-                        
-                        // Reset packet counter since PCAP file is now empty
-                        _lastParsedPacketCount = 0;
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: PCAP truncated and counter reset (ready for next stage with network flows)");
-                    }
-                    catch (Exception ex)
-                    {
-                        OnProgress($"[NetworkMonitor] Stage {currentStage}: WARNING: Failed to truncate PCAP: {ex.Message}");
-                    }
-                }
+                // CRITICAL FIX: DO NOT truncate PCAP file between stages!
+                // Previous approach: Truncate PCAP after each stage to isolate flows
+                // Problem: tcpdump keeps file open with buffering - truncation doesn't prevent buffered data from being written
+                // Result: Next stage sees old data from previous stage (e.g., TC4 Stage 1 sees TC3 Stage 3 data)
+                //
+                // Current approach: Let PCAP accumulate ALL packets, use _lastParsedPacketCount to track progress
+                // - PCAP grows throughout test case execution (all stages append to same file)
+                // - Each ParsePcapForCurrentStageAsync call only processes NEW packets (skip _lastParsedPacketCount)
+                // - RunContext is cleared between test cases (line 514) to prevent cross-contamination
+                // - Snapshot files are saved per-stage for debugging and per-TC organization
+                //
+                // This ensures:
+                // 1. No data loss from tcpdump buffering
+                // 2. Correct stage-to-packet mapping (packets tagged with actual execution stage)
+                // 3. Clean separation between test cases (RunContext cleared)
+                // 4. Proper cumulative parsing within each test case
                 
-                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count}");
+                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count} (cumulative parsing - RunContext cleared between test cases)");
             }
             catch (Exception ex)
             {
@@ -4105,65 +4140,8 @@ namespace SolutionGrader.Core.Services
     
     #region Internal Model Classes
     
-    /// <summary>
-    /// Test kit configuration loaded from Environment.xlsx and Header.xlsx.
-    /// </summary>
-    internal class TestKitConfig
-    {
-        public int CodeContainerInternalPort { get; set; } = 8000;
-        public int CodeContainerHostPort { get; set; } = 8000;
-        public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
-        public string DockerNetwork { get; set; } = "auto-grading-network";
-        public string DatabaseName { get; set; } = "Library";
-        public string DatabasePassword { get; set; } = "";
-        public string Protocol { get; set; } = "TCP";
-        
-        /// <summary>
-        /// Default Grade_Content from test kit root Header.xlsx Config sheet.
-        /// Determines what students submit: "Server", "Client", or "Client/Server".
-        /// This is used to automatically set HasServer and HasClient if not explicitly provided.
-        /// </summary>
-        public string DefaultGradeContent { get; set; } = "Client/Server";
-        
-        /// <summary>
-        /// Path to the given/golden server DLL from Meta/Given/Server folder.
-        /// This is used when the student only provides a client (Project12).
-        /// </summary>
-        public string? GivenServerPath { get; set; }
-        
-        /// <summary>
-        /// Path to the given/golden client DLL from Meta/Given/Client folder.
-        /// This is used when the student only provides a server (Project11).
-        /// </summary>
-        public string? GivenClientPath { get; set; }
-        
-        public Dictionary<string, double> TestCaseMarks { get; set; } = new();
-        public List<TestCaseInfo> TestCases { get; set; } = new();
-        public double TotalMaxMark => TestCases.Sum(tc => tc.MaxMark);
-    }
-    
-    internal class TestCaseInfo
-    {
-        public string Name { get; set; } = "";
-        public string Path { get; set; } = "";
-        public double MaxMark { get; set; }
-        /// <summary>
-        /// Per-test-case timeout in seconds, read from Header.xlsx Testcase_Property sheet.
-        /// Defaults to 15 seconds if not specified in the test kit.
-        /// </summary>
-        public int TimeoutSeconds { get; set; } = 15;
-        
-        /// <summary>
-        /// Specifies what should be graded for this test case.
-        /// Values: "Client", "Server", or "Client/Server"
-        /// - "Client": Grade student's client with golden server
-        /// - "Server": Grade student's server with golden client
-        /// - "Client/Server": Grade both student's client and server (no golden used)
-        /// Read from Header.xlsx Testcase_Property sheet.
-        /// Defaults to "Client/Server" if not specified.
-        /// </summary>
-        public string GradeContent { get; set; } = "Client/Server";
-    }
+    // TestKitConfig and TestCaseInfo moved to Lib/SolutionGrader.Core/Domain/Models/TestKitConfig.cs
+    // to eliminate duplication between CLI and UI implementations
     
     /// <summary>
     /// Represents expected network flow data read from Detail.xlsx.

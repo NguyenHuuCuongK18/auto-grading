@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using SolutionGrader.Core.Services;
+using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.UI.Models;
 using SolutionGrader.UI.Services;
 
@@ -60,12 +61,13 @@ namespace SolutionGrader.UI
         
         // Cache test kit configurations by paper number to avoid repeated Excel file reads
         // Only loaded during grading, NOT during discovery
-        private readonly Dictionary<string, (string testKitPath, TestKitConfigService.TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfigService.TestKitConfig)>();
+        private readonly Dictionary<string, (string testKitPath, TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfig)>();
         
-        // CRITICAL: Shared PortAllocator for batch/parallel grading
-        // Each grading session needs ONE shared PortAllocator that all parallel students use
-        // This prevents port conflicts when grading students in parallel batches
-        private PortAllocator? _sharedPortAllocator;
+        // PORT ALLOCATION REMOVED: No longer needed
+        // All students use the same Code_Container_Internal_Port from environment.xlsx
+        // Docker containers are isolated, so there's no port conflict
+        // Keeping field commented for reference
+        // private PortAllocator? _sharedPortAllocator;
         
         // CRITICAL: Shared GradingMessageLogger for batch/parallel grading
         // Each grading session needs ONE shared GradingMessageLogger that all parallel students use
@@ -431,52 +433,19 @@ namespace SolutionGrader.UI
             // CRITICAL: Clear all previously allocated ports at the START of a new grading session.
             // This prevents port exhaustion from previous runs while ensuring no port reuse
             // DURING the current session (which could cause race conditions in parallel grading).
-            // 
-            // The "never reuse" policy applies WITHIN a session - once a port is allocated
-            // for this session, it stays allocated until the session ends. This prevents
-            // the race condition where Student A finishes and releases port 8001, but the
-            // system incorrectly reuses it while Student B is still being graded.
-            _logger.LogInfo("[UI] Clearing port allocation from previous sessions...");
+            // PORT ALLOCATION REMOVED: No longer needed
+            // All students use the same Code_Container_Internal_Port from environment.xlsx
+            // Docker containers are isolated, so there's no port conflict
+            // Keeping ClearAllAllocatedPorts for backward compatibility
+            _logger.LogInfo("[UI] Clearing port allocation from previous sessions (backward compatibility)...");
             PortAllocator.ClearAllAllocatedPorts();
             
-            // CRITICAL: Initialize shared PortAllocator for THIS grading session
-            // All parallel students will use this SAME PortAllocator instance
-            // to ensure thread-safe, unique port allocation without conflicts
-            try
-            {
-                var firstStudent = studentsToGrade.FirstOrDefault();
-                if (firstStudent != null)
-                {
-                    var firstTestKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, firstStudent.PaperNo);
-                    if (!string.IsNullOrEmpty(firstTestKitPath))
-                    {
-                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
-                        if (startingPort <= 0)
-                        {
-                            startingPort = 8000; // Fallback default
-                            _logger.LogWarning($"[Port Config] Could not read starting port from Environment.xlsx, using default {startingPort}");
-                        }
-                        else
-                        {
-                            _logger.LogInfo($"[Port Config] Read starting port {startingPort} from Environment.xlsx");
-                        }
-                        
-                        _sharedPortAllocator = new PortAllocator(startingPort);
-                        _logger.LogInfo($"[Port Config] Initialized SHARED PortAllocator with starting port {startingPort} for batch grading");
-                    }
-                }
-                
-                if (_sharedPortAllocator == null)
-                {
-                    _sharedPortAllocator = new PortAllocator(8000); // Fallback
-                    _logger.LogWarning("[Port Config] Using fallback PortAllocator with port 8000");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[Port Config] Failed to initialize PortAllocator: {ex.Message}. Using fallback.");
-                _sharedPortAllocator = new PortAllocator(8000);
-            }
+            // PORT ALLOCATION REMOVED: No longer initialize PortAllocator
+            // All students will use the same Code_Container_Internal_Port from test kit environment.xlsx
+            // Docker containers are isolated, so there's no port conflict between students
+            // This simplifies configuration and matches CLI behavior
+            _logger.LogInfo("[Port Config] Port allocation removed - using Code_Container_Internal_Port from environment.xlsx");
+            _logger.LogInfo("[Port Config] All students use same internal port (Docker container isolation prevents conflicts)");
             
             // CRITICAL: Initialize shared GradingMessageLogger for THIS grading session
             // All parallel students will use this SAME GradingMessageLogger instance
@@ -528,7 +497,7 @@ namespace SolutionGrader.UI
                 _logger.LogInfo($"Total batches: {totalBatches} (e.g., first batch: {actualParallel} students together, etc.)");
             }
             
-            _logger.LogInfo($"Port allocation: Ports are allocated once per student and NEVER reused during this session.");
+            _logger.LogInfo($"Port configuration: All students use the same Code_Container_Internal_Port from environment.xlsx (no allocation needed).");
             
             // OPTIMIZATION: Pre-allocate shared network monitor for all students in batch
             // This dramatically reduces resource usage (97% reduction in monitor instances)
@@ -554,14 +523,20 @@ namespace SolutionGrader.UI
             
             try
             {
+                // PORT ALLOCATION REMOVED: Reference to _sharedPortAllocator removed
+                // No longer needed since all students use Code_Container_Internal_Port from environment.xlsx
                 var firstStudent = studentsToGrade.FirstOrDefault();
-                if (firstStudent != null && _sharedPortAllocator != null)
+                if (firstStudent != null)
                 {
                     var firstTestKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, firstStudent.PaperNo);
                     if (!string.IsNullOrEmpty(firstTestKitPath))
                     {
-                        int startingPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
-                        if (startingPort <= 0) startingPort = 8000;
+                        // Read the internal port that all students will use (no allocation)
+                        int internalPort = ReadStartingPortFromEnvironmentXlsx(firstTestKitPath);
+                        if (internalPort <= 0) internalPort = 8000;
+                        
+                        _logger.LogInfo($"[Port Config] All students will use Code_Container_Internal_Port={internalPort} from environment.xlsx");
+                        _logger.LogInfo($"[Port Config] No port allocation needed - Docker container isolation prevents conflicts");
                         
                         // LEGACY: SharedNetworkMonitorManager for HOST-based monitoring (libpcap/NPcap)
                         // With sidecar pattern, each student gets a Docker container network monitor
@@ -759,9 +734,10 @@ namespace SolutionGrader.UI
                     _gradingService.DisposeAllContainers(_configuration);
                 }
                 
-                // Dispose shared PortAllocator when session ends
-                _sharedPortAllocator?.Dispose();
-                _sharedPortAllocator = null;
+                // PORT ALLOCATION REMOVED: No longer using PortAllocator
+                // Keeping commented for reference
+                // _sharedPortAllocator?.Dispose();
+                // _sharedPortAllocator = null;
                 
                 // Dispose shared GradingMessageLogger when session ends
                 // This will export all messages to Excel and close the log file
@@ -791,10 +767,9 @@ namespace SolutionGrader.UI
         /// <summary>
         /// Grades a single student using Docker-based grading.
         /// 
-        /// Port allocation is handled dynamically using SHARED PortAllocator to ensure
-        /// thread-safe, unique port allocation that never reuses ports within a session.
-        /// This prevents race conditions in parallel grading where ports could be
-        /// incorrectly reused while still in use by another student.
+        /// PORT ALLOCATION REMOVED: All students use Code_Container_Internal_Port from environment.xlsx.
+        /// Docker containers are isolated, so there's no port conflict between students.
+        /// This matches CLI behavior and simplifies configuration.
         /// 
         /// PARALLEL EXECUTION: Multiple students can create containers simultaneously
         /// without any staggering or serialization, allowing true parallel batch grading.
@@ -806,34 +781,8 @@ namespace SolutionGrader.UI
             // Set logging context with paper number for organized logging (paper/Log_StudentCode_Date)
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
-            // CRITICAL: Use the SHARED PortAllocator for this grading session
-            // This ensures all parallel students get unique ports without conflicts
-            // DO NOT create a new PortAllocator here - that would break parallel grading!
-            if (_sharedPortAllocator == null)
-            {
-                _logger.LogError($"[UI] Shared PortAllocator not initialized for student {student.StudentCode}");
-                student.Status = GradingStatus.Failed;
-                student.StatusMessage = "Port allocator not initialized";
-                student.EndTime = DateTime.Now;
-                UpdateStudentInUI(student);
-                return;
-            }
-            
-            // Allocate a port dynamically using the SHARED PortAllocator (thread-safe)
-            // This replaces the old per-student PortAllocator approach which caused port conflicts
-            int allocatedPort = _sharedPortAllocator.AllocatePort();
-            
-            if (allocatedPort == -1)
-            {
-                _logger.LogError($"[UI] Failed to allocate port for student {student.StudentCode}");
-                student.Status = GradingStatus.Failed;
-                student.StatusMessage = "Failed to allocate port for grading";
-                student.EndTime = DateTime.Now;
-                UpdateStudentInUI(student);
-                return;
-            }
-            
-            _logger.LogInfo($"[UI] Allocated port {allocatedPort} for student {student.StudentCode} (from shared allocator)");
+            // PORT ALLOCATION REMOVED: No longer check for PortAllocator
+            // Port will be read from test kit environment.xlsx configuration
             
             try
             {
@@ -960,6 +909,11 @@ namespace SolutionGrader.UI
                     _logger.LogWarning($"Using legacy project names: Client={clientProjectName}, Server={serverProjectName}");
                 }
                 
+                // PORT ALLOCATION REMOVED: Use Code_Container_Internal_Port from test kit
+                // All students use the same internal port (Docker container isolation prevents conflicts)
+                int internalPort = cachedTestKit.config.CodeContainerInternalPort;
+                _logger.LogInfo($"[{student.StudentCode}] Using unified internal port: {internalPort} (from environment.xlsx - Docker isolated)");
+                
                 var studentConfig = new GradingConfiguration
                 {
                     SubmitFolderPath = _configuration.SubmitFolderPath,
@@ -984,11 +938,11 @@ namespace SolutionGrader.UI
                     StartIndex = _configuration.StartIndex,
                     EndIndex = _configuration.EndIndex,
                     
-                    // Use dynamically allocated port for DIRECT MAPPING (internal:external)
-                    // This ensures each student's client reaches their own server via host.docker.internal
-                    // The PortAllocator ensures no port reuse during the grading session
-                    CodeContainerInternalPort = allocatedPort,
-                    CodeContainerHostPort = allocatedPort,
+                    // PORT ALLOCATION REMOVED: Use Code_Container_Internal_Port from environment.xlsx
+                    // All students use the same internal port (no allocation needed - Docker isolated)
+                    // Docker containers are isolated, so no conflicts between students
+                    CodeContainerInternalPort = internalPort,
+                    CodeContainerHostPort = internalPort,
                     
                     // Database settings from cached test kit
                     DatabaseImageName = cachedTestKit.config.DatabaseImageName,
@@ -1003,17 +957,16 @@ namespace SolutionGrader.UI
                 };
                 
                 _logger.LogInfo($"Student config created: Client={clientProjectName}, Server={serverProjectName}");
-                
-                _logger.LogInfo($"Using dynamically allocated port: {allocatedPort} (no reuse policy)");
+                _logger.LogInfo($"Using Code_Container_Internal_Port: {internalPort} (no port allocation - matches CLI behavior)");
                 _logger.LogInfo($"Max mark from Header.xlsx: {cachedTestKit.config.TotalMaxMark}");
-                _logger.LogInfo($"Network monitor will capture traffic on host port {allocatedPort}");
                 _logger.LogInfo($"[Parallel Grading] Starting container setup for {student.StudentCode} (no serialization)");
                 
                 try
                 {
                     // Execute grading using the orchestration service - it handles status changes internally
                     // Pass the cancellation token so pause can abort the current grading
-                    // IMPORTANT: Each student gets their own configuration with unique ports for network monitoring
+                    // PORT ALLOCATION REMOVED: All students use same Code_Container_Internal_Port
+                    // Docker container isolation prevents port conflicts between students
                     // TRUE PARALLEL: Containers created simultaneously without any serialization or callbacks
                     // Pass the shared message logger to prevent file access conflicts in parallel grading
                     var sessionState = new GradingSessionState();
@@ -1062,24 +1015,18 @@ namespace SolutionGrader.UI
                 _isPaused = true;
                 // Cancel the current grading operation to abort the student being graded
                 _cancellationTokenSource?.Cancel();
+                
+                // CRITICAL: Immediate UI feedback for pause button (instant response)
+                // Use Send priority to update UI immediately without waiting for batch timer
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    btnPause.IsEnabled = false;
+                    btnResume.IsEnabled = true;
+                    btnStartAll.IsEnabled = true;
+                    btnStartSelected.IsEnabled = true;
+                }, System.Windows.Threading.DispatcherPriority.Send);
+                
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
-                
-                // LEGACY: Clear shared network monitors when pausing (HOST-based monitoring)
-                // With sidecar pattern, monitors are Docker containers cleaned up automatically
-                /*
-                try
-                {
-                    _logger.LogInfo("[Pause] Clearing shared network monitors...");
-                    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
-                    _logger.LogInfo("[Pause] Shared network monitors cleared");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"[Pause] Error clearing monitors: {ex.Message}");
-                }
-                */
-                
-                UpdateButtonStates();
             }
         }
 
@@ -1088,8 +1035,18 @@ namespace SolutionGrader.UI
             if (_isPaused)
             {
                 _isPaused = false;
+                
+                // CRITICAL: Immediate UI feedback for resume button (instant response)
+                // Use Send priority to update UI immediately
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    btnPause.IsEnabled = true;
+                    btnResume.IsEnabled = false;
+                    btnStartAll.IsEnabled = false;
+                    btnStartSelected.IsEnabled = false;
+                }, System.Windows.Threading.DispatcherPriority.Send);
+                
                 _logger.LogInfo("Grading resumed");
-                UpdateButtonStates();
                 
                 // Restart grading from paused students
                 await StartGradingAsync(false);
@@ -1409,13 +1366,13 @@ namespace SolutionGrader.UI
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            // IMMEDIATE UPDATE: Refresh individual student row immediately when they start/finish
-            // Since students take time to grade, immediate updates provide better UX feedback
-            // Performance sacrifice is acceptable as updates are infrequent (only start/end per student)
+            // OPTIMIZED: Use Background priority to avoid blocking UI thread
+            // DataGrid.Items.Refresh() is expensive with 150+ students
+            // Background priority allows user input events to take precedence
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-            }), System.Windows.Threading.DispatcherPriority.Render);
+            }), System.Windows.Threading.DispatcherPriority.Background);
             
             // Status bar can still be batched for efficiency
             UpdateStatusBar();
