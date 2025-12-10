@@ -381,7 +381,10 @@ namespace SolutionGrader.UI.Services
                 var clientDllPath = GetStudentExecutablePath(student, config, "Client");
                 var serverDllPath = GetStudentExecutablePath(student, config, "Server");
                 
-                // Check for missing DLLs and log student errors (but continue grading attempt)
+                // Check for missing DLLs - fail early with clear error message for UI display
+                // This ensures students without required DLLs are notified in the Message column
+                var missingDllMessages = new List<string>();
+                
                 if (config.HasClient && string.IsNullOrEmpty(clientDllPath))
                 {
                     var errorMsg = GradingMessageCatalog.Format(
@@ -389,6 +392,7 @@ namespace SolutionGrader.UI.Services
                         config.ClientProjectName);
                     _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
                     _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                    missingDllMessages.Add($"Missing client DLL: {config.ClientProjectName}.dll");
                 }
                 
                 if (config.HasServer && string.IsNullOrEmpty(serverDllPath))
@@ -398,6 +402,16 @@ namespace SolutionGrader.UI.Services
                         config.ServerProjectName);
                     _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
                     _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                    missingDllMessages.Add($"Missing server DLL: {config.ServerProjectName}.dll");
+                }
+                
+                // If any required DLLs are missing, fail the student immediately with clear message
+                if (missingDllMessages.Count > 0)
+                {
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = string.Join("; ", missingDllMessages);
+                    _logger.LogWarning($"[{student.StudentCode}] Grading failed early: {student.StatusMessage}");
+                    return; // Exit early - cannot grade without required DLLs
                 }
 
                 _logger.LogDebug($"Client DLL path: {clientDllPath ?? "(none)"}");

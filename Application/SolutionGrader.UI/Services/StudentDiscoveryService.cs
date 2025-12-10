@@ -56,10 +56,20 @@ namespace SolutionGrader.UI.Services
                     SolutionPath = discovered.SolutionPath,
                     Status = GradingStatus.Not_Run,
                     ProgressPercent = 0,
-                    Mark = 0
+                    Mark = 0,
+                    // Copy warning message from discovery to StatusMessage for display in UI Message column
+                    StatusMessage = discovered.WarningMessage
                 };
                 students.Add(student);
-                _logger.LogDebug($"[UI Discovery] Added student: {student.StudentCode} (Paper {student.PaperNo}) - Status={student.Status}");
+                
+                if (!string.IsNullOrEmpty(discovered.WarningMessage))
+                {
+                    _logger.LogWarning($"[UI Discovery] Added student with warning: {student.StudentCode} (Paper {student.PaperNo}) - {discovered.WarningMessage}");
+                }
+                else
+                {
+                    _logger.LogDebug($"[UI Discovery] Added student: {student.StudentCode} (Paper {student.PaperNo}) - Status={student.Status}");
+                }
             }
 
             _logger.LogInfo($"[UI Discovery] Converted to {students.Count} StudentSolution objects, all with Status=Not_Run");
