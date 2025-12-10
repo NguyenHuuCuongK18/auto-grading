@@ -1996,15 +1996,33 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
+            // CRITICAL FIX: Positional/Sequential matching within each stage
+            // Network flow order matters! Must match flow-by-flow in sequence.
+            // Expected flow[0] must match Captured flow[0], not just "any flow with matching flags"
+            // This catches errors like "Server closes connection before Client" which violates protocol.
+            //
+            // Group expected flows by stage to handle per-stage sequential matching
+            var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            var capturedByStage = allCapturedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            
             foreach (var exp in expected)
             {
-                // Filter packets by stage from the complete set
-                var capturedPackets = allCapturedPackets.Where(p => p.Stage == exp.Stage).ToList();
+                // Get all flows for this stage (both expected and captured)
+                var expectedFlowsForStage = expectedByStage[exp.Stage];
+                var capturedFlowsForStage = capturedByStage.ContainsKey(exp.Stage) 
+                    ? capturedByStage[exp.Stage] 
+                    : new List<CapturedNetworkPacket>();
                 
-                // Find matching packet by flags using set comparison (order-independent)
-                var matchingPacket = capturedPackets.FirstOrDefault(p =>
-                    !string.IsNullOrEmpty(exp.Flags) && 
-                    FlagsMatch(exp.Flags, p.Flags));
+                // Find position of this expected flow within its stage
+                var positionInStage = expectedFlowsForStage.IndexOf(exp);
+                
+                // SEQUENTIAL MATCHING: Match by position within stage
+                // If we expect the 3rd flow in stage 5, we check the 3rd captured flow in stage 5
+                CapturedNetworkPacket? matchingPacket = null;
+                if (positionInStage >= 0 && positionInStage < capturedFlowsForStage.Count)
+                {
+                    matchingPacket = capturedFlowsForStage[positionInStage];
+                }
                 
                 if (matchingPacket != null)
                 {
@@ -2139,14 +2157,14 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     // No matching packet found - FAIL
-                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(capturedPackets.Any() ? string.Join(", ", capturedPackets.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
+                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} (position {positionInStage}) - Captured: {(capturedFlowsForStage.Any() ? string.Join(", ", capturedFlowsForStage.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
                     
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
                         Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                        Actual = capturedPackets.Any() ? string.Join("; ", capturedPackets.Select(p => p.Flags)) : "(no captures)",
+                        Actual = capturedFlowsForStage.Any() ? string.Join("; ", capturedFlowsForStage.Select(p => p.Flags)) : "(no captures)",
                         Passed = false
                     });
                 }
