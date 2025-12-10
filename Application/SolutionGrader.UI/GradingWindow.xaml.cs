@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using SolutionGrader.Core.Services;
+using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.UI.Models;
 using SolutionGrader.UI.Services;
 
@@ -60,7 +61,7 @@ namespace SolutionGrader.UI
         
         // Cache test kit configurations by paper number to avoid repeated Excel file reads
         // Only loaded during grading, NOT during discovery
-        private readonly Dictionary<string, (string testKitPath, TestKitConfigService.TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfigService.TestKitConfig)>();
+        private readonly Dictionary<string, (string testKitPath, TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfig)>();
         
         // PORT ALLOCATION REMOVED: No longer needed
         // All students use the same Code_Container_Internal_Port from environment.xlsx

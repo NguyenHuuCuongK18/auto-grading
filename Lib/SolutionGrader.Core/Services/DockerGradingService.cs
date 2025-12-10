@@ -14,6 +14,7 @@ using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Helpers;
 using SolutionGrader.Core.Keywords;
+using SolutionGrader.Core.Domain.Models;
 
 namespace SolutionGrader.Core.Services
 {
@@ -4139,65 +4140,8 @@ namespace SolutionGrader.Core.Services
     
     #region Internal Model Classes
     
-    /// <summary>
-    /// Test kit configuration loaded from Environment.xlsx and Header.xlsx.
-    /// </summary>
-    internal class TestKitConfig
-    {
-        public int CodeContainerInternalPort { get; set; } = 8000;
-        public int CodeContainerHostPort { get; set; } = 8000;
-        public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
-        public string DockerNetwork { get; set; } = "auto-grading-network";
-        public string DatabaseName { get; set; } = "Library";
-        public string DatabasePassword { get; set; } = "";
-        public string Protocol { get; set; } = "TCP";
-        
-        /// <summary>
-        /// Default Grade_Content from test kit root Header.xlsx Config sheet.
-        /// Determines what students submit: "Server", "Client", or "Client/Server".
-        /// This is used to automatically set HasServer and HasClient if not explicitly provided.
-        /// </summary>
-        public string DefaultGradeContent { get; set; } = "Client/Server";
-        
-        /// <summary>
-        /// Path to the given/golden server DLL from Meta/Given/Server folder.
-        /// This is used when the student only provides a client (Project12).
-        /// </summary>
-        public string? GivenServerPath { get; set; }
-        
-        /// <summary>
-        /// Path to the given/golden client DLL from Meta/Given/Client folder.
-        /// This is used when the student only provides a server (Project11).
-        /// </summary>
-        public string? GivenClientPath { get; set; }
-        
-        public Dictionary<string, double> TestCaseMarks { get; set; } = new();
-        public List<TestCaseInfo> TestCases { get; set; } = new();
-        public double TotalMaxMark => TestCases.Sum(tc => tc.MaxMark);
-    }
-    
-    internal class TestCaseInfo
-    {
-        public string Name { get; set; } = "";
-        public string Path { get; set; } = "";
-        public double MaxMark { get; set; }
-        /// <summary>
-        /// Per-test-case timeout in seconds, read from Header.xlsx Testcase_Property sheet.
-        /// Defaults to 15 seconds if not specified in the test kit.
-        /// </summary>
-        public int TimeoutSeconds { get; set; } = 15;
-        
-        /// <summary>
-        /// Specifies what should be graded for this test case.
-        /// Values: "Client", "Server", or "Client/Server"
-        /// - "Client": Grade student's client with golden server
-        /// - "Server": Grade student's server with golden client
-        /// - "Client/Server": Grade both student's client and server (no golden used)
-        /// Read from Header.xlsx Testcase_Property sheet.
-        /// Defaults to "Client/Server" if not specified.
-        /// </summary>
-        public string GradeContent { get; set; } = "Client/Server";
-    }
+    // TestKitConfig and TestCaseInfo moved to Lib/SolutionGrader.Core/Domain/Models/TestKitConfig.cs
+    // to eliminate duplication between CLI and UI implementations
     
     /// <summary>
     /// Represents expected network flow data read from Detail.xlsx.
