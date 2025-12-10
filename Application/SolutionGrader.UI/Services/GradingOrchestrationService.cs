@@ -527,7 +527,7 @@ namespace SolutionGrader.UI.Services
                 if (string.IsNullOrEmpty(result.ErrorMessage) || result.TotalMark > 0)
                 {
                     student.Status = GradingStatus.Success;
-                    student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
+                    student.StatusMessage = $"Grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
                     student.Mark = result.TotalMark;
                     
                     _messageLogger?.LogInfo(
@@ -538,7 +538,7 @@ namespace SolutionGrader.UI.Services
                 else
                 {
                     student.Status = GradingStatus.Failed;
-                    student.StatusMessage = result.ErrorMessage ?? $"Docker grading failed: 0/{result.MaxMark:F2}";
+                    student.StatusMessage = result.ErrorMessage ?? $"Grading failed: 0/{result.MaxMark:F2}";
                     student.Mark = 0;
                     
                     // Log as student error if there's a specific error message
@@ -590,12 +590,14 @@ namespace SolutionGrader.UI.Services
                 student.EndTime = DateTime.Now;
                 
                 // Update Excel: Student completed grading
+                // Pass the StatusMessage which contains exception details (if any)
                 _excelCoordinator?.UpdateStudentCompleted(
                     student.StudentCode, 
                     student.PaperNo, 
                     student.EndTime.Value, 
                     student.Mark, 
-                    student.Status);
+                    student.Status,
+                    student.StatusMessage);
                 
                 StudentGradingCompleted?.Invoke(this, student);
                 _logger.SetStudentContext(null);

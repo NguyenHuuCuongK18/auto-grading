@@ -493,42 +493,19 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
 
             marks.TryGetValue(name, out var mark);
             
-            // CRITICAL: Read Grade_Content with fallback hierarchy
-            // 1. Per-test-case Header.xlsx (if exists, overrides suite level)
-            // 2. Suite-level Header.xlsx (passed from outer context)
+            // CRITICAL: Grade_Content is ALWAYS read from outer Header.xlsx (suite level)
+            // The container is set up ONCE at the beginning with the outer environment,
+            // so Grade_Content must be consistent across all test cases within a suite.
+            // Per-test-case overrides are NOT supported because the container setup
+            // (with student DLLs or golden DLLs) happens once during initialization.
             var tcHeaderPath = Path.Combine(dir, "header.xlsx");
-            string? gradeContent = suiteGradeContent; // Default to suite level
+            string? gradeContent = suiteGradeContent; // Always use suite-level Grade_Content
             EnvironmentConfiguration? tcEnv = null;
             
-            if (File.Exists(tcHeaderPath))
+            // Only read test case specific environment.xlsx if flag is enabled
+            if (useInnerTestCaseEnvironment && File.Exists(tcHeaderPath))
             {
                 try
-                {
-                    using var wb = new XLWorkbook(tcHeaderPath);
-                    var ws = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Testcase_Property", StringComparison.OrdinalIgnoreCase));
-                    if (ws != null)
-                    {
-                        // Look for Grade_Content (overrides suite level if found)
-                        for (int r = 1; r <= Math.Min(20, ws.RowCount()); r++)
-                        {
-                            var key = ws.Cell(r, 1).GetString().Trim();
-                            if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
-                            {
-                                var tcGradeContent = ws.Cell(r, 2).GetString().Trim();
-                                if (!string.IsNullOrEmpty(tcGradeContent))
-                                {
-                                    gradeContent = tcGradeContent;
-                                    Console.WriteLine($"[TestCase {name}] Grade_Content override from test case header: {gradeContent}");
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch { }
-                
-                // Read test case specific environment.xlsx only if flag is enabled
-                if (useInnerTestCaseEnvironment)
                 {
                     var tcEnvPath = Path.Combine(dir, FileKeywords.FileName_Environment);
                     if (File.Exists(tcEnvPath))
@@ -537,6 +514,7 @@ public sealed class ExcelSuiteLoader : ITestSuiteLoader
                         Console.WriteLine($"[Suite] Using inner test case environment for {name}: {tcEnvPath}");
                     }
                 }
+                catch { }
             }
             
             list.Add(new TestCaseDefinition

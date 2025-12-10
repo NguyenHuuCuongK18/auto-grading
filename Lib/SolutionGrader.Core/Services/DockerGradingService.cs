@@ -2420,14 +2420,16 @@ namespace SolutionGrader.Core.Services
                 .Where(d => File.Exists(Path.Combine(d, "Detail.xlsx")))
                 .Select(d =>
                 {
-                    var (timeout, gradeContent) = ReadTestCaseConfig(d, config.TestCaseTimeoutSeconds);
+                    var timeout = ReadTestCaseTimeout(d, config.TestCaseTimeoutSeconds);
                     return new TestCaseInfo
                     {
                         Name = Path.GetFileName(d),
                         Path = d,
                         MaxMark = tkConfig.TestCaseMarks.TryGetValue(Path.GetFileName(d), out var m) ? m : 0,
                         TimeoutSeconds = timeout,
-                        GradeContent = gradeContent
+                        // CRITICAL: Use DefaultGradeContent from outer Header.xlsx, NOT per-test-case
+                        // Container is set up ONCE at the beginning with outer configuration
+                        GradeContent = tkConfig.DefaultGradeContent
                     };
                 })
                 .OrderBy(tc => tc.Name)
@@ -2492,20 +2494,21 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Reads the per-test-case configuration from the test case's Header.xlsx file.
+        /// Reads the timeout configuration from the test case's Header.xlsx file.
         /// Looks for the Testcase_Property sheet and reads:
         /// - Timeout(Seconds): timeout in seconds
-        /// - Grade_Content: what to grade ("Client", "Server", or "Client/Server")
-        /// Falls back to defaults if not found or on error.
+        /// 
+        /// NOTE: Grade_Content is NOT read here because the container is set up ONCE at the beginning
+        /// with the outer environment configuration. Grade_Content must come from the outer Header.xlsx.
         /// </summary>
         /// <param name="testCasePath">Path to the test case folder</param>
         /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
-        /// <returns>Tuple of (timeout, gradeContent)</returns>
-        private static (int timeout, string gradeContent) ReadTestCaseConfig(string testCasePath, int defaultTimeout)
+        /// <returns>Timeout in seconds</returns>
+        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
         {
             var headerPath = Path.Combine(testCasePath, "Header.xlsx");
             if (!File.Exists(headerPath))
-                return (defaultTimeout, "Client/Server");
+                return defaultTimeout;
             
             try
             {
@@ -2513,7 +2516,6 @@ namespace SolutionGrader.Core.Services
                 if (wb.TryGetWorksheet("Testcase_Property", out var ws))
                 {
                     int timeout = defaultTimeout;
-                    string gradeContent = "Client/Server";
                     
                     foreach (var row in ws.RowsUsed())
                     {
@@ -2526,21 +2528,12 @@ namespace SolutionGrader.Core.Services
                             int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
                             timeout = parsedTimeout;
-                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
-                            // Logging moved to instance method context where OnProgress is available
-                        }
-                        
-                        // Read Grade_Content
-                        if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase) &&
-                            !string.IsNullOrWhiteSpace(value))
-                        {
-                            gradeContent = value;
-                            // NOTE: Cannot use OnProgress here - this is a static context in CopyFilesToContainersAsync
+                            // NOTE: Cannot use OnProgress here - this is a static context
                             // Logging moved to instance method context where OnProgress is available
                         }
                     }
                     
-                    return (timeout, gradeContent);
+                    return timeout;
                 }
             }
             catch
@@ -2548,7 +2541,7 @@ namespace SolutionGrader.Core.Services
                 // Silently use defaults if header cannot be read
             }
             
-            return (defaultTimeout, "Client/Server");
+            return defaultTimeout;
         }
         
         private List<(int Stage, string Input, string Action)> ReadActions(string detailPath)

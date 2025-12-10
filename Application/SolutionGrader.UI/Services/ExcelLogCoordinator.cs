@@ -108,13 +108,14 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(1, 7).Value = "StartTime";
                     worksheet.Cell(1, 8).Value = "EndTime";
                     worksheet.Cell(1, 9).Value = "Duration";
-                    worksheet.Cell(1, 10).Value = "ServerIP";
-                    worksheet.Cell(1, 11).Value = "ServerPort";
-                    worksheet.Cell(1, 12).Value = "ClientIP";
-                    worksheet.Cell(1, 13).Value = "ClientPort";
-                    worksheet.Cell(1, 14).Value = "ServerDLL";
-                    worksheet.Cell(1, 15).Value = "ClientDLL";
-                    worksheet.Cell(1, 16).Value = "DllModUsed";
+                    worksheet.Cell(1, 10).Value = "Message";
+                    worksheet.Cell(1, 11).Value = "ServerIP";
+                    worksheet.Cell(1, 12).Value = "ServerPort";
+                    worksheet.Cell(1, 13).Value = "ClientIP";
+                    worksheet.Cell(1, 14).Value = "ClientPort";
+                    worksheet.Cell(1, 15).Value = "ServerDLL";
+                    worksheet.Cell(1, 16).Value = "ClientDLL";
+                    worksheet.Cell(1, 17).Value = "DllModUsed";
 
                     // Style header
                     var headerRow = worksheet.Row(1);
@@ -139,13 +140,14 @@ namespace SolutionGrader.UI.Services
                         worksheet.Cell(row, 7).Value = ""; // Start time (filled when grading starts)
                         worksheet.Cell(row, 8).Value = ""; // End time (filled when grading completes)
                         worksheet.Cell(row, 9).Value = ""; // Duration
-                        worksheet.Cell(row, 10).Value = ""; // ServerIP (filled when grading starts)
-                        worksheet.Cell(row, 11).Value = ""; // ServerPort (filled when grading starts)
-                        worksheet.Cell(row, 12).Value = ""; // ClientIP (filled when grading starts)
-                        worksheet.Cell(row, 13).Value = ""; // ClientPort (filled when grading starts)
-                        worksheet.Cell(row, 14).Value = ""; // ServerDLL (filled when grading starts)
-                        worksheet.Cell(row, 15).Value = ""; // ClientDLL (filled when grading starts)
-                        worksheet.Cell(row, 16).Value = ""; // DllModUsed (filled when grading starts)
+                        worksheet.Cell(row, 10).Value = ""; // Message (filled when exceptions occur)
+                        worksheet.Cell(row, 11).Value = ""; // ServerIP (filled when grading starts)
+                        worksheet.Cell(row, 12).Value = ""; // ServerPort (filled when grading starts)
+                        worksheet.Cell(row, 13).Value = ""; // ClientIP (filled when grading starts)
+                        worksheet.Cell(row, 14).Value = ""; // ClientPort (filled when grading starts)
+                        worksheet.Cell(row, 15).Value = ""; // ServerDLL (filled when grading starts)
+                        worksheet.Cell(row, 16).Value = ""; // ClientDLL (filled when grading starts)
+                        worksheet.Cell(row, 17).Value = ""; // DllModUsed (filled when grading starts)
 
                         // Track row mapping for quick updates
                         _studentRowMap[GetStudentKey(student.StudentCode, student.PaperNo)] = new StudentRowInfo
@@ -223,13 +225,13 @@ namespace SolutionGrader.UI.Services
 
             UpdateStudentRow(studentCode, paperNo, row =>
             {
-                row.Cell(10).Value = serverIP;
-                row.Cell(11).Value = serverPort.ToString();
-                row.Cell(12).Value = clientIP;
-                row.Cell(13).Value = clientPort.ToString();
-                row.Cell(14).Value = Path.GetFileName(serverDllPath ?? "N/A");
-                row.Cell(15).Value = Path.GetFileName(clientDllPath ?? "N/A");
-                row.Cell(16).Value = dllModUsed ? "Yes" : "No";
+                row.Cell(11).Value = serverIP;
+                row.Cell(12).Value = serverPort.ToString();
+                row.Cell(13).Value = clientIP;
+                row.Cell(14).Value = clientPort.ToString();
+                row.Cell(15).Value = Path.GetFileName(serverDllPath ?? "N/A");
+                row.Cell(16).Value = Path.GetFileName(clientDllPath ?? "N/A");
+                row.Cell(17).Value = dllModUsed ? "Yes" : "No";
             });
 
             _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated configuration: Server={serverIP}:{serverPort}, Client={clientIP}:{clientPort}, DllMod={dllModUsed}");
@@ -239,7 +241,7 @@ namespace SolutionGrader.UI.Services
         /// Updates a single student's completion info when grading finishes.
         /// This is called when a student's grading completes (container cleaned up).
         /// </summary>
-        public void UpdateStudentCompleted(string studentCode, string paperNo, DateTime endTime, double earnedPoints, GradingStatus status)
+        public void UpdateStudentCompleted(string studentCode, string paperNo, DateTime endTime, double earnedPoints, GradingStatus status, string? message = null)
         {
             if (!_isInitialized)
             {
@@ -263,6 +265,12 @@ namespace SolutionGrader.UI.Services
                     var duration = endTime - startTime;
                     row.Cell(9).Value = $"{duration.TotalSeconds:F2}s";
                 }
+                
+                // Update message column (only if there's a message - typically for errors/exceptions)
+                if (!string.IsNullOrEmpty(message))
+                {
+                    row.Cell(10).Value = message;
+                }
 
                 // Color code row based on status
                 switch (status)
@@ -279,7 +287,7 @@ namespace SolutionGrader.UI.Services
                 }
             });
 
-            _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated completion: {earnedPoints:F2} points, status: {status}");
+            _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated completion: {earnedPoints:F2} points, status: {status}{(message != null ? $", message: {message}" : "")}");
         }
 
         /// <summary>
