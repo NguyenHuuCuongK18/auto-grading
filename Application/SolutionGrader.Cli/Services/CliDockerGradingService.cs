@@ -636,6 +636,7 @@ namespace SolutionGrader.Cli.Services
             var allFolders = Directory.GetDirectories(solutionPath, "*", SearchOption.TopDirectoryOnly);
             foreach (var folder in allFolders)
             {
+                var folderName = Path.GetFileName(folder);
                 var allDlls = Directory.GetFiles(folder, "*.dll", SearchOption.AllDirectories)
                     .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
                     .Where(f => !Path.GetFileName(f).StartsWith("Microsoft.") && 
@@ -643,9 +644,18 @@ namespace SolutionGrader.Cli.Services
                                !Path.GetFileName(f).StartsWith("netstandard"))
                     .ToList();
 
-                if (allDlls.Count > 0)
+                // Prefer DLL matching folder name
+                var preferredDll = allDlls.FirstOrDefault(d => 
+                    Path.GetFileNameWithoutExtension(d).Equals(folderName, StringComparison.OrdinalIgnoreCase));
+                
+                if (preferredDll != null)
                 {
-                    Console.WriteLine($"[DLL Discovery] Found DLL: {Path.GetFileName(allDlls[0])} in {Path.GetFileName(folder)}");
+                    Console.WriteLine($"[DLL Discovery] WARNING: Using fallback DLL: {Path.GetFileName(preferredDll)} (matched folder name)");
+                    return preferredDll;
+                }
+                else if (allDlls.Count > 0)
+                {
+                    Console.WriteLine($"[DLL Discovery] WARNING: Using fallback DLL: {Path.GetFileName(allDlls[0])} - may not be correct!");
                     return allDlls[0];
                 }
             }
