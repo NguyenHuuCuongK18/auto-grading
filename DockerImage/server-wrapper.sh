@@ -1,14 +1,8 @@
 #!/bin/bash
-# Server wrapper script - reads STAGE from file and redirects logs accordingly
+# Server wrapper script - redirects all output to a unified log file
+# The C# grading service will read this file incrementally to separate output by stage
 
-# Read STAGE from file (default to 0 if not set)
-STAGE=0
-if [ -f /tmp/server_stage ]; then
-    STAGE=$(cat /tmp/server_stage)
-fi
-
-# Export for dotnet process
-export STAGE
+# Export environment variables for dotnet process
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_RUNNING_IN_CONTAINER=true
 export DOTNET_SYSTEM_CONSOLE_UNBUFFERED=1
@@ -24,5 +18,6 @@ if [ -z "$DLL" ]; then
     exit 1
 fi
 
-# Run dotnet with output redirected to stage-specific log file
-exec dotnet "$DLL" >> "/apps/server/server-stage-${STAGE}.log" 2>&1
+# Run dotnet with output redirected to unified log file
+# The C# code will read this file incrementally after each action to separate by stage
+exec dotnet "$DLL" >> "/apps/server/server.log" 2>&1
