@@ -822,15 +822,9 @@ public sealed class SharedNetworkMonitorService : IDisposable
         
         // Additional safety: Clear any client ports that might have been associated with this server port
         // Client ports are ephemeral and tracked in _portRoleMap
-        var associatedClientPorts = _portRoleMap
-            .Where(kvp => kvp.Value == NetworkKeywords.Role_Client)
-            .Select(kvp => kvp.Key)
-            .ToList();
-        
-        foreach (var clientPort in associatedClientPorts)
-        {
-            _portRoleMap.TryRemove(clientPort, out _);
-        }
+        // Note: Client ports are ephemeral and will naturally expire when the student is unregistered.
+        // We don't clear them here to avoid affecting other concurrent students.
+        // The BPF filter ensures we only capture traffic for registered server ports.
     }
     
     /// <summary>
