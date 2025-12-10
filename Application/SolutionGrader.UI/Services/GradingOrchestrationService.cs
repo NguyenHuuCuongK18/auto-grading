@@ -164,22 +164,40 @@ namespace SolutionGrader.UI.Services
 
             try
             {
-                // DIAGNOSTIC: Log grading loop filtering
-                var studentsToGrade = students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
-                _logger.LogInfo($"[Grading Loop] Total students discovered: {students.Count}");
-                _logger.LogInfo($"[Grading Loop] Students with Not_Run or Paused status: {studentsToGrade.Count}");
-                if (studentsToGrade.Count < students.Count)
+                // CRITICAL FIX: Do NOT filter students by status here!
+                // The caller (GradingWindow or CLI) already decided which students to grade.
+                // Filtering again here causes students to be skipped unexpectedly.
+                // 
+                // Previous buggy code:
+                // var studentsToGrade = students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
+                // 
+                // This caused the "Start All/Start Selected not always correctly sending all students through grading" bug
+                // where selected students would be filtered out if their status didn't match the filter criteria.
+                //
+                // The orchestration service should grade ALL students it receives from the caller.
+                
+                _logger.LogInfo($"[Grading Loop] Total students to grade: {students.Count}");
+                
+                // Diagnostic logging: Report student statuses for debugging (optimized single-pass count)
+                if (students.Count > 0)
                 {
-                    var skipped = students.Except(studentsToGrade).ToList();
-                    _logger.LogWarning($"[Grading Loop] SKIPPING {skipped.Count} students due to status filter:");
-                    foreach (var s in skipped)
+                    var statusCounts = new Dictionary<GradingStatus, int>();
+                    foreach (var s in students)
                     {
-                        _logger.LogWarning($"[Grading Loop]   - {s.StudentCode} (Paper {s.PaperNo}): Status={s.Status}");
+                        if (statusCounts.ContainsKey(s.Status))
+                            statusCounts[s.Status]++;
+                        else
+                            statusCounts[s.Status] = 1;
+                    }
+                    
+                    foreach (var kvp in statusCounts.OrderBy(x => x.Key))
+                    {
+                        _logger.LogInfo($"[Grading Loop]   - {kvp.Value} student(s) with Status={kvp.Key}");
                     }
                 }
                 
-                // Grade students one at a time
-                foreach (var student in studentsToGrade)
+                // Grade ALL students passed to this service - no filtering by status
+                foreach (var student in students)
                 {
                     if (ct.IsCancellationRequested)
                     {
