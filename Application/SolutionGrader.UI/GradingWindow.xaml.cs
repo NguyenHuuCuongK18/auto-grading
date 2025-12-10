@@ -1015,24 +1015,18 @@ namespace SolutionGrader.UI
                 _isPaused = true;
                 // Cancel the current grading operation to abort the student being graded
                 _cancellationTokenSource?.Cancel();
+                
+                // CRITICAL: Immediate UI feedback for pause button (instant response)
+                // Use Send priority to update UI immediately without waiting for batch timer
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    btnPause.IsEnabled = false;
+                    btnResume.IsEnabled = true;
+                    btnStartAll.IsEnabled = true;
+                    btnStartSelected.IsEnabled = true;
+                }, System.Windows.Threading.DispatcherPriority.Send);
+                
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
-                
-                // LEGACY: Clear shared network monitors when pausing (HOST-based monitoring)
-                // With sidecar pattern, monitors are Docker containers cleaned up automatically
-                /*
-                try
-                {
-                    _logger.LogInfo("[Pause] Clearing shared network monitors...");
-                    await SharedNetworkMonitorManager.Instance.ClearAllAsync();
-                    _logger.LogInfo("[Pause] Shared network monitors cleared");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"[Pause] Error clearing monitors: {ex.Message}");
-                }
-                */
-                
-                UpdateButtonStates();
             }
         }
 
@@ -1041,8 +1035,18 @@ namespace SolutionGrader.UI
             if (_isPaused)
             {
                 _isPaused = false;
+                
+                // CRITICAL: Immediate UI feedback for resume button (instant response)
+                // Use Send priority to update UI immediately
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    btnPause.IsEnabled = true;
+                    btnResume.IsEnabled = false;
+                    btnStartAll.IsEnabled = false;
+                    btnStartSelected.IsEnabled = false;
+                }, System.Windows.Threading.DispatcherPriority.Send);
+                
                 _logger.LogInfo("Grading resumed");
-                UpdateButtonStates();
                 
                 // Restart grading from paused students
                 await StartGradingAsync(false);
@@ -1362,13 +1366,13 @@ namespace SolutionGrader.UI
 
         private void UpdateStudentInUI(StudentSolution student)
         {
-            // IMMEDIATE UPDATE: Refresh individual student row immediately when they start/finish
-            // Since students take time to grade, immediate updates provide better UX feedback
-            // Performance sacrifice is acceptable as updates are infrequent (only start/end per student)
+            // OPTIMIZED: Use Background priority to avoid blocking UI thread
+            // DataGrid.Items.Refresh() is expensive with 150+ students
+            // Background priority allows user input events to take precedence
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 dgStudents.Items.Refresh();
-            }), System.Windows.Threading.DispatcherPriority.Render);
+            }), System.Windows.Threading.DispatcherPriority.Background);
             
             // Status bar can still be batched for efficiency
             UpdateStatusBar();
