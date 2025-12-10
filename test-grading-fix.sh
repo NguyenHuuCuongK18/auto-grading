@@ -45,7 +45,8 @@ else
 fi
 
 # Check that the buggy filter was removed (ignore commented lines)
-if grep "var studentsToGrade = students.Where(s => s.Status ==" "$GRADING_SERVICE_FILE" | grep -v "^\s*//" | grep -q "var studentsToGrade"; then
+# Pattern: Look for the specific problematic code pattern (not commented)
+if grep -n "var studentsToGrade.*=.*students\.Where.*Status.*==" "$GRADING_SERVICE_FILE" | grep -v "//" | grep -q "var studentsToGrade"; then
     echo -e "${RED}✗ Buggy filter still present!${NC}"
     exit 1
 else
@@ -55,12 +56,12 @@ fi
 echo ""
 echo "Step 3: Code analysis..."
 
-# Count occurrences of status filtering
-FILTER_COUNT=$(grep -c "Where.*Status.*Not_Run" "$GRADING_SERVICE_FILE" || true)
-if [ "$FILTER_COUNT" -eq 0 ]; then
-    echo -e "${GREEN}✓ No status filtering found in GradingOrchestrationService${NC}"
+# Verify the correct loop is present
+if grep -q "foreach (var student in students)" "$GRADING_SERVICE_FILE"; then
+    echo -e "${GREEN}✓ Correct grading loop confirmed (iterates over all students)${NC}"
 else
-    echo -e "${YELLOW}⚠ Warning: Found $FILTER_COUNT status filter(s) - review manually${NC}"
+    echo -e "${RED}✗ Incorrect grading loop${NC}"
+    exit 1
 fi
 
 echo ""
