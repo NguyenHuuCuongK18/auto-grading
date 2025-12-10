@@ -232,6 +232,12 @@ namespace SolutionGrader.UI
                     {
                         student.MaxMark = maxMark;
                     }
+                    else
+                    {
+                        // Explicitly set MaxMark to 0 when no test kit is found for this paper
+                        // This makes it clear that the test kit is missing, rather than having an uninitialized value
+                        student.MaxMark = 0;
+                    }
                     
                     _students.Add(student);
                 }
