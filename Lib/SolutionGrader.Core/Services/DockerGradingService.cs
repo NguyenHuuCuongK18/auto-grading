@@ -1060,55 +1060,22 @@ namespace SolutionGrader.Core.Services
                 _dockerExecutor.MakeDirectory(unifiedContainer, "/apps/server");
                 _dockerExecutor.MakeDirectory(unifiedContainer, "/apps/client");
                 
-                // Copy SERVER files
+                // Copy SERVER files (without DLL modification - that's a fallback after appsettings)
                 if (!string.IsNullOrEmpty(serverDllPath))
                 {
                     var serverDir = Path.GetDirectoryName(serverDllPath);
                     if (serverDir != null)
                     {
-                        string dirToCopy = serverDir;
-                        
                         try
                         {
-                            // Apply DLL modification only if fallback is enabled
-                            // Preferred: Use appsettings.json modification (handled later)
-                            // Fallback: Patch DLLs when appsettings.json is not found
-                            if (config.UseDllModificationFallback)
-                            {
-                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedServer_{_currentStudentCode}_{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(tempStagingDir);
-                                tempDirectories.Add(tempStagingDir);
-                                
-                                CopyDirectory(serverDir, tempStagingDir);
-                                OnProgress($"[Unified] Copied server files to temp for DLL modification");
-                                
-                                // Server binds to 0.0.0.0 (all interfaces) or 127.0.0.1 (localhost only)
-                                // We DON'T force IP replacement - student code should already use correct IP
-                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                                // Passing "0.0.0.0" here won't hurt - it will try to replace any hardcoded "0.0.0.0" with "0.0.0.0" (no-op)
-                                var result = dllModService.CheckAndPatchIfNeeded(
-                                    tempStagingDir,
-                                    config.ServerProjectName,
-                                    isServer: true,
-                                    targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "0.0.0.0"  // No-op: replaces 0.0.0.0 with 0.0.0.0, only ports change
-                                );
-                                
-                                OnProgress($"[Unified] Server DLL mod: {result.GetSummary()}");
-                                dirToCopy = tempStagingDir;
-                            }
-                            else
-                            {
-                                OnProgress($"[Unified] Server DLL modification fallback disabled - will use appsettings.json modification");
-                            }
-                            
-                            // Copy to /apps/server
+                            // Copy original files to /apps/server
+                            // DLL modification will be applied later as a fallback if appsettings.json is not found
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
                             // Without "/.": creates /apps/server/AutoGrading_UnifiedServer_*/
                             // With "/.": creates /apps/server/*.dll, /apps/server/appsettings.json, etc.
-                            var serverSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            var serverSource = serverDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
                             _dockerExecutor.CopyFileToContainer(serverSource, $"{unifiedContainer}:/apps/server/");
-                            OnProgress($"[Unified] Copied server files to /apps/server");
+                            OnProgress($"[Unified] Copied server files to /apps/server (DLL mod will be applied as fallback if needed)");
                         }
                         catch (Exception ex)
                         {
@@ -1117,55 +1084,22 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Copy CLIENT files
+                // Copy CLIENT files (without DLL modification - that's a fallback after appsettings)
                 if (!string.IsNullOrEmpty(clientDllPath))
                 {
                     var clientDir = Path.GetDirectoryName(clientDllPath);
                     if (clientDir != null)
                     {
-                        string dirToCopy = clientDir;
-                        
                         try
                         {
-                            // Apply DLL modification only if fallback is enabled
-                            // Preferred: Use appsettings.json modification (handled later)
-                            // Fallback: Patch DLLs when appsettings.json is not found
-                            if (config.UseDllModificationFallback)
-                            {
-                                var tempStagingDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_UnifiedClient_{_currentStudentCode}_{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(tempStagingDir);
-                                tempDirectories.Add(tempStagingDir);
-                                
-                                CopyDirectory(clientDir, tempStagingDir);
-                                OnProgress($"[Unified] Copied client files to temp for DLL modification");
-                                
-                                // Client connects to localhost/127.0.0.1 in unified container
-                                // We DON'T force IP replacement - student code should already use localhost
-                                // We ONLY modify PORT to ensure all students use CodeContainerInternalPort
-                                // Passing "localhost" here: replaces "localhost" → "localhost" (no-op), only ports change
-                                var result = dllModService.CheckAndPatchIfNeeded(
-                                    tempStagingDir,
-                                    config.ClientProjectName,
-                                    isServer: false,
-                                    targetPort: config.CodeContainerInternalPort,
-                                    targetIp: "localhost"  // No-op: replaces localhost with localhost, only ports change
-                                );
-                                
-                                OnProgress($"[Unified] Client DLL mod: {result.GetSummary()}");
-                                dirToCopy = tempStagingDir;
-                            }
-                            else
-                            {
-                                OnProgress($"[Unified] Client DLL modification fallback disabled - will use appsettings.json modification");
-                            }
-                            
-                            // Copy to /apps/client
+                            // Copy original files to /apps/client
+                            // DLL modification will be applied later as a fallback if appsettings.json is not found
                             // CRITICAL: Append "/." to copy directory CONTENTS, not the directory itself
                             // Without "/.": creates /apps/client/AutoGrading_UnifiedClient_*/
                             // With "/.": creates /apps/client/*.dll, /apps/client/appsettings.json, etc.
-                            var clientSource = dirToCopy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                            var clientSource = clientDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
                             _dockerExecutor.CopyFileToContainer(clientSource, $"{unifiedContainer}:/apps/client/");
-                            OnProgress($"[Unified] Copied client files to /apps/client");
+                            OnProgress($"[Unified] Copied client files to /apps/client (DLL mod will be applied as fallback if needed)");
                         }
                         catch (Exception ex)
                         {
@@ -1174,12 +1108,12 @@ namespace SolutionGrader.Core.Services
                     }
                 }
                 
-                // Configure appsettings.json (modify existing or rely on DLL mod)
+                // Configure appsettings.json (modify existing or apply DLL mod as fallback)
                 ConfigureAppsettingsInUnifiedContainer(config, testKitConfig, unifiedContainer, _currentStudentCode ?? "Unknown");
             }
             finally
             {
-                // Cleanup temp directories
+                // Cleanup temp directories (if any were created for DLL modification fallback)
                 foreach (var tempDir in tempDirectories)
                 {
                     try
@@ -1284,39 +1218,57 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Unified] Configuring appsettings for localhost communication (127.0.0.1:{port})");
             
             // Try to modify SERVER appsettings if it exists
-            // Appsettings modification is preferred; DLL mod is fallback
-            TryModifyAppsettingsInContainer(
+            // If appsettings.json doesn't exist and DLL mod is enabled, apply DLL modification as fallback
+            TryModifyAppsettingsOrDllModInContainer(
                 unifiedContainer,
+                "/apps/server",
                 "/apps/server/appsettings.json",
                 serverIpAddress,
                 port,
                 connectionString,
                 "Server",
+                config.ServerProjectName,
+                isServer: true,
                 dllModFallbackEnabled: config.UseDllModificationFallback);
             
             // Try to modify CLIENT appsettings if it exists
-            // Appsettings modification is preferred; DLL mod is fallback
-            TryModifyAppsettingsInContainer(
+            // If appsettings.json doesn't exist and DLL mod is enabled, apply DLL modification as fallback
+            TryModifyAppsettingsOrDllModInContainer(
                 unifiedContainer,
+                "/apps/client",
                 "/apps/client/appsettings.json",
                 clientIpAddress,
                 port,
                 null, // Client doesn't need connection string
                 "Client",
+                config.ClientProjectName,
+                isServer: false,
                 dllModFallbackEnabled: config.UseDllModificationFallback);
         }
         
         /// <summary>
         /// Attempts to modify an existing appsettings.json file inside a container.
-        /// If the file doesn't exist, logs a message about DLL mod fallback status.
+        /// If the file doesn't exist AND DLL mod fallback is enabled, applies DLL modification instead.
+        /// 
+        /// NEW BEHAVIOR (as requested by @dongnuc):
+        /// 1. First, try to modify appsettings.json if it exists in the container
+        /// 2. If appsettings.json doesn't exist AND dllModFallbackEnabled is true:
+        ///    - Download DLLs from container
+        ///    - Apply DLL modification
+        ///    - Upload modified DLLs back to container
+        /// 3. If appsettings.json doesn't exist AND dllModFallbackEnabled is false:
+        ///    - Log warning that grading may fail
         /// </summary>
-        private void TryModifyAppsettingsInContainer(
+        private void TryModifyAppsettingsOrDllModInContainer(
             string container,
+            string containerDir,
             string appsettingsPath,
             string ipAddress,
             int port,
             string? connectionString,
             string componentName,
+            string projectName,
+            bool isServer,
             bool dllModFallbackEnabled)
         {
             // Check if appsettings.json exists
@@ -1325,9 +1277,11 @@ namespace SolutionGrader.Core.Services
             
             if (!exists)
             {
+                // Appsettings.json not found - use DLL modification as fallback if enabled
                 if (dllModFallbackEnabled)
                 {
-                    OnProgress($"[Unified] {componentName} appsettings not found at {appsettingsPath} - DLL modification already applied during copy");
+                    OnProgress($"[Unified] {componentName} appsettings not found at {appsettingsPath} - applying DLL modification fallback");
+                    ApplyDllModificationInContainer(container, containerDir, componentName, projectName, isServer, port, ipAddress);
                 }
                 else
                 {
@@ -1375,6 +1329,82 @@ namespace SolutionGrader.Core.Services
                 if (tempFile != null && File.Exists(tempFile))
                 {
                     try { File.Delete(tempFile); } catch { }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Applies DLL modification to files inside a container.
+        /// Downloads DLLs, modifies them, and uploads them back.
+        /// This is used as a fallback when appsettings.json is not found.
+        /// </summary>
+        private void ApplyDllModificationInContainer(
+            string container,
+            string containerDir,
+            string componentName,
+            string projectName,
+            bool isServer,
+            int targetPort,
+            string targetIp)
+        {
+            string? tempDir = null;
+            try
+            {
+                // Create temp directory for DLL modification
+                tempDir = Path.Combine(Path.GetTempPath(), $"AutoGrading_DllMod_{componentName}_{Guid.NewGuid():N}");
+                Directory.CreateDirectory(tempDir);
+                
+                // Download files from container
+                var copyFromCmd = $"docker cp {container}:{containerDir}/. \"{tempDir}\"";
+                OnProgress($"[Unified] Downloading {componentName} files from container for DLL modification...");
+                var downloadResult = _commandExecutor.RunCommandAndCaptureOutput(copyFromCmd, null, null, 10000);
+                
+                if (downloadResult.ExitCode != 0)
+                {
+                    OnProgress($"[Unified] ERROR: Failed to download {componentName} files from container: {downloadResult.ErrorToString()}");
+                    return;
+                }
+                
+                // Apply DLL modification
+                var dllModService = new DllModificationService();
+                var result = dllModService.CheckAndPatchIfNeeded(
+                    tempDir,
+                    projectName,
+                    isServer,
+                    targetPort,
+                    targetIp);
+                
+                OnProgress($"[Unified] {componentName} DLL mod fallback: {result.GetSummary()}");
+                
+                if (!result.Success && result.RequiresDllModification)
+                {
+                    OnProgress($"[Unified] WARNING: {componentName} DLL modification failed - student code may not work correctly");
+                    return;
+                }
+                
+                // Upload modified files back to container
+                var tempSource = tempDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + "/.";
+                OnProgress($"[Unified] Uploading modified {componentName} DLLs back to container...");
+                _dockerExecutor.CopyFileToContainer(tempSource, $"{container}:{containerDir}/");
+                OnProgress($"[Unified] {componentName} DLL modification applied successfully in container");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Unified] ERROR applying {componentName} DLL modification in container: {ex.Message}");
+            }
+            finally
+            {
+                // Cleanup temp directory
+                if (tempDir != null && Directory.Exists(tempDir))
+                {
+                    try
+                    {
+                        Directory.Delete(tempDir, true);
+                    }
+                    catch (Exception cleanEx)
+                    {
+                        OnProgress($"[Unified] WARNING: Failed to cleanup temp directory {tempDir}: {cleanEx.Message}");
+                    }
                 }
             }
         }
