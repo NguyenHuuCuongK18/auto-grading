@@ -18,12 +18,13 @@ namespace SolutionGrader.UI.Services
     /// SOLUTION: Single coordinator that:
     /// 1. Pre-populates Excel file with all known students at START of grading
     /// 2. Fills in predetermined info: No, StudentCode, Paper, Possible Points, Start Time
-    /// 3. Updates individual rows when students finish (not recreating whole file)
+    /// 3. BATCHES updates: Collects multiple student updates and writes them in one operation
     /// 4. Uses file locking to ensure thread-safe updates
     /// 5. Maintains in-memory cache for fast lookups
     /// 
-    /// This ensures the Excel file is written ONCE at the start, then only updated
-    /// in-place, preventing data loss from concurrent writes.
+    /// OPTIMIZATION: Instead of opening/saving Excel file for EACH student completion,
+    /// we batch updates together and write them all at once every 2 seconds or when
+    /// forced to flush. This eliminates the "constant override" problem and reduces lag.
     /// </summary>
     public class ExcelLogCoordinator : IDisposable
     {
@@ -31,8 +32,20 @@ namespace SolutionGrader.UI.Services
         private readonly ILoggingService _logger;
         private readonly object _fileLock = new object();
         private readonly ConcurrentDictionary<string, StudentRowInfo> _studentRowMap = new();
+        private readonly ConcurrentDictionary<string, PendingUpdate> _pendingUpdates = new();
+        private System.Threading.Timer? _batchTimer;
         private bool _isInitialized = false;
         private bool _disposed = false;
+        
+        /// <summary>
+        /// Represents a pending update to be batched.
+        /// </summary>
+        private class PendingUpdate
+        {
+            public string StudentCode { get; set; } = "";
+            public string PaperNo { get; set; } = "";
+            public Action<IXLRow> UpdateAction { get; set; } = null!;
+        }
 
         /// <summary>
         /// Tracks row information for each student in the Excel file.
@@ -95,6 +108,13 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(1, 7).Value = "StartTime";
                     worksheet.Cell(1, 8).Value = "EndTime";
                     worksheet.Cell(1, 9).Value = "Duration";
+                    worksheet.Cell(1, 10).Value = "ServerIP";
+                    worksheet.Cell(1, 11).Value = "ServerPort";
+                    worksheet.Cell(1, 12).Value = "ClientIP";
+                    worksheet.Cell(1, 13).Value = "ClientPort";
+                    worksheet.Cell(1, 14).Value = "ServerDLL";
+                    worksheet.Cell(1, 15).Value = "ClientDLL";
+                    worksheet.Cell(1, 16).Value = "DllModUsed";
 
                     // Style header
                     var headerRow = worksheet.Row(1);
@@ -119,6 +139,13 @@ namespace SolutionGrader.UI.Services
                         worksheet.Cell(row, 7).Value = ""; // Start time (filled when grading starts)
                         worksheet.Cell(row, 8).Value = ""; // End time (filled when grading completes)
                         worksheet.Cell(row, 9).Value = ""; // Duration
+                        worksheet.Cell(row, 10).Value = ""; // ServerIP (filled when grading starts)
+                        worksheet.Cell(row, 11).Value = ""; // ServerPort (filled when grading starts)
+                        worksheet.Cell(row, 12).Value = ""; // ClientIP (filled when grading starts)
+                        worksheet.Cell(row, 13).Value = ""; // ClientPort (filled when grading starts)
+                        worksheet.Cell(row, 14).Value = ""; // ServerDLL (filled when grading starts)
+                        worksheet.Cell(row, 15).Value = ""; // ClientDLL (filled when grading starts)
+                        worksheet.Cell(row, 16).Value = ""; // DllModUsed (filled when grading starts)
 
                         // Track row mapping for quick updates
                         _studentRowMap[GetStudentKey(student.StudentCode, student.PaperNo)] = new StudentRowInfo
@@ -170,6 +197,42 @@ namespace SolutionGrader.UI.Services
             });
 
             _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated start time: {startTime:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        /// <summary>
+        /// Updates a single student's configuration when grading configuration is determined.
+        /// This is called after containers are set up and before actual test execution begins.
+        /// Records the actual IP addresses, ports, and DLL paths being used for debugging.
+        /// </summary>
+        public void UpdateStudentConfiguration(
+            string studentCode, 
+            string paperNo, 
+            string serverIP, 
+            int serverPort,
+            string clientIP,
+            int clientPort,
+            string serverDllPath,
+            string clientDllPath,
+            bool dllModUsed)
+        {
+            if (!_isInitialized)
+            {
+                _logger.LogWarning($"[ExcelLogCoordinator] [{studentCode}] Excel not initialized, cannot update configuration");
+                return;
+            }
+
+            UpdateStudentRow(studentCode, paperNo, row =>
+            {
+                row.Cell(10).Value = serverIP;
+                row.Cell(11).Value = serverPort.ToString();
+                row.Cell(12).Value = clientIP;
+                row.Cell(13).Value = clientPort.ToString();
+                row.Cell(14).Value = Path.GetFileName(serverDllPath ?? "N/A");
+                row.Cell(15).Value = Path.GetFileName(clientDllPath ?? "N/A");
+                row.Cell(16).Value = dllModUsed ? "Yes" : "No";
+            });
+
+            _logger.LogInfo($"[ExcelLogCoordinator] [{studentCode}] Updated configuration: Server={serverIP}:{serverPort}, Client={clientIP}:{clientPort}, DllMod={dllModUsed}");
         }
 
         /// <summary>
@@ -232,11 +295,44 @@ namespace SolutionGrader.UI.Services
                 return;
             }
 
+            // OPTIMIZED: Queue update for batching instead of immediate write
+            // This prevents the "constant override" problem and eliminates lag from
+            // opening/saving the Excel file for every single student completion
+            _pendingUpdates[key] = new PendingUpdate
+            {
+                StudentCode = studentCode,
+                PaperNo = paperNo,
+                UpdateAction = updateAction
+            };
+            
+            // Start or reset batch timer (write after 2 seconds of inactivity)
+            var oldTimer = Interlocked.Exchange(ref _batchTimer, 
+                new System.Threading.Timer(_ => ProcessPendingUpdates(), null, 2000, Timeout.Infinite));
+            oldTimer?.Dispose();
+        }
+        
+        /// <summary>
+        /// Processes all pending updates in a single batch operation.
+        /// This opens the Excel file ONCE, applies ALL pending updates, then saves ONCE.
+        /// Much more efficient than opening/saving for each individual student.
+        /// </summary>
+        private void ProcessPendingUpdates()
+        {
+            if (_pendingUpdates.IsEmpty) return;
+            
+            // Get all pending updates
+            var updates = _pendingUpdates.ToArray();
+            _pendingUpdates.Clear();
+            
+            if (updates.Length == 0) return;
+
             lock (_fileLock)
             {
                 try
                 {
                     var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
+                    
+                    _logger.LogInfo($"[ExcelLogCoordinator] Processing batch update for {updates.Length} student(s)");
                     
                     // Open existing workbook (with retry for file locks)
                     XLWorkbook workbook = null;
@@ -265,20 +361,44 @@ namespace SolutionGrader.UI.Services
                     using (workbook)
                     {
                         var worksheet = workbook.Worksheet("Sheet1");
-                        var row = worksheet.Row(rowInfo.RowNumber);
 
-                        // Apply the update
-                        updateAction(row);
+                        // Apply ALL pending updates in one pass
+                        foreach (var update in updates)
+                        {
+                            var key = GetStudentKey(update.Value.StudentCode, update.Value.PaperNo);
+                            if (_studentRowMap.TryGetValue(key, out var rowInfo))
+                            {
+                                var row = worksheet.Row(rowInfo.RowNumber);
+                                update.Value.UpdateAction(row);
+                            }
+                        }
 
-                        // Save back to disk
+                        // Save back to disk ONCE for all updates
                         workbook.SaveAs(filePath);
                     }
+                    
+                    _logger.LogInfo($"[ExcelLogCoordinator] Batch update complete: {updates.Length} student(s) updated");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"[ExcelLogCoordinator] [{studentCode}] Failed to update row", ex);
+                    _logger.LogError($"[ExcelLogCoordinator] Failed to process batch updates", ex);
                 }
             }
+        }
+        
+        /// <summary>
+        /// Forces immediate processing of all pending updates.
+        /// Call this when grading completes to ensure all data is written.
+        /// </summary>
+        public void Flush()
+        {
+            lock (_fileLock)
+            {
+                _batchTimer?.Dispose();
+                _batchTimer = null;
+            }
+            
+            ProcessPendingUpdates();
         }
 
         /// <summary>
@@ -313,7 +433,11 @@ namespace SolutionGrader.UI.Services
         {
             if (_disposed) return;
 
-            _logger.LogInfo("[ExcelLogCoordinator] Disposing coordinator");
+            _logger.LogInfo("[ExcelLogCoordinator] Disposing coordinator - flushing pending updates");
+            
+            // Flush any pending updates before disposing
+            Flush();
+            
             _disposed = true;
         }
     }

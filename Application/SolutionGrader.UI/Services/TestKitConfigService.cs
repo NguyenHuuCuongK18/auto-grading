@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using ClosedXML.Excel;
+using SolutionGrader.Core.Domain.Models;
 
 namespace SolutionGrader.UI.Services
 {
@@ -14,6 +15,8 @@ namespace SolutionGrader.UI.Services
     /// 1. Code_Container_Internal_Port and Code_Container_Host_Port are read from environment.xlsx
     /// 2. Max points for each test case are read from Header.xlsx (QuestionMark sheet)
     /// 3. Database configuration is properly loaded for MSSQL container setup
+    /// 
+    /// Note: TestKitConfig class is now shared with CLI in Lib/SolutionGrader.Core/Domain/Models/TestKitConfig.cs
     /// </summary>
     public class TestKitConfigService
     {
@@ -24,51 +27,8 @@ namespace SolutionGrader.UI.Services
             _logger = logger;
         }
 
-        /// <summary>
-        /// Test kit configuration containing all settings from Environment.xlsx and Header.xlsx
-        /// </summary>
-        public class TestKitConfig
-        {
-            // Port configurations
-            public int CodeContainerInternalPort { get; set; } = 5000;
-            public int CodeContainerHostPort { get; set; } = 5000;
-            
-            // Database configurations - values are read from Environment.xlsx
-            // Note: Password is intentionally left empty and should be read from Environment.xlsx
-            // or environment variable AUTOGRADING_DB_PASSWORD for security
-            public string DatabaseImageName { get; set; } = "mcr.microsoft.com/mssql/server:2019-latest";
-            public string DatabaseContainerName { get; set; } = "auto-grading-sqlserver";
-            public int DatabaseContainerInternalPort { get; set; } = 1433;
-            public int DatabaseContainerHostPort { get; set; } = 1434;
-            public string DatabaseUsername { get; set; } = "sa";
-            public string DatabasePassword { get; set; } = System.Environment.GetEnvironmentVariable("AUTOGRADING_DB_PASSWORD") ?? "";
-            public string DefaultDatabaseName { get; set; } = "";
-            public string DefaultDatabaseFilePath { get; set; } = "";
-            
-            // Code container configurations
-            public string CodeImageName { get; set; } = "fptuxaes/aes-dotnet8-console:latest";
-            public string CodeContainerName { get; set; } = "auto-grading-dotnet-console-app";
-            public string DockerNetwork { get; set; } = "auto-grading-network";
-            public string AppType { get; set; } = "Console";
-            public string EnvironmentType { get; set; } = "dotnet";
-            public string RuntimesFolder { get; set; } = "";
-            
-            // Given (reference) executables from Meta/Given folder
-            // When a student provides only client or only server, the other is taken from here
-            // Client: Path to reference client (from Environment.xlsx "Client" field)
-            // Server: Path to reference server (from Environment.xlsx "Server" field)
-            public string GivenClientPath { get; set; } = "";
-            public string GivenServerPath { get; set; } = "";
-            
-            // Test case marks from Header.xlsx
-            public Dictionary<string, double> TestCaseMarks { get; set; } = new Dictionary<string, double>();
-            
-            // Protocol (TCP/HTTP)
-            public string Protocol { get; set; } = "TCP";
-            
-            // Total max mark for this test kit (sum of all test case marks)
-            public double TotalMaxMark => TestCaseMarks.Values.Sum();
-        }
+        // TestKitConfig class removed - now using shared version from SolutionGrader.Core.Domain.Models
+
 
         /// <summary>
         /// Loads the complete test kit configuration from Environment.xlsx and Header.xlsx
@@ -245,8 +205,24 @@ namespace SolutionGrader.UI.Services
                     var rows = markSheet.RowsUsed().Skip(1); // Skip header row
                     foreach (var row in rows)
                     {
-                        var testCaseName = row.Cell(1).GetValue<string>()?.Trim();
-                        var markValue = row.Cell(2).GetValue<double>();
+                        var testCaseName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double markValue = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            markValue = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out markValue))
+                            {
+                                _logger.LogWarning($"Cannot parse mark value '{markStr}' for test case '{testCaseName}' - defaulting to 0");
+                                markValue = 0.0;
+                            }
+                        }
 
                         if (!string.IsNullOrEmpty(testCaseName))
                         {
@@ -261,8 +237,23 @@ namespace SolutionGrader.UI.Services
                     var rows = suiteSheet.RowsUsed().Skip(1); // Skip header row
                     foreach (var row in rows)
                     {
-                        var testCaseName = row.Cell(1).GetValue<string>()?.Trim();
-                        var markValue = row.Cell(2).GetValue<double>();
+                        var testCaseName = row.Cell(1).GetString()?.Trim();
+                        
+                        // Safely parse mark value - handle both numeric and text cells
+                        double markValue = 0.0;
+                        if (row.Cell(2).TryGetValue<double>(out var directValue))
+                        {
+                            markValue = directValue;
+                        }
+                        else
+                        {
+                            var markStr = row.Cell(2).GetString().Trim();
+                            if (!double.TryParse(markStr, System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out markValue))
+                            {
+                                markValue = 0.0;
+                            }
+                        }
 
                         if (!string.IsNullOrEmpty(testCaseName))
                         {

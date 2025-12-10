@@ -1041,7 +1041,11 @@ namespace SolutionGrader.Core.Services
             IXLWorksheet? networkWs;
             if (_wb.Worksheets.TryGetWorksheet(SuiteKeywords.Sheet_Network, out networkWs))
             {
-                // Network sheet exists in template - add actual data columns
+                // Network sheet exists in template - preserve expected Data column and add actual data columns
+                // CRITICAL FIX: The template's Network sheet Data column contains expected values (e.g., "S123", JSON responses)
+                // These values must be preserved when creating the graded output for comparison
+                // ClosedXML sometimes treats empty/populated cells inconsistently, so we explicitly preserve Data values
+                
                 EnsureColumns(networkWs, new[] 
                 { 
                     GradingKeywords.Col_ActualFlags,
@@ -1049,9 +1053,17 @@ namespace SolutionGrader.Core.Services
                     GradingKeywords.Col_ActualSourceRole,
                     GradingKeywords.Col_ActualDestRole,
                     GradingKeywords.Col_ActualData,
+                    GradingKeywords.Col_ActualSourcePort,
+                    GradingKeywords.Col_ActualDestPort,
                     GradingKeywords.Col_NetworkResult
                 });
                 var hdr = GetHeaderIndex(networkWs);
+                
+                // IMPORTANT: Preserve expected Data column values from template
+                // The template Detail.xlsx contains expected Data values that must be shown for comparison
+                // This ensures instructors can see both expected and actual data side-by-side
+                PreserveNetworkExpectedData(networkWs, hdr);
+                
                 PopulateNetworkActualColumns(networkWs, hdr);
             }
             else
@@ -1188,6 +1200,51 @@ namespace SolutionGrader.Core.Services
             return 0;
         }
         
+        
+        /// <summary>
+        /// Preserves expected Data column values from the Network sheet template.
+        /// The template Detail.xlsx contains expected payload values (e.g., "S123", "None", JSON responses)
+        /// that must be retained in the graded output for side-by-side comparison with actual captured data.
+        /// 
+        /// This method explicitly reads and re-writes ALL Data column values to ensure they are preserved.
+        /// ClosedXML sometimes treats cells inconsistently, so we force preservation of all values.
+        /// </summary>
+        private void PreserveNetworkExpectedData(IXLWorksheet ws, Dictionary<string, int> hdr)
+        {
+            if (!hdr.TryGetValue(NetworkKeywords.Col_Data, out var dataCol)) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Read all Data column values and re-write them to ensure they're preserved
+            // This forces ClosedXML to recognize the values and keep them when saving
+            // CRITICAL: Preserve ALL values including "None", empty strings, and null
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                var dataCell = ws.Cell(row.RowNumber(), dataCol);
+                
+                // CRITICAL FIX: Get the actual string value directly
+                // Don't use cellValue.IsBlank or cellValue.IsText as they may not work correctly
+                // for all cell types. Just get the string representation and re-assign it.
+                try
+                {
+                    var dataValue = dataCell.GetString();
+                    // Re-assign to force ClosedXML to preserve it
+                    // Even if empty or "None", we want to keep it
+                    dataCell.Value = dataValue;
+                }
+                catch
+                {
+                    // If GetString() fails, try getting as Value
+                    var cellValue = dataCell.Value;
+                    if (!cellValue.IsBlank)
+                    {
+                        dataCell.Value = cellValue.ToString() ?? "";
+                    }
+                }
+            }
+        }
+        
         /// <summary>
         /// Populates the Network sheet with actual captured data for side-by-side comparison.
         /// Each row in the Network sheet represents an expected packet from the test kit.
@@ -1216,12 +1273,15 @@ namespace SolutionGrader.Core.Services
             int actualSrcRoleCol = TryGetColumnIndex(hdr, "ActualSourceRole", "Actual_SourceRole");
             int actualDstRoleCol = TryGetColumnIndex(hdr, "ActualDestRole", "Actual_DestinationRole");
             int actualDataCol = TryGetColumnIndex(hdr, "ActualData", "Actual_Data");
+            int actualSrcPortCol = TryGetColumnIndex(hdr, "ActualSourcePort", "Actual_SourcePort");
+            int actualDstPortCol = TryGetColumnIndex(hdr, "ActualDestPort", "Actual_DestinationPort");
             int resultCol = TryGetColumnIndex(hdr, "NetworkResult", "Result");
             
             // Get expected data column indices for comparison - also support both conventions
             int expFlagsCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Flags, "Expected_Flags");
             int expSrcRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_SourceRole, "Expected_SourceRole");
             int expDstRoleCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_DestinationRole, "Expected_DestinationRole");
+            int expDataCol = TryGetColumnIndex(hdr, NetworkKeywords.Col_Data, "Expected_Data");
             
             // Track per-stage packet indices for matching with captured data
             var stagePacketIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1255,6 +1315,10 @@ namespace SolutionGrader.Core.Services
                         ws.Cell(row.RowNumber(), actualSrcRoleCol).Value = actualPacket.SourceRole ?? "";
                     if (actualDstRoleCol > 0)
                         ws.Cell(row.RowNumber(), actualDstRoleCol).Value = actualPacket.DestinationRole ?? "";
+                    if (actualSrcPortCol > 0)
+                        ws.Cell(row.RowNumber(), actualSrcPortCol).Value = actualPacket.SourcePort;
+                    if (actualDstPortCol > 0)
+                        ws.Cell(row.RowNumber(), actualDstPortCol).Value = actualPacket.DestinationPort;
                     if (actualDataCol > 0 && !string.IsNullOrEmpty(actualPacket.Data))
                     {
                         var dataPreview = actualPacket.Data.Length > PortKeywords.ACTUAL_DATA_COLUMN_MAX_CHARS 
@@ -1298,6 +1362,26 @@ namespace SolutionGrader.Core.Services
                             !string.Equals(expectedDstRole, actualDstRole, StringComparison.OrdinalIgnoreCase))
                         {
                             matched = false;
+                        }
+                    }
+                    
+                    // Compare Data payload if expected data is provided
+                    // Note: Excel uses null, empty string, or "None" to indicate "no data expected"
+                    // We only validate data if the expected value is non-empty and not "None"
+                    if (matched && expDataCol > 0)
+                    {
+                        var expectedData = row.Cell(expDataCol).GetString()?.Trim() ?? "";
+                        var actualData = actualPacket.Data ?? "";
+                        
+                        // Only compare if expected data is specified and not "None"
+                        if (!string.IsNullOrEmpty(expectedData) && 
+                            !expectedData.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Trim and compare case-insensitively
+                            if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                            {
+                                matched = false;
+                            }
                         }
                     }
                     
@@ -1355,26 +1439,20 @@ namespace SolutionGrader.Core.Services
             if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
                 return false;
             
-            var expectedFlags = expected.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(f => f.Trim().ToUpperInvariant())
-                .OrderBy(f => f)
-                .ToList();
+            // Use regex to extract flag names, ignoring all delimiters (comma, period, hyphen, space, pipe, underscore, etc.)
+            // This is more robust than trying to list every possible separator
+            // Pattern [a-zA-Z]+ matches one or more letters (e.g., "SYN", "ACK", "PSH", "FIN", "RST")
+            // Handles formats: "SYN, ACK", "SYN.ACK", "SYN-ACK", "SYN ACK", "SYN|ACK", "SYN_ACK"
+            var expectedFlags = System.Text.RegularExpressions.Regex.Matches(expected, @"[a-zA-Z]+")
+                .Select(m => m.Value.ToUpperInvariant())
+                .ToHashSet();
             
-            var actualFlags = actual.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(f => f.Trim().ToUpperInvariant())
-                .OrderBy(f => f)
-                .ToList();
+            var actualFlags = System.Text.RegularExpressions.Regex.Matches(actual, @"[a-zA-Z]+")
+                .Select(m => m.Value.ToUpperInvariant())
+                .ToHashSet();
             
-            if (expectedFlags.Count != actualFlags.Count)
-                return false;
-            
-            for (int i = 0; i < expectedFlags.Count; i++)
-            {
-                if (expectedFlags[i] != actualFlags[i])
-                    return false;
-            }
-            
-            return true;
+            // Use set equality - order doesn't matter, just the flags present
+            return expectedFlags.SetEquals(actualFlags);
         }
         
         /// <summary>

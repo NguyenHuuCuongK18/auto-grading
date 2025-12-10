@@ -74,7 +74,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         DataType = dataType
                     });
 
-                    // Add client start step (before middleware to ensure both processes are running)
+                    // Add client start step to ensure both client and server processes start properly
                     steps.Add(new Step
                     {
                         Id = $"{GradingKeywords.StepPrefix_InputClient}CLIENT-{stage}",
@@ -85,7 +85,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                         DataType = dataType
                     });
 
-                    // Add middleware/proxy step after BOTH client and server have started
+                    // Wait step after BOTH client and server have started
                     // This ensures proper exception handling when connections are attempted
                     steps.Add(new Step
                     {
@@ -150,7 +150,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 var dataResponse = Get(row, map, SuiteKeywords.Col_OC_DataResponse);
                 var statusCode = Get(row, map, SuiteKeywords.Col_OC_StatusCode);
                 var output = Get(row, map, SuiteKeywords.Col_OC_Output);
-                var dataType = Get(row, map, SuiteKeywords.Col_OC_DataTypeMiddleware);
+                var dataType = Get(row, map, SuiteKeywords.Col_OC_DataType);
                 var byteSizeStr = Get(row, map, SuiteKeywords.Col_OC_ByteSize);
 
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);
@@ -259,7 +259,7 @@ public sealed class ExcelDetailParser : ITestCaseParser
                 var method = Get(row, map, SuiteKeywords.Col_OS_Method);
                 var req = Get(row, map, SuiteKeywords.Col_OS_DataRequest);
                 var output = Get(row, map, SuiteKeywords.Col_OS_Output);
-                var dataType = Get(row, map, SuiteKeywords.Col_OS_DataTypeMiddleware);
+                var dataType = Get(row, map, SuiteKeywords.Col_OS_DataType);
                 var byteSizeStr = Get(row, map, SuiteKeywords.Col_OS_ByteSize);
 
                 var qid = Get(row, map, SuiteKeywords.Col_Generic_QuestionId);

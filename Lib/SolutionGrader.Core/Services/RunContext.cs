@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using Domain.Models;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Keywords;
 
@@ -185,6 +186,8 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Gets ALL captured network packets across all stages.
         /// Used when you need to retrieve all packets regardless of context.
+        /// CRITICAL FIX: Returns packets sorted by Stage and Timestamp to ensure correct ordering.
+        /// This prevents Stage 3 packets from appearing before Stage 1 packets.
         /// </summary>
         public IReadOnlyList<CapturedNetworkPacket> GetAllCapturedNetworkPackets()
         {
@@ -196,7 +199,29 @@ namespace SolutionGrader.Core.Services
                     allPackets.AddRange(kvp.Value);
                 }
             }
-            return allPackets.AsReadOnly();
+            // CRITICAL: Sort by Stage first, then by Timestamp to maintain correct packet order
+            // This ensures packets appear in stage order (1, 2, 3) not dictionary order (3, 1, 2)
+            return allPackets.OrderBy(p => p.Stage).ThenBy(p => p.Timestamp).ToList().AsReadOnly();
+        }
+        
+        /// <summary>
+        /// Clears captured network packets for a specific student/question code.
+        /// Used to flush packets between test cases to prevent accumulation.
+        /// This ensures each test case starts with a clean slate for comparison.
+        /// </summary>
+        public void ClearCapturedNetworkPackets(string questionCode)
+        {
+            // Clear all packets for this question code (across all stages)
+            var keysToRemove = _capturedPackets.Keys
+                .Where(k => k.StartsWith(questionCode + "-", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            
+            foreach (var key in keysToRemove)
+            {
+                _capturedPackets.TryRemove(key, out _);
+            }
+            
+            Console.WriteLine($"[RunContext] Cleared {keysToRemove.Count} packet collections for {questionCode}");
         }
         
         /// <summary>

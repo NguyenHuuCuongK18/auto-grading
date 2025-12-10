@@ -128,5 +128,16 @@ namespace SolutionGrader.Cli.Services
         /// -1 means grade all students from StartIndex to the end.
         /// </summary>
         public int EndIndex { get; set; } = -1;
+
+        /// <summary>
+        /// Enable DLL modification fallback when appsettings.json is not found.
+        /// 
+        /// PREFERRED: Use appsettings.json modification when available.
+        /// This feature is a FALLBACK that patches hardcoded ports in student DLLs 
+        /// when appsettings.json is not found.
+        /// 
+        /// Default: false (prefer appsettings modification, use DLL mod only as fallback)
+        /// </summary>
+        public bool UseDllModificationFallback { get; set; } = false;
     }
 }

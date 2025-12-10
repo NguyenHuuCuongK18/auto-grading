@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
+using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.UI.Models;
 
 namespace SolutionGrader.UI.Services
@@ -262,7 +263,7 @@ namespace SolutionGrader.UI.Services
         /// Creates {PaperNo}/student/{StudentCode}/OverallSummary.xlsx
         /// Format matches SampleLogging/student/student-code-here/OverallSummary.xlsx
         /// </summary>
-        public void WriteStudentSummary(StudentSolution student, List<TestCaseResult> testCases)
+        public void WriteStudentSummary(StudentSolution student, List<Domain.Models.TestCaseResult> testCases)
         {
             var studentDir = GetStudentResultFolder(student.StudentCode, student.PaperNo);
 
@@ -293,7 +294,7 @@ namespace SolutionGrader.UI.Services
                     summarySheet.Cell(row, 2).Value = tc.Passed ? "PASS" : "FAIL";
                     summarySheet.Cell(row, 3).Value = tc.EarnedMark;
                     summarySheet.Cell(row, 4).Value = tc.MaxMark;
-                    summarySheet.Cell(row, 5).Value = tc.Message ?? "";
+                    summarySheet.Cell(row, 5).Value = tc.ErrorMessage ?? "";
 
                     var rowRange = summarySheet.Range(row, 1, row, 5);
                     rowRange.Style.Fill.BackgroundColor = tc.Passed ? XLColor.LightGreen : XLColor.LightPink;
@@ -348,9 +349,9 @@ namespace SolutionGrader.UI.Services
                 int row = 2;
                 foreach (var step in steps)
                 {
-                    worksheet.Cell(row, 1).Value = step.StepId;
-                    worksheet.Cell(row, 2).Value = step.Stage;
-                    worksheet.Cell(row, 3).Value = step.Action;
+                    worksheet.Cell(row, 1).Value = step.Step?.Id ?? "";
+                    worksheet.Cell(row, 2).Value = step.Step?.Stage ?? "";
+                    worksheet.Cell(row, 3).Value = step.Step?.Action ?? "";
                     worksheet.Cell(row, 4).Value = step.Passed ? "PASS" : "FAIL";
                     worksheet.Cell(row, 5).Value = step.Message ?? "";
                     worksheet.Cell(row, 6).Value = step.DurationMs;
@@ -460,31 +461,5 @@ namespace SolutionGrader.UI.Services
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Represents a test case result for a student.
-    /// </summary>
-    public class TestCaseResult
-    {
-        public string TestCaseName { get; set; } = string.Empty;
-        public bool Passed { get; set; }
-        public double EarnedMark { get; set; }
-        public double MaxMark { get; set; }
-        public string? Message { get; set; }
-        public List<StepResult> Steps { get; set; } = new List<StepResult>();
-    }
-
-    /// <summary>
-    /// Represents a single step result within a test case.
-    /// </summary>
-    public class StepResult
-    {
-        public string StepId { get; set; } = string.Empty;
-        public string Action { get; set; } = string.Empty;
-        public string Stage { get; set; } = string.Empty;
-        public bool Passed { get; set; }
-        public string? Message { get; set; }
-        public double DurationMs { get; set; }
     }
 }

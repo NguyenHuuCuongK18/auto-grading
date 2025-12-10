@@ -4,30 +4,21 @@ using System.Linq;
 using System.Collections.Generic;
 using SolutionGrader.Cli.Services;
 using ClosedXML.Excel;
-using SolutionGrader.Core.Abstractions;
-using SolutionGrader.Core.Services;
 using SolutionGrader.Core.Keywords;
-
-#if WINDOWS
-using SolutionGrader.Core.Domain.Models;
-using SolutionGrader.Services;
-#endif
 
 /// <summary>
 /// CLI entry point for solution grading.
-/// Supports both local (Windows) and Docker-based (cross-platform) grading modes.
+/// This CLI uses Docker-based grading exclusively for cross-platform support.
 /// 
 /// This CLI syncs with SolutionGrader.UI, sharing the SAME DockerGradingService from
 /// Lib/SolutionGrader.Core. This ensures identical grading behavior between CLI and UI.
 /// 
 /// Key modes:
-/// 1. ExecuteSuite: Local grading using direct process execution (Windows only)
-/// 2. ExecutePaper: Local grading for multiple students (Windows only)
-/// 3. DockerGrade: Docker-based grading using containers (cross-platform)
+/// 1. DockerGrade: Docker-based grading using containers (cross-platform)
 ///    - Uses SHARED DockerGradingService from SolutionGrader.Core
 ///    - Student discovery and orchestration via CliDockerGradingOrchestrator
-/// 4. List: List students in submit folder (cross-platform)
-/// 5. Validate: Validate test kit structure (cross-platform)
+/// 2. List: List students in submit folder (cross-platform)
+/// 3. Validate: Validate test kit structure (cross-platform)
 /// </summary>
 public class Program
 {
@@ -40,10 +31,6 @@ public class Program
             var map = ParseArgs(args.Skip(1).ToArray());
             return verb switch
             {
-#if WINDOWS
-                "executesuite" => ExecuteSuite(map).GetAwaiter().GetResult(),
-                "executepaper" => ExecutePaper(map).GetAwaiter().GetResult(),
-#endif
                 "dockergrade" => DockerGrade(map).GetAwaiter().GetResult(),
                 "list" => ListStudents(map),
                 "validate" => ValidateTestKit(map),
@@ -109,7 +96,11 @@ public class Program
             // Parallel grading and index range settings
             MaxParallelStudents = int.TryParse(map.GetValueOrDefault("parallel"), out var parallel) ? Math.Max(1, parallel) : 1,
             StartIndex = int.TryParse(map.GetValueOrDefault("start-index"), out var si) ? Math.Max(0, si) : 0,
-            EndIndex = int.TryParse(map.GetValueOrDefault("end-index"), out var ei) ? ei : -1
+            EndIndex = int.TryParse(map.GetValueOrDefault("end-index"), out var ei) ? ei : -1,
+            
+            // DLL modification fallback (default: false, prefer appsettings.json modification)
+            // Only patches DLLs when appsettings.json is not found
+            UseDllModificationFallback = map.ContainsKey("dll-mod") && ParseBool(map.GetValueOrDefault("dll-mod", "false"))
         };
 
         // Optional: filter by paper or student
@@ -325,78 +316,6 @@ public class Program
         return hasErrors ? 1 : 0;
     }
 
-#if WINDOWS
-    private static async System.Threading.Tasks.Task<int> ExecutePaper(Dictionary<string, string> map)
-    {
-        if (!Need(map, "suite", "out", "submission-root")) return PrintUsage();
-
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var timestampedResultRoot = System.IO.Path.Combine(map["out"], string.Format(FileKeywords.Pattern_GradeResult, timestamp));
-
-        var run = new ExecuteSuiteArgs
-        {
-            SuitePath = map["suite"],
-            ResultRoot = timestampedResultRoot,
-            SubmissionRoot = map["submission-root"],
-            UseInnerTestCaseEnvironment = true
-        };
-
-        var runner = new SuiteRunner();
-        return await runner.ExecutePaper(run);
-    }
-
-    private static async System.Threading.Tasks.Task<int> ExecuteSuite(Dictionary<string, string> a)
-    {
-        if (!Need(a, "suite", "out")) return PrintUsage();
-
-        // Create timestamped results folder
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var timestampedResultRoot = System.IO.Path.Combine(a["out"], string.Format(FileKeywords.Pattern_GradeResult, timestamp));
-
-        var run = new ExecuteSuiteArgs
-        {
-            SuitePath = a["suite"],
-            ResultRoot = timestampedResultRoot,
-            ClientExePath = a.GetValueOrDefault("client"),
-            ServerExePath = a.GetValueOrDefault("server"),
-            UseInnerTestCaseEnvironment = a.ContainsKey("use-inner-env") &&
-                                         (a["use-inner-env"].Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                                          a["use-inner-env"].Equals("1"))
-        };
-
-        IFileService files = new FileService();
-        var env = new EnvironmentResetService(files);
-        var suite = new ExcelSuiteLoader();
-        var parse = new ExcelDetailParser();
-
-        // Use default grading configuration (DateTime/Time excluded from grading, GraderPort = 8888)
-        var gradingConfig = GradingConfig.Default;
-
-        // AppsettingsCreationService now uses GraderPort from GradingConfig
-        var appsettings = new AppsettingsCreationService(gradingConfig);
-
-        IRunContext runctx = new RunContext();
-
-        IExecutableManager proc = new ExecutableManager(runctx);
-        
-        // NEW: Use NetworkMonitorService instead of MiddlewareProxyService
-        // The network monitor passively sniffs packets instead of proxying traffic
-        INetworkMonitorService networkMonitor = new NetworkMonitorService(runctx);
-        
-        IDataComparisonService cmp = new DataComparisonService(runctx);
-        IDetailLogService log = new ExcelDetailLogService(files, runctx); // <-- Excel logger
-
-        IExecutor exec = new Executor(proc, cmp, log, runctx, gradingConfig);
-        IReportService rep = new ReportService(files);
-
-        var flow = new SuiteRunner(files, env, suite, parse, exec, rep, proc, networkMonitor, log, runctx, appsettings);
-        
-        Console.WriteLine($"[Suite] Results will be saved to: {timestampedResultRoot}");
-
-        return await flow.ExecuteSuiteAsync(run);
-    }
-#endif
-
     private static Dictionary<string, string> ParseArgs(string[] args)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -430,8 +349,6 @@ SolutionGrader CLI - Cross-platform grading tool
 
 Commands:
   dockergrade  Docker-based grading (cross-platform, Linux/macOS/Windows)
-  executesuite Local grading for a test suite (Windows only)
-  executepaper Local grading for multiple students (Windows only)
   list         List students in submit folder
   validate     Validate test kit structure
 
@@ -465,14 +382,6 @@ Docker Grading (syncs with SolutionGrader.UI):
     --parallel     Number of students to grade simultaneously (default: 1)
     --start-index  Start grading from this index, 0-based (default: 0)
     --end-index    End grading at this index, -1 for all (default: -1)
-
-Local Grading (Windows only):
-  SolutionGrader.Cli executesuite --suite <suiteFolder> --out <resultRoot>
-                                  [--client <client.exe>] [--server <server.exe>]
-                                  [--use-inner-env]
-
-  SolutionGrader.Cli executepaper --suite <suiteFolder> --out <resultRoot>
-                                  --submission-root <submitFolder>
 
 Utility Commands:
   SolutionGrader.Cli list --submit <submitFolder> [--paper <paperNo>]

@@ -4,7 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Domain.Models;
 using SolutionGrader.UI.Models;
+using SolutionGrader.Core.Services;
 
 namespace SolutionGrader.UI.Services
 {
@@ -33,6 +35,7 @@ namespace SolutionGrader.UI.Services
         private ResultWriterService? _resultWriter;
         private ExcelLogCoordinator? _excelCoordinator;
         private GradingMessageLogger? _messageLogger;
+        private bool _ownsMessageLogger; // True if we created the logger, false if it was shared
         
         private CancellationTokenSource? _cancellationTokenSource;
         
@@ -63,13 +66,16 @@ namespace SolutionGrader.UI.Services
         /// Delegates actual grading to LibGradingService which uses Lib/SolutionGrader.Core.
         /// </summary>
         /// <param name="ct">Optional cancellation token from caller. If provided, uses this instead of internal token.</param>
-        /// <param name="onContainersReady">Optional callback when containers are ready (for staggered startup)</param>
+        /// <param name="sharedMessageLogger">Optional shared GradingMessageLogger for batch grading. 
+        /// If provided, uses this instead of creating a new instance, preventing file access conflicts in parallel grading scenarios. 
+        /// IMPORTANT: When providing a shared logger, the CALLER retains ownership and is responsible for disposal. 
+        /// This service will NOT dispose a shared logger. The shared logger MUST be thread-safe for concurrent writes.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
             GradingSessionState sessionState,
             CancellationToken ct = default,
-            Action? onContainersReady = null)
+            GradingMessageLogger? sharedMessageLogger = null)
         {
             // Use provided cancellation token, or create a new one if not provided
             if (ct == default)
@@ -79,17 +85,27 @@ namespace SolutionGrader.UI.Services
             }
 
             // Initialize result writer for saving StudentsSolution.xlsx
-            var resultPath = !string.IsNullOrEmpty(config.SaveResultFolderPath) 
-                ? config.SaveResultFolderPath 
-                : Path.Combine(config.SubmitFolderPath, "Results");
+            var resultPath = config.GetEffectiveResultPath();
             _resultWriter = new ResultWriterService(_logger, resultPath);
 
             // Initialize Excel log coordinator for centralized, thread-safe Excel updates
             _excelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
 
             // Initialize centralized message logger for structured error/message logging
-            _messageLogger = new GradingMessageLogger(resultPath);
-            _messageLogger.LogInfo($"Starting grading session for {students.Count} students");
+            // Use shared logger if provided (for batch grading), otherwise create a new one
+            if (sharedMessageLogger != null)
+            {
+                _messageLogger = sharedMessageLogger;
+                _ownsMessageLogger = false; // We don't own this logger, so don't dispose it
+                _logger.LogInfo($"[GradingOrchestrationService] Using shared GradingMessageLogger for batch grading");
+            }
+            else
+            {
+                _messageLogger = new GradingMessageLogger(resultPath);
+                _ownsMessageLogger = true; // We created this logger, so we must dispose it
+                _messageLogger.LogInfo($"Starting grading session for {students.Count} students");
+                _logger.LogInfo($"[GradingOrchestrationService] Created new GradingMessageLogger instance");
+            }
 
             sessionState.IsRunning = true;
             sessionState.IsPaused = false;
@@ -140,10 +156,30 @@ namespace SolutionGrader.UI.Services
                     null, ex);
             }
 
+            // PORT ALLOCATION NOTE:
+            // Port allocation is now handled by the caller (GradingWindow) which creates a shared
+            // PortAllocator and allocates unique ports for each student before calling this service.
+            // The allocated ports are passed in via the GradingConfiguration parameter for each student.
+            // This service simply uses the ports provided in the configuration.
+
             try
             {
+                // DIAGNOSTIC: Log grading loop filtering
+                var studentsToGrade = students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused).ToList();
+                _logger.LogInfo($"[Grading Loop] Total students discovered: {students.Count}");
+                _logger.LogInfo($"[Grading Loop] Students with Not_Run or Paused status: {studentsToGrade.Count}");
+                if (studentsToGrade.Count < students.Count)
+                {
+                    var skipped = students.Except(studentsToGrade).ToList();
+                    _logger.LogWarning($"[Grading Loop] SKIPPING {skipped.Count} students due to status filter:");
+                    foreach (var s in skipped)
+                    {
+                        _logger.LogWarning($"[Grading Loop]   - {s.StudentCode} (Paper {s.PaperNo}): Status={s.Status}");
+                    }
+                }
+                
                 // Grade students one at a time
-                foreach (var student in students.Where(s => s.Status == GradingStatus.Not_Run || s.Status == GradingStatus.Paused))
+                foreach (var student in studentsToGrade)
                 {
                     if (ct.IsCancellationRequested)
                     {
@@ -162,13 +198,23 @@ namespace SolutionGrader.UI.Services
                     sessionState.CurrentStudentCode = student.StudentCode;
                     SessionStateChanged?.Invoke(this, sessionState);
 
-                    await GradeStudentAsync(student, config, resultPath, ct, onContainersReady);
+                    await GradeStudentAsync(student, config, resultPath, ct);
 
-                    // Update session state
+                    // Update session state with single-pass counting for better performance
                     sessionState.GradedStudents++;
-                    sessionState.NotRunCount = students.Count(s => s.Status == GradingStatus.Not_Run);
-                    sessionState.SuccessCount = students.Count(s => s.Status == GradingStatus.Success);
-                    sessionState.FailedCount = students.Count(s => s.Status == GradingStatus.Failed);
+                    
+                    // OPTIMIZED: Count statuses in single pass instead of 3 separate iterations
+                    int notRun = 0, success = 0, failed = 0;
+                    foreach (var s in students)
+                    {
+                        if (s.Status == GradingStatus.Not_Run) notRun++;
+                        else if (s.Status == GradingStatus.Success) success++;
+                        else if (s.Status == GradingStatus.Failed) failed++;
+                    }
+                    
+                    sessionState.NotRunCount = notRun;
+                    sessionState.SuccessCount = success;
+                    sessionState.FailedCount = failed;
                     SessionStateChanged?.Invoke(this, sessionState);
 
                     // NO LONGER NEEDED: Old approach that recreated entire Excel file on each update
@@ -198,9 +244,18 @@ namespace SolutionGrader.UI.Services
                 
                 _excelCoordinator?.Dispose();
                 
-                // Dispose message logger - this will export all messages to Excel
-                _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
-                _messageLogger?.Dispose();
+                // Dispose message logger only if we created it (not shared)
+                // If shared, the owner (GradingWindow) will dispose it
+                if (_ownsMessageLogger)
+                {
+                    _messageLogger?.LogInfo($"Grading session completed. Total students: {students.Count}");
+                    _messageLogger?.Dispose();
+                    _logger.LogInfo("[GradingOrchestrationService] Disposed owned GradingMessageLogger");
+                }
+                else
+                {
+                    _logger.LogInfo("[GradingOrchestrationService] Skipped disposal of shared GradingMessageLogger (owned by caller)");
+                }
                 
                 SessionStateChanged?.Invoke(this, sessionState);
                 _logger.LogInfo("Grading session completed");
@@ -227,8 +282,7 @@ namespace SolutionGrader.UI.Services
             StudentSolution student, 
             GradingConfiguration config,
             string resultPath,
-            CancellationToken ct,
-            Action? onContainersReady = null)
+            CancellationToken ct)
         {
             _logger.SetStudentContext(student.StudentCode, student.PaperNo);
             
@@ -269,7 +323,33 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo($"[{student.StudentCode}] Using test kit: {testKitPath}");
 
-                // Step 2: Build paths for Docker grading
+                // Step 2: Ensure solution is extracted (lazy extraction)
+                // This happens here, right before grading, to avoid UI lag during student discovery
+                student.ProgressPercent = 15;
+                StudentProgressUpdated?.Invoke(this, student);
+                
+                if (!string.IsNullOrEmpty(student.SolutionPath))
+                {
+                    _logger.LogInfo($"[{student.StudentCode}] Ensuring solution is extracted from zip if needed...");
+                    bool solutionReady = SharedDiscoveryServices.EnsureSolutionExtracted(
+                        student.SolutionPath,
+                        msg => _logger.LogDebug($"[{student.StudentCode}] {msg}"));
+                    
+                    if (!solutionReady)
+                    {
+                        var errorMsg = $"Failed to extract or locate solution folder - will attempt to continue with grading";
+                        _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                        _messageLogger?.LogStudentError(student.StudentCode, errorMsg);
+                        // Don't return early - let the grading service handle this and report appropriate errors
+                        // The DockerGradingService will fail gracefully if files are truly missing
+                    }
+                    else
+                    {
+                        _logger.LogInfo($"[{student.StudentCode}] Solution ready at: {student.SolutionPath}");
+                    }
+                }
+
+                // Step 3: Build paths for Docker grading
                 student.ProgressPercent = 20;
                 StudentProgressUpdated?.Invoke(this, student);
 
@@ -319,22 +399,81 @@ namespace SolutionGrader.UI.Services
 
                 _logger.LogInfo("Delegating to LibGradingService.ExecuteDockerGradingAsync (Docker-based grading)...");
                 
-                // Build Docker configuration from UI config
-                // The examiner sets HasClient/HasServer to indicate what the student should provide:
-                // - HasClient=true, HasServer=true  → student provides both
-                // - HasClient=true, HasServer=false → student provides client, use golden server
-                // - HasClient=false, HasServer=true → student provides server, use golden client
-                var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+                // PORT ALLOCATION FIX:
+                // Ports are allocated by the caller (GradingWindow) using a shared PortAllocator before
+                // this method is called. The allocated ports are already present in the config parameter:
+                // - config.CodeContainerInternalPort (port inside container)
+                // - config.CodeContainerHostPort (port exposed on host)
+                //
+                // We simply use these pre-allocated ports instead of allocating new ones here.
+                // This ensures:
+                // - Each student in batch grading gets a unique port (allocated by shared PortAllocator)
+                // - No port conflicts when grading multiple students in parallel
+                // - Sequential port allocation (8000, 8001, 8002, etc.) as intended
+                
+                int portToUse = config.CodeContainerHostPort;
+                
+                // Validate that port was provided
+                if (portToUse <= 0 || portToUse > 65535)
                 {
-                    // Examiner's component requirements
-                    HasClient = config.HasClient,
-                    HasServer = config.HasServer,
+                    var errorMsg = $"Invalid port configuration: {portToUse}. Port must be between 1-65535.";
+                    _logger.LogError(errorMsg);
+                    _messageLogger?.LogGraderError(errorMsg, student.StudentCode, null);
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = errorMsg;
+                    student.Mark = 0;
+                    return;
+                }
+                
+                _logger.LogInfo($"[Port Config] [{student.StudentCode}] Using pre-allocated port {portToUse} for container, DLL modification, and network monitoring");
+                
+                // CRITICAL FIX: Read Grade_Content from test kit's OUTER Header.xlsx
+                // This determines what the student should provide (Server or Client)
+                // Overrides UI checkboxes for single-file scenarios
+                bool hasClient = config.HasClient;
+                bool hasServer = config.HasServer;
+                string? gradeContent = ReadGradeContentFromTestKit(testKitPath);
+                
+                if (!string.IsNullOrEmpty(gradeContent))
+                {
+                    _logger.LogInfo($"[Grade_Content] Test kit specifies Grade_Content='{gradeContent}' - overriding UI checkboxes");
+                    
+                    if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Student provides SERVER, use golden CLIENT
+                        hasServer = true;
+                        hasClient = false;
+                        _logger.LogInfo($"[Grade_Content] Student provides SERVER → HasServer=true, HasClient=false (use golden client)");
+                    }
+                    else if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Student provides CLIENT, use golden SERVER
+                        hasServer = false;
+                        hasClient = true;
+                        _logger.LogInfo($"[Grade_Content] Student provides CLIENT → HasServer=false, HasClient=true (use golden server)");
+                    }
+                }
+                else
+                {
+                    _logger.LogInfo($"[Grade_Content] No Grade_Content in test kit - using UI checkboxes: HasClient={hasClient}, HasServer={hasServer}");
+                }
+                
+                _logger.LogInfo($"[Port Config] Creating DockerGradingConfig with CodeContainerInternalPort={portToUse}, CodeContainerHostPort={portToUse}");
+                
+                var dockerConfig = new DockerGradingConfig
+                {
+                    // Component requirements (from Grade_Content or UI checkboxes)
+                    HasClient = hasClient,
+                    HasServer = hasServer,
                     ClientProjectName = config.ClientProjectName,
                     ServerProjectName = config.ServerProjectName,
                     
-                    // Container settings
-                    CodeContainerInternalPort = config.CodeContainerInternalPort,
-                    CodeContainerHostPort = config.CodeContainerHostPort,
+                    // Container settings - USE MONITOR PORT DIRECTLY from environment.xlsx
+                    // CRITICAL: Both ports must be the same for network monitoring to work correctly
+                    // The server binds to this port inside the container, and it's exposed to host on the same port
+                    // DLL modification also uses this same port to patch hardcoded values
+                    CodeContainerInternalPort = portToUse,
+                    CodeContainerHostPort = portToUse,
                     DockerNetwork = config.DockerNetwork ?? "auto-grading-network",
                     
                     // Database container settings
@@ -345,7 +484,10 @@ namespace SolutionGrader.UI.Services
                     DatabaseUsername = config.DatabaseUsername ?? "sa",
                     DatabasePassword = config.DatabasePassword,
                     
-                    GradingTimeoutSeconds = config.GradingTimeoutSeconds
+                    GradingTimeoutSeconds = config.GradingTimeoutSeconds,
+                    
+                    // DLL modification fallback setting
+                    UseDllModificationFallback = config.UseDllModificationFallback
                 };
                 
                 _logger.LogInfo($"[{student.StudentCode}] Grading config: HasClient={config.HasClient}, HasServer={config.HasServer}");
@@ -358,14 +500,13 @@ namespace SolutionGrader.UI.Services
                     clientDllPath,
                     student.StudentCode,
                     dockerConfig,
-                    ct,
-                    onContainersReady);
+                    ct);
 
                 student.ProgressPercent = 90;
                 StudentProgressUpdated?.Invoke(this, student);
 
                 // Step 4: Interpret results from DockerGradingResult
-                if (result.Passed || result.TotalMark > 0)
+                if (string.IsNullOrEmpty(result.ErrorMessage) || result.TotalMark > 0)
                 {
                     student.Status = GradingStatus.Success;
                     student.StatusMessage = $"Docker grading completed: {result.TotalMark:F2}/{result.MaxMark:F2}";
@@ -488,38 +629,48 @@ namespace SolutionGrader.UI.Services
 
             // Fallback: Search recursively for the DLL (same logic as StudentDiscoveryService)
             // This handles cases where the DLL might not have been found during initial discovery
+            // The actual solution folder is at: {studentCode}/1/solution/
             if (!string.IsNullOrEmpty(projectName) && Directory.Exists(student.SolutionPath))
             {
                 try
                 {
-                    // Search for the DLL recursively, excluding runtime folders
-                    var dllFiles = Directory.GetFiles(student.SolutionPath, $"{projectName}.dll", SearchOption.AllDirectories)
-                        .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
-                        .ToArray();
-
-                    if (dllFiles.Length > 0)
+                    // Priority 1: Search in solution subfolder ({studentCode}/1/solution/)
+                    var solutionSubfolder = Path.Combine(student.SolutionPath, "solution");
+                    var searchFolders = Directory.Exists(solutionSubfolder) 
+                        ? new[] { solutionSubfolder, student.SolutionPath } 
+                        : new[] { student.SolutionPath };
+                    
+                    foreach (var searchFolder in searchFolders)
                     {
-                        var result = dllFiles[0];
-                        _logger.LogDebug($"Found {type} DLL via recursive search: {result}");
-                        return result;
-                    }
-
-                    // Try alternate names (Q11, Q12) for compatibility
-                    var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
-                        ? new[] { "Q12.dll", "Project12.dll" }
-                        : new[] { "Q11.dll", "Project11.dll" };
-
-                    foreach (var altName in altNames)
-                    {
-                        dllFiles = Directory.GetFiles(student.SolutionPath, altName, SearchOption.AllDirectories)
+                        // Search for the DLL recursively, excluding runtime folders
+                        var dllFiles = Directory.GetFiles(searchFolder, $"{projectName}.dll", SearchOption.AllDirectories)
                             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
                             .ToArray();
 
                         if (dllFiles.Length > 0)
                         {
                             var result = dllFiles[0];
-                            _logger.LogDebug($"Found {type} DLL via fallback search ({altName}): {result}");
+                            _logger.LogDebug($"Found {type} DLL via recursive search in {Path.GetFileName(searchFolder)}: {result}");
                             return result;
+                        }
+
+                        // Try alternate names (Q11, Q12) for compatibility
+                        var altNames = type.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                            ? new[] { "Q12.dll", "Project12.dll" }
+                            : new[] { "Q11.dll", "Project11.dll" };
+
+                        foreach (var altName in altNames)
+                        {
+                            dllFiles = Directory.GetFiles(searchFolder, altName, SearchOption.AllDirectories)
+                                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "runtimes" + Path.DirectorySeparatorChar))
+                                .ToArray();
+
+                            if (dllFiles.Length > 0)
+                            {
+                                var result = dllFiles[0];
+                                _logger.LogDebug($"Found {type} DLL via fallback search ({altName}) in {Path.GetFileName(searchFolder)}: {result}");
+                                return result;
+                            }
                         }
                     }
                 }
@@ -665,7 +816,7 @@ namespace SolutionGrader.UI.Services
         {
             _logger.LogInfo("Disposing all Docker containers...");
             
-            var dockerConfig = new SolutionGrader.Core.Services.DockerGradingConfig
+            var dockerConfig = new DockerGradingConfig
             {
                 DatabaseContainerName = config.DatabaseContainerName ?? "auto-grading-sqlserver",
                 DockerNetwork = config.DockerNetwork ?? "auto-grading-network"
@@ -673,5 +824,45 @@ namespace SolutionGrader.UI.Services
             
             _libGrading.DisposeAllContainers(dockerConfig);
         }
+
+        /// <summary>
+        /// Reads Grade_Content from the test kit's outer Header.xlsx file.
+        /// This determines whether the student should provide Server or Client.
+        /// Returns null if Grade_Content is not specified (two-file scenario).
+        /// </summary>
+        private string? ReadGradeContentFromTestKit(string testKitPath)
+        {
+            try
+            {
+                var headerPath = Path.Combine(testKitPath, "Header.xlsx");
+                if (!File.Exists(headerPath))
+                {
+                    return null;
+                }
+
+                using var wb = new ClosedXML.Excel.XLWorkbook(headerPath);
+                var ws = wb.Worksheets.FirstOrDefault();
+                if (ws == null) return null;
+
+                // Look for Grade_Content key
+                for (int r = 1; r <= Math.Min(50, ws.RowCount()); r++)
+                {
+                    var key = ws.Cell(r, 1).GetValue<string>()?.Trim() ?? "";
+                    if (key.Equals("Grade_Content", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var value = ws.Cell(r, 2).GetValue<string>()?.Trim() ?? "";
+                        return string.IsNullOrEmpty(value) ? null : value;
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Could not read Grade_Content from test kit Header.xlsx: {ex.Message}");
+                return null;
+            }
+        }
+
     }
 }

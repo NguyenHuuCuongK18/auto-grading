@@ -42,6 +42,25 @@ public static class ConnectionStringHelper
     }
 
     /// <summary>
+    /// Builds a connection string for a student's database on the shared MSSQL container.
+    /// Database name format: Student_{StudentCode}
+    /// </summary>
+    /// <param name="sharedContainerPort">Port of the shared MSSQL container (typically 1433)</param>
+    /// <param name="studentCode">Student code (e.g., "AnhDThe187386")</param>
+    /// <param name="username">Database username (default: sa)</param>
+    /// <param name="password">Database password</param>
+    /// <returns>Connection string for the student's database</returns>
+    public static string BuildForStudentDatabase(int sharedContainerPort, string studentCode, string? username = null, string? password = null)
+    {
+        var server = $"localhost,{sharedContainerPort}";
+        var databaseName = $"Student_{studentCode}";
+        var user = username ?? AppsettingKeywords.DEFAULT_USERNAME;
+        var pwd = password ?? AppsettingKeywords.DOCKER_SA_PASSWORD;
+
+        return FormatConnectionString(server, databaseName, user, pwd);
+    }
+
+    /// <summary>
     /// Builds a SqlConnectionStringBuilder for database reset operations with additional connection options.
     /// Used by EnvironmentResetService.
     /// </summary>

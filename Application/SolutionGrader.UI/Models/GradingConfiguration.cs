@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace SolutionGrader.UI.Models
@@ -66,6 +67,12 @@ namespace SolutionGrader.UI.Models
         private int _maxParallelStudents = 1;
         private int _startIndex = 0;
         private int _endIndex = -1; // -1 means grade all students
+        
+        // DLL modification fallback settings
+        // PREFERRED: Use appsettings.json modification when available
+        // This is a FALLBACK that patches DLLs when appsettings.json is not found
+        // Default: false (prefer appsettings modification)
+        private bool _useDllModificationFallback = false;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -306,6 +313,34 @@ namespace SolutionGrader.UI.Models
             set { _endIndex = value; OnPropertyChanged(); }
         }
 
+        /// <summary>
+        /// Enables DLL modification fallback when appsettings.json is not found.
+        /// When enabled, the system will attempt to directly modify the compiled DLL files
+        /// to patch hardcoded IP addresses and port numbers instead of relying on appsettings.json.
+        /// 
+        /// CRITICAL for batch grading: This patches student-hardcoded values like:
+        /// - IP addresses: localhost, 127.0.0.1 → host.docker.internal (client) or 0.0.0.0 (server)
+        /// - Ports: 4000, 5000, 8080, etc. → allocated port (8000, 8001, 8002, ...)
+        /// 
+        /// Without this, students who hardcode ports will fail because:
+        /// - Student hardcodes port 4000 in DLL
+        /// - Container runs on port 8001 (dynamically allocated)
+        /// - Client tries port 4000 → connection fails
+        /// 
+        /// With this enabled:
+        /// - Student hardcodes port 4000 in DLL
+        /// - DLL patched: 4000 → 8001
+        /// - Container runs on port 8001
+        /// - Client connects to 8001 → success!
+        /// 
+        /// Default: true (enabled for reliable batch grading)
+        /// </summary>
+        public bool UseDllModificationFallback
+        {
+            get => _useDllModificationFallback;
+            set { _useDllModificationFallback = value; OnPropertyChanged(); }
+        }
+
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -338,8 +373,27 @@ namespace SolutionGrader.UI.Models
                 DatabasePassword = this.DatabasePassword,
                 MaxParallelStudents = this.MaxParallelStudents,
                 StartIndex = this.StartIndex,
-                EndIndex = this.EndIndex
+                EndIndex = this.EndIndex,
+                UseDllModificationFallback = this.UseDllModificationFallback
             };
+        }
+        
+        /// <summary>
+        /// Gets the effective result path, using SaveResultFolderPath if specified,
+        /// otherwise defaulting to Results subfolder in SubmitFolderPath.
+        /// This ensures consistent result path calculation across the application.
+        /// </summary>
+        /// <returns>The effective result path, or empty string if both paths are not configured</returns>
+        public string GetEffectiveResultPath()
+        {
+            if (!string.IsNullOrEmpty(SaveResultFolderPath))
+                return SaveResultFolderPath;
+            
+            if (!string.IsNullOrEmpty(SubmitFolderPath))
+                return Path.Combine(SubmitFolderPath, "Results");
+            
+            // Both paths are empty - return empty string to signal error
+            return string.Empty;
         }
     }
 }

@@ -63,14 +63,21 @@ public static class AppsettingKeywords
     /// </summary>
     public const string DOCKER_SERVER_BIND_ADDRESS = "0.0.0.0";
     /// <summary>
-    /// Docker host DNS name - allows containers to access the host machine.
+    /// Docker host DNS name - allows containers to access the host machine (legacy port mapping mode).
     /// Client uses this to route traffic through host's exposed port for network monitoring.
+    /// When using Docker internal networking, this is replaced with server container name.
     /// </summary>
     public const string DOCKER_HOST_INTERNAL = "host.docker.internal";
     /// <summary>
     /// Docker run flag to enable host.docker.internal on Linux (Docker 20.10+)
+    /// Only needed for legacy port mapping mode.
     /// </summary>
     public const string DOCKER_ADD_HOST_FLAG = "--add-host=host.docker.internal:host-gateway";
+    /// <summary>
+    /// Placeholder for server container name in appsettings.json when using Docker internal networking.
+    /// Will be replaced with actual container name (e.g., "ag-server-student123") at runtime.
+    /// </summary>
+    public const string DOCKER_SERVER_CONTAINER_PLACEHOLDER = "{SERVER_CONTAINER_NAME}";
     
     // Docker constants
     public const string DOCKER_COMMAND = "docker";
@@ -96,6 +103,7 @@ public static class AppsettingKeywords
     public const string LOG_PREFIX_APPSETTINGS = "[Appsettings]";
     public const string LOG_PREFIX_DATABASE = "[Database]";
     public const string LOG_PREFIX_APPSETTINGS_CREATION = "[AppsettingsCreation]";
+    public const string LOG_PREFIX_APPSETTINGS_MODIFICATION = "[AppsettingsModification]";
     
     // Messages
     public const string MSG_GENERATING_FROM_HEADER = "Generating appsettings.json from Header.xlsx configuration...";
