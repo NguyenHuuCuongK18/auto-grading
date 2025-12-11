@@ -835,6 +835,23 @@ namespace SolutionGrader.UI
                                         _logger.LogInfo($"[Worker-{localWorkerId}] [{currentCompletedIndex}/{studentsToGrade.Count}] Completed: {student.StudentCode}");
                                         _logger.LogInfo($"[Progress] {currentCompletedIndex}/{studentsToGrade.Count} students completed, {Math.Min(_configuration.MaxParallelStudents, studentsToGrade.Count - currentCompletedIndex)} students currently in progress");
                                         
+                                        // CRITICAL FIX: Periodic orphaned container cleanup during batch grading
+                                        // Clean up every batch (MaxParallelStudents) to prevent container accumulation
+                                        // This addresses the issue: "container won't get cleaned up for the final batches"
+                                        if (currentCompletedIndex % _configuration.MaxParallelStudents == 0)
+                                        {
+                                            try
+                                            {
+                                                _logger.LogInfo($"[Container Cleanup] Batch {currentCompletedIndex / _configuration.MaxParallelStudents} completed - cleaning up orphaned containers");
+                                                _gradingService.DisposeAllContainers(_configuration);
+                                                _logger.LogInfo($"[Container Cleanup] Orphaned container cleanup completed for batch");
+                                            }
+                                            catch (Exception cleanupEx)
+                                            {
+                                                _logger.LogWarning($"[Container Cleanup] Failed to cleanup orphaned containers: {cleanupEx.Message}");
+                                            }
+                                        }
+                                        
                                         // Update UI on UI thread
                                         await Dispatcher.InvokeAsync(() => UpdateStatusBar());
                                     }
