@@ -2172,6 +2172,15 @@ namespace SolutionGrader.Core.Services
                     bool exactMatch = true;
                     var mismatchReasons = new List<string>();
                     
+                    // CRITICAL FIX: Ensure at least Flags field is non-empty to prevent tests passing with no validation
+                    // Flags is the primary identifier for network flows and must always be specified
+                    if (string.IsNullOrEmpty(exp.Flags))
+                    {
+                        exactMatch = false;
+                        mismatchReasons.Add("Expected packet has no flags specified - cannot validate");
+                        OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: Expected flow has empty Flags field - data quality issue");
+                    }
+                    
                     // Compare flags using set comparison (already matched in FirstOrDefault above)
                     // This is redundant but kept for clarity
                     if (!string.IsNullOrEmpty(exp.Flags) && !FlagsMatch(exp.Flags, matchingPacket.Flags))
@@ -3854,6 +3863,13 @@ namespace SolutionGrader.Core.Services
             var protocol = _currentTestKitProtocol ?? "TCP";
             bool isHttpProtocol = protocol.Equals("HTTP", StringComparison.OrdinalIgnoreCase);
             
+            // Group expected flows by stage for positional matching (CONSISTENT with CompareNetwork scoring)
+            // This is used in both SECTION 1 and SECTION 2, so declare it here
+            var expectedByStage = expectedNetworkFlows
+                .OrderBy(f => f.Stage)
+                .GroupBy(f => f.Stage)
+                .ToDictionary(g => g.Key, g => g.ToList());
+            
             // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
             // Show ALL expected flows with their matching actual captures
             if (expectedNetworkFlows.Count > 0)
@@ -3893,16 +3909,23 @@ namespace SolutionGrader.Core.Services
                     }
                     
                     // Find matching actual packet(s) for this expected flow
+                    // CRITICAL FIX: Use POSITIONAL matching (same algorithm as CompareNetwork scoring)
+                    // This ensures Excel display is CONSISTENT with test results
                     var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
                         ? packets 
                         : new List<CapturedNetworkPacket>();
                     
-                    // Try to find a packet that matches the expected flags
-                    // Find matching packet by comparing flags
-                    // Flags must match exactly (case-insensitive, order-normalized)
-                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
-                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
-                        NormalizeFlags(expectedFlow.Flags) == NormalizeFlags(p.Flags));
+                    // Get all expected flows for this stage to find position
+                    var expectedFlowsForStage = expectedByStage[expectedFlow.Stage];
+                    var positionInStage = expectedFlowsForStage.IndexOf(expectedFlow);
+                    
+                    // POSITIONAL MATCHING: Get packet at same position as expected flow
+                    // If we expect the 3rd flow in stage 5, we check the 3rd captured flow in stage 5
+                    CapturedNetworkPacket? matchingPacket = null;
+                    if (positionInStage >= 0 && positionInStage < actualPacketsForStage.Count)
+                    {
+                        matchingPacket = actualPacketsForStage[positionInStage];
+                    }
                     
                     if (matchingPacket != null)
                     {
@@ -3970,14 +3993,19 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, col).Value = exactMatch ? "PASS" : "PARTIAL";
                         netWs.Cell(netRow, col).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
                         
-                        // Remove from list so we can identify extra packets later
-                        actualPacketsForStage.Remove(matchingPacket);
+                        // Mark this position as used so we don't count it as extra
+                        // (We'll track which positions have been matched)
                     }
                     else
                     {
-                        // No matching packet found - expected flow is MISSING
+                        // No matching packet found at this position - expected flow is MISSING
+                        // IMPROVED MESSAGE: Show position to clarify positional matching
+                        var missingMessage = actualPacketsForStage.Count == 0 
+                            ? "(MISSING - no packets captured at stage)"
+                            : $"(MISSING at position {positionInStage} - captured {actualPacketsForStage.Count} packet(s) at stage)";
+                        
                         // Fill in empty actual columns
-                        netWs.Cell(netRow, col++).Value = "(MISSING - not captured)";  // ActualFlags
+                        netWs.Cell(netRow, col++).Value = missingMessage;  // ActualFlags
                         netWs.Cell(netRow, col++).Value = "";  // ActualState
                         
                         if (isHttpProtocol)
@@ -4004,7 +4032,7 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, col).Value = "FAIL";
                         netWs.Cell(netRow, col).Style.Fill.BackgroundColor = XLColor.LightPink;
                         
-                        OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
+                        OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage} position {positionInStage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
                     
                     netRow++;
@@ -4013,6 +4041,8 @@ namespace SolutionGrader.Core.Services
             
             // === SECTION 2: Additional Captured Packets (not validated by this test case) ===
             // These packets were captured but not validated by the test case.
+            // With POSITIONAL matching, "additional" means packets beyond the expected count for each stage.
+            // For example, if stage 5 expects 3 packets but captured 5 packets, packets at positions 3 and 4 are "additional".
             // This is NORMAL - test cases intentionally validate only specific aspects:
             //   - TC1 may only validate sending
             //   - TC2 may validate send + server confirm
@@ -4021,12 +4051,17 @@ namespace SolutionGrader.Core.Services
             // Extra packets are shown for information but DO NOT cause test failure.
             foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
-                var remainingPackets = capturesByStage[stage];
-                if (remainingPackets.Count > 0)
+                var allPacketsForStage = capturesByStage[stage];
+                var expectedCountForStage = expectedByStage.ContainsKey(stage) ? expectedByStage[stage].Count : 0;
+                
+                // Show packets beyond expected count (positions >= expectedCount)
+                var additionalPackets = allPacketsForStage.Skip(expectedCountForStage).ToList();
+                
+                if (additionalPackets.Count > 0)
                 {
-                    OnProgress($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    OnProgress($"[Network Sheet] Found {additionalPackets.Count} additional (not validated) packets at stage {stage} beyond position {expectedCountForStage - 1}");
                     
-                    foreach (var packet in remainingPackets)
+                    foreach (var packet in additionalPackets)
                     {
                         int col = 1;
                         
