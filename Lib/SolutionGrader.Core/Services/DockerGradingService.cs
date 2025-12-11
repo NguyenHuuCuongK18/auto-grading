@@ -2061,38 +2061,120 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
-            // CRITICAL FIX: Positional/Sequential matching within each stage
-            // Network flow order matters! Must match flow-by-flow in sequence.
-            // Expected flow[0] must match Captured flow[0], not just "any flow with matching flags"
-            // This catches errors like "Server closes connection before Client" which violates protocol.
+            // CRITICAL FIX: Content-based matching with position as secondary factor
+            // 
+            // The previous positional matching was too strict and caused failures when:
+            // 1. TCP packets arrive slightly out of order due to timing
+            // 2. The pcap capture records packets in different order than transmitted
+            // 3. The OS TCP stack behavior differs from expected sequence
             //
-            // Group expected flows by stage to handle per-stage sequential matching
-            var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
-            var capturedByStage = allCapturedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            // The new approach:
+            // 1. Group captured packets by stage
+            // 2. For each expected flow, find the BEST MATCH in captured packets by:
+            //    a. Same stage
+            //    b. Matching flags (normalized for comma/hyphen differences)
+            //    c. Matching source role and destination role
+            // 3. Mark matched packets as used to prevent double-matching
+            // 4. If no match found, mark as MISSING
+            //
+            // This approach correctly identifies:
+            // - Exact matches: All fields match perfectly
+            // - Partial matches: Flags match but roles differ (timing issues)
+            // - Missing packets: Expected flow not found in captures
+            
+            // Group captured packets by stage
+            var capturedByStage = allCapturedPackets
+                .GroupBy(p => p.Stage)
+                .ToDictionary(g => g.Key, g => g.ToList());
+            
+            // Track which packets have been matched to prevent double-matching
+            var matchedPacketIds = new HashSet<int>();
             
             foreach (var exp in expected)
             {
-                // Get all flows for this stage (both expected and captured)
-                var expectedFlowsForStage = expectedByStage[exp.Stage];
-                var capturedFlowsForStage = capturedByStage.ContainsKey(exp.Stage) 
-                    ? capturedByStage[exp.Stage] 
+                // Get available (unmatched) packets for this stage
+                var availablePackets = capturedByStage.ContainsKey(exp.Stage)
+                    ? capturedByStage[exp.Stage]
+                        .Where((p, idx) => !matchedPacketIds.Contains(exp.Stage * 10000 + idx))
+                        .ToList()
                     : new List<CapturedNetworkPacket>();
                 
-                // Find position of this expected flow within its stage
-                var positionInStage = expectedFlowsForStage.IndexOf(exp);
-                
-                // SEQUENTIAL MATCHING: Match by position within stage
-                // If we expect the 3rd flow in stage 5, we check the 3rd captured flow in stage 5
+                // CONTENT-BASED MATCHING: Find the best match based on content
+                // Priority: 1. Flags match + Roles match (EXACT)
+                //          2. Flags match only (PARTIAL - role mismatch)
+                //          3. No match (MISSING)
                 CapturedNetworkPacket? matchingPacket = null;
-                if (positionInStage >= 0 && positionInStage < capturedFlowsForStage.Count)
+                int matchedIdx = -1;
+                bool exactMatch = false;
+                bool partialMatch = false;
+                
+                // First pass: Look for EXACT match (flags + both roles match)
+                for (int i = 0; i < availablePackets.Count; i++)
                 {
-                    matchingPacket = capturedFlowsForStage[positionInStage];
+                    var packet = availablePackets[i];
+                    if (FlagsMatch(exp.Flags, packet.Flags) &&
+                        (string.IsNullOrEmpty(exp.SourceRole) || exp.SourceRole == packet.SourceRole) &&
+                        (string.IsNullOrEmpty(exp.DestinationRole) || exp.DestinationRole == packet.DestinationRole))
+                    {
+                        matchingPacket = packet;
+                        matchedIdx = i;
+                        exactMatch = true;
+                        break;
+                    }
+                }
+                
+                // Second pass: If no exact match, look for PARTIAL match (flags match, roles may differ)
+                if (matchingPacket == null)
+                {
+                    for (int i = 0; i < availablePackets.Count; i++)
+                    {
+                        var packet = availablePackets[i];
+                        if (FlagsMatch(exp.Flags, packet.Flags))
+                        {
+                            matchingPacket = packet;
+                            matchedIdx = i;
+                            partialMatch = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // Third pass: Fall back to positional match if no content match found
+                if (matchingPacket == null && capturedByStage.ContainsKey(exp.Stage))
+                {
+                    var stagePackets = capturedByStage[exp.Stage];
+                    var expectedByStage = expected.Where(e => e.Stage == exp.Stage).ToList();
+                    var positionInStage = expectedByStage.IndexOf(exp);
+                    
+                    if (positionInStage >= 0 && positionInStage < stagePackets.Count)
+                    {
+                        var packetIdToCheck = exp.Stage * 10000 + positionInStage;
+                        if (!matchedPacketIds.Contains(packetIdToCheck))
+                        {
+                            matchingPacket = stagePackets[positionInStage];
+                            matchedIdx = positionInStage;
+                            // This is a positional fallback, not a content match
+                            exactMatch = false;
+                            partialMatch = false;
+                        }
+                    }
+                }
+                
+                // Mark packet as matched to prevent double-matching
+                if (matchingPacket != null && matchedIdx >= 0)
+                {
+                    // Calculate the original index in the stage's packet list
+                    var stagePackets = capturedByStage[exp.Stage];
+                    var originalIdx = stagePackets.IndexOf(matchingPacket);
+                    if (originalIdx >= 0)
+                    {
+                        matchedPacketIds.Add(exp.Stage * 10000 + originalIdx);
+                    }
                 }
                 
                 if (matchingPacket != null)
                 {
-                    // Check if it's an exact match (PASS) or partial match (PARTIAL)
-                    bool exactMatch = true;
+                    // Re-evaluate exact match based on all fields
                     var mismatchReasons = new List<string>();
                     
                     // Compare flags using set comparison (already matched in FirstOrDefault above)
@@ -2222,14 +2304,19 @@ namespace SolutionGrader.Core.Services
                 else
                 {
                     // No matching packet found - FAIL
-                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} (position {positionInStage}) - Captured: {(capturedFlowsForStage.Any() ? string.Join(", ", capturedFlowsForStage.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
+                    // Get the captured packets for this stage for logging
+                    var stagePacketsForLog = capturedByStage.ContainsKey(exp.Stage) 
+                        ? capturedByStage[exp.Stage] 
+                        : new List<CapturedNetworkPacket>();
+                    
+                    OnProgress($"[COMPARISON] ✗ FAIL - Stage {exp.Stage}: MISSING {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole} - Captured: {(stagePacketsForLog.Any() ? string.Join(", ", stagePacketsForLog.Select(p => $"{p.Flags}({p.SourceRole}→{p.DestinationRole})")) : "none")}");
                     
                     results.Add(new ComparisonResult
                     {
                         Source = "Network",
                         Stage = exp.Stage,
                         Expected = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}",
-                        Actual = capturedFlowsForStage.Any() ? string.Join("; ", capturedFlowsForStage.Select(p => p.Flags)) : "(no captures)",
+                        Actual = stagePacketsForLog.Any() ? string.Join("; ", stagePacketsForLog.Select(p => p.Flags)) : "(no captures)",
                         Passed = false
                     });
                 }
@@ -3940,12 +4027,17 @@ namespace SolutionGrader.Core.Services
                 
                 // SNAPSHOT STRATEGY Step 0: Force tcpdump to flush its buffer by sending SIGUSR1 signal
                 // This ensures all captured packets are written to the pcap file before we copy it
+                // 
+                // CRITICAL FIX: Increased flush delay from 500ms to 1000ms to ensure all packets are written
+                // The previous 500ms was not enough to capture the final ACK in FIN sequences
                 OnProgress($"[NetworkMonitor] Stage {currentStage}: Flushing tcpdump buffer in {monitorContainer}...");
                 var flushCmd = $"{monitorContainer} pkill -USR1 tcpdump";
                 _dockerExecutor.ExecDockerCommandWithOutput(flushCmd, 2000);
                 
-                // Give tcpdump a moment to finish flushing
-                await Task.Delay(500);
+                // CRITICAL FIX: Wait longer for tcpdump to finish flushing
+                // The TCP FIN/ACK sequence can have timing gaps where the final ACK arrives
+                // slightly after the flush signal. 1000ms gives more time for all packets.
+                await Task.Delay(1000);
                 
                 // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
                 // This bypasses Windows/WSL2 file locking issues with the live capture file
