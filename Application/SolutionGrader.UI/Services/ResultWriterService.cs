@@ -12,16 +12,18 @@ namespace SolutionGrader.UI.Services
 {
     /// <summary>
     /// Service for writing grading results to Excel files.
-    /// Creates student-specific result files and overall summary spreadsheets.
+    /// Creates student-specific result files and per-paper summary spreadsheets.
     /// 
     /// Output structure follows the SampleLogging format with paper-based organization:
-    /// - StudentsSolution.xlsx: Overall summary of all students
-    /// - {PaperNo}/StudentsSolution.xlsx: Per-paper summary
+    /// - {PaperNo}/StudentsSolution.xlsx: Per-paper summary (written by this service)
     /// - {PaperNo}/student/{StudentCode}/
     ///   - OverallSummary.xlsx: Student-level summary 
     ///   - {TestCase}/
     ///     - GradeDetail.xlsx: Detailed test case results
-    ///     - {TestCase}_Result.xlsx: Raw test data
+    /// 
+    /// IMPORTANT: The global StudentsSolution.xlsx file is NOT written by this service.
+    /// It is handled by ExcelLogCoordinator in GradingOrchestrationService to prevent
+    /// race conditions that cause grade mismatches between the outer file and inner files.
     /// 
     /// Note: Results are organized by paper number (1/, 2/, etc.) for better navigation.
     /// </summary>
@@ -91,6 +93,10 @@ namespace SolutionGrader.UI.Services
         
         /// <summary>
         /// Synchronous version for FlushPendingWrites to ensure completion before return.
+        /// 
+        /// NOTE: Does NOT write the global StudentsSolution.xlsx because ExcelLogCoordinator
+        /// (in GradingOrchestrationService) is the authoritative source for that file.
+        /// Writing here would cause a race condition that overwrites correct grades.
         /// </summary>
         private void WritePendingResultsSync()
         {
@@ -109,11 +115,14 @@ namespace SolutionGrader.UI.Services
             // Synchronous write for flush scenario
             try
             {
-                // Write global summary
-                var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-                WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
+                // FIX: Do NOT write global StudentsSolution.xlsx here!
+                // ExcelLogCoordinator in GradingOrchestrationService handles the main file.
+                // Writing here would overwrite correct grades with potentially stale data,
+                // causing the bug where "outer StudentSolution.xlsx does not match inner file and UI".
+                // var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
+                // WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
 
-                // Write per-paper summaries
+                // Write per-paper summaries (these are separate files, no conflict)
                 var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
                 foreach (var group in paperGroups)
                 {
@@ -136,6 +145,10 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Internal method that performs the actual write operation.
         /// OPTIMIZATION: Runs on background thread pool to prevent blocking UI or worker threads.
+        /// 
+        /// NOTE: Does NOT write the global StudentsSolution.xlsx because ExcelLogCoordinator
+        /// (in GradingOrchestrationService) is the authoritative source for that file.
+        /// Writing here would cause a race condition that overwrites correct grades.
         /// </summary>
         private void WritePendingResults()
         {
@@ -157,11 +170,14 @@ namespace SolutionGrader.UI.Services
             {
                 try
                 {
-                    // Write global summary
-                    var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-                    WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
+                    // FIX: Do NOT write global StudentsSolution.xlsx here!
+                    // ExcelLogCoordinator in GradingOrchestrationService handles the main file.
+                    // Writing here would overwrite correct grades with potentially stale data,
+                    // causing the bug where "outer StudentSolution.xlsx does not match inner file and UI".
+                    // var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
+                    // WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
 
-                    // Write per-paper summaries
+                    // Write per-paper summaries (these are separate files, no conflict)
                     var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
                     foreach (var group in paperGroups)
                     {
