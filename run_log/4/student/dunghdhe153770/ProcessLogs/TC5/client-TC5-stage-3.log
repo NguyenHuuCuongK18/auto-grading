@@ -1,0 +1,9 @@
+
+--- Server Response ---
+Expression: 5 + abc
+Status: error
+Error Message: Invalid expression
+Message: Invalid expression
+----------------------
+
+Enter expression: 

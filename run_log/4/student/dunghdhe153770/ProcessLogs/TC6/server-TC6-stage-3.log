@@ -1,0 +1,4 @@
+Client connected from 127.0.0.1:50626
+Recived from 127.0.0.1:50626
+Send to 127.0.0.1:50626 : {"Expression":"5 \u002B 3","Result":8,"Status":"success","Message":"Calculation completed successfully"}
+Client from 127.0.0.1:50626 disconnetecd
