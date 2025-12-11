@@ -2173,7 +2173,7 @@ namespace SolutionGrader.Core.Services
                     var mismatchReasons = new List<string>();
                     
                     // CRITICAL FIX: Ensure at least Flags field is non-empty to prevent tests passing with no validation
-                    // If ALL expected fields are null/empty (data quality issue), the test should fail
+                    // Flags is the primary identifier for network flows and must always be specified
                     if (string.IsNullOrEmpty(exp.Flags))
                     {
                         exactMatch = false;

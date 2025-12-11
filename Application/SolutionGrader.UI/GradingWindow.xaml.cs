@@ -838,13 +838,15 @@ namespace SolutionGrader.UI
                                         // CRITICAL FIX: Periodic orphaned container cleanup during batch grading
                                         // Clean up every batch (MaxParallelStudents) to prevent container accumulation
                                         // This addresses the issue: "container won't get cleaned up for the final batches"
-                                        if (currentCompletedIndex % _configuration.MaxParallelStudents == 0)
+                                        // Skip cleanup at start (index 0) and only clean after completing each batch
+                                        if (currentCompletedIndex > 0 && currentCompletedIndex % _configuration.MaxParallelStudents == 0)
                                         {
                                             try
                                             {
-                                                _logger.LogInfo($"[Container Cleanup] Batch {currentCompletedIndex / _configuration.MaxParallelStudents} completed - cleaning up orphaned containers");
+                                                var batchNumber = currentCompletedIndex / _configuration.MaxParallelStudents;
+                                                _logger.LogInfo($"[Container Cleanup] Batch {batchNumber} completed ({currentCompletedIndex} students) - cleaning up orphaned containers");
                                                 _gradingService.DisposeAllContainers(_configuration);
-                                                _logger.LogInfo($"[Container Cleanup] Orphaned container cleanup completed for batch");
+                                                _logger.LogInfo($"[Container Cleanup] Orphaned container cleanup completed for batch {batchNumber}");
                                             }
                                             catch (Exception cleanupEx)
                                             {
