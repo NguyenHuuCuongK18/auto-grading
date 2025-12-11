@@ -55,6 +55,12 @@ namespace SolutionGrader.UI
         private readonly ObservableCollection<StudentSolution> _students = new ObservableCollection<StudentSolution>();
         private System.Windows.Data.CollectionViewSource? _studentsViewSource;
         
+        // CRITICAL: Lock for thread-safe access to _students collection
+        // ObservableCollection is NOT thread-safe. Multiple worker threads calling _students.ToList()
+        // simultaneously can cause "non-concurrent collections" exception during batch grading.
+        // This lock ensures only one thread can enumerate the collection at a time.
+        private readonly object _studentsLock = new object();
+        
         // Log file paths for display (logs written to files, not shown in UI for performance)
         private string? _systemLogPath;
         private string? _currentStudentLogPath;
@@ -269,10 +275,13 @@ namespace SolutionGrader.UI
             // FIXED: Ensure UI updates are marshalled to UI thread and force DataGrid refresh
             // Select all students with this paper number
             int selectedCount = 0;
-            foreach (var student in _students.Where(s => s.PaperNo == paperNo))
+            lock (_studentsLock)
             {
-                student.IsSelected = true;
-                selectedCount++;
+                foreach (var student in _students.Where(s => s.PaperNo == paperNo))
+                {
+                    student.IsSelected = true;
+                    selectedCount++;
+                }
             }
             
             // Force DataGrid to refresh its display to show updated checkbox states
@@ -316,17 +325,24 @@ namespace SolutionGrader.UI
             // FIXED: Ensure all selection state changes are visible to the DataGrid
             // Step 1: Unselect all students (clears previous selections)
             int unselectedCount = 0;
-            foreach (var student in _students)
+            lock (_studentsLock)
             {
-                if (student.IsSelected)
+                foreach (var student in _students)
                 {
-                    student.IsSelected = false;
-                    unselectedCount++;
+                    if (student.IsSelected)
+                    {
+                        student.IsSelected = false;
+                        unselectedCount++;
+                    }
                 }
             }
             
             // Step 2: Apply selection to the specified index range
-            var studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            List<StudentSolution> studentsInRange;
+            lock (_studentsLock)
+            {
+                studentsInRange = ApplyIndexRange(_students.ToList(), startIndex, endIndex);
+            }
             int selectedCount = 0;
             foreach (var student in studentsInRange)
             {
@@ -372,9 +388,12 @@ namespace SolutionGrader.UI
         /// </summary>
         private void SelectAll_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var student in _students)
+            lock (_studentsLock)
             {
-                student.IsSelected = true;
+                foreach (var student in _students)
+                {
+                    student.IsSelected = true;
+                }
             }
             dgStudents.Items.Refresh();
             _logger.LogInfo("Selected all students");
@@ -385,9 +404,12 @@ namespace SolutionGrader.UI
         /// </summary>
         private void UnselectAll_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var student in _students)
+            lock (_studentsLock)
             {
-                student.IsSelected = false;
+                foreach (var student in _students)
+                {
+                    student.IsSelected = false;
+                }
             }
             dgStudents.Items.Refresh();
             _logger.LogInfo("Unselected all students");
@@ -444,7 +466,11 @@ namespace SolutionGrader.UI
             
             if (selectedOnly)
             {
-                var selectedStudents = _students.Where(s => s.IsSelected).ToList();
+                List<StudentSolution> selectedStudents;
+                lock (_studentsLock)
+                {
+                    selectedStudents = _students.Where(s => s.IsSelected).ToList();
+                }
                 var notSuccessStudents = selectedStudents.Where(s => s.Status != GradingStatus.Success).ToList();
                 _logger.LogInfo($"Students with IsSelected=true: {selectedStudents.Count}");
                 _logger.LogInfo($"Students with IsSelected=true AND Status!=Success: {notSuccessStudents.Count}");
@@ -458,7 +484,11 @@ namespace SolutionGrader.UI
             else
             {
                 // Log status distribution for "Start All" mode
-                var statusGroups = _students.GroupBy(s => s.Status).OrderBy(g => g.Key);
+                List<IGrouping<GradingStatus, StudentSolution>> statusGroups;
+                lock (_studentsLock)
+                {
+                    statusGroups = _students.GroupBy(s => s.Status).OrderBy(g => g.Key).ToList();
+                }
                 _logger.LogInfo("Status distribution of all students:");
                 foreach (var group in statusGroups)
                 {
@@ -468,9 +498,14 @@ namespace SolutionGrader.UI
             
             // Get students to grade based on selection
             // FIXED: Both modes now use the same filtering logic - exclude only Success status
-            var studentsToGrade = selectedOnly
-                ? _students.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
-                : _students.Where(s => s.Status != GradingStatus.Success).ToList();
+            // CRITICAL: Lock collection access for thread safety
+            List<StudentSolution> studentsToGrade;
+            lock (_studentsLock)
+            {
+                studentsToGrade = selectedOnly
+                    ? _students.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
+                    : _students.Where(s => s.Status != GradingStatus.Success).ToList();
+            }
             
             _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
             
@@ -647,7 +682,13 @@ namespace SolutionGrader.UI
                         await GradeStudentAsync(student, _cancellationTokenSource.Token);
                         
                         // Write results after each student
-                        _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                        // CRITICAL: Lock access to _students collection for thread safety
+                        List<StudentSolution> studentsSnapshot;
+                        lock (_studentsLock)
+                        {
+                            studentsSnapshot = _students.ToList();
+                        }
+                        _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
                         
                         UpdateStatusBar();
                     }
@@ -770,8 +811,14 @@ namespace SolutionGrader.UI
                                         
                                         // Write results after each student
                                         // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
-                                        // No need for lock - the ResultWriter handles thread safety internally
-                                        _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                        // CRITICAL: Lock access to _students collection for thread safety
+                                        // Multiple workers calling ToList() simultaneously can cause collection corruption
+                                        List<StudentSolution> studentsSnapshot;
+                                        lock (_studentsLock)
+                                        {
+                                            studentsSnapshot = _students.ToList();
+                                        }
+                                        _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
                                         
                                         int currentCompletedIndex;
                                         lock (completedLock)
@@ -808,7 +855,14 @@ namespace SolutionGrader.UI
                                             student.StatusMessage = $"Worker crashed: {ex.Message}";
                                             student.EndTime = DateTime.Now;
                                             UpdateStudentInUI(student);
-                                            _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                                            
+                                            // CRITICAL: Lock access to _students collection for thread safety
+                                            List<StudentSolution> studentsSnapshot;
+                                            lock (_studentsLock)
+                                            {
+                                                studentsSnapshot = _students.ToList();
+                                            }
+                                            _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
                                             
                                             int currentCompletedIndex;
                                             lock (completedLock)
@@ -874,7 +928,13 @@ namespace SolutionGrader.UI
                             }
                             
                             // Write final results with updated statuses
-                            _resultWriter.WriteStudentsSolutionSummary(_students.ToList());
+                            // CRITICAL: Lock access to _students collection for thread safety
+                            List<StudentSolution> studentsSnapshot;
+                            lock (_studentsLock)
+                            {
+                                studentsSnapshot = _students.ToList();
+                            }
+                            _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
                             
                             _logger.LogError($"[CRITICAL BUG DETECTED] Marked {lostStudents.Count} lost students as Failed");
                             _logger.LogError("[CRITICAL BUG DETECTED] Please report this bug with the log files");
@@ -1273,9 +1333,12 @@ namespace SolutionGrader.UI
             
             _logger.LogInfo($"Resetting all {_students.Count} students and deleting result folders...");
             
-            foreach (var student in _students)
+            lock (_studentsLock)
             {
-                ResetStudent(student);
+                foreach (var student in _students)
+                {
+                    ResetStudent(student);
+                }
             }
             
             dgStudents.Items.Refresh();
@@ -1297,7 +1360,11 @@ namespace SolutionGrader.UI
                 return;
             }
             
-            var selectedStudents = _students.Where(s => s.IsSelected).ToList();
+            List<StudentSolution> selectedStudents;
+            lock (_studentsLock)
+            {
+                selectedStudents = _students.Where(s => s.IsSelected).ToList();
+            }
             
             if (selectedStudents.Count == 0)
             {
@@ -1508,29 +1575,34 @@ namespace SolutionGrader.UI
         {
             // OPTIMIZED: Single-pass iteration through students collection
             // Previously iterated 4-5 times, now only once for better performance
-            var total = _students.Count;
-            int success = 0, failed = 0, notRun = 0;
+            // CRITICAL: Lock access to ensure thread-safe enumeration during batch grading
+            int total, success = 0, failed = 0, notRun = 0;
             DateTime? latestEndTime = null;
             
-            foreach (var student in _students)
+            lock (_studentsLock)
             {
-                switch (student.Status)
-                {
-                    case GradingStatus.Success:
-                        success++;
-                        break;
-                    case GradingStatus.Failed:
-                        failed++;
-                        break;
-                    case GradingStatus.Not_Run:
-                        notRun++;
-                        break;
-                }
+                total = _students.Count;
                 
-                // Track latest end time for session duration calculation
-                if (student.EndTime.HasValue && (!latestEndTime.HasValue || student.EndTime.Value > latestEndTime.Value))
+                foreach (var student in _students)
                 {
-                    latestEndTime = student.EndTime;
+                    switch (student.Status)
+                    {
+                        case GradingStatus.Success:
+                            success++;
+                            break;
+                        case GradingStatus.Failed:
+                            failed++;
+                            break;
+                        case GradingStatus.Not_Run:
+                            notRun++;
+                            break;
+                    }
+                    
+                    // Track latest end time for session duration calculation
+                    if (student.EndTime.HasValue && (!latestEndTime.HasValue || student.EndTime.Value > latestEndTime.Value))
+                    {
+                        latestEndTime = student.EndTime;
+                    }
                 }
             }
             
