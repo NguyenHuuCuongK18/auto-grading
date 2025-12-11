@@ -3895,7 +3895,7 @@ namespace SolutionGrader.Core.Services
                     {
                         // No matching packet found - expected flow is MISSING
                         // Fill in empty actual columns
-                        netWs.Cell(netRow, col++).Value = missingMessage;  // ActualFlags
+                        netWs.Cell(netRow, col++).Value = "(missing)";  // ActualFlags
                         netWs.Cell(netRow, col++).Value = "";  // ActualState
 
                         if (isHttpProtocol)

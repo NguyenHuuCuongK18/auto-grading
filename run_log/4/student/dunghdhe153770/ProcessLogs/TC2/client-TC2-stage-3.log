@@ -1,9 +1,0 @@
-
---- Server Response ---
-Expression: 5 + 5
-Status: success
-Result: 10
-Message: Calculation completed successfully
-----------------------
-
-Enter expression: 
