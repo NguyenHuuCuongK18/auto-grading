@@ -41,18 +41,18 @@ RUN mkdir -p /apps/server /apps/client /scripts
 
 # Copy and compile the delay_close library for LD_PRELOAD injection
 # This library intercepts close() syscall and adds 50ms delay to force 4-way TCP handshake
-COPY delay_close.c /tmp/delay_close.c
+COPY DockerImage/delay_close.c /tmp/delay_close.c
 RUN gcc -fPIC -shared -o /usr/lib/libdelay_close.so /tmp/delay_close.c -ldl && \
     rm /tmp/delay_close.c
 
 # Copy supervisord configuration
-COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
+COPY DockerImage/supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Copy control script, entrypoint, and wrapper scripts
-COPY unified-control.sh /scripts/unified-control.sh
-COPY unified-entrypoint.sh /scripts/unified-entrypoint.sh
-COPY server-wrapper.sh /scripts/server-wrapper.sh
-COPY client-wrapper.sh /scripts/client-wrapper.sh
+COPY DockerImage/unified-control.sh /scripts/unified-control.sh
+COPY DockerImage/unified-entrypoint.sh /scripts/unified-entrypoint.sh
+COPY DockerImage/server-wrapper.sh /scripts/server-wrapper.sh
+COPY DockerImage/client-wrapper.sh /scripts/client-wrapper.sh
 
 # CRITICAL FIX: Convert Windows line endings (CRLF) to Unix line endings (LF)
 # This prevents "exec /scripts/unified-entrypoint.sh: no such file or directory" errors

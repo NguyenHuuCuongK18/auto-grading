@@ -1,0 +1,6 @@
+Client connected from 127.0.0.1:56622
+Received from 127.0.0.1:56622: S001
+Sent to 127.0.0.1:56622: {"StudentId":"S001","Name":"John Smith","Major":"Computer Science","Year":3,"GPA":3.5,"Status":"success","Message":"Student information retrieved successfully"}
+
+Client from 127.0.0.1:56622 disconnected
+

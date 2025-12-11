@@ -1,0 +1,6 @@
+Client connected from 127.0.0.1:56154
+Received from 127.0.0.1:56154: Sabc
+Sent to 127.0.0.1:56154: {"StudentId":"Sabc","Name":null,"Major":null,"Year":null,"GPA":null,"Status":"error","Message":"Invalid student ID format. Expected: S followed by 3 digits"}
+
+Client from 127.0.0.1:56154 disconnected
+
