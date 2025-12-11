@@ -179,15 +179,22 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-        /// Duration of grading in human-readable format
+        /// Duration of grading in human-readable format.
+        /// Only calculates duration ONCE when grading finishes (EndTime is set).
+        /// Returns "-" when grading hasn't started or is still in progress.
+        /// This prevents live duration updates during grading which could cause
+        /// unnecessary UI refreshes and performance issues.
         /// </summary>
         public string Duration
         {
             get
             {
-                if (!StartTime.HasValue) return "-";
-                var end = EndTime ?? DateTime.Now;
-                var duration = end - StartTime.Value;
+                // Only calculate duration when both StartTime and EndTime are set
+                // This ensures duration is calculated ONCE when grading finishes,
+                // not continuously updated while grading is in progress
+                if (!StartTime.HasValue || !EndTime.HasValue) return "-";
+                
+                var duration = EndTime.Value - StartTime.Value;
                 return duration.TotalMinutes < 1
                     ? $"{duration.Seconds}s"
                     : $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
