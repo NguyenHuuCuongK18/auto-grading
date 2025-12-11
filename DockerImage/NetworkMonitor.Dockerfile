@@ -1,36 +1,61 @@
 # Network Monitor Container for Sidecar Pattern
 #
-# This container runs tcpdump to capture network traffic on the loopback interface
-# when attached to a unified container via --net=container.
+# This container uses SharpPcap/PacketDotNet for real-time packet capture,
+# matching the EXACT behavior of MiddlewareSniffPort used for testkit generation.
 #
-# BUILD COMMAND:
-#   docker build -t fptuxaes/network-monitor:latest -f NetworkMonitor.Dockerfile .
+# BUILD COMMAND (from repository root):
+#   docker build -t fptuxaes/network-monitor:latest -f DockerImage/NetworkMonitor.Dockerfile .
 #
-# CRITICAL DESIGN:
-#   - Captures on loopback (-i lo) to catch localhost traffic inside unified container
-#   - NO port filtering - captures ALL traffic to detect student mistakes
-#   - Packet-buffered mode (-U) writes immediately, safe if container crashes
-#   - Uses Debian (Alpine has persistent TLS issues with package repositories in CI)
+# CRITICAL DESIGN (matching MiddlewareSniffPort):
+#   - Uses SharpPcap for real-time packet capture (not tcpdump)
+#   - Uses PacketDotNet for packet parsing  
+#   - Captures on loopback (lo) to catch localhost traffic inside unified container
+#   - Writes structured JSON output (not raw PCAP) for reliable parsing
+#   - Flag format: comma-separated (e.g., "FIN, ACK") 
+#   - Flag order: FIN, SYN, RST, PSH, ACK, URG
 #
-# Use Debian slim for reliability (Alpine has TLS certificate issues)
-FROM debian:bullseye-slim
+# ADVANTAGES OVER TCPDUMP:
+#   - Real-time parsing - no buffering/timing issues
+#   - Structured output - no PCAP parsing needed
+#   - Exact flag format match with testkit expectations
+#   - No accumulation issues between test cases
+#
+# MULTI-STAGE BUILD for smaller image size
 
-# Install tcpdump (minimal dependencies, reliable package repository)
+# Stage 1: Build the .NET application
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy project files from Lib/NetworkMonitorSidecar
+COPY Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj Lib/NetworkMonitorSidecar/
+RUN dotnet restore Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj -r linux-x64
+
+# Copy source and publish
+COPY Lib/NetworkMonitorSidecar/ Lib/NetworkMonitorSidecar/
+RUN dotnet publish Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj \
+    -c Release -r linux-x64 --self-contained -o /app/publish
+
+# Stage 2: Runtime image
+FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-bookworm-slim
+
+# Install libpcap (required for SharpPcap packet capture)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tcpdump && \
+    apt-get install -y --no-install-recommends libpcap0.8 && \
     rm -rf /var/lib/apt/lists/*
 
-# Create a directory for the output files
-WORKDIR /data
+WORKDIR /app
 
-# Define a volume so you don't forget to mount it
+# Copy published application from build stage
+COPY --from=build /app/publish .
+
+# Create data directory for output files
+RUN mkdir -p /data
 VOLUME ["/data"]
 
-# ENTRYPOINT ensures 'tcpdump' is always the executable
-ENTRYPOINT ["tcpdump"]
+# Set entrypoint to the network monitor application
+ENTRYPOINT ["/app/NetworkMonitorSidecar"]
 
-# CMD sets the default arguments:
-# -i lo  : Listen on Loopback (CRITICAL for your Fat Container)
-# -w ... : Save to file named 'capture.pcap'
-# -U     : 'Packet-Buffered' mode (writes to file immediately, safer if container crashes)
-CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
+# Default arguments:
+# - Port 4000 (can be overridden)
+# - Output to /data/packets.jsonl (JSON lines format for easy parsing)
+CMD ["4000", "/data/packets.jsonl"]
