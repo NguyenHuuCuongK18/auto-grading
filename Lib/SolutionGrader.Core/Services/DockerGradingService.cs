@@ -2404,14 +2404,19 @@ namespace SolutionGrader.Core.Services
                         // The ACK should be from B to A (same direction as the second FIN-ACK)
                         // This transforms: FIN-ACK(A→B), FIN-ACK(B→A), ACK(A→B)
                         // Into:            FIN-ACK(A→B), ACK(B→A), FIN-ACK(B→A), ACK(A→B)
+                        // Calculate timestamp as midpoint between current and next packets
+                        // This ensures correct ordering even with high-precision timestamps
+                        var midpointTicks = (current.Timestamp.Ticks + next.Timestamp.Ticks) / 2;
+                        var syntheticTimestamp = new DateTime(midpointTicks);
+                        
                         var syntheticAck = new CapturedNetworkPacket
                         {
                             Stage = current.Stage,
-                            Timestamp = current.Timestamp.AddMilliseconds(1), // Slightly after the FIN
+                            Timestamp = syntheticTimestamp,
                             Flags = "ACK",
                             State = "FIN_WAIT",
-                            SourceRole = next.SourceRole,        // Same as the second FIN-ACK's source
-                            DestinationRole = next.DestinationRole,  // Same as the second FIN-ACK's destination
+                            SourceRole = next.SourceRole,        // Same as the second FIN-ACK's source (B)
+                            DestinationRole = next.DestinationRole,  // Same as the second FIN-ACK's destination (A)
                             Source = next.Source ?? current.Destination ?? "",
                             Destination = next.Destination ?? current.Source ?? "",
                             Protocol = current.Protocol ?? "TCP",
