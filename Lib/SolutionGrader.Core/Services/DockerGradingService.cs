@@ -3345,7 +3345,7 @@ namespace SolutionGrader.Core.Services
             
             try
             {
-                // Stop all processes in the container first
+                // Stop all processes in the container
                 try
                 {
                     _commandExecutor.RunCommand($"docker exec {unifiedContainer} /scripts/unified-control.sh StopAll", null, null, 5000);
@@ -3536,6 +3536,7 @@ namespace SolutionGrader.Core.Services
         /// 3. Remove the monitor container and wait for removal to complete
         /// 
         /// The output file (JSON lines) is already on the host due to volume mounting.
+        /// The container stop ensures any buffered packets are flushed before removal.
         /// CRITICAL: Waits for container removal to prevent zombie containers during batch grading.
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
@@ -3546,14 +3547,14 @@ namespace SolutionGrader.Core.Services
             
             try
             {
-                // Stop the container (this flushes tcpdump buffer)
+                // Stop the container to ensure SharpPcap flushes any buffered packets
                 if (_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Stopping container to flush tcpdump buffer...");
+                    OnProgress($"[Monitor] Stopping container to flush SharpPcap buffer...");
                     _commandExecutor.RunCommand($"docker stop {monitorContainer}", null, null, 10000);
                     
-                    // Wait for clean shutdown
-                    await Task.Delay(500);
+                    // Wait for clean shutdown - SharpPcap has AutoFlush=true so buffering is minimal
+                    await Task.Delay(1000);
                 }
                 
                 // Verify pcap file exists on host (should be there via volume mount)
