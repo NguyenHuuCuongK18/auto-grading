@@ -1,0 +1,5 @@
+Error: Failed to parse server response
+
+Raw response: {"StudentExists":false,"StudentName":"","Message":"Only 0 digits","students":[]}{"StudentExists":false,"StudentName":"","Message":"","students":[]}
+
+Enter Student ID: 

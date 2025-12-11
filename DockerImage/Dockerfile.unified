@@ -5,6 +5,14 @@
 # Processes communicate via localhost (127.0.0.1) to eliminate proxy behavior.
 # Supervisord manages process lifecycle based on test case actions.
 #
+# TCP 4-WAY HANDSHAKE ENFORCEMENT:
+# Uses LD_PRELOAD injection with libdelay_close.so to intercept close() syscall
+# and add a 50ms delay. This forces Linux to send proper 4-way TCP close:
+#   FIN-ACK -> ACK -> FIN-ACK -> ACK (4 packets)
+# Instead of the default 3-way close where ACK is piggybacked on FIN:
+#   FIN-ACK -> FIN-ACK -> ACK (3 packets)
+# This ensures network flow captures match Windows-generated testkits.
+#
 # Build Command:
 #   docker build -t fptuxaes/aes-dotnet8-console:latest -f DockerImage/Dockerfile.unified DockerImage/
 #
@@ -16,10 +24,12 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0
 # Install supervisord for process management
 # Install dos2unix to automatically fix Windows line endings (CRLF→LF) in shell scripts
 # This prevents "exec /scripts/unified-entrypoint.sh: no such file or directory" errors
+# Install iproute2 for 'ip route' command used to enable quickack on loopback
+# Install gcc for compiling the delay_close library
 # Install dependencies with retry logic to handle transient network errors
 RUN apt-get update && \
     for i in $(seq 1 3); do \
-        apt-get install -y supervisor netcat-openbsd procps dos2unix && break || sleep 5; \
+        apt-get install -y supervisor netcat-openbsd procps dos2unix iproute2 gcc && break || sleep 5; \
     done && \
     rm -rf /var/lib/apt/lists/*
 
@@ -29,14 +39,20 @@ RUN apt-get update && \
 # /scripts - Control scripts for supervisorctl
 RUN mkdir -p /apps/server /apps/client /scripts
 
+# Copy and compile the delay_close library for LD_PRELOAD injection
+# This library intercepts close() syscall and adds 50ms delay to force 4-way TCP handshake
+COPY DockerImage/delay_close.c /tmp/delay_close.c
+RUN gcc -fPIC -shared -o /usr/lib/libdelay_close.so /tmp/delay_close.c -ldl && \
+    rm /tmp/delay_close.c
+
 # Copy supervisord configuration
-COPY supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
+COPY DockerImage/supervisord-unified.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Copy control script, entrypoint, and wrapper scripts
-COPY unified-control.sh /scripts/unified-control.sh
-COPY unified-entrypoint.sh /scripts/unified-entrypoint.sh
-COPY server-wrapper.sh /scripts/server-wrapper.sh
-COPY client-wrapper.sh /scripts/client-wrapper.sh
+COPY DockerImage/unified-control.sh /scripts/unified-control.sh
+COPY DockerImage/unified-entrypoint.sh /scripts/unified-entrypoint.sh
+COPY DockerImage/server-wrapper.sh /scripts/server-wrapper.sh
+COPY DockerImage/client-wrapper.sh /scripts/client-wrapper.sh
 
 # CRITICAL FIX: Convert Windows line endings (CRLF) to Unix line endings (LF)
 # This prevents "exec /scripts/unified-entrypoint.sh: no such file or directory" errors

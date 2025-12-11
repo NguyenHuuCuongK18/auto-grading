@@ -1,0 +1,2 @@
+﻿{"timestamp":"2025-12-11T09:16:43.3836940Z","sourceIp":"127.0.0.1","sourcePort":49068,"destinationIp":"127.0.0.1","destinationPort":4000,"sourceRole":"Client","destinationRole":"Server","flags":"SYN","state":"Client connecting to server (SYN)","data":null,"payloadLength":0}
+{"timestamp":"2025-12-11T09:16:43.3837070Z","sourceIp":"127.0.0.1","sourcePort":4000,"destinationIp":"127.0.0.1","destinationPort":49068,"sourceRole":"Server","destinationRole":"Client","flags":"RST, ACK","state":"Connection reset","data":null,"payloadLength":0}

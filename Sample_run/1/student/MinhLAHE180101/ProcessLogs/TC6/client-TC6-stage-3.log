@@ -1,0 +1,9 @@
+
+========== Server Response ==========
+Student ID: s001
+Status: error
+Error: Invalid student ID format. Expected: S followed by 3 digits
+Message: Invalid student ID format. Expected: S followed by 3 digits
+=====================================
+
+Enter Student ID: 
