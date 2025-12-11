@@ -1,0 +1,5 @@
+Error: Failed to parse server response
+
+Raw response: {"StudentExists":false,"StudentName":"","Message":"Lowercase \u0027s\u0027","students":[]}{"StudentExists":false,"StudentName":"","Message":"Only 0 digits","students":[]}{"StudentExists":false,"StudentName":"","Message":"","students":[]}
+
+Enter Student ID: 

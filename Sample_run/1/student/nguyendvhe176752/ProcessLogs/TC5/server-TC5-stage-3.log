@@ -1,0 +1,5 @@
+Client connected from 127.0.0.1:43404
+Received from 127.0.0.1:43404: s001
+Sent to 127.0.0.1:43404: {"StudentId":"s001","Name":null,"Major":null,"Year":null,"GPA":null,"Status":"error","Message":"Invalid student ID format. Expected: S followed by 3 digits"}
+Client from 127.0.0.1:43404 disconnected
+
