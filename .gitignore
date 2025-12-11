@@ -571,3 +571,4 @@ coverage*[.json, .xml, .info]
 
 batchstudent/Results/
 Students_Fixed/
+Students_compat/
