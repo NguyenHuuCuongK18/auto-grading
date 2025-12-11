@@ -155,46 +155,64 @@ public class SharpPcapParsingService
     }
     
     /// <summary>
-    /// Parse TCP flags into human-readable format
+    /// Parse TCP flags into human-readable format.
+    /// 
+    /// CRITICAL FIX: Output comma-separated format (e.g., "SYN, ACK", "FIN, ACK")
+    /// to match the testkit Detail.xlsx format. The previous hyphenated format
+    /// (e.g., "SYN-ACK", "FIN-ACK") caused comparison failures.
+    /// 
+    /// TCP Flag Reference:
+    /// - SYN: Connection initiation
+    /// - ACK: Acknowledgment
+    /// - PSH: Push data immediately
+    /// - FIN: Connection termination
+    /// - RST: Connection reset
     /// </summary>
     private string ParseTcpFlags(TcpPacket tcp)
     {
+        // CRITICAL FIX: Build flags list in standard order and use comma-separated format
+        // This matches the testkit Detail.xlsx format (e.g., "SYN, ACK", "FIN, ACK")
         var flags = new List<string>();
         
-        if (tcp.Synchronize) flags.Add("SYN");
-        if (tcp.Acknowledgment && flags.Count == 0) flags.Add("ACK");
-        if (tcp.Push) flags.Add("PSH");
+        // Add flags in priority order (same order as MiddlewareSniffPort reference implementation)
         if (tcp.Finished) flags.Add("FIN");
+        if (tcp.Synchronize) flags.Add("SYN");
         if (tcp.Reset) flags.Add("RST");
+        if (tcp.Push) flags.Add("PSH");
+        if (tcp.Acknowledgment) flags.Add("ACK");
+        if (tcp.Urgent) flags.Add("URG");
         
-        // Handle combined flags
-        if (tcp.Synchronize && tcp.Acknowledgment)
-            return "SYN-ACK";
-        if (tcp.Push && tcp.Acknowledgment)
-            return "PSH-ACK";
-        if (tcp.Finished && tcp.Acknowledgment)
-            return "FIN-ACK";
-        if (tcp.Reset && tcp.Acknowledgment)
-            return "RST-ACK";
-        
+        // Return comma-separated format to match testkit expectations
+        // Examples: "SYN", "SYN, ACK", "PSH, ACK", "FIN, ACK", "ACK"
         return flags.Count > 0 ? string.Join(", ", flags) : "UNKNOWN";
     }
     
     /// <summary>
-    /// Determine TCP state based on flags
+    /// Determine TCP state based on flags.
+    /// 
+    /// CRITICAL FIX: Updated to handle comma-separated flag format
+    /// (e.g., "SYN, ACK" instead of "SYN-ACK") to match ParseTcpFlags output.
     /// </summary>
     private string DetermineState(string flags)
     {
-        return flags switch
-        {
-            "SYN" => "SYN_SENT",
-            "SYN-ACK" => "SYN_RECEIVED",
-            "ACK" => "ESTABLISHED",
-            "PSH-ACK" => "ESTABLISHED",
-            "FIN-ACK" => "FIN_WAIT",
-            "RST" or "RST-ACK" => "RESET",
-            _ => ""
-        };
+        // Normalize flags for comparison - handle both comma and hyphen separators
+        var normalizedFlags = flags.Replace("-", ", ").Replace("  ", " ");
+        
+        // Check for specific flag combinations using Contains for flexibility
+        if (normalizedFlags.Contains("RST"))
+            return "RESET";
+        if (normalizedFlags.Contains("SYN") && normalizedFlags.Contains("ACK"))
+            return "SYN_RECEIVED";
+        if (normalizedFlags.Contains("SYN"))
+            return "SYN_SENT";
+        if (normalizedFlags.Contains("FIN"))
+            return "FIN_WAIT";
+        if (normalizedFlags.Contains("PSH") && normalizedFlags.Contains("ACK"))
+            return "ESTABLISHED";
+        if (normalizedFlags.Contains("ACK"))
+            return "ESTABLISHED";
+        
+        return "";
     }
     
     // HTTP method detection set for O(1) lookup performance
