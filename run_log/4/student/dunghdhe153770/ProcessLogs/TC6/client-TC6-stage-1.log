@@ -1,7 +1,0 @@
-Calculator Client
-=================
-Connecting to server at 127.0.0.1:3000
-Enter mathematical expressions (e.g., '5 + 3')
-Press Enter (empty input) to exit
-
-Enter expression: 

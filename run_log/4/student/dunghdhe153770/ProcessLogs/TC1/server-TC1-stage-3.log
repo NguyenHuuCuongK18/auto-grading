@@ -1,4 +1,0 @@
-Client connected from 127.0.0.1:54596
-Recived from 127.0.0.1:54596
-Send to 127.0.0.1:54596 : {"Expression":"5 \u002B 4","Result":9,"Status":"success","Message":"Calculation completed successfully"}
-Client from 127.0.0.1:54596 disconnetecd
