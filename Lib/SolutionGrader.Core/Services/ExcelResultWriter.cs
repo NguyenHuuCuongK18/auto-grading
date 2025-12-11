@@ -103,7 +103,14 @@ namespace SolutionGrader.Core.Services
                 .GroupBy(p => p.Stage)
                 .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
             
+            // CRITICAL FIX: Group expected flows by stage for POSITIONAL matching
+            // This matches the CompareNetwork algorithm which uses position within stage
+            var expectedByStage = expectedNetworkFlows
+                .GroupBy(e => e.Stage)
+                .ToDictionary(g => g.Key, g => g.ToList());
+            
             // === SECTION 1: EXPECTED Network Flows ===
+            // CRITICAL: Use POSITIONAL matching to align with CompareNetwork algorithm
             if (expectedNetworkFlows.Count > 0)
             {
                 OnProgress($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
@@ -117,17 +124,32 @@ namespace SolutionGrader.Core.Services
                     netWs.Cell(netRow, 5).Value = "";
                     netWs.Cell(netRow, 6).Value = expectedFlow.Flags ?? "";
                     netWs.Cell(netRow, 7).Value = expectedFlow.State ?? "";
-                    netWs.Cell(netRow, 8).Value = "";
+                    netWs.Cell(netRow, 8).Value = expectedFlow.Data ?? "";
                     netWs.Cell(netRow, 9).Value = expectedFlow.SourceRole ?? "";
                     netWs.Cell(netRow, 10).Value = expectedFlow.DestinationRole ?? "";
                     
+                    // CRITICAL FIX: Use POSITIONAL matching - same algorithm as CompareNetwork
+                    // The expected flow at position N within its stage should match captured packet at position N
+                    
+                    // Get expected flows for this stage to determine position
+                    var expectedFlowsForStage = expectedByStage.TryGetValue(expectedFlow.Stage, out var expFlows) 
+                        ? expFlows 
+                        : new List<ExpectedNetworkFlow>();
+                    
+                    // Get captured packets for this stage
                     var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
                         ? packets 
                         : new List<CapturedNetworkPacket>();
                     
-                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
-                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
-                        normalizeFlags(expectedFlow.Flags) == normalizeFlags(p.Flags));
+                    // Find position of this expected flow within its stage
+                    int positionInStage = expectedFlowsForStage.IndexOf(expectedFlow);
+                    
+                    // POSITIONAL MATCHING: Get the packet at the same position
+                    CapturedNetworkPacket? matchingPacket = null;
+                    if (positionInStage >= 0 && positionInStage < actualPacketsForStage.Count)
+                    {
+                        matchingPacket = actualPacketsForStage[positionInStage];
+                    }
                     
                     if (matchingPacket != null)
                     {
@@ -160,8 +182,6 @@ namespace SolutionGrader.Core.Services
                         // If any field doesn't match exactly, mark as FAIL
                         netWs.Cell(netRow, 18).Value = exactMatch ? "PASS" : "FAIL";
                         netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.LightPink;
-                        
-                        actualPacketsForStage.Remove(matchingPacket);
                     }
                     else
                     {
@@ -175,7 +195,7 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, 18).Value = "FAIL";
                         netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = XLColor.LightPink;
                         
-                        OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
+                        OnProgress($"[Network Sheet] Expected flow MISSING at stage {expectedFlow.Stage} position {positionInStage}: Flags={expectedFlow.Flags}, SourceRole={expectedFlow.SourceRole}, DestRole={expectedFlow.DestinationRole}");
                     }
                     
                     netRow++;
@@ -183,14 +203,21 @@ namespace SolutionGrader.Core.Services
             }
             
             // === SECTION 2: Additional Captured Packets ===
+            // With POSITIONAL matching, "additional" packets are those beyond the expected count
             foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
-                var remainingPackets = capturesByStage[stage];
-                if (remainingPackets.Count > 0)
+                var allPacketsForStage = capturesByStage[stage];
+                var expectedCountForStage = expectedByStage.TryGetValue(stage, out var expList) 
+                    ? expList.Count 
+                    : 0;
+                
+                // Get packets beyond the expected count (these are "additional" not validated)
+                if (allPacketsForStage.Count > expectedCountForStage)
                 {
-                    OnProgress($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    var additionalPackets = allPacketsForStage.Skip(expectedCountForStage).ToList();
+                    OnProgress($"[Network Sheet] Found {additionalPackets.Count} additional (not validated) packets at stage {stage}");
                     
-                    foreach (var packet in remainingPackets)
+                    foreach (var packet in additionalPackets)
                     {
                         netWs.Cell(netRow, 1).Value = packet.Stage;
                         netWs.Cell(netRow, 2).Value = "(Not validated by this test case)";

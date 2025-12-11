@@ -3731,12 +3731,20 @@ namespace SolutionGrader.Core.Services
                 .GroupBy(p => p.Stage)
                 .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
             
+            // CRITICAL FIX: Group expected flows by stage for POSITIONAL matching
+            // This matches the CompareNetwork algorithm which uses position within stage
+            // Expected flow at position N in stage S should match captured packet at position N in stage S
+            var expectedByStage = expectedNetworkFlows
+                .GroupBy(e => e.Stage)
+                .ToDictionary(g => g.Key, g => g.ToList());
+            
             // Determine protocol type once for the entire Network sheet
             var protocol = _currentTestKitProtocol ?? "TCP";
             bool isHttpProtocol = protocol.Equals("HTTP", StringComparison.OrdinalIgnoreCase);
             
             // === SECTION 1: EXPECTED Network Flows (from TestKit) ===
             // Show ALL expected flows with their matching actual captures
+            // CRITICAL: Use POSITIONAL matching to align with CompareNetwork algorithm
             if (expectedNetworkFlows.Count > 0)
             {
                 OnProgress($"[Network Sheet] Writing {expectedNetworkFlows.Count} expected network flows...");
@@ -3773,17 +3781,32 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, col++).Value = expectedFlow.DestinationRole ?? "";  // DestinationRole
                     }
                     
-                    // Find matching actual packet(s) for this expected flow
+                    // CRITICAL FIX: Use POSITIONAL matching - same algorithm as CompareNetwork
+                    // The expected flow at position N within its stage should match captured packet at position N
+                    // This ensures:
+                    // - ACK at position 2 matches captured packet 2 (not just "any ACK")
+                    // - FIN-ACK at position 7 matches captured packet 7 (not first FIN-ACK found)
+                    // - Proper 4-way handshake validation works correctly
+                    
+                    // Get expected flows for this stage to determine position
+                    var expectedFlowsForStage = expectedByStage.TryGetValue(expectedFlow.Stage, out var expFlows) 
+                        ? expFlows 
+                        : new List<ExpectedNetworkFlow>();
+                    
+                    // Get captured packets for this stage
                     var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) 
                         ? packets 
                         : new List<CapturedNetworkPacket>();
                     
-                    // Try to find a packet that matches the expected flags
-                    // Find matching packet by comparing flags
-                    // Flags must match exactly (case-insensitive, order-normalized)
-                    var matchingPacket = actualPacketsForStage.FirstOrDefault(p => 
-                        !string.IsNullOrEmpty(expectedFlow.Flags) && 
-                        NormalizeFlags(expectedFlow.Flags) == NormalizeFlags(p.Flags));
+                    // Find position of this expected flow within its stage
+                    int positionInStage = expectedFlowsForStage.IndexOf(expectedFlow);
+                    
+                    // POSITIONAL MATCHING: Get the packet at the same position
+                    CapturedNetworkPacket? matchingPacket = null;
+                    if (positionInStage >= 0 && positionInStage < actualPacketsForStage.Count)
+                    {
+                        matchingPacket = actualPacketsForStage[positionInStage];
+                    }
                     
                     if (matchingPacket != null)
                     {
@@ -3843,9 +3866,15 @@ namespace SolutionGrader.Core.Services
                         }
                         else
                         {
-                            // TCP: Compare Data field
-                            if (!string.IsNullOrEmpty(expectedFlow.Data) && matchingPacket.Data != expectedFlow.Data)
-                                exactMatch = false;
+                            // TCP: Compare Data field STRICTLY (case-sensitive, trimmed)
+                            // Per user requirement: "data comparison is strict. if they do not match 100% including case -> FAIL"
+                            if (!string.IsNullOrEmpty(expectedFlow.Data) && 
+                                !expectedFlow.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var actualData = matchingPacket.Data ?? "";
+                                if (!actualData.Trim().Equals(expectedFlow.Data.Trim(), StringComparison.Ordinal))
+                                    exactMatch = false;
+                            }
                         }
                         
                         // STRICT GRADING: No PARTIAL status - only PASS or FAIL
@@ -3853,8 +3882,8 @@ namespace SolutionGrader.Core.Services
                         netWs.Cell(netRow, col).Value = exactMatch ? "PASS" : "FAIL";
                         netWs.Cell(netRow, col).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.LightPink;
                         
-                        // Remove from list so we can identify extra packets later
-                        actualPacketsForStage.Remove(matchingPacket);
+                        // NOTE: With positional matching, we don't remove packets from list
+                        // The "Additional Captured Packets" section now shows packets beyond expected count
                     }
                     else
                     {
@@ -3895,7 +3924,8 @@ namespace SolutionGrader.Core.Services
             }
             
             // === SECTION 2: Additional Captured Packets (not validated by this test case) ===
-            // These packets were captured but not validated by the test case.
+            // With POSITIONAL matching, "additional" packets are those beyond the expected count.
+            // For example, if stage 3 expects 11 packets but captured 13, packets 12 and 13 are shown here.
             // This is NORMAL - test cases intentionally validate only specific aspects:
             //   - TC1 may only validate sending
             //   - TC2 may validate send + server confirm
@@ -3904,12 +3934,18 @@ namespace SolutionGrader.Core.Services
             // Extra packets are shown for information but DO NOT cause test failure.
             foreach (var stage in capturesByStage.Keys.OrderBy(k => k))
             {
-                var remainingPackets = capturesByStage[stage];
-                if (remainingPackets.Count > 0)
+                var allPacketsForStage = capturesByStage[stage];
+                var expectedCountForStage = expectedByStage.TryGetValue(stage, out var expList) 
+                    ? expList.Count 
+                    : 0;
+                
+                // Get packets beyond the expected count (these are "additional" not validated)
+                if (allPacketsForStage.Count > expectedCountForStage)
                 {
-                    OnProgress($"[Network Sheet] Found {remainingPackets.Count} additional (not validated) packets at stage {stage}");
+                    var additionalPackets = allPacketsForStage.Skip(expectedCountForStage).ToList();
+                    OnProgress($"[Network Sheet] Found {additionalPackets.Count} additional (not validated) packets at stage {stage} (expected {expectedCountForStage}, captured {allPacketsForStage.Count})");
                     
-                    foreach (var packet in remainingPackets)
+                    foreach (var packet in additionalPackets)
                     {
                         int col = 1;
                         
