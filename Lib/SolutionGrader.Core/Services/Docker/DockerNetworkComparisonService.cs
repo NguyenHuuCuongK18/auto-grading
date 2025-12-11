@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Domain.Models;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services.Docker
 {
@@ -119,7 +120,7 @@ namespace SolutionGrader.Core.Services.Docker
             }
             
             // Compare data (if expected)
-            if (!string.IsNullOrEmpty(expected.Data) && expected.Data != "No payload")
+            if (!string.IsNullOrEmpty(expected.Data) && expected.Data != NetworkKeywords.Data_NoPayload)
             {
                 if (!DataMatches(expected.Data, actual.Data ?? ""))
                 {

@@ -10,6 +10,18 @@ public static class NetworkKeywords
     public const string Protocol_TCP = "TCP";
     public const string Protocol_HTTP = "HTTP";
     
+    // Special data values
+    /// <summary>
+    /// Represents "no data expected" in Excel cells. Used when a network packet
+    /// should have no payload (e.g., SYN, ACK-only packets).
+    /// </summary>
+    public const string Data_None = "None";
+    
+    /// <summary>
+    /// Represents "no payload" for packets without data.
+    /// </summary>
+    public const string Data_NoPayload = "No payload";
+    
     // Network sheet column names (from new test kit format)
     public const string Col_Stage = "Stage";
     public const string Col_Time = "Time";

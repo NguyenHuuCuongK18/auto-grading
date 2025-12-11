@@ -2146,7 +2146,7 @@ namespace SolutionGrader.Core.Services
                     // Compare Data payload if expected data is provided (for TCP)
                     // Note: Expected data from Excel uses null or empty string to indicate "no data expected"
                     // We need to check if exp.Data is not null/empty AND not the string "None" (which Excel uses for null)
-                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals(NetworkKeywords.Data_None, StringComparison.OrdinalIgnoreCase))
                     {
                         var actualData = matchingPacket.Data ?? "";
                         var expectedData = exp.Data;
@@ -2220,7 +2220,7 @@ namespace SolutionGrader.Core.Services
                     // Log detailed comparison
                     if (exactMatch)
                     {
-                        var dataInfo = (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase)) 
+                        var dataInfo = (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals(NetworkKeywords.Data_None, StringComparison.OrdinalIgnoreCase)) 
                             ? $" with data='{exp.Data}'" : "";
                         OnProgress($"[COMPARISON] ✓ PASS - Stage {exp.Stage}: {exp.Flags} from {exp.SourceRole} to {exp.DestinationRole}{dataInfo}");
                     }
@@ -2232,7 +2232,7 @@ namespace SolutionGrader.Core.Services
                     var expectedStr = $"Flags={exp.Flags}, From={exp.SourceRole}, To={exp.DestinationRole}";
                     var actualStr = $"Flags={matchingPacket.Flags}, From={matchingPacket.SourceRole}, To={matchingPacket.DestinationRole}";
                     
-                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    if (!string.IsNullOrEmpty(exp.Data) && !exp.Data.Equals(NetworkKeywords.Data_None, StringComparison.OrdinalIgnoreCase))
                     {
                         expectedStr += $", Data={exp.Data}";
                         actualStr += $", Data={matchingPacket.Data ?? "(empty)"}";
@@ -3869,7 +3869,7 @@ namespace SolutionGrader.Core.Services
                             // TCP: Compare Data field STRICTLY (case-sensitive, trimmed)
                             // Per user requirement: "data comparison is strict. if they do not match 100% including case -> FAIL"
                             if (!string.IsNullOrEmpty(expectedFlow.Data) && 
-                                !expectedFlow.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                                !expectedFlow.Data.Equals(NetworkKeywords.Data_None, StringComparison.OrdinalIgnoreCase))
                             {
                                 var actualData = matchingPacket.Data ?? "";
                                 if (!actualData.Trim().Equals(expectedFlow.Data.Trim(), StringComparison.Ordinal))

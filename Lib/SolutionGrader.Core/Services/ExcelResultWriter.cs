@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using ClosedXML.Excel;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
 {
@@ -171,7 +172,7 @@ namespace SolutionGrader.Core.Services
                         // STRICT DATA COMPARISON: Data must match exactly (case-sensitive)
                         // Per user requirement: "data comparison is strict. if they do not match 100% including case -> FAIL"
                         if (!string.IsNullOrEmpty(expectedFlow.Data) && 
-                            !expectedFlow.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                            !expectedFlow.Data.Equals(NetworkKeywords.Data_None, StringComparison.OrdinalIgnoreCase))
                         {
                             var actualData = matchingPacket.Data ?? "";
                             if (!actualData.Trim().Equals(expectedFlow.Data.Trim(), StringComparison.Ordinal))
