@@ -2077,10 +2077,16 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
-            // STRICT 4-WAY TCP HANDSHAKE ENFORCEMENT:
-            // Linux TCP stack must be configured to send proper 4-way close (FIN-ACK -> ACK -> FIN-ACK -> ACK)
-            // This is enforced via quickack setting in the container entrypoint.
-            // No normalization/tolerance is applied - strict positional matching is used.
+            // LINUX 3-WAY TO 4-WAY TCP CLOSE NORMALIZATION:
+            // Linux TCP stack optimizes connection close to 3-way (FIN-ACK → FIN-ACK → ACK)
+            // Windows TCP stack uses 4-way (FIN-ACK → ACK → FIN-ACK → ACK)
+            // Since test kits expect Windows 4-way pattern, we normalize captured packets
+            // by injecting synthetic ACK packets where the 3-way pattern is detected.
+            //
+            // This normalization must happen BEFORE grouping by stage to ensure correct packet order.
+            var normalizedPackets = Normalize3WayTo4WayClose(allCapturedPackets.ToList());
+            
+            OnProgress($"[CompareNetwork] After 3→4 way normalization: {normalizedPackets.Count} packets (was {allCapturedPackets.Count})");
             
             // CRITICAL FIX: Positional/Sequential matching within each stage
             // Network flow order matters! Must match flow-by-flow in sequence.
@@ -2089,7 +2095,7 @@ namespace SolutionGrader.Core.Services
             //
             // Group expected flows by stage to handle per-stage sequential matching
             var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
-            var capturedByStage = allCapturedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            var capturedByStage = normalizedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
             
             foreach (var exp in expected)
             {
@@ -2336,9 +2342,125 @@ namespace SolutionGrader.Core.Services
             return set1.SetEquals(set2);
         }
         
-        // NOTE: NormalizeTcpCloseSequence was removed - we now enforce strict 4-way TCP handshake
-        // via quickack setting in the container entrypoint (unified-entrypoint.sh).
-        // This ensures Linux behaves like Windows with proper 4-way close sequence.
+        /// <summary>
+        /// Normalizes captured network packets from Linux 3-way TCP close to Windows 4-way TCP close.
+        /// 
+        /// PROBLEM:
+        /// Linux TCP stack optimizes connection close by combining ACK with FIN into a single packet:
+        ///   3-way (Linux):  FIN-ACK (A→B) → FIN-ACK (B→A) → ACK (A→B)
+        /// 
+        /// Windows TCP stack sends them separately:
+        ///   4-way (Windows): FIN-ACK (A→B) → ACK (B→A) → FIN-ACK (B→A) → ACK (A→B)
+        /// 
+        /// Since test kits are designed for Windows 4-way handshake, grading on Linux fails.
+        /// 
+        /// SOLUTION:
+        /// Detect the 3-way pattern (two consecutive FIN-ACK from opposite directions) and inject
+        /// a synthetic ACK packet between them to transform it into the expected 4-way pattern.
+        /// 
+        /// Pattern Detection:
+        /// - Packet[i] has FIN flag and is from Role A to Role B
+        /// - Packet[i+1] has FIN flag and is from Role B to Role A (opposite direction)
+        /// 
+        /// Transformation:
+        /// - Insert synthetic ACK packet from Role B to Role A between them
+        /// </summary>
+        /// <param name="packets">List of captured network packets (modified in place)</param>
+        /// <returns>List of normalized packets with synthetic ACK packets injected where needed</returns>
+        private List<CapturedNetworkPacket> Normalize3WayTo4WayClose(List<CapturedNetworkPacket> packets)
+        {
+            if (packets == null || packets.Count < 2)
+            {
+                return packets ?? new List<CapturedNetworkPacket>();
+            }
+            
+            var result = new List<CapturedNetworkPacket>();
+            int injectedCount = 0;
+            
+            for (int i = 0; i < packets.Count; i++)
+            {
+                var current = packets[i];
+                result.Add(current);
+                
+                // Check if this is a FIN packet and there's a next packet
+                if (i + 1 < packets.Count)
+                {
+                    var next = packets[i + 1];
+                    
+                    // Detect 3-way close pattern:
+                    // Current: FIN-ACK from Role A to Role B
+                    // Next: FIN-ACK from Role B to Role A (opposite direction, also has FIN)
+                    bool currentHasFin = HasFinFlag(current.Flags);
+                    bool nextHasFin = HasFinFlag(next.Flags);
+                    bool oppositeDirection = !string.IsNullOrEmpty(current.SourceRole) && 
+                                            !string.IsNullOrEmpty(next.SourceRole) &&
+                                            current.SourceRole == next.DestinationRole &&
+                                            current.DestinationRole == next.SourceRole;
+                    bool sameStage = current.Stage == next.Stage;
+                    
+                    if (currentHasFin && nextHasFin && oppositeDirection && sameStage)
+                    {
+                        // Inject synthetic ACK packet between them
+                        // The ACK should be from B to A (same direction as the second FIN-ACK)
+                        // This transforms: FIN-ACK(A→B), FIN-ACK(B→A), ACK(A→B)
+                        // Into:            FIN-ACK(A→B), ACK(B→A), FIN-ACK(B→A), ACK(A→B)
+                        // Calculate timestamp as midpoint between current and next packets
+                        // This ensures correct ordering even with high-precision timestamps
+                        var midpointTicks = (current.Timestamp.Ticks + next.Timestamp.Ticks) / 2;
+                        var syntheticTimestamp = new DateTime(midpointTicks);
+                        
+                        var syntheticAck = new CapturedNetworkPacket
+                        {
+                            Stage = current.Stage,
+                            Timestamp = syntheticTimestamp,
+                            Flags = "ACK",
+                            State = "FIN_WAIT",
+                            SourceRole = next.SourceRole,        // Same as the second FIN-ACK's source (B)
+                            DestinationRole = next.DestinationRole,  // Same as the second FIN-ACK's destination (A)
+                            Source = next.Source ?? current.Destination ?? "",
+                            Destination = next.Destination ?? current.Source ?? "",
+                            Protocol = current.Protocol ?? "TCP",
+                            Length = 0,  // ACK-only packets have no payload
+                            Info = "[Synthetic ACK - normalized from 3-way to 4-way close]",
+                            Data = null,
+                            SourcePort = next.SourcePort != 0 ? next.SourcePort : current.DestinationPort,
+                            DestinationPort = next.DestinationPort != 0 ? next.DestinationPort : current.SourcePort
+                        };
+                        
+                        result.Add(syntheticAck);
+                        injectedCount++;
+                        
+                        OnProgress($"[3Way→4Way] Injected synthetic ACK at stage {current.Stage}: " +
+                                  $"{syntheticAck.SourceRole}→{syntheticAck.DestinationRole} " +
+                                  $"(between FIN-ACK packets to normalize to 4-way close)");
+                    }
+                }
+            }
+            
+            if (injectedCount > 0)
+            {
+                OnProgress($"[3Way→4Way] Normalization complete: Injected {injectedCount} synthetic ACK packet(s)");
+                OnProgress($"[3Way→4Way] Original packet count: {packets.Count}, Normalized count: {result.Count}");
+            }
+            
+            return result;
+        }
+        
+        /// <summary>
+        /// Checks if a TCP flags string contains the FIN flag.
+        /// Handles various formats: "FIN", "FIN, ACK", "FIN-ACK", "ACK, FIN", etc.
+        /// </summary>
+        private static bool HasFinFlag(string? flags)
+        {
+            if (string.IsNullOrWhiteSpace(flags))
+            {
+                return false;
+            }
+            
+            // Parse flags into a set and check for FIN
+            var flagSet = ParseFlagsToSet(flags);
+            return flagSet.Contains("FIN");
+        }
         
         #endregion
         
