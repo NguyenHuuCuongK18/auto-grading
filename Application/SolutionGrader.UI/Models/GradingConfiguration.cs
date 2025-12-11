@@ -53,7 +53,7 @@ namespace SolutionGrader.UI.Models
         private int _codeContainerInternalPort = 0;
         private int _codeContainerHostPort = 0;
         private string _dockerNetwork = "auto-grading-network";
-        private int _gradingTimeoutSeconds = 60;
+        private int _gradingTimeoutSeconds = 180;
         private string _databaseImageName = "mcr.microsoft.com/mssql/server:2019-latest";
         private string _databaseContainerName = "auto-grading-sqlserver";
         private int _databaseContainerInternalPort = 1433;

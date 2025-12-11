@@ -47,13 +47,13 @@ namespace Domain.Models
         /// Total grading timeout in seconds (overall timeout for all test cases).
         /// Default: 60 seconds.
         /// </summary>
-        public int GradingTimeoutSeconds { get; set; } = 60;
+        public int GradingTimeoutSeconds { get; set; } = 180;
         
         /// <summary>
         /// Per-test-case timeout in seconds. If a test case takes longer than this,
         /// it is stopped and marked as failed. Default: 15 seconds.
         /// </summary>
-        public int TestCaseTimeoutSeconds { get; set; } = 15;
+        public int TestCaseTimeoutSeconds { get; set; } = 120;
         
         /// <summary>
         /// Enables DLL modification fallback when appsettings.json is not found.
