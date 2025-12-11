@@ -149,8 +149,14 @@ class Program
         // Step 3: Setup packet capture (matching MiddlewareSniffPort)
         _device.OnPacketArrival += OnPacketArrival;
         
-        // Open device in promiscuous mode with 1000ms read timeout
-        _device.Open(DeviceModes.Promiscuous, 1000);
+        // CRITICAL FIX: Use Promiscuous + MaxResponsiveness mode to minimize buffering and 
+        // ensure packets are delivered in the correct order. On Linux, libpcap uses a ring 
+        // buffer that can cause packets to be delivered out of order when they arrive very 
+        // close together (e.g., FIN packets within milliseconds of each other).
+        // 
+        // Also use a much smaller read timeout (10ms instead of 1000ms) to reduce buffering.
+        // This ensures packets are processed immediately rather than being batched.
+        _device.Open(DeviceModes.Promiscuous | DeviceModes.MaxResponsiveness, 10);
         
         // Set BPF filter for TCP only (like MiddlewareSniffPort with targeted ports)
         try

@@ -1377,8 +1377,9 @@ namespace SolutionGrader.Core.Services
                         if (!string.IsNullOrEmpty(expectedData) && 
                             !expectedData.Equals("None", StringComparison.OrdinalIgnoreCase))
                         {
-                            // Trim and compare case-insensitively
-                            if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                            // Trim and compare STRICTLY (case-sensitive, no normalization)
+                            // Network data must match exactly to catch encoding/casing bugs
+                            if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.Ordinal))
                             {
                                 matched = false;
                             }
