@@ -161,7 +161,52 @@ namespace SolutionGrader.Core.Services
             // Remove database container
             try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
 
+            // CRITICAL: Clean up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*)
+            // These may remain after the final batch of students if cleanup wasn't triggered
+            // This addresses the issue: "containers not being cleaned up after final batch of student grading"
+            CleanupOrphanedContainers();
+
             OnProgress("[Docker] All containers disposed");
+        }
+
+        /// <summary>
+        /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// This is called at the end of grading sessions to ensure no containers are left behind,
+        /// especially after the final batch which may not trigger the periodic cleanup.
+        /// </summary>
+        private void CleanupOrphanedContainers()
+        {
+            try
+            {
+                CleanupContainersByPrefix("ag-unified-", "unified");
+                CleanupContainersByPrefix("ag-monitor-", "monitor");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cleans up containers matching a specific name prefix.
+        /// </summary>
+        /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
+        /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
+        private void CleanupContainersByPrefix(string prefix, string containerType)
+        {
+            var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(
+                $"ps -a --filter 'name={prefix}' -q", 5000);
+
+            if (success && !string.IsNullOrWhiteSpace(output))
+            {
+                var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
+
+                foreach (var containerId in containerIds)
+                {
+                    try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                }
+            }
         }
 
         /// <summary>
