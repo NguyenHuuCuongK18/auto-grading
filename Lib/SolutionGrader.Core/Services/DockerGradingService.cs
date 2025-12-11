@@ -161,7 +161,57 @@ namespace SolutionGrader.Core.Services
             // Remove database container
             try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
 
+            // CRITICAL: Clean up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*)
+            // These may remain after the final batch of students if cleanup wasn't triggered
+            // This addresses the issue: "containers not being cleaned up after final batch of student grading"
+            CleanupOrphanedContainers();
+
             OnProgress("[Docker] All containers disposed");
+        }
+
+        /// <summary>
+        /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// This is called at the end of grading sessions to ensure no containers are left behind,
+        /// especially after the final batch which may not trigger the periodic cleanup.
+        /// </summary>
+        private void CleanupOrphanedContainers()
+        {
+            try
+            {
+                // Find and remove unified containers (ag-unified-*)
+                var (unifiedSuccess, unifiedOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-unified-' -q", 5000);
+
+                if (unifiedSuccess && !string.IsNullOrWhiteSpace(unifiedOutput))
+                {
+                    var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
+
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+
+                // Find and remove monitor containers (ag-monitor-*)
+                var (monitorSuccess, monitorOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-monitor-' -q", 5000);
+
+                if (monitorSuccess && !string.IsNullOrWhiteSpace(monitorOutput))
+                {
+                    var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
+
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
         }
 
         /// <summary>
