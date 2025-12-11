@@ -1576,7 +1576,10 @@ namespace SolutionGrader.UI
             // OPTIMIZED: Single-pass iteration through students collection
             // Previously iterated 4-5 times, now only once for better performance
             // CRITICAL: Lock access to ensure thread-safe enumeration during batch grading
-            int total, success = 0, failed = 0, notRun = 0;
+            int total;
+            int success = 0;
+            int failed = 0;
+            int notRun = 0;
             DateTime? latestEndTime = null;
             
             lock (_studentsLock)
