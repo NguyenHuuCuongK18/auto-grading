@@ -1,4 +1,0 @@
-Client connected from 127.0.0.1:49024
-Received from 127.0.0.1:49024: S123
-Sent to 127.0.0.1:49024: {"StudentId":"S123","Name":null,"Major":null,"Year":null,"GPA":null,"Status":"error","Message":"Student not found"}
-Client from 127.0.0.1:49024 disconnected
