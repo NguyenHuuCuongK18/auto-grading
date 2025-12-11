@@ -143,6 +143,7 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Disposes all Docker containers including the database container.
         /// Call this at the end of a grading session to clean up all resources.
+        /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// </summary>
         /// <param name="config">Docker grading configuration</param>
         public void DisposeAllContainers(DockerGradingConfig config)
@@ -160,7 +161,56 @@ namespace SolutionGrader.Core.Services
             // Remove database container
             try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
             
+            // CRITICAL: Clean up any orphaned auto-grading containers
+            // These may remain if grading was interrupted or cleanup failed during batch grading
+            CleanupOrphanedContainers();
+            
             OnProgress("[Docker] All containers disposed");
+        }
+        
+        /// <summary>
+        /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// This is called at the end of grading sessions to ensure no containers are left behind.
+        /// CRITICAL for batch grading of 200+ students where container cleanup may fail.
+        /// </summary>
+        private void CleanupOrphanedContainers()
+        {
+            try
+            {
+                // Find and remove unified containers
+                var (unifiedSuccess, unifiedOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-unified-' -q", 5000);
+                
+                if (unifiedSuccess && !string.IsNullOrWhiteSpace(unifiedOutput))
+                {
+                    var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
+                    
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+                
+                // Find and remove monitor containers
+                var (monitorSuccess, monitorOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-monitor-' -q", 5000);
+                
+                if (monitorSuccess && !string.IsNullOrWhiteSpace(monitorOutput))
+                {
+                    var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
+                    
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
         }
         
         /// <summary>
@@ -3286,6 +3336,8 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Cleanup unified container after grading.
         /// Removes the container and unregisters student from shared monitor.
+        /// CRITICAL: Waits for container removal to complete to prevent resource exhaustion
+        /// during batch grading of large numbers of students.
         /// </summary>
         private async Task CleanupUnifiedContainerAsync(string unifiedContainer, string studentCode)
         {
@@ -3304,16 +3356,56 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Unified] WARNING: Failed to stop processes: {ex.Message}");
                 }
                 
-                // Remove the unified container
-                _dockerExecutor.RemoveContainer(unifiedContainer);
-                OnProgress($"[Unified] Removed container {unifiedContainer}");
+                // Kill any remaining dotnet processes with SIGKILL to ensure cleanup
+                try
+                {
+                    var killCmd = BuildSafeDotnetKillCommand(unifiedContainer);
+                    _dockerExecutor.TryExecDockerCommand(killCmd, 5000);
+                    await Task.Delay(100); // Brief wait for process termination
+                }
+                catch
+                {
+                    // Ignore errors - container may already be stopping
+                }
+                
+                // Remove the unified container with force flag
+                try
+                {
+                    _dockerExecutor.RemoveContainer(unifiedContainer, 10000);
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"[Unified] WARNING: RemoveContainer failed, trying force removal: {ex.Message}");
+                    try
+                    {
+                        // Force remove if normal removal fails
+                        _dockerExecutor.ExecDockerCommand($"rm -f {unifiedContainer}", 10000);
+                    }
+                    catch
+                    {
+                        // Ignore - will be handled by WaitForContainerRemovedAsync
+                    }
+                }
+                
+                // CRITICAL: Wait for container to be fully removed before continuing
+                // This prevents zombie containers during batch grading of 200+ students
+                await WaitForContainerRemovedAsync(unifiedContainer, maxWaitSeconds: 10);
+                
+                OnProgress($"[Unified] Container {unifiedContainer} cleanup completed");
             }
             catch (Exception ex)
             {
-                OnProgress($"[Unified] WARNING: Failed to remove container: {ex.Message}");
+                OnProgress($"[Unified] WARNING: Container cleanup encountered issues: {ex.Message}");
+                // Try one final force removal
+                try
+                {
+                    _dockerExecutor.ExecDockerCommand($"rm -f {unifiedContainer}", 5000);
+                }
+                catch
+                {
+                    // Container may already be removed
+                }
             }
-            
-            await Task.CompletedTask;
         }
         
         /// <summary>
@@ -3441,10 +3533,11 @@ namespace SolutionGrader.Core.Services
         /// CLEANUP WORKFLOW:
         /// 1. Stop the monitor container (SharpPcap flushes automatically on SIGTERM)
         /// 2. Output file is already on host via volume mount
-        /// 3. Remove the monitor container
+        /// 3. Remove the monitor container and wait for removal to complete
         /// 
         /// The output file (JSON lines) is already on the host due to volume mounting.
-        /// to ensure the container is stopped to flush any buffered packets.
+        /// The container stop ensures any buffered packets are flushed before removal.
+        /// CRITICAL: Waits for container removal to prevent zombie containers during batch grading.
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
         /// <param name="studentResultPath">Student result directory path</param>
@@ -3454,13 +3547,13 @@ namespace SolutionGrader.Core.Services
             
             try
             {
-                // Stop the container (this flushes tcpdump buffer)
+                // Stop the container to ensure SharpPcap flushes any buffered packets
                 if (_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Stopping container to flush tcpdump buffer...");
+                    OnProgress($"[Monitor] Stopping container to flush SharpPcap buffer...");
                     _commandExecutor.RunCommand($"docker stop {monitorContainer}", null, null, 10000);
                     
-                    // Wait for clean shutdown
+                    // Wait for clean shutdown - SharpPcap has AutoFlush=true so buffering is minimal
                     await Task.Delay(1000);
                 }
                 
@@ -3476,16 +3569,43 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Monitor] WARNING: Network capture file not found at {pcapPath}");
                 }
                 
-                // Remove the monitor container
-                _dockerExecutor.RemoveContainer(monitorContainer);
-                OnProgress($"[Monitor] Removed container {monitorContainer}");
+                // Remove the monitor container with force flag
+                try
+                {
+                    _dockerExecutor.RemoveContainer(monitorContainer, 10000);
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"[Monitor] WARNING: RemoveContainer failed, trying force removal: {ex.Message}");
+                    try
+                    {
+                        _dockerExecutor.ExecDockerCommand($"rm -f {monitorContainer}", 5000);
+                    }
+                    catch
+                    {
+                        // Ignore - will be handled by WaitForContainerRemovedAsync
+                    }
+                }
+                
+                // CRITICAL: Wait for container to be fully removed before continuing
+                // This prevents zombie containers during batch grading of 200+ students
+                await WaitForContainerRemovedAsync(monitorContainer, maxWaitSeconds: 5);
+                
+                OnProgress($"[Monitor] Container {monitorContainer} cleanup completed");
             }
             catch (Exception ex)
             {
                 OnProgress($"[Monitor] WARNING during cleanup: {ex.Message}");
+                // Try one final force removal
+                try
+                {
+                    _dockerExecutor.ExecDockerCommand($"rm -f {monitorContainer}", 5000);
+                }
+                catch
+                {
+                    // Container may already be removed
+                }
             }
-            
-            await Task.CompletedTask;
         }
         
         /// <summary>

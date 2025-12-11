@@ -79,8 +79,8 @@ public class Program
             CodeContainerInternalPort = int.TryParse(map.GetValueOrDefault("internal-port"), out var ip) ? ip : 8000,
             CodeContainerHostPort = int.TryParse(map.GetValueOrDefault("host-port"), out var hp) ? hp : 8000,
             DockerNetwork = map.GetValueOrDefault("network", "auto-grading-network"),
-            GradingTimeoutSeconds = int.TryParse(map.GetValueOrDefault("timeout"), out var t) ? t : 60,
-            TestCaseTimeoutSeconds = int.TryParse(map.GetValueOrDefault("tc-timeout"), out var tct) ? tct : 15,
+            GradingTimeoutSeconds = int.TryParse(map.GetValueOrDefault("timeout"), out var t) ? t : 300,
+            TestCaseTimeoutSeconds = int.TryParse(map.GetValueOrDefault("tc-timeout"), out var tct) ? tct : 120,
             
             // Database settings
             // Note: Database password is read from Environment.xlsx by DockerGradingService

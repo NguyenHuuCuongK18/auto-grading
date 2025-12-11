@@ -45,13 +45,13 @@ namespace Domain.Models
         
         /// <summary>
         /// Total grading timeout in seconds (overall timeout for all test cases).
-        /// Default: 60 seconds.
+        /// Default: 300 seconds (5 minutes).
         /// </summary>
-        public int GradingTimeoutSeconds { get; set; } = 180;
+        public int GradingTimeoutSeconds { get; set; } = 300;
         
         /// <summary>
         /// Per-test-case timeout in seconds. If a test case takes longer than this,
-        /// it is stopped and marked as failed. Default: 15 seconds.
+        /// it is stopped and marked as failed. Default: 120 seconds.
         /// </summary>
         public int TestCaseTimeoutSeconds { get; set; } = 120;
         

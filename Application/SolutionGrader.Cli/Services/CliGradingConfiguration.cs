@@ -71,14 +71,15 @@ namespace SolutionGrader.Cli.Services
 
         /// <summary>
         /// Timeout in seconds for grading operations (overall)
+        /// Default: 300 seconds (5 minutes).
         /// </summary>
-        public int GradingTimeoutSeconds { get; set; } = 60;
+        public int GradingTimeoutSeconds { get; set; } = 300;
 
         /// <summary>
         /// Timeout in seconds per test case. If a test case exceeds this limit,
-        /// it is stopped and marked as failed. Default: 15 seconds.
+        /// it is stopped and marked as failed. Default: 120 seconds.
         /// </summary>
-        public int TestCaseTimeoutSeconds { get; set; } = 15;
+        public int TestCaseTimeoutSeconds { get; set; } = 120;
 
         /// <summary>
         /// Database Docker image name (e.g., mcr.microsoft.com/mssql/server:2019-latest)

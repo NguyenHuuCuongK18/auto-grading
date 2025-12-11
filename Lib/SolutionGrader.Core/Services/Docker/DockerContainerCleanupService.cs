@@ -101,6 +101,7 @@ namespace SolutionGrader.Core.Services.Docker
         
         /// <summary>
         /// Disposes all Docker containers including the database container.
+        /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// </summary>
         public void DisposeAllContainers(DockerGradingConfig config)
         {
@@ -114,7 +115,55 @@ namespace SolutionGrader.Core.Services.Docker
             try { _dockerExecutor.RemoveContainer(clientContainer); } catch { }
             try { _dockerExecutor.RemoveContainer(databaseContainer); } catch { }
             
+            // CRITICAL: Clean up any orphaned auto-grading containers
+            // These may remain if grading was interrupted or cleanup failed
+            CleanupOrphanedContainers();
+            
             OnProgress("[Docker] All containers disposed");
+        }
+        
+        /// <summary>
+        /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// This is called at the end of grading sessions to ensure no containers are left behind.
+        /// </summary>
+        private void CleanupOrphanedContainers()
+        {
+            try
+            {
+                // Find and remove unified containers
+                var (unifiedSuccess, unifiedOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-unified-' -q", 5000);
+                
+                if (unifiedSuccess && !string.IsNullOrWhiteSpace(unifiedOutput))
+                {
+                    var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
+                    
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+                
+                // Find and remove monitor containers
+                var (monitorSuccess, monitorOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
+                    "ps -a --filter 'name=ag-monitor-' -q", 5000);
+                
+                if (monitorSuccess && !string.IsNullOrWhiteSpace(monitorOutput))
+                {
+                    var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
+                    
+                    foreach (var containerId in containerIds)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
         }
         
         /// <summary>

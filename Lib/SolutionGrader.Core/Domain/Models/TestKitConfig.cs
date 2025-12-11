@@ -83,9 +83,9 @@ public class TestCaseInfo
     
     /// <summary>
     /// Per-test-case timeout in seconds, read from Header.xlsx Testcase_Property sheet.
-    /// Defaults to 15 seconds if not specified in the test kit.
+    /// Defaults to 120 seconds if not specified in the test kit.
     /// </summary>
-    public int TimeoutSeconds { get; set; } = 15;
+    public int TimeoutSeconds { get; set; } = 120;
     
     /// <summary>
     /// Specifies what should be graded for this test case.
