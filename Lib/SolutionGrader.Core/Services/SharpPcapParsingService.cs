@@ -155,46 +155,59 @@ public class SharpPcapParsingService
     }
     
     /// <summary>
-    /// Parse TCP flags into human-readable format
+    /// Parse TCP flags into human-readable format.
+    /// 
+    /// CRITICAL FIX: Aligned with SharedNetworkMonitorService.GetTcpFlags() and MiddlewareSniffPort
+    /// to produce consistent comma-separated flags (e.g., "FIN, ACK" not "FIN-ACK").
+    /// 
+    /// The previous implementation had two bugs:
+    /// 1. ACK was only added if flags.Count == 0, causing ACK to be missing from combined flags
+    /// 2. Combined flags used hyphenated format (FIN-ACK) instead of comma-separated (FIN, ACK)
+    /// 
+    /// The order of flags follows the MiddlewareSniffPort convention:
+    /// FIN, SYN, RST, PSH, ACK, URG (matching TCP header bit order)
     /// </summary>
     private string ParseTcpFlags(TcpPacket tcp)
     {
         var flags = new List<string>();
         
-        if (tcp.Synchronize) flags.Add("SYN");
-        if (tcp.Acknowledgment && flags.Count == 0) flags.Add("ACK");
-        if (tcp.Push) flags.Add("PSH");
+        // CRITICAL: Order matches SharedNetworkMonitorService and MiddlewareSniffPort
+        // This ensures testkit comparison works correctly
         if (tcp.Finished) flags.Add("FIN");
+        if (tcp.Synchronize) flags.Add("SYN");
         if (tcp.Reset) flags.Add("RST");
+        if (tcp.Push) flags.Add("PSH");
+        if (tcp.Acknowledgment) flags.Add("ACK");  // FIX: Always add ACK if present
+        if (tcp.Urgent) flags.Add("URG");
         
-        // Handle combined flags
-        if (tcp.Synchronize && tcp.Acknowledgment)
-            return "SYN-ACK";
-        if (tcp.Push && tcp.Acknowledgment)
-            return "PSH-ACK";
-        if (tcp.Finished && tcp.Acknowledgment)
-            return "FIN-ACK";
-        if (tcp.Reset && tcp.Acknowledgment)
-            return "RST-ACK";
-        
+        // Return comma-separated flags (e.g., "FIN, ACK" not "FIN-ACK")
+        // This matches the testkit expected format from MiddlewareSniffPort
         return flags.Count > 0 ? string.Join(", ", flags) : "UNKNOWN";
     }
     
     /// <summary>
-    /// Determine TCP state based on flags
+    /// Determine TCP state based on flags.
+    /// 
+    /// CRITICAL FIX: Updated to handle comma-separated flag format (e.g., "FIN, ACK")
+    /// instead of hyphenated format (e.g., "FIN-ACK").
     /// </summary>
     private string DetermineState(string flags)
     {
-        return flags switch
-        {
-            "SYN" => "SYN_SENT",
-            "SYN-ACK" => "SYN_RECEIVED",
-            "ACK" => "ESTABLISHED",
-            "PSH-ACK" => "ESTABLISHED",
-            "FIN-ACK" => "FIN_WAIT",
-            "RST" or "RST-ACK" => "RESET",
-            _ => ""
-        };
+        // Handle comma-separated flag combinations
+        if (flags == "SYN")
+            return "SYN_SENT";
+        if (flags == "SYN, ACK" || flags == "ACK, SYN")
+            return "SYN_RECEIVED";
+        if (flags == "ACK")
+            return "ESTABLISHED";
+        if (flags.Contains("PSH") && flags.Contains("ACK"))
+            return "ESTABLISHED";
+        if (flags.Contains("FIN") && flags.Contains("ACK"))
+            return "FIN_WAIT";
+        if (flags.Contains("RST"))
+            return "RESET";
+        
+        return "";
     }
     
     // HTTP method detection set for O(1) lookup performance

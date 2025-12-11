@@ -518,12 +518,25 @@ namespace SolutionGrader.Core.Services
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
                         
-                        // CRITICAL FIX: Reset packet counter when clearing RunContext between test cases
-                        // This ensures ParsePcapForCurrentStageAsync starts fresh for the new test case
-                        // Without this, accumulated packets from previous test case would be skipped
+                        // CRITICAL FIX: Reset the PCAP file by restarting the network monitor
+                        // This ensures each test case starts with a fresh PCAP file, preventing
+                        // packets from previous test cases from being parsed.
+                        // 
+                        // The previous approach of just resetting _lastParsedPacketCount to 0 was buggy:
+                        // - PCAP file kept growing with packets from ALL test cases
+                        // - When counter reset to 0, it would re-parse old packets from TC1, TC2, etc.
+                        // - This caused wrong packets to be matched (e.g., TC4 matched TC1 FIN packets)
+                        await ResetNetworkMonitorForNewTestCaseAsync(
+                            _currentMonitorContainer, 
+                            unifiedContainer,
+                            config.CodeContainerInternalPort,
+                            _currentPcapFilePath,
+                            testKitConfig.Protocol ?? "TCP");
+                        
+                        // Reset packet counter after PCAP reset
                         _lastParsedPacketCount = 0;
                         
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared and packet counter reset for fresh comparison");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] PCAP reset and packet counter cleared for fresh comparison");
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -3332,6 +3345,96 @@ namespace SolutionGrader.Core.Services
             }
             
             await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Resets the network monitor for a new test case by stopping and restarting tcpdump.
+        /// 
+        /// CRITICAL FIX: This method ensures each test case starts with a fresh PCAP file.
+        /// 
+        /// THE PROBLEM:
+        /// The previous approach kept the same PCAP file across all test cases and used
+        /// _lastParsedPacketCount to skip already-processed packets. However, when the counter
+        /// was reset to 0 at the start of each test case, it would re-parse ALL packets
+        /// from the beginning - including packets from previous test cases (TC1, TC2, etc.).
+        /// This caused wrong packets to be matched (e.g., TC4 expecting Client→Server FIN
+        /// would match a Server→Client FIN from TC1).
+        /// 
+        /// THE FIX:
+        /// Restart tcpdump with a fresh PCAP file for each test case. This ensures:
+        /// 1. Each test case only sees its own packets
+        /// 2. No cross-contamination between test cases
+        /// 3. Packet ordering is preserved within each test case
+        /// 
+        /// IMPLEMENTATION:
+        /// 1. Send SIGTERM to tcpdump to flush buffers and exit cleanly
+        /// 2. Wait for tcpdump to exit
+        /// 3. Delete the existing PCAP file on the host
+        /// 4. Restart tcpdump with the same parameters
+        /// </summary>
+        private async Task ResetNetworkMonitorForNewTestCaseAsync(
+            string monitorContainer,
+            string unifiedContainer,
+            int port,
+            string pcapOutputPath,
+            string protocol)
+        {
+            OnProgress($"[Monitor] Resetting network monitor for new test case...");
+            
+            try
+            {
+                // Step 1: Send SIGTERM to tcpdump to flush buffers and stop gracefully
+                // This ensures all buffered packets are written to the PCAP file
+                var killCmd = $"{monitorContainer} pkill -TERM tcpdump";
+                _dockerExecutor.ExecDockerCommandWithOutput(killCmd, 3000);
+                
+                // Wait for tcpdump to exit gracefully
+                await Task.Delay(500);
+                
+                // Step 2: Delete the existing PCAP file on the host
+                // This ensures we start fresh for the new test case
+                if (File.Exists(pcapOutputPath))
+                {
+                    try
+                    {
+                        File.Delete(pcapOutputPath);
+                        OnProgress($"[Monitor] Deleted old PCAP file: {pcapOutputPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[Monitor] WARNING: Could not delete old PCAP file: {ex.Message}");
+                    }
+                }
+                
+                // Step 3: Restart tcpdump in the monitor container
+                // The container is still running (we only killed tcpdump, not the container)
+                var pcapFileName = Path.GetFileName(pcapOutputPath);
+                var restartCmd = $"{monitorContainer} sh -c \"tcpdump -i lo -n -U -w /data/{pcapFileName} &\"";
+                var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(restartCmd, 5000);
+                
+                if (!success)
+                {
+                    OnProgress($"[Monitor] WARNING: Failed to restart tcpdump: {output}");
+                    // Try alternative approach - restart the entire container
+                    OnProgress($"[Monitor] Attempting to restart monitor container...");
+                    _commandExecutor.RunCommand($"docker restart {monitorContainer}", null, null, 10000);
+                    await Task.Delay(1000);
+                }
+                else
+                {
+                    OnProgress($"[Monitor] tcpdump restarted successfully");
+                }
+                
+                // Wait for tcpdump to be ready
+                await Task.Delay(500);
+                
+                OnProgress($"[Monitor] Network monitor reset complete - ready for new test case");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Monitor] WARNING: Error resetting network monitor: {ex.Message}");
+                // Continue even if reset fails - the test case may still work with stale data
+            }
         }
         
         
