@@ -323,19 +323,24 @@ namespace SolutionGrader.UI.Services
         /// Processes all pending updates in a single batch operation.
         /// This opens the Excel file ONCE, applies ALL pending updates, then saves ONCE.
         /// Much more efficient than opening/saving for each individual student.
+        /// 
+        /// THREAD-SAFETY FIX: The entire operation is now inside the lock to prevent
+        /// race conditions between the timer callback and Flush() that could cause
+        /// the first student's update to be lost.
         /// </summary>
         private void ProcessPendingUpdates()
         {
-            if (_pendingUpdates.IsEmpty) return;
-            
-            // Get all pending updates
-            var updates = _pendingUpdates.ToArray();
-            _pendingUpdates.Clear();
-            
-            if (updates.Length == 0) return;
-
             lock (_fileLock)
             {
+                // Thread-safe: Check and retrieve updates inside the lock
+                if (_pendingUpdates.IsEmpty) return;
+                
+                // Get all pending updates and clear atomically within the lock
+                var updates = _pendingUpdates.ToArray();
+                _pendingUpdates.Clear();
+                
+                if (updates.Length == 0) return;
+                
                 try
                 {
                     var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
@@ -397,15 +402,20 @@ namespace SolutionGrader.UI.Services
         /// <summary>
         /// Forces immediate processing of all pending updates.
         /// Call this when grading completes to ensure all data is written.
+        /// 
+        /// THREAD-SAFETY: Disposes the timer outside the lock first, then calls
+        /// ProcessPendingUpdates which handles its own locking. This ensures we
+        /// don't have a deadlock and that all pending updates are processed.
         /// </summary>
         public void Flush()
         {
-            lock (_fileLock)
-            {
-                _batchTimer?.Dispose();
-                _batchTimer = null;
-            }
+            // Dispose the timer first - this prevents new timer callbacks from starting
+            // Note: This doesn't prevent an already-queued callback, but ProcessPendingUpdates
+            // handles concurrent access safely with its internal lock.
+            var timer = Interlocked.Exchange(ref _batchTimer, null);
+            timer?.Dispose();
             
+            // Process any remaining pending updates
             ProcessPendingUpdates();
         }
 
