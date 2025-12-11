@@ -72,15 +72,14 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
-        private readonly SharpPcapParsingService _sharpPcapParser; // SharpPcap parser for PCAP files (fallback)
-        private readonly JsonPacketParsingService _jsonPacketParser; // JSON parser for new SharpPcap-based sidecar
+        private readonly JsonPacketParsingService _jsonPacketParser; // JSON parser for SharpPcap-based sidecar
         private string? _currentStudentCode; // Track current student for logging
         private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
         private string? _currentTestKitProtocol; // Track protocol type (TCP or HTTP) from testkit Header.xlsx
         
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
-        private string? _currentPcapFilePath; // Path to output file (PCAP or JSONL depending on sidecar version)
+        private string? _currentPcapFilePath; // Path to output file (JSONL from sidecar)
         private string? _currentJsonlFilePath; // Path to JSON lines file from SharpPcap-based sidecar
         private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
         
@@ -106,8 +105,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
-            _sharpPcapParser = new SharpPcapParsingService(); // PCAP parser (fallback)
-            _jsonPacketParser = new JsonPacketParsingService(); // JSON parser (new sidecar)
+            _jsonPacketParser = new JsonPacketParsingService(); // JSON parser for sidecar
         }
         
         /// <summary>
