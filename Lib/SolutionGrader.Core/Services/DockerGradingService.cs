@@ -72,14 +72,15 @@ namespace SolutionGrader.Core.Services
         private readonly DockerConsoleManager _consoleManager;
         private readonly INetworkMonitorService? _networkMonitor;
         private readonly IRunContext _runContext;
-        private readonly SharpPcapParsingService _sharpPcapParser; // SharpPcap parser for robust PCAP reading
+        private readonly JsonPacketParsingService _jsonPacketParser; // JSON parser for SharpPcap-based sidecar
         private string? _currentStudentCode; // Track current student for logging
         private string? _currentTestCaseName; // Track current test case for per-TC logging (e.g., "TC3")
         private string? _currentTestKitProtocol; // Track protocol type (TCP or HTTP) from testkit Header.xlsx
         
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
-        private string? _currentPcapFilePath; // Path to pcap file being written by network monitor
+        private string? _currentPcapFilePath; // Path to output file (JSONL from sidecar)
+        private string? _currentJsonlFilePath; // Path to JSON lines file from SharpPcap-based sidecar
         private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
         
         // Stage output tracking for per-test-case log export
@@ -104,7 +105,7 @@ namespace SolutionGrader.Core.Services
             _consoleManager = new DockerConsoleManager();
             _networkMonitor = networkMonitor;
             _runContext = runContext;
-            _sharpPcapParser = new SharpPcapParsingService(); // Initialize SharpPcap parser
+            _jsonPacketParser = new JsonPacketParsingService(); // JSON parser for sidecar
         }
         
         /// <summary>
@@ -518,12 +519,22 @@ namespace SolutionGrader.Core.Services
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
                         
-                        // CRITICAL FIX: Reset packet counter when clearing RunContext between test cases
-                        // This ensures ParsePcapForCurrentStageAsync starts fresh for the new test case
-                        // Without this, accumulated packets from previous test case would be skipped
+                        // CRITICAL FIX: Reset the PCAP file by restarting the network monitor
+                        // This ensures each test case starts with a fresh PCAP file, preventing
+                        // packets from previous test cases from being parsed.
+                        // 
+                        // The previous approach of just resetting _lastParsedPacketCount to 0 was buggy:
+                        // - PCAP file kept growing with packets from ALL test cases
+                        // - When counter reset to 0, it would re-parse old packets from TC1, TC2, etc.
+                        // - This caused wrong packets to be matched (e.g., TC4 matched TC1 FIN packets)
+                        await ResetNetworkMonitorForNewTestCaseAsync(
+                            _currentMonitorContainer, 
+                            _currentPcapFilePath);
+                        
+                        // Reset packet counter after PCAP reset
                         _lastParsedPacketCount = 0;
                         
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared and packet counter reset for fresh comparison");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] PCAP reset and packet counter cleared for fresh comparison");
                     }
                     
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -667,8 +678,13 @@ namespace SolutionGrader.Core.Services
             // Processes are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
             // Logs are written to unified files: /apps/server/server.log and /apps/client/client.log
             // The C# code reads these files incrementally after each action to separate output by stage
+            //
+            // NOTE: --cap-add=NET_ADMIN is required for the container entrypoint to enable 'quickack'
+            // on the loopback interface. This forces proper 4-way TCP close (FIN-ACK -> ACK -> FIN-ACK -> ACK)
+            // instead of 3-way close where Linux piggybacks ACK with FIN.
             var dockerCmd = $"docker run -d --name {unifiedContainer} " +
                            $"--network {config.DockerNetwork} " +
+                           $"--cap-add=NET_ADMIN " +  // Required for ip route quickack
                            $"-t " +  // TTY for unbuffered logs
                            $"{config.CodeImageName}";
             
@@ -2061,6 +2077,11 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
+            // STRICT 4-WAY TCP HANDSHAKE ENFORCEMENT:
+            // Linux TCP stack must be configured to send proper 4-way close (FIN-ACK -> ACK -> FIN-ACK -> ACK)
+            // This is enforced via quickack setting in the container entrypoint.
+            // No normalization/tolerance is applied - strict positional matching is used.
+            
             // CRITICAL FIX: Positional/Sequential matching within each stage
             // Network flow order matters! Must match flow-by-flow in sequence.
             // Expected flow[0] must match Captured flow[0], not just "any flow with matching flags"
@@ -2314,6 +2335,10 @@ namespace SolutionGrader.Core.Services
             
             return set1.SetEquals(set2);
         }
+        
+        // NOTE: NormalizeTcpCloseSequence was removed - we now enforce strict 4-way TCP handshake
+        // via quickack setting in the container entrypoint (unified-entrypoint.sh).
+        // This ensures Linux behaves like Windows with proper 4-way close sequence.
         
         #endregion
         
@@ -3174,25 +3199,26 @@ namespace SolutionGrader.Core.Services
         /// 
         /// SIDECAR PATTERN:
         /// The monitor container attaches to the student's unified container network namespace
-        /// using --net=container:{unifiedContainer}. This allows tcpdump to capture all traffic
+        /// using --net=container:{unifiedContainer}. This allows SharpPcap to capture all traffic
         /// on the student container's loopback (lo) interface.
         /// 
-        /// CRITICAL DESIGN DECISIONS (per new requirement):
-        /// 1. Monitor loopback interface (lo) - NOT eth0
-        /// 2. Capture ALL traffic - NO port filtering (catches student mistakes like wrong ports)
-        /// 3. Use Alpine Linux + tcpdump (lightweight, dedicated monitoring)
+        /// CRITICAL DESIGN DECISIONS:
+        /// 1. Uses SharpPcap/PacketDotNet for real-time capture (matching MiddlewareSniffPort)
+        /// 2. Monitor loopback interface (lo) - NOT eth0
+        /// 3. Captures traffic on target port range (4000-4010)
         /// 4. Sidecar survives if student container crashes
         /// 5. Clean separation of concerns (student code vs monitoring)
+        /// 6. Outputs JSON lines for reliable parsing (not raw PCAP)
         /// 
         /// REQUIREMENTS:
         /// - NET_ADMIN and NET_RAW capabilities for packet capture
-        /// - Attached to unified container's network namespace
+        /// - Attached to unified container's network namespace via --net=container:
         /// - Output written to bind-mounted volume for extraction
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
         /// <param name="unifiedContainer">Name of the unified student container to attach to</param>
-        /// <param name="port">Port number (for logging/reference only, NOT for filtering)</param>
-        /// <param name="pcapOutputPath">Host path where pcap file will be saved</param>
+        /// <param name="port">Port number for role detection (server port)</param>
+        /// <param name="pcapOutputPath">Host path where output file will be saved</param>
         /// <param name="protocol">Protocol type (TCP/HTTP) for logging</param>
         private async Task SetupNetworkMonitorContainerAsync(
             string monitorContainer,
@@ -3201,11 +3227,15 @@ namespace SolutionGrader.Core.Services
             string pcapOutputPath,
             string protocol)
         {
-            OnProgress($"[SETUP] Creating network monitor sidecar: {monitorContainer}");
+            OnProgress($"[SETUP] Creating SharpPcap-based network monitor sidecar: {monitorContainer}");
             
             // === CRITICAL: Save monitor container name to class field ===
             _currentMonitorContainer = monitorContainer;
-            _currentPcapFilePath = pcapOutputPath;
+            // For new SharpPcap sidecar, output is JSON lines not PCAP
+            // Change extension from .pcap to .jsonl
+            var jsonlOutputPath = Path.ChangeExtension(pcapOutputPath, ".jsonl");
+            _currentPcapFilePath = jsonlOutputPath; // Update to use JSONL path
+            _currentJsonlFilePath = jsonlOutputPath;
             // =============================================================
             
             // Remove existing monitor container if any
@@ -3218,8 +3248,8 @@ namespace SolutionGrader.Core.Services
                 // Container doesn't exist or already removed - this is fine
             }
             
-            // Create directory for pcap output on host
-            var outputDir = Path.GetDirectoryName(pcapOutputPath);
+            // Create directory for output on host
+            var outputDir = Path.GetDirectoryName(jsonlOutputPath);
             if (!string.IsNullOrEmpty(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
@@ -3228,40 +3258,43 @@ namespace SolutionGrader.Core.Services
             }
             
             // Extract the filename from the full path
-            var pcapFileName = Path.GetFileName(pcapOutputPath);
+            var outputFileName = Path.GetFileName(jsonlOutputPath);
             
-            // Build the docker run command for network monitor sidecar
+            // Build the docker run command for SharpPcap-based network monitor sidecar
             // CRITICAL: 
             // - Use --net=container:{unifiedContainer} to attach to student's network namespace
-            // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for tcpdump permissions
-            // - Capture on loopback interface (-i lo) to catch localhost traffic
-            // - Write to /data/{pcapFileName} inside container (bind-mounted to host)
+            // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for SharpPcap permissions
+            // - SharpPcap captures on loopback interface (lo) to catch localhost traffic
+            // - Outputs JSON lines to /data/{outputFileName} inside container (bind-mounted to host)
             //
-            // The network-monitor image uses ENTRYPOINT ["tcpdump"] with CMD ["-i", "lo", "-U", "-w", "capture.pcap"]
-            // We override the -w argument to use our custom filename
+            // The new network-monitor image uses SharpPcap/PacketDotNet for real-time capture
+            // matching MiddlewareSniffPort's behavior exactly.
+            // ENTRYPOINT is the NetworkMonitorSidecar app, CMD is [port, outputPath]
             
-            // CRITICAL: Capture on loopback interface for localhost traffic
-            // Client and server communicate via localhost (127.0.0.1) in unified container
-            // Using -i lo is less noisy than -i any (which captures eth0 traffic too)
+            // CRITICAL: --net=container:{unifiedContainer} attaches to the unified container's
+            // network namespace, allowing the sidecar to see localhost (127.0.0.1) traffic
+            // between client and server running in the unified container.
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
-                           $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container
-                           $"--cap-add=NET_ADMIN " +                 // Required for tcpdump
+                           $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container's network
+                           $"--cap-add=NET_ADMIN " +                 // Required for SharpPcap
                            $"--cap-add=NET_RAW " +                   // Required for raw packet capture
-                           $"-v \"{outputDir}:/data\" " +            // Mount host directory for pcap output
-                           $"fptuxaes/network-monitor:latest " +     // Debian + tcpdump image with ENTRYPOINT
-                           $"-i lo -n -U -w /data/{pcapFileName}";  // CRITICAL: -i lo for loopback, NO -v (breaks parser with multi-line format)
+                           $"-v \"{outputDir}:/data\" " +            // Mount host directory for output
+                           $"fptuxaes/network-monitor:latest " +     // SharpPcap-based monitor
+                           $"{port} /data/{outputFileName}";         // Args: port, output path
             
             OnProgress($"[Monitor] Command: {dockerCmd}");
-            OnProgress($"[Monitor] Capturing on loopback (lo) interface - localhost traffic only (less noisy than -i any)");
-            OnProgress($"[Monitor] Output will be saved to: {pcapOutputPath}");
+            OnProgress($"[Monitor] Using SharpPcap-based sidecar (matching MiddlewareSniffPort)");
+            OnProgress($"[Monitor] Attached to {unifiedContainer}'s network namespace via --net=container:");
+            OnProgress($"[Monitor] Capturing on loopback (lo) interface - localhost traffic between client/server");
+            OnProgress($"[Monitor] Output will be saved to: {jsonlOutputPath}");
             
             try
             {
                 _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
                 OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
                 
-                // Brief delay to ensure container is up
-                await Task.Delay(500);
+                // Brief delay to ensure container is up and SharpPcap is initialized
+                await Task.Delay(1000);
                 
                 // Verify monitor is running
                 if (_dockerExecutor.IsContainerRunning(monitorContainer))
@@ -3281,15 +3314,14 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Cleans up network monitor container and extracts pcap file.
+        /// Cleans up network monitor container.
         /// 
         /// CLEANUP WORKFLOW:
-        /// 1. Stop the monitor container (this flushes tcpdump's buffer)
-        /// 2. Extract the pcap file from the container (already on host via volume mount)
+        /// 1. Stop the monitor container (SharpPcap flushes automatically on SIGTERM)
+        /// 2. Output file is already on host via volume mount
         /// 3. Remove the monitor container
-        /// 4. Parse pcap file and integrate with grading system (if needed)
         /// 
-        /// The pcap file is already on the host due to volume mounting, so we just need
+        /// The output file (JSON lines) is already on the host due to volume mounting.
         /// to ensure the container is stopped to flush any buffered packets.
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
@@ -3332,6 +3364,97 @@ namespace SolutionGrader.Core.Services
             }
             
             await Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Resets the network monitor for a new test case by stopping and restarting tcpdump.
+        /// 
+        /// CRITICAL FIX: This method ensures each test case starts with a fresh PCAP file.
+        /// 
+        /// THE PROBLEM:
+        /// The previous approach kept the same PCAP file across all test cases and used
+        /// _lastParsedPacketCount to skip already-processed packets. However, when the counter
+        /// was reset to 0 at the start of each test case, it would re-parse ALL packets
+        /// from the beginning - including packets from previous test cases (TC1, TC2, etc.).
+        /// This caused wrong packets to be matched (e.g., TC4 expecting Client→Server FIN
+        /// would match a Server→Client FIN from TC1).
+        /// 
+        /// THE FIX (SharpPcap-based sidecar):
+        /// Clear the JSON output file for each new test case. The sidecar keeps running
+        /// and will create a fresh file. This ensures:
+        /// 1. Each test case only sees its own packets
+        /// 2. No cross-contamination between test cases
+        /// 3. Packet ordering is preserved within each test case
+        /// 
+        /// IMPLEMENTATION:
+        /// 1. Delete the existing JSON lines file inside the container
+        /// 2. The sidecar's AutoFlush=true ensures new packets are written immediately
+        /// 3. No need to restart the sidecar process
+        /// </summary>
+        /// <param name="monitorContainer">Name of the monitor container</param>
+        /// <param name="outputPath">Host path where the output file is stored</param>
+        private async Task ResetNetworkMonitorForNewTestCaseAsync(
+            string monitorContainer,
+            string outputPath)
+        {
+            OnProgress($"[Monitor] Resetting network monitor for new test case...");
+            
+            try
+            {
+                // Get the filename from the output path
+                var outputFileName = Path.GetFileName(outputPath);
+                
+                // Step 1: Delete the existing JSON file inside the container
+                // The sidecar will create a new file when it writes the next packet
+                var clearCmd = $"{monitorContainer} rm -f /data/{outputFileName}";
+                var (clearSuccess, clearOutput) = _dockerExecutor.ExecDockerCommandWithOutput(clearCmd, 3000);
+                
+                if (clearSuccess)
+                {
+                    OnProgress($"[Monitor] Cleared output file in container: /data/{outputFileName}");
+                }
+                else
+                {
+                    OnProgress($"[Monitor] WARNING: Could not clear output file: {clearOutput}");
+                }
+                
+                // Step 2: Also delete from host if it exists
+                if (File.Exists(outputPath))
+                {
+                    try
+                    {
+                        File.Delete(outputPath);
+                        OnProgress($"[Monitor] Deleted output file on host: {outputPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnProgress($"[Monitor] WARNING: Could not delete host file: {ex.Message}");
+                    }
+                }
+                
+                // Step 3: Verify the sidecar is still running
+                var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitorSidecar";
+                var (checkSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 2000);
+                
+                if (checkSuccess)
+                {
+                    OnProgress($"[Monitor] Verified NetworkMonitorSidecar is running");
+                }
+                else
+                {
+                    // Sidecar may have crashed - try to restart the container
+                    OnProgress($"[Monitor] WARNING: NetworkMonitorSidecar not found, restarting container...");
+                    _commandExecutor.RunCommand($"docker restart {monitorContainer}", null, null, 10000);
+                    await Task.Delay(1000);
+                }
+                
+                OnProgress($"[Monitor] Network monitor reset complete - ready for new test case");
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Monitor] WARNING: Error resetting network monitor: {ex.Message}");
+                // Continue even if reset fails - the test case may still work with stale data
+            }
         }
         
         
@@ -3911,10 +4034,15 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         
         /// <summary>
-        /// Parse pcap file for current stage using SNAPSHOT strategy.
-        /// Creates an internal snapshot copy inside the container to bypass file locking issues,
-        /// then copies the snapshot to host for parsing.
-        /// This enables per-stage network validation without stopping the monitor.
+        /// Parse network packets for current stage from JSON lines file.
+        /// 
+        /// NEW APPROACH (SharpPcap-based sidecar):
+        /// The sidecar uses SharpPcap for real-time capture and writes parsed packets
+        /// directly to a JSON lines file. This eliminates the need for PCAP parsing
+        /// and snapshot copying - we just read the JSON file directly.
+        /// 
+        /// The sidecar writes packets with AutoFlush=true, so packets are available
+        /// immediately after capture without buffering issues.
         /// </summary>
         private async Task ParsePcapForCurrentStageAsync(int currentStage, int port)
         {
@@ -3924,55 +4052,30 @@ namespace SolutionGrader.Core.Services
                 return;
             }
             
-            var monitorContainer = _currentMonitorContainer; // Use the saved container name
-            var pcapFileName = Path.GetFileName(_currentPcapFilePath);
+            var jsonlFilePath = _currentPcapFilePath; // Already points to .jsonl file
             
             // CRITICAL: Include test case name in snapshot path for per-TC organization
-            // Format: snapshot_TC3_stage1.pcap instead of snapshot_stage1.pcap
-            // This prevents overwriting between test cases and organizes artifacts per TC
             var testCasePrefix = !string.IsNullOrEmpty(_currentTestCaseName) ? $"{_currentTestCaseName}_" : "";
-            var snapshotPath = Path.Combine(Path.GetDirectoryName(_currentPcapFilePath) ?? "", $"snapshot_{testCasePrefix}stage{currentStage}.pcap");
+            var snapshotPath = Path.Combine(
+                Path.GetDirectoryName(_currentPcapFilePath) ?? "", 
+                $"snapshot_{testCasePrefix}stage{currentStage}.jsonl");
             
             try
             {
-                // Skip the IsContainerRunning check - it has reliability issues with docker ps filters
-                // If the container doesn't exist or has crashed, the snapshot copy will fail which we handle below
+                // NEW APPROACH: Copy the JSON lines file from container to host for this stage
+                // The SharpPcap sidecar writes directly to /data/packets.jsonl
+                var jsonFileName = Path.GetFileName(jsonlFilePath);
                 
-                // SNAPSHOT STRATEGY Step 0: Force tcpdump to flush its buffer by sending SIGUSR1 signal
-                // This ensures all captured packets are written to the pcap file before we copy it
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Flushing tcpdump buffer in {monitorContainer}...");
-                var flushCmd = $"{monitorContainer} pkill -USR1 tcpdump";
-                _dockerExecutor.ExecDockerCommandWithOutput(flushCmd, 2000);
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Copying JSON packets file from container...");
                 
-                // Give tcpdump a moment to finish flushing
-                await Task.Delay(500);
+                // Copy the current JSON file to a stage-specific snapshot
+                var copyCmd = $"docker cp {_currentMonitorContainer}:/data/{jsonFileName} \"{snapshotPath}\"";
+                var copyResult = _commandExecutor.RunCommandAndCaptureOutput(copyCmd, null, null, 5000);
                 
-                // SNAPSHOT STRATEGY Step 1: Create a snapshot copy INSIDE the container
-                // This bypasses Windows/WSL2 file locking issues with the live capture file
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Creating snapshot from /data/{pcapFileName}");
-                // Note: ExecDockerCommandWithOutput adds "docker exec" prefix, so we only provide container name and command
-                var snapshotCmd = $"{monitorContainer} cp /data/{pcapFileName} /data/snapshot.pcap";
-                var (snapshotSuccess, snapshotOutput) = _dockerExecutor.ExecDockerCommandWithOutput(snapshotCmd, 5000);
-                
-                if (!snapshotSuccess)
+                if (copyResult.ExitCode != 0)
                 {
                     // File doesn't exist yet - normal for early stages before traffic
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot copy failed (file may not exist yet): {snapshotOutput}");
-                    return;
-                }
-                
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot created, downloading to host");
-                
-                // SNAPSHOT STRATEGY Step 2: Download the snapshot to host
-                // Note: docker cp is a top-level command, not docker exec, so we run it directly
-                var copyCmd = $"docker cp {monitorContainer}:/data/snapshot.pcap \"{snapshotPath}\"";
-                var copyResult = _commandExecutor.RunCommandAndCaptureOutput(copyCmd, null, null, 5000);
-                var copySuccess = copyResult.ExitCode == 0;
-                var copyOutput = string.Join("\n", copyResult.Output);
-                
-                if (!copySuccess)
-                {
-                    OnProgress($"[NetworkMonitor] Stage {currentStage}: Failed to download snapshot: {copyOutput}");
+                    OnProgress($"[NetworkMonitor] Stage {currentStage}: JSON file copy failed (may not exist yet): {string.Join(" ", copyResult.Output)}");
                     return;
                 }
                 
@@ -3983,18 +4086,12 @@ namespace SolutionGrader.Core.Services
                 }
                 
                 var fileSize = new FileInfo(snapshotPath).Length;
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Snapshot downloaded ({fileSize} bytes), parsing with SharpPcap");
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: JSON snapshot downloaded ({fileSize} bytes), parsing...");
                 
-                // SNAPSHOT STRATEGY Step 3: Parse the snapshot using SharpPcap
-                // This is more robust than tcpdump text parsing - works cross-platform
-                // Pass the protocol type from testkit configuration (TCP or HTTP)
-                var protocol = _currentTestKitProtocol ?? "TCP";
-                var packets = _sharpPcapParser.ParsePcapFile(snapshotPath, currentStage, port, protocol);
+                // Parse JSON lines using the new parser
+                var (newPackets, totalCount) = _jsonPacketParser.ParseNewPackets(snapshotPath, currentStage, _lastParsedPacketCount);
                 
-                OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsed {packets.Count} total packets");
-                
-                // Skip packets we've already processed (cumulative parsing)
-                var newPackets = packets.Skip(_lastParsedPacketCount).ToList();
+                OnProgress($"[NetworkMonitor] Stage {currentStage}: Parsed {totalCount} total packets, {newPackets.Count} new");
                 
                 foreach (var packet in newPackets)
                 {
@@ -4002,47 +4099,27 @@ namespace SolutionGrader.Core.Services
                     {
                         // Add to RunContext for this stage
                         var studentCode = _currentStudentCode ?? "";
-                        OnProgress($"[NetworkMonitor] DEBUG: Adding packet to RunContext - StudentCode='{studentCode}', Stage={currentStage}, Flags={packet.Flags}, Data={packet.Data ?? "(empty)"}");
+                        OnProgress($"[NetworkMonitor] Adding packet: {packet.SourceRole}:{packet.SourcePort} -> {packet.DestinationRole}:{packet.DestinationPort} [{packet.Flags}]");
                         _runContext.AddCapturedNetworkPacket(studentCode, currentStage.ToString(), packet);
-                        
-                        // Verify it was added
-                        var allPackets = _runContext.GetAllCapturedNetworkPackets();
-                        OnProgress($"[NetworkMonitor] DEBUG: After adding, total packets in RunContext: {allPackets.Count}");
                     }
                     catch (Exception ex)
                     {
-                        // Log the exception instead of silently swallowing it
                         OnProgress($"[NETWORK] ERROR adding packet: {ex.Message}");
                         continue;
                     }
                 }
                 
                 // Update counter to skip these packets next time
-                _lastParsedPacketCount = packets.Count;
+                _lastParsedPacketCount = totalCount;
                 
-                // CRITICAL FIX: DO NOT truncate PCAP file between stages!
-                // Previous approach: Truncate PCAP after each stage to isolate flows
-                // Problem: tcpdump keeps file open with buffering - truncation doesn't prevent buffered data from being written
-                // Result: Next stage sees old data from previous stage (e.g., TC4 Stage 1 sees TC3 Stage 3 data)
-                //
-                // Current approach: Let PCAP accumulate ALL packets, use _lastParsedPacketCount to track progress
-                // - PCAP grows throughout test case execution (all stages append to same file)
-                // - Each ParsePcapForCurrentStageAsync call only processes NEW packets (skip _lastParsedPacketCount)
-                // - RunContext is cleared between test cases (line 514) to prevent cross-contamination
-                // - Snapshot files are saved per-stage for debugging and per-TC organization
-                //
-                // This ensures:
-                // 1. No data loss from tcpdump buffering
-                // 2. Correct stage-to-packet mapping (packets tagged with actual execution stage)
-                // 3. Clean separation between test cases (RunContext cleared)
-                // 4. Proper cumulative parsing within each test case
-                
-                OnProgress($"[NETWORK] Parsed {newPackets.Count} new packets for stage {currentStage}, cumulative total: {packets.Count} (cumulative parsing - RunContext cleared between test cases)");
+                OnProgress($"[NETWORK] Stage {currentStage}: Added {newPackets.Count} new packets, cumulative total: {totalCount}");
             }
             catch (Exception ex)
             {
-                OnProgress($"[NETWORK] Error parsing pcap for stage {currentStage}: {ex.Message}");
+                OnProgress($"[NETWORK] Error parsing JSON packets for stage {currentStage}: {ex.Message}");
             }
+            
+            await Task.CompletedTask;
         }
         
         /// <summary>
