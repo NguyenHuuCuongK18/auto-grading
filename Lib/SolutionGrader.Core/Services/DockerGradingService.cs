@@ -2118,7 +2118,8 @@ namespace SolutionGrader.Core.Services
                 
                 if (matchingPacket != null)
                 {
-                    // Check if it's an exact match (PASS) or partial match (PARTIAL)
+                    // STRICT GRADING: Check if it's an exact match (PASS) or mismatch (FAIL)
+                    // Per user requirement: "remove all PARTIAL and just defaults to FAIL or NOT FAIL"
                     bool exactMatch = true;
                     var mismatchReasons = new List<string>();
                     
@@ -3847,8 +3848,10 @@ namespace SolutionGrader.Core.Services
                                 exactMatch = false;
                         }
                         
-                        netWs.Cell(netRow, col).Value = exactMatch ? "PASS" : "PARTIAL";
-                        netWs.Cell(netRow, col).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        // STRICT GRADING: No PARTIAL status - only PASS or FAIL
+                        // If any field doesn't match exactly, mark as FAIL
+                        netWs.Cell(netRow, col).Value = exactMatch ? "PASS" : "FAIL";
+                        netWs.Cell(netRow, col).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.LightPink;
                         
                         // Remove from list so we can identify extra packets later
                         actualPacketsForStage.Remove(matchingPacket);

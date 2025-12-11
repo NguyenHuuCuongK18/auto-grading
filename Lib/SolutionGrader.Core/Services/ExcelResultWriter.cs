@@ -146,9 +146,20 @@ namespace SolutionGrader.Core.Services
                             exactMatch = false;
                         if (!string.IsNullOrEmpty(expectedFlow.DestinationRole) && matchingPacket.DestinationRole != expectedFlow.DestinationRole)
                             exactMatch = false;
+                        // STRICT DATA COMPARISON: Data must match exactly (case-sensitive)
+                        // Per user requirement: "data comparison is strict. if they do not match 100% including case -> FAIL"
+                        if (!string.IsNullOrEmpty(expectedFlow.Data) && 
+                            !expectedFlow.Data.Equals("None", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var actualData = matchingPacket.Data ?? "";
+                            if (!actualData.Trim().Equals(expectedFlow.Data.Trim(), StringComparison.Ordinal))
+                                exactMatch = false;
+                        }
                         
-                        netWs.Cell(netRow, 18).Value = exactMatch ? "PASS" : "PARTIAL";
-                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.Yellow;
+                        // STRICT GRADING: No PARTIAL status - only PASS or FAIL
+                        // If any field doesn't match exactly, mark as FAIL
+                        netWs.Cell(netRow, 18).Value = exactMatch ? "PASS" : "FAIL";
+                        netWs.Cell(netRow, 18).Style.Fill.BackgroundColor = exactMatch ? XLColor.LightGreen : XLColor.LightPink;
                         
                         actualPacketsForStage.Remove(matchingPacket);
                     }
