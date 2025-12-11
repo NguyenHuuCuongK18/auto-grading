@@ -2150,9 +2150,9 @@ namespace SolutionGrader.Core.Services
                         var actualData = matchingPacket.Data ?? "";
                         var expectedData = exp.Data;
                         
-                        // Compare data - trim whitespace and use case-insensitive comparison for now
-                        // TODO: Make this configurable per test case if needed
-                        if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.OrdinalIgnoreCase))
+                        // Compare data - trim whitespace but use STRICT case-sensitive comparison
+                        // Network data must match exactly (no normalization) to catch encoding/casing bugs
+                        if (!actualData.Trim().Equals(expectedData.Trim(), StringComparison.Ordinal))
                         {
                             exactMatch = false;
                             var expPreview = expectedData.Length > 50 ? expectedData.Substring(0, 50) + "..." : expectedData;
