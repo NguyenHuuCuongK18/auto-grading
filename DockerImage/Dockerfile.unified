@@ -5,6 +5,12 @@
 # Processes communicate via localhost (127.0.0.1) to eliminate proxy behavior.
 # Supervisord manages process lifecycle based on test case actions.
 #
+# TCP 4-WAY HANDSHAKE ENFORCEMENT:
+# The container entrypoint enables 'quickack' on the loopback interface to force
+# Linux to send proper 4-way TCP close (FIN-ACK -> ACK -> FIN-ACK -> ACK) instead
+# of the default 3-way close (FIN-ACK -> FIN-ACK -> ACK) where ACK is piggybacked.
+# This ensures network flow captures match Windows-generated testkits.
+#
 # Build Command:
 #   docker build -t fptuxaes/aes-dotnet8-console:latest -f DockerImage/Dockerfile.unified DockerImage/
 #
@@ -16,10 +22,11 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0
 # Install supervisord for process management
 # Install dos2unix to automatically fix Windows line endings (CRLF→LF) in shell scripts
 # This prevents "exec /scripts/unified-entrypoint.sh: no such file or directory" errors
+# Install iproute2 for 'ip route' command used to enable quickack on loopback
 # Install dependencies with retry logic to handle transient network errors
 RUN apt-get update && \
     for i in $(seq 1 3); do \
-        apt-get install -y supervisor netcat-openbsd procps dos2unix && break || sleep 5; \
+        apt-get install -y supervisor netcat-openbsd procps dos2unix iproute2 && break || sleep 5; \
     done && \
     rm -rf /var/lib/apt/lists/*
 

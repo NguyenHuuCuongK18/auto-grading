@@ -680,8 +680,13 @@ namespace SolutionGrader.Core.Services
             // Processes are controlled by test case actions (StartClient, StartServer, CloseClient, CloseServer)
             // Logs are written to unified files: /apps/server/server.log and /apps/client/client.log
             // The C# code reads these files incrementally after each action to separate output by stage
+            //
+            // NOTE: --cap-add=NET_ADMIN is required for the container entrypoint to enable 'quickack'
+            // on the loopback interface. This forces proper 4-way TCP close (FIN-ACK -> ACK -> FIN-ACK -> ACK)
+            // instead of 3-way close where Linux piggybacks ACK with FIN.
             var dockerCmd = $"docker run -d --name {unifiedContainer} " +
                            $"--network {config.DockerNetwork} " +
+                           $"--cap-add=NET_ADMIN " +  // Required for ip route quickack
                            $"-t " +  // TTY for unbuffered logs
                            $"{config.CodeImageName}";
             
@@ -2074,13 +2079,10 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[CompareNetwork] Captured stages: {string.Join(", ", allCapturedPackets.Select(p => p.Stage).Distinct().OrderBy(s => s))}");
             }
             
-            // TCP FIN SEQUENCE TOLERANCE:
-            // Windows TCP stack sends 4-way close: FIN-ACK -> ACK -> FIN-ACK -> ACK
-            // Linux TCP stack often sends 3-way close: FIN-ACK -> FIN-ACK -> ACK (combines ACK with FIN)
-            // 
-            // When testkit was generated on Windows but grading runs on Linux, we need to handle this.
-            // Strategy: Normalize expected flows to match 3-way close pattern when detected.
-            var normalizedExpected = NormalizeTcpCloseSequence(expected, allCapturedPackets);
+            // STRICT 4-WAY TCP HANDSHAKE ENFORCEMENT:
+            // Linux TCP stack must be configured to send proper 4-way close (FIN-ACK -> ACK -> FIN-ACK -> ACK)
+            // This is enforced via quickack setting in the container entrypoint.
+            // No normalization/tolerance is applied - strict positional matching is used.
             
             // CRITICAL FIX: Positional/Sequential matching within each stage
             // Network flow order matters! Must match flow-by-flow in sequence.
@@ -2088,7 +2090,7 @@ namespace SolutionGrader.Core.Services
             // This catches errors like "Server closes connection before Client" which violates protocol.
             //
             // Group expected flows by stage to handle per-stage sequential matching
-            var expectedByStage = normalizedExpected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
+            var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
             var capturedByStage = allCapturedPackets.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
             
             foreach (var exp in expected)
@@ -2336,104 +2338,9 @@ namespace SolutionGrader.Core.Services
             return set1.SetEquals(set2);
         }
         
-        /// <summary>
-        /// Normalize TCP close sequence to handle platform differences.
-        /// 
-        /// PROBLEM:
-        /// Windows TCP stack sends 4-way close: Client FIN-ACK -> Server ACK -> Server FIN-ACK -> Client ACK
-        /// Linux TCP stack sends 3-way close:   Client FIN-ACK -> Server FIN-ACK -> Client ACK
-        /// 
-        /// When testkit was generated on Windows but grading runs on Linux, the captured
-        /// packet count differs (10 vs 11 packets), causing position mismatches.
-        /// 
-        /// SOLUTION:
-        /// Detect the 4-way close pattern in expected flows and convert to 3-way when the
-        /// captured packets show 3-way close (combined ACK+FIN).
-        /// 
-        /// 4-way pattern (expected):   FIN,ACK | ACK | FIN,ACK | ACK
-        /// 3-way pattern (normalized): FIN,ACK | FIN,ACK | ACK
-        /// 
-        /// We remove the "Server->Client ACK" that comes after "Client->Server FIN-ACK"
-        /// because Linux combines it with the Server's FIN into a single FIN-ACK.
-        /// </summary>
-        private List<ExpectedNetworkFlow> NormalizeTcpCloseSequence(
-            List<ExpectedNetworkFlow> expected, 
-            IReadOnlyList<CapturedNetworkPacket> captured)
-        {
-            // Group by stage to handle each stage independently
-            var result = new List<ExpectedNetworkFlow>();
-            var expectedByStage = expected.GroupBy(e => e.Stage).ToDictionary(g => g.Key, g => g.ToList());
-            var capturedByStage = captured.GroupBy(p => p.Stage).ToDictionary(g => g.Key, g => g.ToList());
-            
-            foreach (var stageGroup in expectedByStage)
-            {
-                var stage = stageGroup.Key;
-                var stageExpected = stageGroup.Value;
-                var stageCaptured = capturedByStage.ContainsKey(stage) ? capturedByStage[stage] : new List<CapturedNetworkPacket>();
-                
-                // Check if we need normalization: expected has more packets than captured
-                // AND the difference is in the FIN sequence
-                if (stageExpected.Count == stageCaptured.Count + 1)
-                {
-                    // Look for the 4-way close pattern that needs normalization
-                    // Pattern: ... | FIN,ACK (Client->Server) | ACK (Server->Client) | FIN,ACK (Server->Client) | ACK (Client->Server)
-                    var normalizedStage = new List<ExpectedNetworkFlow>();
-                    bool skippedAck = false;
-                    
-                    for (int i = 0; i < stageExpected.Count; i++)
-                    {
-                        var flow = stageExpected[i];
-                        
-                        // Check if this is the "Server->Client ACK" after "Client->Server FIN-ACK"
-                        // that should be combined with the next FIN-ACK
-                        if (i > 0 && i < stageExpected.Count - 1 && !skippedAck)
-                        {
-                            var prevFlow = stageExpected[i - 1];
-                            var nextFlow = stageExpected[i + 1];
-                            
-                            bool isPrevClientFinAck = FlagsMatch(prevFlow.Flags ?? "", "FIN, ACK") && 
-                                                      prevFlow.SourceRole == "Client" && 
-                                                      prevFlow.DestinationRole == "Server";
-                            bool isCurrentServerAck = FlagsMatch(flow.Flags ?? "", "ACK") && 
-                                                      !FlagsMatch(flow.Flags ?? "", "FIN") &&  // Pure ACK, no FIN
-                                                      flow.SourceRole == "Server" && 
-                                                      flow.DestinationRole == "Client";
-                            bool isNextServerFinAck = FlagsMatch(nextFlow.Flags ?? "", "FIN, ACK") && 
-                                                      nextFlow.SourceRole == "Server" && 
-                                                      nextFlow.DestinationRole == "Client";
-                            
-                            if (isPrevClientFinAck && isCurrentServerAck && isNextServerFinAck)
-                            {
-                                // Skip this ACK - it will be combined with the FIN-ACK on Linux
-                                OnProgress($"[TCP_NORMALIZE] Stage {stage}: Skipping Server->Client ACK (position {i}) - Linux combines with FIN-ACK");
-                                skippedAck = true;
-                                continue;
-                            }
-                        }
-                        
-                        normalizedStage.Add(flow);
-                    }
-                    
-                    if (skippedAck)
-                    {
-                        OnProgress($"[TCP_NORMALIZE] Stage {stage}: Normalized 4-way close to 3-way close ({stageExpected.Count} -> {normalizedStage.Count} flows)");
-                        result.AddRange(normalizedStage);
-                    }
-                    else
-                    {
-                        // No normalization needed for this stage
-                        result.AddRange(stageExpected);
-                    }
-                }
-                else
-                {
-                    // No normalization needed - counts match or difference isn't 1
-                    result.AddRange(stageExpected);
-                }
-            }
-            
-            return result;
-        }
+        // NOTE: NormalizeTcpCloseSequence was removed - we now enforce strict 4-way TCP handshake
+        // via quickack setting in the container entrypoint (unified-entrypoint.sh).
+        // This ensures Linux behaves like Windows with proper 4-way close sequence.
         
         #endregion
         
