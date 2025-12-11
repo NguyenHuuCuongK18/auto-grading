@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Domain.Models;
 using SolutionGrader.Core.Domain.Models;
+using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services.Docker
 {
@@ -119,7 +120,7 @@ namespace SolutionGrader.Core.Services.Docker
             }
             
             // Compare data (if expected)
-            if (!string.IsNullOrEmpty(expected.Data) && expected.Data != "No payload")
+            if (!string.IsNullOrEmpty(expected.Data) && expected.Data != NetworkKeywords.Data_NoPayload)
             {
                 if (!DataMatches(expected.Data, actual.Data ?? ""))
                 {
@@ -189,7 +190,14 @@ namespace SolutionGrader.Core.Services.Docker
         }
         
         /// <summary>
-        /// Compares data payloads with normalization.
+        /// Compares data payloads with STRICT case-sensitive matching.
+        /// 
+        /// STRICT GRADING: Data must match 100% including case.
+        /// - No partial/contains matching
+        /// - No case-insensitive comparison
+        /// - Only whitespace trimming is allowed
+        /// 
+        /// Per user requirement: "data comparison is strict. if they do not match 100% including case -> FAIL"
         /// </summary>
         private bool DataMatches(string expected, string actual)
         {
@@ -198,40 +206,13 @@ namespace SolutionGrader.Core.Services.Docker
                 return true; // No expected data, anything is fine
             }
             
-            // Normalize both strings
-            var normalizedExpected = NormalizeData(expected);
-            var normalizedActual = NormalizeData(actual);
+            // STRICT COMPARISON: Use Ordinal (case-sensitive) string comparison
+            // Only trim whitespace, no other normalization
+            var trimmedExpected = expected.Trim();
+            var trimmedActual = (actual ?? "").Trim();
             
-            // Exact match after normalization
-            if (normalizedExpected == normalizedActual)
-            {
-                return true;
-            }
-            
-            // Contains match (for partial data comparison)
-            if (normalizedActual.Contains(normalizedExpected) || normalizedExpected.Contains(normalizedActual))
-            {
-                return true;
-            }
-            
-            return false;
-        }
-        
-        /// <summary>
-        /// Normalizes data for comparison (removes whitespace, lowercases).
-        /// </summary>
-        private string NormalizeData(string data)
-        {
-            if (string.IsNullOrEmpty(data))
-            {
-                return string.Empty;
-            }
-            
-            return data
-                .ToLowerInvariant()
-                .Replace("\r\n", "\n")
-                .Replace("\r", "\n")
-                .Trim();
+            // Exact match required - case-sensitive, no partial matching
+            return string.Equals(trimmedExpected, trimmedActual, StringComparison.Ordinal);
         }
         
         private void OnProgress(string message)
