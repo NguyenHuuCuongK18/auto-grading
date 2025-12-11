@@ -108,6 +108,14 @@ public class JsonPacketParsingService
     /// <summary>
     /// Parse JSON lines file and return only new packets (packets after the given count).
     /// This supports cumulative parsing where we skip already-processed packets.
+    /// 
+    /// IMPORTANT: This method assumes that:
+    /// 1. New packets are only appended to the file (not inserted in the middle)
+    /// 2. New packets have later timestamps than previously processed packets
+    /// 
+    /// Since ParseJsonlFile sorts packets by timestamp, and new packets should have
+    /// later timestamps than old ones, Skip(skipCount) will correctly skip the
+    /// previously processed packets.
     /// </summary>
     /// <param name="jsonlFilePath">Path to the .jsonl file</param>
     /// <param name="stage">Current test stage number</param>
