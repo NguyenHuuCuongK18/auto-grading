@@ -1,0 +1,4 @@
+Client connected from 127.0.0.1:54228
+Received from 127.0.0.1:54228: S111
+Sent to 127.0.0.1:54228: {"StudentId":"S111","Name":null,"Major":null,"Year":null,"GPA":null,"Status":"error","Message":"Student not found"}
+Client from 127.0.0.1:54228 disconnected
