@@ -178,39 +178,34 @@ namespace SolutionGrader.Core.Services
         {
             try
             {
-                // Find and remove unified containers (ag-unified-*)
-                var (unifiedSuccess, unifiedOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
-                    "ps -a --filter 'name=ag-unified-' -q", 5000);
-
-                if (unifiedSuccess && !string.IsNullOrWhiteSpace(unifiedOutput))
-                {
-                    var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
-
-                    foreach (var containerId in containerIds)
-                    {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
-                    }
-                }
-
-                // Find and remove monitor containers (ag-monitor-*)
-                var (monitorSuccess, monitorOutput) = _dockerExecutor.ExecDockerCommandWithOutput(
-                    "ps -a --filter 'name=ag-monitor-' -q", 5000);
-
-                if (monitorSuccess && !string.IsNullOrWhiteSpace(monitorOutput))
-                {
-                    var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                    OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
-
-                    foreach (var containerId in containerIds)
-                    {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
-                    }
-                }
+                CleanupContainersByPrefix("ag-unified-", "unified");
+                CleanupContainersByPrefix("ag-monitor-", "monitor");
             }
             catch (Exception ex)
             {
                 OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cleans up containers matching a specific name prefix.
+        /// </summary>
+        /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
+        /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
+        private void CleanupContainersByPrefix(string prefix, string containerType)
+        {
+            var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(
+                $"ps -a --filter 'name={prefix}' -q", 5000);
+
+            if (success && !string.IsNullOrWhiteSpace(output))
+            {
+                var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
+
+                foreach (var containerId in containerIds)
+                {
+                    try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                }
             }
         }
 
