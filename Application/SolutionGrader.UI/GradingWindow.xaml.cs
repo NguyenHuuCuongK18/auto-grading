@@ -70,7 +70,8 @@ namespace SolutionGrader.UI
         // THREAD-SAFETY: Using ConcurrentDictionary because multiple parallel worker threads
         // access this cache simultaneously during batch grading. Regular Dictionary would cause:
         // "Operations that change non-concurrent collections must have exclusive access" exception
-        private readonly ConcurrentDictionary<string, (string testKitPath, TestKitConfig config)> _testKitCache = new ConcurrentDictionary<string, (string, TestKitConfig)>();
+        // NOTE: The TestKitConfig is nullable to allow caching of "test kit not found" results
+        private readonly ConcurrentDictionary<string, (string testKitPath, TestKitConfig? config)> _testKitCache = new ConcurrentDictionary<string, (string testKitPath, TestKitConfig? config)>();
         
         // PORT ALLOCATION REMOVED: No longer needed
         // All students use the same Code_Container_Internal_Port from environment.xlsx
@@ -1083,20 +1084,20 @@ namespace SolutionGrader.UI
                     var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, paperNo);
                     if (string.IsNullOrEmpty(testKitPath))
                     {
-                        // Return a tuple with null config to indicate failure
-                        // We'll check this after GetOrAdd returns
-                        return (testKitPath: string.Empty, config: (TestKitConfig?)null)!;
+                        // Return a tuple with empty path and null config to indicate "test kit not found"
+                        // This allows caching the failure to avoid repeated lookups for the same paper
+                        return (testKitPath: string.Empty, config: (TestKitConfig?)null);
                     }
                     
                     var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
                     if (testKitConfig == null)
                     {
-                        // Return a tuple with null config to indicate failure
-                        return (testKitPath: string.Empty, config: (TestKitConfig?)null)!;
+                        // Return a tuple with empty path and null config to indicate "failed to load config"
+                        return (testKitPath: string.Empty, config: (TestKitConfig?)null);
                     }
                     
                     _logger.LogInfo($"Loaded test kit for Paper {paperNo} from: {testKitPath}");
-                    return (testKitPath, config: testKitConfig)!;
+                    return (testKitPath, config: testKitConfig);
                 });
                 
                 // Handle cache miss failures (test kit not found or failed to load)
