@@ -1,5 +1,5 @@
-Client connected from 127.0.0.1:48590
-Received from 127.0.0.1:48590: S001
-Sent to 127.0.0.1:48590: {"StudentId":"S001","Name":"John Smith","Major":"Computer Science","Year":3,"GPA":3.5,"Status":"success","Message":"Student information retrieved successfully"}
-Client from 127.0.0.1:48590 disconnected
+Client connected from 127.0.0.1:51674
+Received from 127.0.0.1:51674: S001
+Sent to 127.0.0.1:51674: {"StudentId":"S001","Name":"John Smith","Major":"Computer Science","Year":3,"GPA":3.5,"Status":"success","Message":"Student information retrieved successfully"}
+Client from 127.0.0.1:51674 disconnected
 

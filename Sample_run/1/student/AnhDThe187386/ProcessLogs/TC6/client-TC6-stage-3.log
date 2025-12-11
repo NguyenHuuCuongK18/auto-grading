@@ -1,9 +1,9 @@
 
 ========== Server Response ==========
-Student ID: Sabc
+Student ID: s001
 Status: error
-Error: Student not found
-Message: Student not found
+Error: Invalid student ID format. Expected: S followed by 3 digits
+Message: Invalid student ID format. Expected: S followed by 3 digits
 =====================================
 
 Enter Student ID: 
