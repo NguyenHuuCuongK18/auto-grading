@@ -19,6 +19,10 @@ namespace SolutionGrader.Core.Services;
 /// - Exact flag format match (comma-separated: "FIN, ACK")
 /// - Real-time capture - no buffering/timing issues
 /// - Easy to read and debug
+/// 
+/// IMPORTANT: Packets are sorted by kernel-level timestamp after parsing to ensure
+/// correct network flow ordering. This is critical because libpcap's ring buffer may
+/// deliver packets out of order even though each packet has the correct timestamp.
 /// </summary>
 public class JsonPacketParsingService
 {
@@ -85,6 +89,13 @@ public class JsonPacketParsingService
             }
             
             Console.WriteLine($"[JsonPacketParser] Successfully parsed {packets.Count} packets");
+            
+            // CRITICAL FIX: Sort packets by timestamp to ensure correct network flow ordering.
+            // libpcap's ring buffer in Linux containers may deliver packets out of order even
+            // though each packet has the correct kernel-level timestamp. This sorting ensures
+            // that FIN/ACK sequences and other time-sensitive packet flows are in the correct order.
+            packets = packets.OrderBy(p => p.Timestamp).ToList();
+            Console.WriteLine($"[JsonPacketParser] Packets sorted by timestamp for correct ordering");
         }
         catch (Exception ex)
         {
