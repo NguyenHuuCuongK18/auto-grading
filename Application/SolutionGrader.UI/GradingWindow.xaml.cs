@@ -67,7 +67,10 @@ namespace SolutionGrader.UI
         
         // Cache test kit configurations by paper number to avoid repeated Excel file reads
         // Only loaded during grading, NOT during discovery
-        private readonly Dictionary<string, (string testKitPath, TestKitConfig config)> _testKitCache = new Dictionary<string, (string, TestKitConfig)>();
+        // THREAD-SAFETY: Using ConcurrentDictionary because multiple parallel worker threads
+        // access this cache simultaneously during batch grading. Regular Dictionary would cause:
+        // "Operations that change non-concurrent collections must have exclusive access" exception
+        private readonly ConcurrentDictionary<string, (string testKitPath, TestKitConfig config)> _testKitCache = new ConcurrentDictionary<string, (string, TestKitConfig)>();
         
         // PORT ALLOCATION REMOVED: No longer needed
         // All students use the same Code_Container_Internal_Port from environment.xlsx
@@ -1070,43 +1073,49 @@ namespace SolutionGrader.UI
                 
                 _logger.LogInfo($"Starting grading for {student.StudentCode} (Paper {student.PaperNo})");
                 
-                // Use cached test kit path and config to avoid repeated Excel file reads
-                if (!_testKitCache.TryGetValue(student.PaperNo, out var cachedTestKit))
+                // THREAD-SAFETY: Use GetOrAdd for atomic cache population
+                // This prevents race conditions when multiple parallel workers try to load the same paper's test kit
+                // GetOrAdd is thread-safe and guarantees that the factory delegate runs at most once per key
+                var cachedTestKit = _testKitCache.GetOrAdd(student.PaperNo, paperNo =>
                 {
-                    // Not in cache (shouldn't happen if LoadStudents ran), load it now
-                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                    _logger.LogInfo($"Loading test kit for Paper {paperNo} (cache miss)...");
+                    
+                    var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, paperNo);
                     if (string.IsNullOrEmpty(testKitPath))
                     {
-                        student.Status = GradingStatus.Not_Run;
-                        student.StatusMessage = $"No test kit for paper {student.PaperNo}";
-                        student.EndTime = DateTime.Now;
-                        _logger.LogWarning(student.StatusMessage);
-                        UpdateStudentInUI(student);
-                        return;
+                        // Return a tuple with null config to indicate failure
+                        // We'll check this after GetOrAdd returns
+                        return (testKitPath: string.Empty, config: (TestKitConfig?)null)!;
                     }
                     
                     var testKitConfig = _testKitConfigService.LoadTestKitConfig(testKitPath);
                     if (testKitConfig == null)
                     {
-                        student.Status = GradingStatus.Failed;
-                        student.StatusMessage = "Failed to load test kit configuration";
-                        student.EndTime = DateTime.Now;
-                        _logger.LogError(student.StatusMessage);
-                        UpdateStudentInUI(student);
-                        return;
+                        // Return a tuple with null config to indicate failure
+                        return (testKitPath: string.Empty, config: (TestKitConfig?)null)!;
                     }
                     
-                    cachedTestKit = (testKitPath, testKitConfig);
-                    _testKitCache[student.PaperNo] = cachedTestKit;
-                }
+                    _logger.LogInfo($"Loaded test kit for Paper {paperNo} from: {testKitPath}");
+                    return (testKitPath, config: testKitConfig)!;
+                });
                 
-                // Check if test kit exists
-                if (string.IsNullOrEmpty(cachedTestKit.testKitPath) || cachedTestKit.config == null)
+                // Handle cache miss failures (test kit not found or failed to load)
+                if (string.IsNullOrEmpty(cachedTestKit.testKitPath))
                 {
                     student.Status = GradingStatus.Not_Run;
                     student.StatusMessage = $"No test kit for paper {student.PaperNo}";
                     student.EndTime = DateTime.Now;
                     _logger.LogWarning(student.StatusMessage);
+                    UpdateStudentInUI(student);
+                    return;
+                }
+                
+                if (cachedTestKit.config == null)
+                {
+                    student.Status = GradingStatus.Failed;
+                    student.StatusMessage = "Failed to load test kit configuration";
+                    student.EndTime = DateTime.Now;
+                    _logger.LogError(student.StatusMessage);
                     UpdateStudentInUI(student);
                     return;
                 }
