@@ -125,6 +125,8 @@ namespace SolutionGrader.Core.Services.Docker
         /// <summary>
         /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// This is called at the end of grading sessions to ensure no containers are left behind.
+        /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
+        /// commands for better performance when grading 200+ students.
         /// </summary>
         private void CleanupOrphanedContainers()
         {
@@ -139,9 +141,9 @@ namespace SolutionGrader.Core.Services.Docker
                     var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                     OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
                     
-                    foreach (var containerId in containerIds)
+                    if (containerIds.Length > 0)
                     {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                        BatchRemoveContainers(containerIds, "unified");
                     }
                 }
                 
@@ -154,15 +156,46 @@ namespace SolutionGrader.Core.Services.Docker
                     var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                     OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
                     
-                    foreach (var containerId in containerIds)
+                    if (containerIds.Length > 0)
                     {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                        BatchRemoveContainers(containerIds, "monitor");
                     }
                 }
             }
             catch (Exception ex)
             {
                 OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Removes containers in batches for efficiency.
+        /// Uses single docker rm command for multiple containers to reduce API overhead.
+        /// </summary>
+        /// <param name="containerIds">Array of container IDs to remove</param>
+        /// <param name="containerType">Type of container for logging</param>
+        private void BatchRemoveContainers(string[] containerIds, string containerType)
+        {
+            const int batchSize = 20;
+            for (int i = 0; i < containerIds.Length; i += batchSize)
+            {
+                var batch = containerIds.Skip(i).Take(batchSize).ToArray();
+                var batchIds = string.Join(" ", batch);
+                try
+                {
+                    // Use single docker rm command for batch removal
+                    _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", 15000);
+                    OnProgress($"[Docker Cleanup] Removed batch of {batch.Length} {containerType} container(s)");
+                }
+                catch (Exception ex)
+                {
+                    // Fallback: try removing individually if batch fails
+                    OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
+                    foreach (var containerId in batch)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    }
+                }
             }
         }
         
