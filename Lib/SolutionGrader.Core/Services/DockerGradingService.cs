@@ -104,8 +104,8 @@ namespace SolutionGrader.Core.Services
         // This prevents periodic cleanup from killing containers that are still being used by other students.
         // Without this, when Student A finishes and triggers cleanup, the monitor/unified containers
         // for Students B, C, D would be killed, causing them to fail with "no network captured".
-        // Key: container name, Value: true (using ConcurrentDictionary for thread-safety)
-        private static readonly ConcurrentDictionary<string, bool> _activeContainers = new();
+        // Key: container name, Value: byte (unused, just for ConcurrentDictionary - more memory efficient than bool)
+        private static readonly ConcurrentDictionary<string, byte> _activeContainers = new();
 
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -306,7 +306,7 @@ namespace SolutionGrader.Core.Services
         /// <param name="containerName">Name of the container to register</param>
         private static void RegisterActiveContainer(string containerName)
         {
-            _activeContainers.TryAdd(containerName, true);
+            _activeContainers.TryAdd(containerName, 0);
         }
         
         /// <summary>
@@ -386,7 +386,9 @@ namespace SolutionGrader.Core.Services
                 for (int i = 0; i < containersToRemove.Count; i += BatchRemovalSize)
                 {
                     var batchCount = Math.Min(BatchRemovalSize, containersToRemove.Count - i);
-                    var batchNames = string.Join(" ", containersToRemove.Skip(i).Take(batchCount));
+                    // OPTIMIZATION: Use GetRange instead of LINQ Skip/Take to avoid intermediate collections
+                    var batchContainers = containersToRemove.GetRange(i, batchCount);
+                    var batchNames = string.Join(" ", batchContainers);
                     try
                     {
                         // Use single docker rm command for batch removal
@@ -397,7 +399,7 @@ namespace SolutionGrader.Core.Services
                     {
                         // Fallback: try removing individually if batch fails
                         OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
-                        foreach (var containerName in containersToRemove.Skip(i).Take(batchCount))
+                        foreach (var containerName in batchContainers)
                         {
                             try { _dockerExecutor.ExecDockerCommand($"rm -f {containerName}", 5000); } catch { }
                         }
