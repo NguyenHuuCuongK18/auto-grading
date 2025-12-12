@@ -175,22 +175,11 @@ namespace SolutionGrader.UI
                 _cancellationTokenSource?.Dispose();
             }
             
-            // LEGACY: Clear shared network monitors (HOST-based monitoring)
-            // With sidecar pattern, monitors are per-student Docker containers
-            // and are cleaned up automatically
-            // Keeping this commented for reference
-            /*
-            try
-            {
-                _logger.LogInfo("[Window Close] Clearing shared network monitors...");
-                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
-                _logger.LogInfo("[Window Close] Shared network monitors cleared");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[Window Close] Error clearing monitors: {ex.Message}");
-            }
-            */
+            // CRITICAL: Dispose all Docker containers (including MSSQL) when window is closing
+            // This ensures containers are cleaned up even when grading was paused
+            // The FinalizeGradingSession skips disposal when paused (to allow resume),
+            // but when the window is closing, we must clean up regardless
+            DisposeContainersWithLogging("Window Close");
             
             // Flush any pending UI updates before closing
             _uiUpdateBatcher?.Flush();
@@ -1459,6 +1448,10 @@ namespace SolutionGrader.UI
                     btnStartSelected.IsEnabled = true;
                 }, System.Windows.Threading.DispatcherPriority.Send);
                 
+                // CRITICAL: Dispose all Docker containers (including MSSQL) when pausing
+                // This ensures containers are cleaned up immediately when user pauses
+                DisposeContainersWithLogging("Pause");
+                
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
             }
         }
@@ -1729,6 +1722,25 @@ namespace SolutionGrader.UI
             var setupWindow = new SetupWindow();
             setupWindow.Show();
             this.Close();
+        }
+
+        /// <summary>
+        /// Disposes all Docker containers (including MSSQL) with logging.
+        /// Used for cleanup during pause, window close, and other scenarios.
+        /// </summary>
+        /// <param name="context">Context string for logging (e.g., "Pause", "Window Close")</param>
+        private void DisposeContainersWithLogging(string context)
+        {
+            try
+            {
+                _logger.LogInfo($"[{context}] Disposing all Docker containers...");
+                _gradingService.DisposeAllContainers(_configuration);
+                _logger.LogInfo($"[{context}] Docker containers disposed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[{context}] Error disposing containers: {ex.Message}");
+            }
         }
 
         private void UpdateButtonStates()
