@@ -450,8 +450,9 @@ namespace SolutionGrader.Core.Services
             // Set current student code for logging
             _currentStudentCode = studentCode;
 
-            // Unified container name
-            var unifiedContainer = $"ag-unified-{studentCode}";
+            // Unified container name - use sanitized student code for valid Docker container names
+            // Docker container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]+ (no spaces or special chars)
+            var unifiedContainer = ContainerNameHelper.BuildUnifiedContainerName(studentCode);
             var databaseContainer = config.DatabaseContainerName; // Database container name from config
 
             // CRITICAL FIX: Check Docker container count before starting
@@ -724,7 +725,8 @@ namespace SolutionGrader.Core.Services
                     unifiedContainer);
 
                 // Setup network monitor container attached to unified container
-                var monitorContainer = $"ag-monitor-{studentCode}";
+                // Use sanitized student code for valid Docker container names
+                var monitorContainer = ContainerNameHelper.BuildMonitorContainerName(studentCode);
                 pcapFilePath = Path.Combine(studentResultPath, "network_capture.pcap");
                 _currentPcapFilePath = pcapFilePath; // Store for per-stage parsing
                 _lastParsedPacketCount = 0; // Reset packet counter
@@ -861,7 +863,8 @@ namespace SolutionGrader.Core.Services
                 // }
 
                 // Cleanup network monitor container (sidecar pattern)
-                var monitorContainer = $"ag-monitor-{studentCode}";
+                // Use sanitized student code for valid Docker container names
+                var monitorContainer = ContainerNameHelper.BuildMonitorContainerName(studentCode);
                 try
                 {
                     OnProgress($"[Monitor] Stopping and extracting pcap from {monitorContainer}...");
