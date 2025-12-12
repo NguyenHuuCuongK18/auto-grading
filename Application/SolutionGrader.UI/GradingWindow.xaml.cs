@@ -85,6 +85,12 @@ namespace SolutionGrader.UI
         // The logger creates one timestamped file per session, not per student
         private GradingMessageLogger? _sharedMessageLogger;
         
+        // CRITICAL: Shared ExcelLogCoordinator for batch/parallel grading
+        // Each grading session needs ONE shared ExcelLogCoordinator that all parallel students use
+        // This prevents the root StudentsSolution.xlsx from being overwritten by each student
+        // The coordinator is initialized ONCE with ALL students, then updates individual rows
+        private ExcelLogCoordinator? _sharedExcelCoordinator;
+        
         private CancellationTokenSource? _cancellationTokenSource;
         private DateTime? _sessionStartTime;
         private bool _isPaused;
@@ -651,6 +657,59 @@ namespace SolutionGrader.UI
                 _sharedMessageLogger = null;
             }
             
+            // CRITICAL FIX: Initialize shared ExcelLogCoordinator for THIS grading session
+            // All parallel students will use this SAME ExcelLogCoordinator instance
+            // This prevents the root StudentsSolution.xlsx from being overwritten by each student
+            // The coordinator is initialized ONCE with ALL students (including those NOT being graded),
+            // then updates individual rows as each student completes
+            try
+            {
+                var resultPath = _configuration.GetEffectiveResultPath();
+                if (string.IsNullOrEmpty(resultPath))
+                {
+                    _logger.LogWarning("[ExcelCoordinator] Result path is not configured, Excel logging will use fallback");
+                    _sharedExcelCoordinator = null;
+                }
+                else
+                {
+                    _sharedExcelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
+                    
+                    // Collect max marks for each paper from test kits
+                    var testKitMaxMarks = new Dictionary<string, double>();
+                    List<StudentSolution> allStudents;
+                    lock (_studentsLock)
+                    {
+                        allStudents = _students.ToList();
+                    }
+                    
+                    foreach (var student in allStudents)
+                    {
+                        if (!testKitMaxMarks.ContainsKey(student.PaperNo))
+                        {
+                            var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                            if (!string.IsNullOrEmpty(testKitPath))
+                            {
+                                var config = _testKitConfigService.LoadTestKitConfig(testKitPath);
+                                if (config != null)
+                                {
+                                    testKitMaxMarks[student.PaperNo] = config.TotalMaxMark;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Initialize with ALL students (not just those being graded)
+                    // This ensures the root StudentsSolution.xlsx contains all students
+                    _sharedExcelCoordinator.InitializeExcelFile(allStudents, testKitMaxMarks);
+                    _logger.LogInfo($"[ExcelCoordinator] Initialized SHARED ExcelLogCoordinator with {allStudents.Count} students for batch grading session");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[ExcelCoordinator] Failed to initialize ExcelLogCoordinator: {ex.Message}. Excel logging will use fallback.", ex);
+                _sharedExcelCoordinator = null;
+            }
+            
             _cancellationTokenSource = new CancellationTokenSource();
             _isRunning = true;
             _isPaused = false;
@@ -1101,6 +1160,12 @@ namespace SolutionGrader.UI
                 _sharedMessageLogger = null;
                 _logger.LogInfo("[Message Logger] Shared GradingMessageLogger disposed and logs exported to Excel");
                 
+                // Dispose shared ExcelLogCoordinator when session ends
+                // This will flush any pending updates to the root StudentsSolution.xlsx
+                _sharedExcelCoordinator?.Dispose();
+                _sharedExcelCoordinator = null;
+                _logger.LogInfo("[ExcelCoordinator] Shared ExcelLogCoordinator disposed and root StudentsSolution.xlsx finalized");
+                
                 // LEGACY: Clear shared network monitors (HOST-based monitoring)
                 // With sidecar pattern, monitors are Docker containers cleaned up automatically
                 /*
@@ -1330,14 +1395,15 @@ namespace SolutionGrader.UI
                     // PORT ALLOCATION REMOVED: All students use same Code_Container_Internal_Port
                     // Docker container isolation prevents port conflicts between students
                     // TRUE PARALLEL: Containers created simultaneously without any serialization or callbacks
-                    // Pass the shared message logger to prevent file access conflicts in parallel grading
+                    // Pass the shared message logger and Excel coordinator to prevent file access conflicts in parallel grading
                     var sessionState = new GradingSessionState();
                     await _gradingService.StartGradingAsync(
                         new System.Collections.Generic.List<StudentSolution> { student },
                         studentConfig,
                         sessionState,
                         ct,
-                        _sharedMessageLogger);
+                        _sharedMessageLogger,
+                        _sharedExcelCoordinator);
                 
                     // Update final status
                     student.ProgressPercent = 100;

@@ -36,6 +36,7 @@ namespace SolutionGrader.UI.Services
         private ExcelLogCoordinator? _excelCoordinator;
         private GradingMessageLogger? _messageLogger;
         private bool _ownsMessageLogger; // True if we created the logger, false if it was shared
+        private bool _ownsExcelCoordinator; // True if we created the coordinator, false if it was shared
         
         private CancellationTokenSource? _cancellationTokenSource;
         
@@ -70,12 +71,17 @@ namespace SolutionGrader.UI.Services
         /// If provided, uses this instead of creating a new instance, preventing file access conflicts in parallel grading scenarios. 
         /// IMPORTANT: When providing a shared logger, the CALLER retains ownership and is responsible for disposal. 
         /// This service will NOT dispose a shared logger. The shared logger MUST be thread-safe for concurrent writes.</param>
+        /// <param name="sharedExcelCoordinator">Optional shared ExcelLogCoordinator for batch grading.
+        /// If provided, uses this instead of creating a new instance, preventing the root StudentsSolution.xlsx from being overwritten.
+        /// IMPORTANT: When providing a shared coordinator, the CALLER retains ownership and is responsible for disposal.
+        /// The coordinator should be initialized with ALL students before calling this method.</param>
         public async Task StartGradingAsync(
             List<StudentSolution> students, 
             GradingConfiguration config,
             GradingSessionState sessionState,
             CancellationToken ct = default,
-            GradingMessageLogger? sharedMessageLogger = null)
+            GradingMessageLogger? sharedMessageLogger = null,
+            ExcelLogCoordinator? sharedExcelCoordinator = null)
         {
             // Use provided cancellation token, or create a new one if not provided
             if (ct == default)
@@ -89,7 +95,19 @@ namespace SolutionGrader.UI.Services
             _resultWriter = new ResultWriterService(_logger, resultPath);
 
             // Initialize Excel log coordinator for centralized, thread-safe Excel updates
-            _excelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
+            // Use shared coordinator if provided (for batch grading), otherwise create a new one
+            if (sharedExcelCoordinator != null)
+            {
+                _excelCoordinator = sharedExcelCoordinator;
+                _ownsExcelCoordinator = false; // We don't own this coordinator, so don't dispose it
+                _logger.LogInfo($"[GradingOrchestrationService] Using shared ExcelLogCoordinator for batch grading");
+            }
+            else
+            {
+                _excelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
+                _ownsExcelCoordinator = true; // We created this coordinator, so we must dispose it
+                _logger.LogInfo($"[GradingOrchestrationService] Created new ExcelLogCoordinator instance");
+            }
 
             // Initialize centralized message logger for structured error/message logging
             // Use shared logger if provided (for batch grading), otherwise create a new one
@@ -119,41 +137,49 @@ namespace SolutionGrader.UI.Services
 
             // PRE-POPULATE Excel file with all students and predetermined information
             // This solves the batch grading issue where multiple processes overwrite the file
-            try
+            // ONLY initialize if we OWN the coordinator (not using a shared one)
+            if (_ownsExcelCoordinator)
             {
-                // Collect max marks for each paper from test kits
-                var testKitMaxMarks = new Dictionary<string, double>();
-                foreach (var student in students)
+                try
                 {
-                    if (!testKitMaxMarks.ContainsKey(student.PaperNo))
+                    // Collect max marks for each paper from test kits
+                    var testKitMaxMarks = new Dictionary<string, double>();
+                    foreach (var student in students)
                     {
-                        var testKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
-                        if (string.IsNullOrEmpty(testKitPath))
+                        if (!testKitMaxMarks.ContainsKey(student.PaperNo))
                         {
-                            // Test kit not found - this is a test kit error
-                            var errorMsg = GradingMessageCatalog.Format(
-                                GradingMessageCatalog.TestKitError.MappingNotFound, 
-                                student.PaperNo);
-                            _messageLogger.LogTestKitError(errorMsg, student.StudentCode);
-                            _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
-                            continue;
+                            var testKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
+                            if (string.IsNullOrEmpty(testKitPath))
+                            {
+                                // Test kit not found - this is a test kit error
+                                var errorMsg = GradingMessageCatalog.Format(
+                                    GradingMessageCatalog.TestKitError.MappingNotFound, 
+                                    student.PaperNo);
+                                _messageLogger.LogTestKitError(errorMsg, student.StudentCode);
+                                _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
+                                continue;
+                            }
+                            
+                            var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                            testKitMaxMarks[student.PaperNo] = maxMark;
                         }
-                        
-                        var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
-                        testKitMaxMarks[student.PaperNo] = maxMark;
                     }
-                }
 
-                _excelCoordinator.InitializeExcelFile(students, testKitMaxMarks);
-                _logger.LogInfo($"[ExcelCoordinator] Pre-populated StudentsSolution.xlsx with {students.Count} students");
-                _messageLogger.LogInfo("Excel log file initialized successfully");
+                    _excelCoordinator.InitializeExcelFile(students, testKitMaxMarks);
+                    _logger.LogInfo($"[ExcelCoordinator] Pre-populated StudentsSolution.xlsx with {students.Count} students");
+                    _messageLogger.LogInfo("Excel log file initialized successfully");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Failed to initialize Excel file", ex);
+                    _messageLogger.LogGraderError(
+                        GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.ExcelFileWriteFailed, ex.Message), 
+                        null, ex);
+                }
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError("Failed to initialize Excel file", ex);
-                _messageLogger.LogGraderError(
-                    GradingMessageCatalog.Format(GradingMessageCatalog.GraderError.ExcelFileWriteFailed, ex.Message), 
-                    null, ex);
+                _logger.LogInfo($"[ExcelCoordinator] Using shared coordinator - skipping initialization (already initialized by caller)");
             }
 
             // PORT ALLOCATION NOTE:
@@ -260,7 +286,17 @@ namespace SolutionGrader.UI.Services
                 sessionState.SessionEndTime = DateTime.Now;
                 sessionState.CurrentStudentCode = null;
                 
-                _excelCoordinator?.Dispose();
+                // Dispose ExcelLogCoordinator only if we created it (not shared)
+                // If shared, the owner (GradingWindow) will dispose it
+                if (_ownsExcelCoordinator)
+                {
+                    _excelCoordinator?.Dispose();
+                    _logger.LogInfo("[GradingOrchestrationService] Disposed owned ExcelLogCoordinator");
+                }
+                else
+                {
+                    _logger.LogInfo("[GradingOrchestrationService] Skipped disposal of shared ExcelLogCoordinator (owned by caller)");
+                }
                 
                 // Dispose message logger only if we created it (not shared)
                 // If shared, the owner (GradingWindow) will dispose it
