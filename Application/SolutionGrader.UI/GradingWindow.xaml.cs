@@ -179,16 +179,7 @@ namespace SolutionGrader.UI
             // This ensures containers are cleaned up even when grading was paused
             // The FinalizeGradingSession skips disposal when paused (to allow resume),
             // but when the window is closing, we must clean up regardless
-            try
-            {
-                _logger.LogInfo("[Window Close] Disposing all Docker containers...");
-                _gradingService.DisposeAllContainers(_configuration);
-                _logger.LogInfo("[Window Close] Docker containers disposed");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"[Window Close] Error disposing containers: {ex.Message}");
-            }
+            DisposeContainersWithLogging("Window Close");
             
             // Flush any pending UI updates before closing
             _uiUpdateBatcher?.Flush();
@@ -1459,16 +1450,7 @@ namespace SolutionGrader.UI
                 
                 // CRITICAL: Dispose all Docker containers (including MSSQL) when pausing
                 // This ensures containers are cleaned up immediately when user pauses
-                try
-                {
-                    _logger.LogInfo("[Pause] Disposing all Docker containers...");
-                    _gradingService.DisposeAllContainers(_configuration);
-                    _logger.LogInfo("[Pause] Docker containers disposed");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"[Pause] Error disposing containers: {ex.Message}");
-                }
+                DisposeContainersWithLogging("Pause");
                 
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
             }
@@ -1740,6 +1722,25 @@ namespace SolutionGrader.UI
             var setupWindow = new SetupWindow();
             setupWindow.Show();
             this.Close();
+        }
+
+        /// <summary>
+        /// Disposes all Docker containers (including MSSQL) with logging.
+        /// Used for cleanup during pause, window close, and other scenarios.
+        /// </summary>
+        /// <param name="context">Context string for logging (e.g., "Pause", "Window Close")</param>
+        private void DisposeContainersWithLogging(string context)
+        {
+            try
+            {
+                _logger.LogInfo($"[{context}] Disposing all Docker containers...");
+                _gradingService.DisposeAllContainers(_configuration);
+                _logger.LogInfo($"[{context}] Docker containers disposed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[{context}] Error disposing containers: {ex.Message}");
+            }
         }
 
         private void UpdateButtonStates()
