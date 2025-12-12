@@ -434,7 +434,7 @@ namespace SolutionGrader.UI
         private void SearchField_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
             // Only apply filter if there's search text (avoid unnecessary filter on startup)
-            if (!string.IsNullOrEmpty(txtSearchFilter?.Text))
+            if (txtSearchFilter != null && !string.IsNullOrEmpty(txtSearchFilter.Text))
             {
                 ApplySearchFilter();
             }
@@ -478,7 +478,8 @@ namespace SolutionGrader.UI
                         "StudentCode" => student.StudentCode ?? string.Empty,
                         "PaperNo" => student.PaperNo ?? string.Empty,
                         "Status" => student.StatusDisplay ?? string.Empty,
-                        "Mark" => student.Mark.ToString("N1"),
+                        // Use G format for marks to allow matching both "85" and "85.0"
+                        "Mark" => student.Mark.ToString("G"),
                         "Start" => student.StartTime?.ToString("HH:mm:ss") ?? string.Empty,
                         "End" => student.EndTime?.ToString("HH:mm:ss") ?? string.Empty,
                         _ => student.StudentCode ?? string.Empty
