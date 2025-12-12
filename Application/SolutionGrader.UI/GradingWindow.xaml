@@ -120,7 +120,27 @@
 
                                 <!-- Buttons -->
                                 <Button x:Name="btnSelectAll" Content="All" Height="26" Padding="10,0" Margin="0,0,5,0" Click="SelectAll_Click"/>
-                                <Button x:Name="btnUnselectAll" Content="None" Height="26" Padding="10,0" Click="UnselectAll_Click"/>
+                                <Button x:Name="btnUnselectAll" Content="None" Height="26" Padding="10,0" Margin="0,0,15,0" Click="UnselectAll_Click"/>
+
+                                <Border Width="1" Height="20" Background="#DDDDDD" Margin="0,0,15,0"/>
+
+                                <!-- Search Filter -->
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                                    <TextBlock Text="Search:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#444"/>
+                                    <ComboBox x:Name="cmbSearchField" Width="100" Height="26" VerticalContentAlignment="Center" SelectedIndex="0"
+                                              SelectionChanged="SearchField_SelectionChanged">
+                                        <ComboBoxItem Content="StudentCode"/>
+                                        <ComboBoxItem Content="PaperNo"/>
+                                        <ComboBoxItem Content="Status"/>
+                                        <ComboBoxItem Content="Mark"/>
+                                        <ComboBoxItem Content="Start"/>
+                                        <ComboBoxItem Content="End"/>
+                                    </ComboBox>
+                                    <TextBox x:Name="txtSearchFilter" Width="150" Height="26" Margin="5,0,0,0" VerticalContentAlignment="Center" 
+                                             TextChanged="SearchFilter_TextChanged" ToolTip="Type to filter students"/>
+                                    <Button x:Name="btnClearSearch" Content="✕" Height="26" Width="26" Margin="5,0,0,0" 
+                                            Click="ClearSearch_Click" ToolTip="Clear search"/>
+                                </StackPanel>
                             </WrapPanel>
                         </StackPanel>
                     </Border>
