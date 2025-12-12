@@ -689,8 +689,7 @@ namespace SolutionGrader.UI
                             var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
                             if (string.IsNullOrEmpty(testKitPath))
                             {
-                                // Test kit not found - log warning but continue
-                                // The ExcelLogCoordinator will use 0.0 as max mark for this paper
+                                // Test kit not found - use 0.0 as max mark for this paper
                                 _logger.LogWarning($"[ExcelCoordinator] Test kit not found for paper {student.PaperNo}, max mark will be 0");
                                 testKitMaxMarks[student.PaperNo] = 0.0;
                             }
@@ -704,8 +703,8 @@ namespace SolutionGrader.UI
                         }
                     }
                     
-                    // Initialize with ALL students (not just those being graded)
-                    // This ensures the root StudentsSolution.xlsx contains all students
+                    // Initialize with ALL students in the collection (_students), not just those being graded (studentsToGrade)
+                    // This ensures the root StudentsSolution.xlsx contains all students regardless of their current grading status
                     _sharedExcelCoordinator.InitializeExcelFile(allStudents, testKitMaxMarks);
                     _logger.LogInfo($"[ExcelCoordinator] Initialized SHARED ExcelLogCoordinator with {allStudents.Count} students for batch grading session");
                 }
