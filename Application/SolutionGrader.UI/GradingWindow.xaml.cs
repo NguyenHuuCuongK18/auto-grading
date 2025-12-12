@@ -687,13 +687,19 @@ namespace SolutionGrader.UI
                         if (!testKitMaxMarks.ContainsKey(student.PaperNo))
                         {
                             var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
-                            if (!string.IsNullOrEmpty(testKitPath))
+                            if (string.IsNullOrEmpty(testKitPath))
                             {
-                                var config = _testKitConfigService.LoadTestKitConfig(testKitPath);
-                                if (config != null)
-                                {
-                                    testKitMaxMarks[student.PaperNo] = config.TotalMaxMark;
-                                }
+                                // Test kit not found - log warning but continue
+                                // The ExcelLogCoordinator will use 0.0 as max mark for this paper
+                                _logger.LogWarning($"[ExcelCoordinator] Test kit not found for paper {student.PaperNo}, max mark will be 0");
+                                testKitMaxMarks[student.PaperNo] = 0.0;
+                            }
+                            else
+                            {
+                                // Use GetTestKitMaxMark for consistency with GradingOrchestrationService
+                                var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                                testKitMaxMarks[student.PaperNo] = maxMark;
+                                _logger.LogDebug($"[ExcelCoordinator] Loaded max mark {maxMark} for paper {student.PaperNo}");
                             }
                         }
                     }

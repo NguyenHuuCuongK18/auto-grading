@@ -151,17 +151,20 @@ namespace SolutionGrader.UI.Services
                             var testKitPath = _testKitDiscovery.GetTestKitForPaper(config.TestKitFolderPath, student.PaperNo);
                             if (string.IsNullOrEmpty(testKitPath))
                             {
-                                // Test kit not found - this is a test kit error
+                                // Test kit not found - log warning and use 0.0 as max mark
+                                // This is consistent with GradingWindow initialization
                                 var errorMsg = GradingMessageCatalog.Format(
                                     GradingMessageCatalog.TestKitError.MappingNotFound, 
                                     student.PaperNo);
                                 _messageLogger.LogTestKitError(errorMsg, student.StudentCode);
                                 _logger.LogWarning($"[{student.StudentCode}] {errorMsg}");
-                                continue;
+                                testKitMaxMarks[student.PaperNo] = 0.0;
                             }
-                            
-                            var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
-                            testKitMaxMarks[student.PaperNo] = maxMark;
+                            else
+                            {
+                                var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                                testKitMaxMarks[student.PaperNo] = maxMark;
+                            }
                         }
                     }
 
