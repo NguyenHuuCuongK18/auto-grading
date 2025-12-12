@@ -175,22 +175,20 @@ namespace SolutionGrader.UI
                 _cancellationTokenSource?.Dispose();
             }
             
-            // LEGACY: Clear shared network monitors (HOST-based monitoring)
-            // With sidecar pattern, monitors are per-student Docker containers
-            // and are cleaned up automatically
-            // Keeping this commented for reference
-            /*
+            // CRITICAL: Dispose all Docker containers (including MSSQL) when window is closing
+            // This ensures containers are cleaned up even when grading was paused
+            // The FinalizeGradingSession skips disposal when paused (to allow resume),
+            // but when the window is closing, we must clean up regardless
             try
             {
-                _logger.LogInfo("[Window Close] Clearing shared network monitors...");
-                await SharedNetworkMonitorManager.Instance.ClearAllAsync();
-                _logger.LogInfo("[Window Close] Shared network monitors cleared");
+                _logger.LogInfo("[Window Close] Disposing all Docker containers...");
+                _gradingService.DisposeAllContainers(_configuration);
+                _logger.LogInfo("[Window Close] Docker containers disposed");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Window Close] Error clearing monitors: {ex.Message}");
+                _logger.LogWarning($"[Window Close] Error disposing containers: {ex.Message}");
             }
-            */
             
             // Flush any pending UI updates before closing
             _uiUpdateBatcher?.Flush();
