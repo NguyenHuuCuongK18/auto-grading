@@ -1138,9 +1138,12 @@ namespace SolutionGrader.UI
                 
                 // Dispose all Docker containers (including database) when grading session ends
                 // Only dispose if not paused (paused sessions may resume)
+                // CRITICAL: Use forceCleanup=true to clear the active containers registry
+                // This ensures ALL containers are cleaned up at the end of the session,
+                // even if some workers crashed and didn't unregister their containers
                 if (!_isPaused)
                 {
-                    _gradingService.DisposeAllContainers(_configuration);
+                    _gradingService.DisposeAllContainers(_configuration, forceCleanup: true);
                 }
                 
                 // PORT ALLOCATION REMOVED: No longer using PortAllocator

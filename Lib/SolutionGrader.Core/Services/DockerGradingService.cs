@@ -166,18 +166,45 @@ namespace SolutionGrader.Core.Services
         /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// </summary>
         /// <param name="config">Docker grading configuration</param>
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// 
+        /// IMPORTANT: This method is safe to call during batch grading for periodic cleanup.
+        /// It will NOT remove containers that are registered as active (in use by other workers).
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
         public void DisposeAllContainers(DockerGradingConfig config)
+        {
+            // Call the overload with forceCleanup=false (safe for periodic cleanup)
+            DisposeAllContainers(config, forceCleanup: false);
+        }
+
+        /// <summary>
+        /// Disposes all Docker containers including the database container.
+        /// Call this at the end of a grading session to clean up all resources.
+        /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
+        /// </summary>
+        /// <param name="config">Docker grading configuration</param>
+        /// <param name="forceCleanup">When true, clears the active containers registry before cleanup.
+        /// Use this ONLY at the end of a grading session when no workers are running.
+        /// When false (default), active containers are protected from cleanup.</param>
+        public void DisposeAllContainers(DockerGradingConfig config, bool forceCleanup)
         {
             OnProgress("[Docker] Disposing all containers...");
 
-            // CRITICAL FIX: Clear the active containers registry BEFORE cleanup
-            // This ensures that ALL containers are eligible for removal, even if worker threads
-            // crashed and didn't properly unregister their containers.
-            // Without this, containers would be skipped during cleanup because IsContainerActive() returns true.
-            var clearedCount = ClearActiveContainersRegistry();
-            if (clearedCount > 0)
+            // CRITICAL FIX: Only clear the active containers registry when forceCleanup is true
+            // This should only be done at the END of a grading session when all workers have finished.
+            // During periodic cleanup (forceCleanup=false), we must NOT clear the registry because
+            // other workers are still running and their containers must be protected.
+            if (forceCleanup)
             {
-                OnProgress($"[Docker] Cleared {clearedCount} container(s) from active registry to allow cleanup");
+                var clearedCount = ClearActiveContainersRegistry();
+                if (clearedCount > 0)
+                {
+                    OnProgress($"[Docker] Force cleanup: Cleared {clearedCount} container(s) from active registry");
+                }
             }
 
             var databaseContainer = config.DatabaseContainerName;

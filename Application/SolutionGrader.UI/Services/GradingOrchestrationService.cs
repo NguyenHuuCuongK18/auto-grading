@@ -856,9 +856,12 @@ namespace SolutionGrader.UI.Services
         /// Call this at the end of a grading session to clean up all resources.
         /// </summary>
         /// <param name="config">Grading configuration containing Docker settings</param>
-        public void DisposeAllContainers(GradingConfiguration config)
+        /// <param name="forceCleanup">When true, clears the active containers registry before cleanup.
+        /// Use this ONLY at the end of a grading session when no workers are running.
+        /// When false (default), active containers are protected from cleanup.</param>
+        public void DisposeAllContainers(GradingConfiguration config, bool forceCleanup = false)
         {
-            _logger.LogInfo("Disposing all Docker containers...");
+            _logger.LogInfo($"Disposing all Docker containers (forceCleanup={forceCleanup})...");
             
             var dockerConfig = new DockerGradingConfig
             {
@@ -866,7 +869,7 @@ namespace SolutionGrader.UI.Services
                 DockerNetwork = config.DockerNetwork ?? "auto-grading-network"
             };
             
-            _libGrading.DisposeAllContainers(dockerConfig);
+            _libGrading.DisposeAllContainers(dockerConfig, forceCleanup);
         }
 
         /// <summary>
