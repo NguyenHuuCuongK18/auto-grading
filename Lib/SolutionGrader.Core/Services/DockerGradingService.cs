@@ -99,6 +99,13 @@ namespace SolutionGrader.Core.Services
         
         // Delay before retrying cleanup for a container (30 seconds)
         private const int RetryCleanupDelaySeconds = 30;
+        
+        // CRITICAL FIX: Static registry of containers currently in use by parallel grading tasks
+        // This prevents periodic cleanup from killing containers that are still being used by other students.
+        // Without this, when Student A finishes and triggers cleanup, the monitor/unified containers
+        // for Students B, C, D would be killed, causing them to fail with "no network captured".
+        // Key: container name, Value: byte (unused, just for ConcurrentDictionary - more memory efficient than bool)
+        private static readonly ConcurrentDictionary<string, byte> _activeContainers = new();
 
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -290,43 +297,111 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[Docker Cleanup] Added {containerName} to retry cleanup queue");
             }
         }
+        
+        /// <summary>
+        /// Registers a container as actively in use by a grading task.
+        /// Active containers are excluded from periodic cleanup to prevent
+        /// killing containers that are still being used by parallel students.
+        /// </summary>
+        /// <param name="containerName">Name of the container to register</param>
+        private static void RegisterActiveContainer(string containerName)
+        {
+            _activeContainers.TryAdd(containerName, 0);
+        }
+        
+        /// <summary>
+        /// Unregisters a container from the active containers registry.
+        /// Call this when a container is no longer needed and can be cleaned up.
+        /// </summary>
+        /// <param name="containerName">Name of the container to unregister</param>
+        private static void UnregisterActiveContainer(string containerName)
+        {
+            _activeContainers.TryRemove(containerName, out _);
+        }
+        
+        /// <summary>
+        /// Checks if a container is currently registered as active.
+        /// </summary>
+        /// <param name="containerName">Name of the container to check</param>
+        /// <returns>True if the container is active and should not be cleaned up</returns>
+        private static bool IsContainerActive(string containerName)
+        {
+            return _activeContainers.ContainsKey(containerName);
+        }
 
         /// <summary>
         /// Cleans up containers matching a specific name prefix.
         /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
         /// commands for better performance when grading 200+ students in batches of 15.
+        /// CRITICAL FIX: Excludes containers that are currently registered as active to prevent
+        /// killing containers that are still being used by parallel grading tasks.
         /// </summary>
         /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
         /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
         private void CleanupContainersByPrefix(string prefix, string containerType)
         {
+            // Get container names (not IDs) so we can check against active containers registry
             var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(
-                $"ps -a --filter 'name={prefix}' -q", 5000);
+                $"ps -a --filter 'name={prefix}' --format '{{{{.Names}}}}'", 5000);
 
             if (success && !string.IsNullOrWhiteSpace(output))
             {
-                var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
+                var containerNames = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                OnProgress($"[Docker Cleanup] Found {containerNames.Length} {containerType} container(s)");
+
+                // CRITICAL FIX: Filter out containers that are currently in use by parallel grading tasks
+                // Without this, periodic cleanup would kill containers for students still being graded
+                var containersToRemove = new List<string>();
+                var skippedActiveCount = 0;
+                
+                foreach (var containerName in containerNames)
+                {
+                    if (IsContainerActive(containerName))
+                    {
+                        // Container is actively being used - DO NOT remove it
+                        skippedActiveCount++;
+                        OnProgress($"[Docker Cleanup] Skipping active container: {containerName}");
+                    }
+                    else
+                    {
+                        containersToRemove.Add(containerName);
+                    }
+                }
+                
+                if (skippedActiveCount > 0)
+                {
+                    OnProgress($"[Docker Cleanup] Protected {skippedActiveCount} active {containerType} container(s) from cleanup");
+                }
+                
+                if (containersToRemove.Count == 0)
+                {
+                    OnProgress($"[Docker Cleanup] No orphaned {containerType} containers to remove");
+                    return;
+                }
+                
+                OnProgress($"[Docker Cleanup] Removing {containersToRemove.Count} orphaned {containerType} container(s)");
 
                 // OPTIMIZATION: Batch remove containers in chunks for efficiency
                 // This reduces Docker API overhead significantly for large batch grading
-                for (int i = 0; i < containerIds.Length; i += BatchRemovalSize)
+                for (int i = 0; i < containersToRemove.Count; i += BatchRemovalSize)
                 {
-                    var batchCount = Math.Min(BatchRemovalSize, containerIds.Length - i);
-                    var batchIds = string.Join(" ", containerIds, i, batchCount);
+                    var batchCount = Math.Min(BatchRemovalSize, containersToRemove.Count - i);
+                    // OPTIMIZATION: Use GetRange instead of LINQ Skip/Take to avoid intermediate collections
+                    var batchContainers = containersToRemove.GetRange(i, batchCount);
+                    var batchNames = string.Join(" ", batchContainers);
                     try
                     {
                         // Use single docker rm command for batch removal
-                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", BatchRemovalTimeoutMs);
+                        _dockerExecutor.ExecDockerCommand($"rm -f {batchNames}", BatchRemovalTimeoutMs);
                         OnProgress($"[Docker Cleanup] Removed batch of {batchCount} {containerType} container(s)");
                     }
                     catch (Exception ex)
                     {
                         // Fallback: try removing individually if batch fails
                         OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
-                        for (int j = i; j < i + batchCount; j++)
+                        foreach (var containerName in batchContainers)
                         {
-                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerIds[j]}", 5000); } catch { }
+                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerName}", 5000); } catch { }
                         }
                     }
                 }
@@ -859,6 +934,11 @@ namespace SolutionGrader.Core.Services
                            $"{config.CodeImageName}";
 
             _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
+            
+            // CRITICAL: Register container as active IMMEDIATELY after creation
+            // This prevents periodic cleanup from killing this container while it's in use
+            RegisterActiveContainer(unifiedContainer);
+            OnProgress($"[SETUP] Unified container {unifiedContainer} created and registered as active");
             OnProgress($"[SETUP] Unified container ready - supervisord running, processes idle");
 
             // Wait for supervisord to be ready
@@ -3499,6 +3579,14 @@ namespace SolutionGrader.Core.Services
             {
                 OnProgress($"[Unified] WARNING: Failed to remove container: {ex.Message}");
             }
+            finally
+            {
+                // CRITICAL: Always unregister the container from active registry
+                // This must happen even if removal failed, to prevent memory leaks
+                // and allow future cleanup attempts to remove the container
+                UnregisterActiveContainer(unifiedContainer);
+                OnProgress($"[Unified] Unregistered {unifiedContainer} from active containers");
+            }
 
             // If removal failed, add to retry queue for later cleanup
             if (!removalSuccessful && _dockerExecutor.IsContainerExist(unifiedContainer))
@@ -3604,7 +3692,11 @@ namespace SolutionGrader.Core.Services
             try
             {
                 _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
-                OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
+                
+                // CRITICAL: Register container as active IMMEDIATELY after creation
+                // This prevents periodic cleanup from killing this container while it's in use
+                RegisterActiveContainer(monitorContainer);
+                OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started and registered as active");
 
                 // Brief delay to ensure container is up and SharpPcap is initialized
                 await Task.Delay(1000);
@@ -3688,6 +3780,14 @@ namespace SolutionGrader.Core.Services
             catch (Exception ex)
             {
                 OnProgress($"[Monitor] WARNING during cleanup: {ex.Message}");
+            }
+            finally
+            {
+                // CRITICAL: Always unregister the container from active registry
+                // This must happen even if removal failed, to prevent memory leaks
+                // and allow future cleanup attempts to remove the container
+                UnregisterActiveContainer(monitorContainer);
+                OnProgress($"[Monitor] Unregistered {monitorContainer} from active containers");
             }
 
             // If removal failed, add to retry queue for later cleanup
