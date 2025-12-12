@@ -111,10 +111,6 @@ namespace SolutionGrader.Core.Services
         // This prevents the periodic cleanup from removing containers that are still being used
         // by students being graded in parallel. Thread-safe for concurrent access.
         private static readonly ConcurrentDictionary<string, DateTime> _activeContainers = new();
-        
-        // Grace period after a container is unregistered before it can be cleaned up (seconds)
-        // This handles race conditions between unregister and cleanup
-        private const int ContainerGracePeriodSeconds = 10;
 
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -3859,12 +3855,12 @@ namespace SolutionGrader.Core.Services
             }
 
             // Attempt to restart the monitor (single attempt, short timeout)
-            var outputDir = Path.GetDirectoryName(_currentPcapFilePath);
+            var outputDir = Path.GetDirectoryName(_currentJsonlFilePath);
             if (!string.IsNullOrEmpty(outputDir))
             {
                 outputDir = Path.GetFullPath(outputDir);
             }
-            var outputFileName = Path.GetFileName(_currentPcapFilePath);
+            var outputFileName = Path.GetFileName(_currentJsonlFilePath);
 
             var dockerCmd = $"docker run -d --name {_currentMonitorContainer} " +
                            $"--net=container:{_currentUnifiedContainer} " +
