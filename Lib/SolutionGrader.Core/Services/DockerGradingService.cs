@@ -67,6 +67,11 @@ namespace SolutionGrader.Core.Services
         private const int OutputRetryMaxAttempts = 5;
         private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
+        
+        // Container cleanup constants
+        private const int ContainerRemovalVerificationDelayMs = 500;  // Delay to verify container removal
+        private const int BatchRemovalTimeoutMs = 15000;  // Timeout for batch container removal
+        private const int BatchRemovalSize = 20;  // Number of containers to remove in a single batch
 
         private readonly DockerCommandExecutor _dockerExecutor;
         private readonly CommandExecutor _commandExecutor;
@@ -303,28 +308,25 @@ namespace SolutionGrader.Core.Services
                 var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
 
-                if (containerIds.Length == 0) return;
-
-                // OPTIMIZATION: Batch remove containers in chunks of 20 for efficiency
+                // OPTIMIZATION: Batch remove containers in chunks for efficiency
                 // This reduces Docker API overhead significantly for large batch grading
-                const int batchSize = 20;
-                for (int i = 0; i < containerIds.Length; i += batchSize)
+                for (int i = 0; i < containerIds.Length; i += BatchRemovalSize)
                 {
-                    var batch = containerIds.Skip(i).Take(batchSize);
-                    var batchIds = string.Join(" ", batch);
+                    var batchCount = Math.Min(BatchRemovalSize, containerIds.Length - i);
+                    var batchIds = string.Join(" ", containerIds, i, batchCount);
                     try
                     {
                         // Use single docker rm command for batch removal
-                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", 15000);
-                        OnProgress($"[Docker Cleanup] Removed batch of {batch.Count()} {containerType} container(s)");
+                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", BatchRemovalTimeoutMs);
+                        OnProgress($"[Docker Cleanup] Removed batch of {batchCount} {containerType} container(s)");
                     }
                     catch (Exception ex)
                     {
                         // Fallback: try removing individually if batch fails
                         OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
-                        foreach (var containerId in batch)
+                        for (int j = i; j < i + batchCount; j++)
                         {
-                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerIds[j]}", 5000); } catch { }
                         }
                     }
                 }
@@ -3482,7 +3484,7 @@ namespace SolutionGrader.Core.Services
                 _dockerExecutor.RemoveContainer(unifiedContainer);
                 
                 // Verify container was actually removed
-                await Task.Delay(500); // Brief wait for Docker to process removal
+                await Task.Delay(ContainerRemovalVerificationDelayMs);
                 if (!_dockerExecutor.IsContainerExist(unifiedContainer))
                 {
                     removalSuccessful = true;
@@ -3672,7 +3674,7 @@ namespace SolutionGrader.Core.Services
                 _dockerExecutor.RemoveContainer(monitorContainer);
                 
                 // Verify container was actually removed
-                await Task.Delay(500); // Brief wait for Docker to process removal
+                await Task.Delay(ContainerRemovalVerificationDelayMs);
                 if (!_dockerExecutor.IsContainerExist(monitorContainer))
                 {
                     removalSuccessful = true;
