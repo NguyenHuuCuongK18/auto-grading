@@ -1457,6 +1457,19 @@ namespace SolutionGrader.UI
                     btnStartSelected.IsEnabled = true;
                 }, System.Windows.Threading.DispatcherPriority.Send);
                 
+                // CRITICAL: Dispose all Docker containers (including MSSQL) when pausing
+                // This ensures containers are cleaned up immediately when user pauses
+                try
+                {
+                    _logger.LogInfo("[Pause] Disposing all Docker containers...");
+                    _gradingService.DisposeAllContainers(_configuration);
+                    _logger.LogInfo("[Pause] Docker containers disposed");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"[Pause] Error disposing containers: {ex.Message}");
+                }
+                
                 _logger.LogInfo("Grading paused - current student will be aborted and can be resumed");
             }
         }
