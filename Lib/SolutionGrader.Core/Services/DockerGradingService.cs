@@ -72,6 +72,11 @@ namespace SolutionGrader.Core.Services
         private const int ContainerRemovalVerificationDelayMs = 500;  // Delay to verify container removal
         private const int BatchRemovalTimeoutMs = 15000;  // Timeout for batch container removal
         private const int BatchRemovalSize = 20;  // Number of containers to remove in a single batch
+        
+        // Monitor container retry constants - addresses sidecar deployment failures during extended grading
+        private const int MonitorStartupMaxRetries = 3;  // Maximum number of retries for monitor container startup
+        private const int MonitorStartupRetryDelayMs = 2000;  // Delay between retry attempts
+        private const int MonitorVerificationTimeoutMs = 5000;  // Timeout for verifying monitor is healthy
 
         private readonly DockerCommandExecutor _dockerExecutor;
         private readonly CommandExecutor _commandExecutor;
@@ -85,6 +90,8 @@ namespace SolutionGrader.Core.Services
 
         // Network monitoring for sidecar pattern
         private string? _currentMonitorContainer; // Name of network monitor container (e.g., ag-monitor-StudentCode)
+        private string? _currentUnifiedContainer; // Name of the unified container (for monitor restart)
+        private int _currentMonitorPort; // Port being monitored (for monitor restart)
         private string? _currentPcapFilePath; // Path to output file (JSONL from sidecar)
         private string? _currentJsonlFilePath; // Path to JSON lines file from SharpPcap-based sidecar
         private int _lastParsedPacketCount = 0; // Track how many packets we've already processed
@@ -99,6 +106,15 @@ namespace SolutionGrader.Core.Services
         
         // Delay before retrying cleanup for a container (30 seconds)
         private const int RetryCleanupDelaySeconds = 30;
+
+        // CRITICAL FIX: Static registry of containers currently in use by active grading sessions
+        // This prevents the periodic cleanup from removing containers that are still being used
+        // by students being graded in parallel. Thread-safe for concurrent access.
+        private static readonly ConcurrentDictionary<string, DateTime> _activeContainers = new();
+        
+        // Grace period after a container is unregistered before it can be cleaned up (seconds)
+        // This handles race conditions between unregister and cleanup
+        private const int ContainerGracePeriodSeconds = 10;
 
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -219,10 +235,17 @@ namespace SolutionGrader.Core.Services
             var containersSuccessfullyRemoved = new List<string>();
 
             // Find containers that are ready for retry (older than RetryCleanupDelaySeconds)
+            // CRITICAL FIX: Skip containers that are currently active
             foreach (var kvp in _pendingCleanupContainers)
             {
                 if ((now - kvp.Value).TotalSeconds >= RetryCleanupDelaySeconds)
                 {
+                    // Skip if container is currently active
+                    if (IsContainerActive(kvp.Key))
+                    {
+                        OnProgress($"[Docker Cleanup] Skipping active container {kvp.Key} in retry queue");
+                        continue;
+                    }
                     containersToRetry.Add(kvp.Key);
                 }
             }
@@ -292,32 +315,83 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
+        /// Registers a container as active (currently in use by a grading session).
+        /// This prevents the container from being cleaned up by periodic cleanup.
+        /// </summary>
+        /// <param name="containerName">Name of the container to register</param>
+        private static void RegisterActiveContainer(string containerName)
+        {
+            _activeContainers.TryAdd(containerName, DateTime.UtcNow);
+        }
+
+        /// <summary>
+        /// Unregisters a container when it's no longer in use.
+        /// The container can be cleaned up after the grace period.
+        /// </summary>
+        /// <param name="containerName">Name of the container to unregister</param>
+        private static void UnregisterActiveContainer(string containerName)
+        {
+            _activeContainers.TryRemove(containerName, out _);
+        }
+
+        /// <summary>
+        /// Checks if a container is currently active (in use by a grading session).
+        /// </summary>
+        /// <param name="containerName">Name of the container to check</param>
+        /// <returns>True if the container is active and should not be cleaned up</returns>
+        private static bool IsContainerActive(string containerName)
+        {
+            return _activeContainers.ContainsKey(containerName);
+        }
+
+        /// <summary>
         /// Cleans up containers matching a specific name prefix.
         /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
         /// commands for better performance when grading 200+ students in batches of 15.
+        /// CRITICAL FIX: Excludes containers that are currently in use by active grading sessions.
         /// </summary>
         /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
         /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
         private void CleanupContainersByPrefix(string prefix, string containerType)
         {
+            // Get container names (not just IDs) so we can check against active registry
             var (success, output) = _dockerExecutor.ExecDockerCommandWithOutput(
-                $"ps -a --filter 'name={prefix}' -q", 5000);
+                $"ps -a --filter 'name={prefix}' --format '{{{{.Names}}}}'", 5000);
 
             if (success && !string.IsNullOrWhiteSpace(output))
             {
-                var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
+                var allContainerNames = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                
+                // CRITICAL FIX: Filter out containers that are currently active
+                var containersToRemove = allContainerNames
+                    .Where(name => !IsContainerActive(name))
+                    .ToArray();
+                
+                var skippedCount = allContainerNames.Length - containersToRemove.Length;
+                
+                if (skippedCount > 0)
+                {
+                    OnProgress($"[Docker Cleanup] Found {allContainerNames.Length} {containerType} containers, skipping {skippedCount} active containers");
+                }
+                
+                if (containersToRemove.Length == 0)
+                {
+                    OnProgress($"[Docker Cleanup] No orphaned {containerType} containers to remove (all are active)");
+                    return;
+                }
+                
+                OnProgress($"[Docker Cleanup] Removing {containersToRemove.Length} orphaned {containerType} container(s)");
 
                 // OPTIMIZATION: Batch remove containers in chunks for efficiency
                 // This reduces Docker API overhead significantly for large batch grading
-                for (int i = 0; i < containerIds.Length; i += BatchRemovalSize)
+                for (int i = 0; i < containersToRemove.Length; i += BatchRemovalSize)
                 {
-                    var batchCount = Math.Min(BatchRemovalSize, containerIds.Length - i);
-                    var batchIds = string.Join(" ", containerIds, i, batchCount);
+                    var batchCount = Math.Min(BatchRemovalSize, containersToRemove.Length - i);
+                    var batchNames = string.Join(" ", containersToRemove, i, batchCount);
                     try
                     {
                         // Use single docker rm command for batch removal
-                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", BatchRemovalTimeoutMs);
+                        _dockerExecutor.ExecDockerCommand($"rm -f {batchNames}", BatchRemovalTimeoutMs);
                         OnProgress($"[Docker Cleanup] Removed batch of {batchCount} {containerType} container(s)");
                     }
                     catch (Exception ex)
@@ -326,7 +400,7 @@ namespace SolutionGrader.Core.Services
                         OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
                         for (int j = i; j < i + batchCount; j++)
                         {
-                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerIds[j]}", 5000); } catch { }
+                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containersToRemove[j]}", 5000); } catch { }
                         }
                     }
                 }
@@ -680,6 +754,10 @@ namespace SolutionGrader.Core.Services
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
 
+                    // CRITICAL FIX: Ensure monitor container is healthy before each test case
+                    // This handles cases where the monitor crashes during extended grading sessions
+                    await EnsureMonitorContainerHealthyAsync();
+
                     // CRITICAL: Clear RunContext at START of each test case for proper isolation
                     // This prevents packets from previous test cases from being included in comparisons
                     if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
@@ -859,6 +937,10 @@ namespace SolutionGrader.Core.Services
                            $"{config.CodeImageName}";
 
             _commandExecutor.RunCommand(dockerCmd, null, null, 30000);
+            
+            // CRITICAL FIX: Register container as active to prevent premature cleanup during parallel grading
+            RegisterActiveContainer(unifiedContainer);
+            
             OnProgress($"[SETUP] Unified container ready - supervisord running, processes idle");
 
             // Wait for supervisord to be ready
@@ -3467,6 +3549,9 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Unified] Starting cleanup for {unifiedContainer}");
             bool removalSuccessful = false;
 
+            // CRITICAL FIX: Unregister container first to allow cleanup by other sessions
+            UnregisterActiveContainer(unifiedContainer);
+
             try
             {
                 // Stop all processes in the container
@@ -3542,24 +3627,16 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress($"[SETUP] Creating SharpPcap-based network monitor sidecar: {monitorContainer}");
 
-            // === CRITICAL: Save monitor container name to class field ===
+            // === CRITICAL: Save monitor container info to class fields for potential restart ===
             _currentMonitorContainer = monitorContainer;
+            _currentUnifiedContainer = unifiedContainer;
+            _currentMonitorPort = port;
             // For new SharpPcap sidecar, output is JSON lines not PCAP
             // Change extension from .pcap to .jsonl
             var jsonlOutputPath = Path.ChangeExtension(pcapOutputPath, ".jsonl");
             _currentPcapFilePath = jsonlOutputPath; // Update to use JSONL path
             _currentJsonlFilePath = jsonlOutputPath;
             // =============================================================
-
-            // Remove existing monitor container if any
-            try
-            {
-                _dockerExecutor.RemoveContainer(monitorContainer);
-            }
-            catch
-            {
-                // Container doesn't exist or already removed - this is fine
-            }
 
             // Create directory for output on host
             var outputDir = Path.GetDirectoryName(jsonlOutputPath);
@@ -3574,19 +3651,6 @@ namespace SolutionGrader.Core.Services
             var outputFileName = Path.GetFileName(jsonlOutputPath);
 
             // Build the docker run command for SharpPcap-based network monitor sidecar
-            // CRITICAL: 
-            // - Use --net=container:{unifiedContainer} to attach to student's network namespace
-            // - Use --cap-add=NET_ADMIN and --cap-add=NET_RAW for SharpPcap permissions
-            // - SharpPcap captures on loopback interface (lo) to catch localhost traffic
-            // - Outputs JSON lines to /data/{outputFileName} inside container (bind-mounted to host)
-            //
-            // The new network-monitor image uses SharpPcap/PacketDotNet for real-time capture
-            // matching MiddlewareSniffPort's behavior exactly.
-            // ENTRYPOINT is the NetworkMonitorSidecar app, CMD is [port, outputPath]
-
-            // CRITICAL: --net=container:{unifiedContainer} attaches to the unified container's
-            // network namespace, allowing the sidecar to see localhost (127.0.0.1) traffic
-            // between client and server running in the unified container.
             var dockerCmd = $"docker run -d --name {monitorContainer} " +
                            $"--net=container:{unifiedContainer} " +  // SIDECAR: Attach to student container's network
                            $"--cap-add=NET_ADMIN " +                 // Required for SharpPcap
@@ -3601,28 +3665,234 @@ namespace SolutionGrader.Core.Services
             OnProgress($"[Monitor] Capturing on loopback (lo) interface - localhost traffic between client/server");
             OnProgress($"[Monitor] Output will be saved to: {jsonlOutputPath}");
 
+            // CRITICAL FIX: Add retry logic for monitor container startup
+            // This addresses the issue where monitor sidecar fails to deploy during extended grading sessions
+            Exception? lastException = null;
+            
+            for (int attempt = 1; attempt <= MonitorStartupMaxRetries; attempt++)
+            {
+                try
+                {
+                    // Remove existing monitor container if any (may exist from previous failed attempt)
+                    try
+                    {
+                        _dockerExecutor.RemoveContainer(monitorContainer);
+                        // Wait for container to be fully removed
+                        await Task.Delay(500);
+                    }
+                    catch
+                    {
+                        // Container doesn't exist or already removed - this is fine
+                    }
+
+                    // Start the monitor container
+                    _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
+                    OnProgress($"[Monitor] Attempt {attempt}/{MonitorStartupMaxRetries}: Sidecar monitor {monitorContainer} command executed");
+
+                    // Brief delay to ensure container is up and SharpPcap is initialized
+                    await Task.Delay(1500);
+
+                    // CRITICAL: Verify monitor is actually running and healthy
+                    var isHealthy = await VerifyMonitorContainerHealthAsync(monitorContainer, attempt);
+                    
+                    if (isHealthy)
+                    {
+                        // CRITICAL FIX: Register container as active to prevent premature cleanup
+                        RegisterActiveContainer(monitorContainer);
+                        OnProgress($"[Monitor] Successfully started and verified {monitorContainer} on attempt {attempt}");
+                        return; // Success - exit the method
+                    }
+                    else
+                    {
+                        OnProgress($"[Monitor] Attempt {attempt}/{MonitorStartupMaxRetries}: Container not healthy, will retry...");
+                        lastException = new Exception("Monitor container is not healthy after startup");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    OnProgress($"[Monitor] Attempt {attempt}/{MonitorStartupMaxRetries} failed: {ex.Message}");
+                }
+
+                // Wait before retry with exponential backoff
+                if (attempt < MonitorStartupMaxRetries)
+                {
+                    var retryDelay = MonitorStartupRetryDelayMs * attempt;
+                    OnProgress($"[Monitor] Waiting {retryDelay}ms before retry...");
+                    await Task.Delay(retryDelay);
+                }
+            }
+
+            // All retries exhausted - log warning but don't throw to allow grading to continue
+            // Network grading will fail but console grading can still proceed
+            OnProgress($"[Monitor] WARNING: Failed to start monitor container after {MonitorStartupMaxRetries} attempts");
+            OnProgress($"[Monitor] Last error: {lastException?.Message}");
+            OnProgress($"[Monitor] Network grading will not be available for this student");
+        }
+
+        /// <summary>
+        /// Verifies that the monitor container is running and healthy.
+        /// Checks:
+        /// 1. Container exists and is running
+        /// 2. Container hasn't exited immediately (which indicates a crash)
+        /// 3. NetworkMonitorSidecar process is running inside container
+        /// </summary>
+        private async Task<bool> VerifyMonitorContainerHealthAsync(string monitorContainer, int attemptNumber)
+        {
             try
             {
-                _commandExecutor.RunCommand(dockerCmd, null, null, 10000);
-                OnProgress($"[Monitor] Sidecar monitor {monitorContainer} started successfully");
-
-                // Brief delay to ensure container is up and SharpPcap is initialized
-                await Task.Delay(1000);
-
-                // Verify monitor is running
-                if (_dockerExecutor.IsContainerRunning(monitorContainer))
+                // Check 1: Container exists
+                if (!_dockerExecutor.IsContainerExist(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Verified {monitorContainer} is running and ready to capture");
+                    OnProgress($"[Monitor Health] Container {monitorContainer} does not exist");
+                    return false;
+                }
+
+                // Check 2: Container is running (not exited)
+                if (!_dockerExecutor.IsContainerRunning(monitorContainer))
+                {
+                    // Container exists but is not running - it exited immediately
+                    // Get container logs to understand why
+                    var logsOutput = GetMonitorContainerLogs(monitorContainer);
+                    OnProgress($"[Monitor Health] Container {monitorContainer} exited immediately");
+                    OnProgress($"[Monitor Health] Exit logs: {logsOutput}");
+                    return false;
+                }
+
+                // Check 3: NetworkMonitorSidecar process is running inside container
+                var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitorSidecar";
+                var (checkSuccess, checkOutput) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 3000);
+
+                if (!checkSuccess || string.IsNullOrWhiteSpace(checkOutput))
+                {
+                    // Process not running - container started but app crashed
+                    var logsOutput = GetMonitorContainerLogs(monitorContainer);
+                    OnProgress($"[Monitor Health] NetworkMonitorSidecar process not found in container");
+                    OnProgress($"[Monitor Health] Container logs: {logsOutput}");
+                    return false;
+                }
+
+                OnProgress($"[Monitor Health] Container {monitorContainer} is healthy (PID: {checkOutput.Trim()})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnProgress($"[Monitor Health] Error verifying container health: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets the last few lines of logs from the monitor container for diagnostic purposes.
+        /// </summary>
+        private string GetMonitorContainerLogs(string monitorContainer)
+        {
+            try
+            {
+                var logsCmd = $"docker logs --tail 20 {monitorContainer} 2>&1";
+                var result = _commandExecutor.RunCommandAndCaptureOutput(logsCmd, null, null, 5000);
+                return string.Join("\n", result.Output).Trim();
+            }
+            catch (Exception ex)
+            {
+                return $"(Failed to get logs: {ex.Message})";
+            }
+        }
+
+        /// <summary>
+        /// Ensures the monitor container is running and healthy before a test case.
+        /// If the monitor has crashed, attempts a SINGLE restart (no retries to prevent delays).
+        /// This addresses the issue where monitor disappears during extended grading sessions.
+        /// 
+        /// IMPORTANT: This method has a strict timeout to prevent student clumping.
+        /// If restart fails, we proceed with grading anyway (network grading will fail,
+        /// but console grading can still succeed).
+        /// </summary>
+        private async Task EnsureMonitorContainerHealthyAsync()
+        {
+            if (string.IsNullOrEmpty(_currentMonitorContainer) || 
+                string.IsNullOrEmpty(_currentUnifiedContainer))
+            {
+                // Monitor was never set up - nothing to check
+                return;
+            }
+
+            // Quick health check - if running, we're done
+            if (_dockerExecutor.IsContainerRunning(_currentMonitorContainer))
+            {
+                return;
+            }
+
+            // Monitor is not running - attempt a SINGLE restart (no retries to prevent delays)
+            // Total time spent here should be under 5 seconds to prevent clumping
+            OnProgress($"[Monitor] Detected monitor container {_currentMonitorContainer} is not running, attempting single restart...");
+
+            // Get logs before removing for diagnostics (with timeout)
+            try
+            {
+                var crashLogs = GetMonitorContainerLogs(_currentMonitorContainer);
+                if (!string.IsNullOrEmpty(crashLogs) && crashLogs.Length < 500)
+                {
+                    OnProgress($"[Monitor] Crash logs: {crashLogs}");
+                }
+            }
+            catch
+            {
+                // Ignore log retrieval failures
+            }
+
+            // Remove the dead container quickly
+            try
+            {
+                _commandExecutor.RunCommand($"docker rm -f {_currentMonitorContainer}", null, null, 3000);
+            }
+            catch
+            {
+                // Ignore removal errors
+            }
+
+            // Check if unified container is still running
+            if (!_dockerExecutor.IsContainerRunning(_currentUnifiedContainer))
+            {
+                OnProgress($"[Monitor] WARNING: Unified container {_currentUnifiedContainer} is also not running - skipping monitor restart");
+                return;
+            }
+
+            // Attempt to restart the monitor (single attempt, short timeout)
+            var outputDir = Path.GetDirectoryName(_currentPcapFilePath);
+            if (!string.IsNullOrEmpty(outputDir))
+            {
+                outputDir = Path.GetFullPath(outputDir);
+            }
+            var outputFileName = Path.GetFileName(_currentPcapFilePath);
+
+            var dockerCmd = $"docker run -d --name {_currentMonitorContainer} " +
+                           $"--net=container:{_currentUnifiedContainer} " +
+                           $"--cap-add=NET_ADMIN " +
+                           $"--cap-add=NET_RAW " +
+                           $"-v \"{outputDir}:/data\" " +
+                           $"fptuxaes/network-monitor:latest " +
+                           $"{_currentMonitorPort} /data/{outputFileName}";
+
+            try
+            {
+                _commandExecutor.RunCommand(dockerCmd, null, null, 5000); // Short timeout
+                await Task.Delay(1000); // Brief wait for startup
+
+                if (_dockerExecutor.IsContainerRunning(_currentMonitorContainer))
+                {
+                    // Re-register the container as active after successful restart
+                    RegisterActiveContainer(_currentMonitorContainer);
+                    OnProgress($"[Monitor] Successfully restarted monitor container");
                 }
                 else
                 {
-                    OnProgress($"[Monitor] WARNING: {monitorContainer} may not be running properly");
+                    OnProgress($"[Monitor] WARNING: Monitor restart failed - network grading may not work for remaining test cases");
                 }
             }
             catch (Exception ex)
             {
-                OnProgress($"[Monitor] ERROR: Failed to start network monitor: {ex.Message}");
-                throw new InvalidOperationException($"Failed to start network monitor container: {ex.Message}", ex);
+                OnProgress($"[Monitor] WARNING: Monitor restart failed ({ex.Message}) - continuing without network monitoring");
             }
         }
 
@@ -3645,6 +3915,9 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress($"[Monitor] Cleaning up {monitorContainer}");
             bool removalSuccessful = false;
+
+            // CRITICAL FIX: Unregister container first to allow cleanup by other sessions
+            UnregisterActiveContainer(monitorContainer);
 
             try
             {
