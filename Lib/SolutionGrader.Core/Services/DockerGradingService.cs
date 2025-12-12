@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -66,6 +67,11 @@ namespace SolutionGrader.Core.Services
         private const int OutputRetryMaxAttempts = 5;
         private const int OutputRetryDelayMs = 500;  // Reduced from 1000 - faster polling
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
+        
+        // Container cleanup constants
+        private const int ContainerRemovalVerificationDelayMs = 500;  // Delay to verify container removal
+        private const int BatchRemovalTimeoutMs = 15000;  // Timeout for batch container removal
+        private const int BatchRemovalSize = 20;  // Number of containers to remove in a single batch
 
         private readonly DockerCommandExecutor _dockerExecutor;
         private readonly CommandExecutor _commandExecutor;
@@ -86,6 +92,13 @@ namespace SolutionGrader.Core.Services
         // Stage output tracking for per-test-case log export
         private Dictionary<int, string>? _lastTestCaseClientOutputs; // Track last test case client outputs by stage
         private Dictionary<int, string>? _lastTestCaseServerOutputs; // Track last test case server outputs by stage
+
+        // Retry cleanup tracking for containers that failed initial cleanup
+        // Key: container name, Value: timestamp when cleanup was first attempted
+        private readonly ConcurrentDictionary<string, DateTime> _pendingCleanupContainers = new();
+        
+        // Delay before retrying cleanup for a container (30 seconds)
+        private const int RetryCleanupDelaySeconds = 30;
 
         /// <summary>
         /// Event raised when grading progress is updated.
@@ -173,11 +186,15 @@ namespace SolutionGrader.Core.Services
         /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// This is called at the end of grading sessions to ensure no containers are left behind,
         /// especially after the final batch which may not trigger the periodic cleanup.
+        /// Also processes any containers that are pending retry cleanup.
         /// </summary>
         private void CleanupOrphanedContainers()
         {
             try
             {
+                // First, process any containers pending retry cleanup
+                ProcessPendingCleanupRetries();
+                
                 CleanupContainersByPrefix("ag-unified-", "unified");
                 CleanupContainersByPrefix("ag-monitor-", "monitor");
             }
@@ -188,7 +205,96 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
+        /// Processes containers that are pending cleanup retry.
+        /// Retries cleanup for containers that were added to the pending queue at least
+        /// RetryCleanupDelaySeconds ago. This ensures we don't interfere with containers
+        /// that might still be in use by students currently being graded.
+        /// </summary>
+        private void ProcessPendingCleanupRetries()
+        {
+            if (_pendingCleanupContainers.IsEmpty) return;
+
+            var now = DateTime.UtcNow;
+            var containersToRetry = new List<string>();
+            var containersSuccessfullyRemoved = new List<string>();
+
+            // Find containers that are ready for retry (older than RetryCleanupDelaySeconds)
+            foreach (var kvp in _pendingCleanupContainers)
+            {
+                if ((now - kvp.Value).TotalSeconds >= RetryCleanupDelaySeconds)
+                {
+                    containersToRetry.Add(kvp.Key);
+                }
+            }
+
+            if (containersToRetry.Count == 0) return;
+
+            OnProgress($"[Docker Cleanup] Processing {containersToRetry.Count} container(s) pending retry cleanup...");
+
+            // Try to remove containers that are ready for retry
+            foreach (var containerName in containersToRetry)
+            {
+                try
+                {
+                    // Check if container still exists before attempting removal
+                    if (_dockerExecutor.IsContainerExist(containerName))
+                    {
+                        _dockerExecutor.ExecDockerCommand($"rm -f {containerName}", 10000);
+                        
+                        // Verify removal
+                        if (!_dockerExecutor.IsContainerExist(containerName))
+                        {
+                            containersSuccessfullyRemoved.Add(containerName);
+                            OnProgress($"[Docker Cleanup] Retry successful: removed {containerName}");
+                        }
+                        else
+                        {
+                            OnProgress($"[Docker Cleanup] Retry failed: {containerName} still exists");
+                        }
+                    }
+                    else
+                    {
+                        // Container no longer exists, remove from pending queue
+                        containersSuccessfullyRemoved.Add(containerName);
+                        OnProgress($"[Docker Cleanup] Container {containerName} no longer exists, removing from retry queue");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnProgress($"[Docker Cleanup] Retry cleanup failed for {containerName}: {ex.Message}");
+                }
+            }
+
+            // Remove successfully cleaned containers from pending queue
+            foreach (var containerName in containersSuccessfullyRemoved)
+            {
+                _pendingCleanupContainers.TryRemove(containerName, out _);
+            }
+
+            if (containersSuccessfullyRemoved.Count > 0)
+            {
+                OnProgress($"[Docker Cleanup] Retry cleanup completed: {containersSuccessfullyRemoved.Count}/{containersToRetry.Count} containers removed");
+            }
+        }
+
+        /// <summary>
+        /// Adds a container to the pending cleanup retry queue.
+        /// The container will be retried for cleanup after RetryCleanupDelaySeconds.
+        /// </summary>
+        /// <param name="containerName">Name of the container to add to retry queue</param>
+        private void AddToPendingCleanupRetry(string containerName)
+        {
+            // Only add if not already in the queue
+            if (_pendingCleanupContainers.TryAdd(containerName, DateTime.UtcNow))
+            {
+                OnProgress($"[Docker Cleanup] Added {containerName} to retry cleanup queue");
+            }
+        }
+
+        /// <summary>
         /// Cleans up containers matching a specific name prefix.
+        /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
+        /// commands for better performance when grading 200+ students in batches of 15.
         /// </summary>
         /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
         /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
@@ -202,9 +308,27 @@ namespace SolutionGrader.Core.Services
                 var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
 
-                foreach (var containerId in containerIds)
+                // OPTIMIZATION: Batch remove containers in chunks for efficiency
+                // This reduces Docker API overhead significantly for large batch grading
+                for (int i = 0; i < containerIds.Length; i += BatchRemovalSize)
                 {
-                    try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    var batchCount = Math.Min(BatchRemovalSize, containerIds.Length - i);
+                    var batchIds = string.Join(" ", containerIds, i, batchCount);
+                    try
+                    {
+                        // Use single docker rm command for batch removal
+                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", BatchRemovalTimeoutMs);
+                        OnProgress($"[Docker Cleanup] Removed batch of {batchCount} {containerType} container(s)");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Fallback: try removing individually if batch fails
+                        OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
+                        for (int j = i; j < i + batchCount; j++)
+                        {
+                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerIds[j]}", 5000); } catch { }
+                        }
+                    }
                 }
             }
         }
@@ -3335,12 +3459,13 @@ namespace SolutionGrader.Core.Services
         /// <summary>
         /// Cleanup unified container after grading.
         /// Removes the container and unregisters student from shared monitor.
-        /// CRITICAL: Waits for container removal to complete to prevent resource exhaustion
-        /// during batch grading of large numbers of students.
+        /// CRITICAL: Verifies container removal and adds to retry queue if failed,
+        /// preventing resource exhaustion during batch grading of large numbers of students.
         /// </summary>
         private async Task CleanupUnifiedContainerAsync(string unifiedContainer, string studentCode)
         {
             OnProgress($"[Unified] Starting cleanup for {unifiedContainer}");
+            bool removalSuccessful = false;
 
             try
             {
@@ -3357,14 +3482,29 @@ namespace SolutionGrader.Core.Services
 
                 // Remove the unified container
                 _dockerExecutor.RemoveContainer(unifiedContainer);
-                OnProgress($"[Unified] Removed container {unifiedContainer}");
+                
+                // Verify container was actually removed
+                await Task.Delay(ContainerRemovalVerificationDelayMs);
+                if (!_dockerExecutor.IsContainerExist(unifiedContainer))
+                {
+                    removalSuccessful = true;
+                    OnProgress($"[Unified] Removed container {unifiedContainer}");
+                }
+                else
+                {
+                    OnProgress($"[Unified] WARNING: Container {unifiedContainer} still exists after removal attempt");
+                }
             }
             catch (Exception ex)
             {
                 OnProgress($"[Unified] WARNING: Failed to remove container: {ex.Message}");
             }
 
-            await Task.CompletedTask;
+            // If removal failed, add to retry queue for later cleanup
+            if (!removalSuccessful && _dockerExecutor.IsContainerExist(unifiedContainer))
+            {
+                AddToPendingCleanupRetry(unifiedContainer);
+            }
         }
 
         /// <summary>
@@ -3496,13 +3636,15 @@ namespace SolutionGrader.Core.Services
         /// 
         /// The output file (JSON lines) is already on the host due to volume mounting.
         /// The container stop ensures any buffered packets are flushed before removal.
-        /// CRITICAL: Waits for container removal to prevent zombie containers during batch grading.
+        /// CRITICAL: Verifies container removal and adds to retry queue if failed,
+        /// preventing zombie containers during batch grading.
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
         /// <param name="studentResultPath">Student result directory path</param>
         private async Task CleanupNetworkMonitorContainerAsync(string monitorContainer, string studentResultPath)
         {
             OnProgress($"[Monitor] Cleaning up {monitorContainer}");
+            bool removalSuccessful = false;
 
             try
             {
@@ -3530,14 +3672,29 @@ namespace SolutionGrader.Core.Services
 
                 // Remove the monitor container
                 _dockerExecutor.RemoveContainer(monitorContainer);
-                OnProgress($"[Monitor] Removed container {monitorContainer}");
+                
+                // Verify container was actually removed
+                await Task.Delay(ContainerRemovalVerificationDelayMs);
+                if (!_dockerExecutor.IsContainerExist(monitorContainer))
+                {
+                    removalSuccessful = true;
+                    OnProgress($"[Monitor] Removed container {monitorContainer}");
+                }
+                else
+                {
+                    OnProgress($"[Monitor] WARNING: Container {monitorContainer} still exists after removal attempt");
+                }
             }
             catch (Exception ex)
             {
                 OnProgress($"[Monitor] WARNING during cleanup: {ex.Message}");
             }
 
-            await Task.CompletedTask;
+            // If removal failed, add to retry queue for later cleanup
+            if (!removalSuccessful && _dockerExecutor.IsContainerExist(monitorContainer))
+            {
+                AddToPendingCleanupRetry(monitorContainer);
+            }
         }
 
         /// <summary>

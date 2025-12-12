@@ -21,6 +21,10 @@ namespace SolutionGrader.Core.Services.Docker
     {
         private const string DefaultDatabasePassword = "YourStrong@Passw0rd";
         
+        // Container cleanup constants
+        private const int BatchRemovalTimeoutMs = 15000;  // Timeout for batch container removal
+        private const int BatchRemovalSize = 20;  // Number of containers to remove in a single batch
+        
         private readonly DockerCommandExecutor _dockerExecutor;
         
         /// <summary>
@@ -125,6 +129,8 @@ namespace SolutionGrader.Core.Services.Docker
         /// <summary>
         /// Cleans up orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// This is called at the end of grading sessions to ensure no containers are left behind.
+        /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
+        /// commands for better performance when grading 200+ students.
         /// </summary>
         private void CleanupOrphanedContainers()
         {
@@ -139,9 +145,9 @@ namespace SolutionGrader.Core.Services.Docker
                     var containerIds = unifiedOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                     OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned unified container(s)");
                     
-                    foreach (var containerId in containerIds)
+                    if (containerIds.Length > 0)
                     {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                        BatchRemoveContainers(containerIds, "unified");
                     }
                 }
                 
@@ -154,15 +160,45 @@ namespace SolutionGrader.Core.Services.Docker
                     var containerIds = monitorOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                     OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned monitor container(s)");
                     
-                    foreach (var containerId in containerIds)
+                    if (containerIds.Length > 0)
                     {
-                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                        BatchRemoveContainers(containerIds, "monitor");
                     }
                 }
             }
             catch (Exception ex)
             {
                 OnProgress($"[Docker Cleanup] WARNING: Error cleaning up orphaned containers: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Removes containers in batches for efficiency.
+        /// Uses single docker rm command for multiple containers to reduce API overhead.
+        /// </summary>
+        /// <param name="containerIds">Array of container IDs to remove</param>
+        /// <param name="containerType">Type of container for logging</param>
+        private void BatchRemoveContainers(string[] containerIds, string containerType)
+        {
+            for (int i = 0; i < containerIds.Length; i += BatchRemovalSize)
+            {
+                var batchCount = Math.Min(BatchRemovalSize, containerIds.Length - i);
+                var batchIds = string.Join(" ", containerIds, i, batchCount);
+                try
+                {
+                    // Use single docker rm command for batch removal
+                    _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", BatchRemovalTimeoutMs);
+                    OnProgress($"[Docker Cleanup] Removed batch of {batchCount} {containerType} container(s)");
+                }
+                catch (Exception ex)
+                {
+                    // Fallback: try removing individually if batch fails
+                    OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
+                    for (int j = i; j < i + batchCount; j++)
+                    {
+                        try { _dockerExecutor.ExecDockerCommand($"rm -f {containerIds[j]}", 5000); } catch { }
+                    }
+                }
             }
         }
         
