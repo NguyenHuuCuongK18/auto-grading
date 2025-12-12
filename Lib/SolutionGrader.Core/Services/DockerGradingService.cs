@@ -189,6 +189,8 @@ namespace SolutionGrader.Core.Services
 
         /// <summary>
         /// Cleans up containers matching a specific name prefix.
+        /// OPTIMIZATION: Uses batch removal (docker rm -f container1 container2...) instead of sequential
+        /// commands for better performance when grading 200+ students in batches of 15.
         /// </summary>
         /// <param name="prefix">The container name prefix to filter by (e.g., "ag-unified-")</param>
         /// <param name="containerType">Human-readable type name for logging (e.g., "unified")</param>
@@ -202,9 +204,30 @@ namespace SolutionGrader.Core.Services
                 var containerIds = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 OnProgress($"[Docker Cleanup] Found {containerIds.Length} orphaned {containerType} container(s)");
 
-                foreach (var containerId in containerIds)
+                if (containerIds.Length == 0) return;
+
+                // OPTIMIZATION: Batch remove containers in chunks of 20 for efficiency
+                // This reduces Docker API overhead significantly for large batch grading
+                const int batchSize = 20;
+                for (int i = 0; i < containerIds.Length; i += batchSize)
                 {
-                    try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                    var batch = containerIds.Skip(i).Take(batchSize);
+                    var batchIds = string.Join(" ", batch);
+                    try
+                    {
+                        // Use single docker rm command for batch removal
+                        _dockerExecutor.ExecDockerCommand($"rm -f {batchIds}", 15000);
+                        OnProgress($"[Docker Cleanup] Removed batch of {batch.Count()} {containerType} container(s)");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Fallback: try removing individually if batch fails
+                        OnProgress($"[Docker Cleanup] Batch removal failed, falling back to individual removal: {ex.Message}");
+                        foreach (var containerId in batch)
+                        {
+                            try { _dockerExecutor.ExecDockerCommand($"rm -f {containerId}", 5000); } catch { }
+                        }
+                    }
                 }
             }
         }
