@@ -806,6 +806,9 @@ namespace SolutionGrader.UI
                     var completedLock = new object();
                     
                     // Producer task: Feed students into the channel
+                    // CRITICAL FIX: Don't pass cancellation token to Task.Run
+                    // Passing the token can prevent the task from starting if cancellation is requested
+                    // before the task pool picks it up. Instead, check cancellation inside the task.
                     var producerTask = Task.Run(async () =>
                     {
                         try
@@ -823,7 +826,9 @@ namespace SolutionGrader.UI
                                 }
                                 
                                 _logger.LogDebug($"[Producer] Queuing student {queuedCount + 1}/{studentsToGrade.Count}: {student.StudentCode}");
-                                await channel.Writer.WriteAsync(student, _cancellationTokenSource.Token);
+                                // CRITICAL FIX: Don't pass cancellation token to WriteAsync
+                                // This prevents OperationCanceledException from causing partial queue
+                                await channel.Writer.WriteAsync(student);
                                 queuedCount++;
                             }
                             
@@ -844,13 +849,15 @@ namespace SolutionGrader.UI
                             channel.Writer.Complete();
                             _logger.LogInfo("[Producer] Channel writer marked as complete");
                         }
-                    }, _cancellationTokenSource.Token);
+                    });
                     
                     // Consumer tasks: Pull students from channel and grade them
                     var workerTasks = new List<Task>();
                     for (int workerId = 0; workerId < _configuration.MaxParallelStudents; workerId++)
                     {
                         var localWorkerId = workerId;
+                        // CRITICAL FIX: Don't pass cancellation token to Task.Run
+                        // This prevents the task from being cancelled before it starts
                         var workerTask = Task.Run(async () =>
                         {
                             _logger.LogInfo($"[Worker-{localWorkerId}] Started and ready to process students");
@@ -859,19 +866,28 @@ namespace SolutionGrader.UI
                             // Each worker continuously pulls students from the queue until empty
                             try
                             {
-                                await foreach (var student in channel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
+                                // CRITICAL FIX: Don't pass cancellation token to ReadAllAsync
+                                // Passing the token causes the enumeration to terminate immediately when cancelled,
+                                // which can leave students in the channel unprocessed.
+                                // Instead, we check cancellation inside the loop and handle it gracefully.
+                                await foreach (var student in channel.Reader.ReadAllAsync())
                                 {
                                     try
                                     {
-                                        // Wait while paused - pass cancellation token for responsive shutdown
-                                        while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                        // Wait while paused - DON'T pass cancellation token to avoid OperationCanceledException
+                                        // Check cancellation manually for more control
+                                        while (_isPaused && _cancellationTokenSource?.Token.IsCancellationRequested != true)
                                         {
-                                            await Task.Delay(500, _cancellationTokenSource.Token);
+                                            await Task.Delay(500);
                                         }
                                         
-                                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                        if (_cancellationTokenSource?.Token.IsCancellationRequested == true)
                                         {
-                                            _logger.LogInfo($"[Worker-{localWorkerId}] Cancellation requested, stopping after {studentsProcessed} students");
+                                            _logger.LogInfo($"[Worker-{localWorkerId}] Cancellation requested, marking student {student.StudentCode} as Paused");
+                                            // Mark the current student as Paused before exiting
+                                            student.Status = GradingStatus.Paused;
+                                            student.StatusMessage = "Grading was cancelled before processing started";
+                                            UpdateStudentInUI(student);
                                             break;
                                         }
                                         
@@ -886,7 +902,7 @@ namespace SolutionGrader.UI
                                         
                                         // Grade the student (port allocation happens inside via PortAllocator)
                                         // TRUE PARALLEL: No lock - multiple students can create containers simultaneously
-                                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                        await GradeStudentAsync(student, _cancellationTokenSource?.Token ?? CancellationToken.None);
                                         
                                         // Write results after each student
                                         // OPTIMIZATION: Deferred write mechanism batches updates and runs on background thread
@@ -934,9 +950,47 @@ namespace SolutionGrader.UI
                                     }
                                     catch (OperationCanceledException)
                                     {
+                                        // CRITICAL FIX: Handle cancellation gracefully instead of re-throwing
+                                        // Re-throwing caused the worker to exit, leaving the current student
+                                        // in "Not Run" status (the bug: "Student was queued but worker did not process it")
                                         _logger.LogInfo($"[Worker-{localWorkerId}] Grading cancelled for student {student.StudentCode}");
-                                        // Re-throw to exit the worker loop
-                                        throw;
+                                        
+                                        // Mark the student as Paused so it can be resumed later
+                                        try
+                                        {
+                                            student.Status = GradingStatus.Paused;
+                                            student.StatusMessage = "Grading was cancelled/paused during processing";
+                                            student.EndTime = DateTime.Now;
+                                            UpdateStudentInUI(student);
+                                            
+                                            List<StudentSolution> studentsSnapshot;
+                                            lock (_studentsLock)
+                                            {
+                                                studentsSnapshot = _students.ToList();
+                                            }
+                                            _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
+                                            
+                                            int currentCompletedIndex;
+                                            lock (completedLock)
+                                            {
+                                                completedCount++;
+                                                currentCompletedIndex = completedCount;
+                                            }
+                                            
+                                            _logger.LogInfo($"[Worker-{localWorkerId}] Marked {student.StudentCode} as Paused");
+                                        }
+                                        catch (Exception cleanupEx)
+                                        {
+                                            _logger.LogError($"[Worker-{localWorkerId}] Failed to mark student as paused: {cleanupEx.Message}", cleanupEx);
+                                        }
+                                        
+                                        // Exit the loop gracefully if cancellation was requested
+                                        if (_cancellationTokenSource?.Token.IsCancellationRequested == true)
+                                        {
+                                            _logger.LogInfo($"[Worker-{localWorkerId}] Exiting due to cancellation request");
+                                            break;
+                                        }
+                                        // Otherwise continue with next student (might have been a timeout, not full cancellation)
                                     }
                                     catch (Exception ex)
                                     {
@@ -993,7 +1047,7 @@ namespace SolutionGrader.UI
                             {
                                 _logger.LogInfo($"[Worker-{localWorkerId}] Finished. Total students processed: {studentsProcessed}");
                             }
-                        }, _cancellationTokenSource.Token);
+                        }); // CRITICAL FIX: Removed cancellation token - task must always start
                         workerTasks.Add(workerTask);
                     }
                     

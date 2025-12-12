@@ -170,6 +170,16 @@ namespace SolutionGrader.Core.Services
         {
             OnProgress("[Docker] Disposing all containers...");
 
+            // CRITICAL FIX: Clear the active containers registry BEFORE cleanup
+            // This ensures that ALL containers are eligible for removal, even if worker threads
+            // crashed and didn't properly unregister their containers.
+            // Without this, containers would be skipped during cleanup because IsContainerActive() returns true.
+            var clearedCount = ClearActiveContainersRegistry();
+            if (clearedCount > 0)
+            {
+                OnProgress($"[Docker] Cleared {clearedCount} container(s) from active registry to allow cleanup");
+            }
+
             var databaseContainer = config.DatabaseContainerName;
             var serverContainer = $"server-{databaseContainer}";
             var clientContainer = $"client-{databaseContainer}";
@@ -327,6 +337,25 @@ namespace SolutionGrader.Core.Services
         private static bool IsContainerActive(string containerName)
         {
             return _activeContainers.ContainsKey(containerName);
+        }
+        
+        /// <summary>
+        /// Clears the active containers registry.
+        /// CRITICAL: Call this at the end of a grading session to ensure all containers can be cleaned up.
+        /// 
+        /// This is necessary because if a worker thread crashes (e.g., due to OperationCanceledException),
+        /// the container cleanup methods may not be called, leaving containers registered as "active".
+        /// When DisposeAllContainers runs, it would skip these containers because IsContainerActive() returns true.
+        /// 
+        /// By clearing the registry before cleanup, we ensure that ALL containers are eligible for removal,
+        /// fixing the issue where "final batches of students are not having their containers disposed".
+        /// </summary>
+        /// <returns>The number of containers that were cleared from the registry</returns>
+        private static int ClearActiveContainersRegistry()
+        {
+            var count = _activeContainers.Count;
+            _activeContainers.Clear();
+            return count;
         }
 
         /// <summary>
