@@ -164,12 +164,6 @@ namespace SolutionGrader.Core.Services
         /// Disposes all Docker containers including the database container.
         /// Call this at the end of a grading session to clean up all resources.
         /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
-        /// </summary>
-        /// <param name="config">Docker grading configuration</param>
-        /// <summary>
-        /// Disposes all Docker containers including the database container.
-        /// Call this at the end of a grading session to clean up all resources.
-        /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// 
         /// IMPORTANT: This method is safe to call during batch grading for periodic cleanup.
         /// It will NOT remove containers that are registered as active (in use by other workers).

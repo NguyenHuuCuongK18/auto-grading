@@ -956,6 +956,8 @@ namespace SolutionGrader.UI
                                         _logger.LogInfo($"[Worker-{localWorkerId}] Grading cancelled for student {student.StudentCode}");
                                         
                                         // Mark the student as Paused so it can be resumed later
+                                        // NOTE: We do NOT increment completedCount here because a paused student
+                                        // hasn't been graded yet - it should be counted when resumed and completed
                                         try
                                         {
                                             student.Status = GradingStatus.Paused;
@@ -969,13 +971,6 @@ namespace SolutionGrader.UI
                                                 studentsSnapshot = _students.ToList();
                                             }
                                             _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
-                                            
-                                            int currentCompletedIndex;
-                                            lock (completedLock)
-                                            {
-                                                completedCount++;
-                                                currentCompletedIndex = completedCount;
-                                            }
                                             
                                             _logger.LogInfo($"[Worker-{localWorkerId}] Marked {student.StudentCode} as Paused");
                                         }
