@@ -419,6 +419,80 @@ namespace SolutionGrader.UI
             _logger.LogInfo("Unselected all students");
         }
 
+        /// <summary>
+        /// Handle search filter text changes to filter the DataGrid display.
+        /// Filters students based on the selected field and search text.
+        /// </summary>
+        private void SearchFilter_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            ApplySearchFilter();
+        }
+
+        /// <summary>
+        /// Handle search field selection changes to re-apply the filter with the new field.
+        /// </summary>
+        private void SearchField_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            // Only apply filter if there's search text (avoid unnecessary filter on startup)
+            if (!string.IsNullOrEmpty(txtSearchFilter?.Text))
+            {
+                ApplySearchFilter();
+            }
+        }
+
+        /// <summary>
+        /// Clear the search filter and show all students.
+        /// </summary>
+        private void ClearSearch_Click(object sender, RoutedEventArgs e)
+        {
+            txtSearchFilter.Text = string.Empty;
+            ApplySearchFilter();
+        }
+
+        /// <summary>
+        /// Apply the search filter to the DataGrid based on selected field and search text.
+        /// This is a UI-only filter that doesn't modify the underlying data.
+        /// </summary>
+        private void ApplySearchFilter()
+        {
+            if (_studentsViewSource?.View == null) return;
+
+            var searchText = txtSearchFilter.Text?.Trim() ?? string.Empty;
+            var selectedField = (cmbSearchField.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Content?.ToString() ?? "StudentCode";
+
+            if (string.IsNullOrEmpty(searchText))
+            {
+                // Clear the filter
+                _studentsViewSource.View.Filter = null;
+                _logger.LogInfo("Search filter cleared - showing all students");
+            }
+            else
+            {
+                // Apply filter based on selected field
+                _studentsViewSource.View.Filter = item =>
+                {
+                    if (item is not StudentSolution student) return false;
+
+                    var valueToSearch = selectedField switch
+                    {
+                        "StudentCode" => student.StudentCode ?? string.Empty,
+                        "PaperNo" => student.PaperNo ?? string.Empty,
+                        "Status" => student.StatusDisplay ?? string.Empty,
+                        "Mark" => student.Mark.ToString("N1"),
+                        "Start" => student.StartTime?.ToString("HH:mm:ss") ?? string.Empty,
+                        "End" => student.EndTime?.ToString("HH:mm:ss") ?? string.Empty,
+                        _ => student.StudentCode ?? string.Empty
+                    };
+
+                    return valueToSearch.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+                };
+
+                _logger.LogInfo($"Search filter applied: {selectedField} contains '{searchText}'");
+            }
+
+            dgStudents.Items.Refresh();
+        }
+
         private async void StartAll_Click(object sender, RoutedEventArgs e)
         {
             await StartGradingAsync(false);
