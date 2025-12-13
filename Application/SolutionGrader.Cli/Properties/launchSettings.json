@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "SolutionGrader.Cli": {
-      "commandName": "Project",
-      "commandLineArgs": "executepaper --submission-root C:\\Users\\NPC\\Documents\\FPT\\Capstone\\Code\\Sample\\NewQ\\Submit --suite C:\\Users\\NPC\\Documents\\FPT\\Capstone\\Code\\Sample\\auto-grading\\SampleTestKitsWithData\\Testkit_HTTP_1 --out C:\\Res"
-    }
-  }
-}
