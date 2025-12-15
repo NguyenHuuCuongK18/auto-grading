@@ -56,31 +56,25 @@ namespace SolutionGrader.Core.Services
         // Key: "SheetName_Stage_ColumnName" -> Value: expected value from template
         private readonly Dictionary<string, string> _expectedValuesCache = new();
 
-        // Columns we always ensure exist
+        // Columns we always ensure exist (simplified - removed redundant columns per user request)
         private static readonly string[] BaseColumns =
         {
-            GradingKeywords.Col_Stage,
-            SuiteKeywords.Col_IC_Input,
-            SuiteKeywords.Col_IC_DataType,
-            SuiteKeywords.Col_IC_Action
+            GradingKeywords.Col_Stage
         };
 
+        // Simplified result columns for Client/Server sheets:
+        // Removed: DataType, Action, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt
+        // Kept: Stage, Console (from test kit), StudentConsole, Message, Result (at end)
         private static readonly string[] ResultColumns =
         {
-            GradingKeywords.Col_Result,
-            GradingKeywords.Col_ErrorCode,
-            GradingKeywords.Col_ErrorCategory,
-            GradingKeywords.Col_PointsAwarded,
-            GradingKeywords.Col_PointsPossible,
-            GradingKeywords.Col_DurationMs,
-            GradingKeywords.Col_DetailPath,
+            GradingKeywords.Col_StudentConsole,
             GradingKeywords.Col_Message,
-            GradingKeywords.Col_DiffIndex,
-            GradingKeywords.Col_ExpectedOutput,
-            GradingKeywords.Col_ActualOutput,
-            GradingKeywords.Col_ExpectedExcerpt,
-            GradingKeywords.Col_ActualExcerpt
+            GradingKeywords.Col_Result  // Result at the very end to show FAIL/PASS
         };
+        
+        // GradeProcess sheet columns defined in GradingKeywords:
+        // Col_Stage, Col_Action, Col_GradeAction, Col_Message
+        // GradeProcess sheet is written by ExcelResultWriter.WriteTestCaseResultAsync using TestCaseResult.GradeProcessRecords
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
         {
@@ -2039,4 +2033,5 @@ namespace SolutionGrader.Core.Services
 
         public void Dispose() => _wb?.Dispose();
     }
+    // GradeProcessRecord defined in SolutionGrader.Core/Domain/Models/GradeProcessRecord.cs
 }

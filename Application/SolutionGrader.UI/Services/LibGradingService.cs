@@ -129,7 +129,9 @@ namespace SolutionGrader.UI.Services
         /// Call this at the end of a grading session to clean up all resources.
         /// </summary>
         /// <param name="dockerConfig">Docker grading configuration</param>
-        public void DisposeAllContainers(DockerGradingConfig? dockerConfig = null)
+        /// <param name="forceCleanup">When true, clears active containers registry before cleanup.
+        /// Use forceCleanup=true at end of grading session, forceCleanup=false during periodic cleanup.</param>
+        public void DisposeAllContainers(DockerGradingConfig? dockerConfig = null, bool forceCleanup = false)
         {
             try
             {
@@ -138,9 +140,9 @@ namespace SolutionGrader.UI.Services
                 // Create a temporary DockerGradingService to call DisposeAllContainers
                 IRunContext runctx = new RunContext();
                 var dockerGrading = new DockerGradingService(null, runctx);
-                dockerGrading.DisposeAllContainers(config);
+                dockerGrading.DisposeAllContainers(config, forceCleanup);
                 
-                _uiLogger.LogInfo("[LibGradingService] All Docker containers disposed");
+                _uiLogger.LogInfo($"[LibGradingService] All Docker containers disposed (forceCleanup={forceCleanup})");
             }
             catch (Exception ex)
             {

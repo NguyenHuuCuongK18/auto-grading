@@ -113,22 +113,4 @@ public class JsonPacketParsingService
         return (newPackets, allPackets.Count);
     }
 }
-
-/// <summary>
-/// JSON structure matching the sidecar's CapturedPacket output.
-/// Property names use camelCase to match JSON serialization.
-/// </summary>
-internal class JsonCapturedPacket
-{
-    public string Timestamp { get; set; } = "";
-    public string SourceIp { get; set; } = "";
-    public int SourcePort { get; set; }
-    public string DestinationIp { get; set; } = "";
-    public int DestinationPort { get; set; }
-    public string SourceRole { get; set; } = "";
-    public string DestinationRole { get; set; } = "";
-    public string Flags { get; set; } = "";
-    public string State { get; set; } = "";
-    public string? Data { get; set; }
-    public int PayloadLength { get; set; }
-}
+// JsonCapturedPacket moved to SolutionGrader.Core/Domain/Models/JsonCapturedPacket.cs

@@ -54,6 +54,9 @@ namespace SolutionGrader.UI.Models
         private int _codeContainerHostPort = 0;
         private string _dockerNetwork = "auto-grading-network";
         private int _gradingTimeoutSeconds = 300;
+        
+        // Timeout settings are now hidden constants - see DockerGradingService for actual timeout values
+        // These fields are kept for backward compatibility but not exposed in UI
         private string _databaseImageName = "mcr.microsoft.com/mssql/server:2019-latest";
         private string _databaseContainerName = "auto-grading-sqlserver";
         private int _databaseContainerInternalPort = 1433;
@@ -241,23 +244,28 @@ namespace SolutionGrader.UI.Models
             set { _dockerNetwork = value; OnPropertyChanged(); }
         }
 
-        public int GradingTimeoutSeconds
-        {
-            get => _gradingTimeoutSeconds;
-            set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
-        }
+        /// <summary>
+         /// Legacy timeout setting - kept for backward compatibility.
+         /// Actual timeouts are now defined in DockerGradingService.TimeoutConstants.
+         /// </summary>
+         [Obsolete("Timeouts are now defined in DockerGradingService.TimeoutConstants")]
+         public int GradingTimeoutSeconds
+         {
+             get => _gradingTimeoutSeconds;
+             set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
+         }
 
-        public string DatabaseImageName
-        {
-            get => _databaseImageName;
-            set { _databaseImageName = value; OnPropertyChanged(); }
-        }
+         public string DatabaseImageName
+         {
+             get => _databaseImageName;
+             set { _databaseImageName = value; OnPropertyChanged(); }
+         }
 
-        public string DatabaseContainerName
-        {
-            get => _databaseContainerName;
-            set { _databaseContainerName = value; OnPropertyChanged(); }
-        }
+         public string DatabaseContainerName
+         {
+             get => _databaseContainerName;
+             set { _databaseContainerName = value; OnPropertyChanged(); }
+         }
 
         public int DatabaseContainerInternalPort
         {
