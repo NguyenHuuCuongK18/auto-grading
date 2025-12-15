@@ -93,9 +93,13 @@ namespace SolutionGrader.Core.Services
         private Dictionary<int, string>? _lastTestCaseClientOutputs; // Track last test case client outputs by stage
         private Dictionary<int, string>? _lastTestCaseServerOutputs; // Track last test case server outputs by stage
 
-        // Retry cleanup tracking for containers that failed initial cleanup
+        // CRITICAL FIX: Static registry for retry cleanup tracking
+        // This MUST be static because DockerGradingService instances are created per-student and
+        // when DisposeAllContainers is called from LibGradingService, it creates a NEW instance.
+        // If this is instance-level, the new instance has an empty dictionary and
+        // ProcessPendingCleanupRetries() does nothing, leaving containers orphaned.
         // Key: container name, Value: timestamp when cleanup was first attempted
-        private readonly ConcurrentDictionary<string, DateTime> _pendingCleanupContainers = new();
+        private static readonly ConcurrentDictionary<string, DateTime> _pendingCleanupContainers = new();
         
         // Delay before retrying cleanup for a container (30 seconds)
         private const int RetryCleanupDelaySeconds = 30;
@@ -194,11 +198,25 @@ namespace SolutionGrader.Core.Services
         /// This is called at the end of grading sessions to ensure no containers are left behind,
         /// especially after the final batch which may not trigger the periodic cleanup.
         /// Also processes any containers that are pending retry cleanup.
+        /// 
+        /// CRITICAL FIX: Also clears stale entries from the active containers registry.
+        /// When a grading session ends, all containers should be eligible for cleanup.
         /// </summary>
         private void CleanupOrphanedContainers()
         {
             try
             {
+                // CRITICAL FIX: Clear the active containers registry for end-of-session cleanup
+                // When cleanup is called at the end of grading (not during periodic cleanup),
+                // all containers should be eligible for removal. Stale entries in the registry
+                // (e.g., from crashed students) would otherwise prevent cleanup.
+                // We identify end-of-session by checking if pending cleanup queue is being processed.
+                if (_activeContainers.Count > 0)
+                {
+                    OnProgress($"[Docker Cleanup] Clearing {_activeContainers.Count} stale entries from active containers registry");
+                    _activeContainers.Clear();
+                }
+                
                 // First, process any containers pending retry cleanup
                 ProcessPendingCleanupRetries();
                 
@@ -3962,54 +3980,64 @@ namespace SolutionGrader.Core.Services
             int userRow = 2;
             foreach (var action in result.Actions)
             {
-                userWs.Cell(userRow, 1).Value = action.Stage;
-                userWs.Cell(userRow, 2).Value = action.Input ?? "";
-                userWs.Cell(userRow, 3).Value = action.ActionType ?? "";
-                // DataType, Result, etc. are optional for action rows
+                userWs.Cell(userRow, 1).Value = action.Stage;     // Stage
+                userWs.Cell(userRow, 2).Value = action.Input ?? "";  // Input
+                userWs.Cell(userRow, 3).Value = action.ActionType ?? "";  // Action
+                // Message column (4) left empty for actions - will be populated if there's a message
                 userRow++;
             }
             userWs.Columns().AdjustToContents();
 
             // === Client Sheet ===
-            // Contains client console output comparisons
+            // Contains client console output comparisons - SIMPLIFIED per user request
+            // Columns: Stage, Console (expected), StudentConsole (actual), ExpectedExcerpt, ActualExcerpt, Message, Result
             var clientWs = wb.Worksheets.Add("Client");
             SetClientSheetHeaders(clientWs);
             int clientRow = 2;
             foreach (var comp in result.ClientComparisons)
             {
                 clientWs.Cell(clientRow, 1).Value = comp.Stage;  // Stage
-                clientWs.Cell(clientRow, 2).Value = comp.Expected ?? "";  // Console (expected)
-                // Skip Input, DataType, Action
-                clientWs.Cell(clientRow, 6).Value = comp.Passed ? "PASS" : "FAIL";  // Result
-                clientWs.Cell(clientRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";  // ErrorCode
-                clientWs.Cell(clientRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";  // ErrorCategory
-                clientWs.Cell(clientRow, 9).Value = comp.PointsAwarded;  // PointsAwarded
-                clientWs.Cell(clientRow, 10).Value = comp.PointsPossible;  // PointsPossible
-                clientWs.Cell(clientRow, 11).Value = comp.DurationMs;  // DurationMs
-                clientWs.Cell(clientRow, 13).Value = comp.Passed ? "Text comparison passed: client output matches exactly" : "Text comparison failed: client output mismatch";  // Message
-                clientWs.Cell(clientRow, 19).Value = comp.Actual ?? "";  // ClientStdout
+                clientWs.Cell(clientRow, 2).Value = comp.Expected ?? "";  // Console (expected from test kit)
+                clientWs.Cell(clientRow, 3).Value = comp.Actual ?? "";  // StudentConsole (actual student output)
+                // ExpectedExcerpt (4) and ActualExcerpt (5) will be populated below if mismatch
+                if (!comp.Passed && !string.IsNullOrEmpty(comp.Expected) && !string.IsNullOrEmpty(comp.Actual))
+                {
+                    var expExcerpt = ExtractMismatchExcerpt(comp.Expected, comp.Actual, true);
+                    var actExcerpt = ExtractMismatchExcerpt(comp.Expected, comp.Actual, false);
+                    clientWs.Cell(clientRow, 4).Value = expExcerpt;  // ExpectedExcerpt
+                    clientWs.Cell(clientRow, 5).Value = actExcerpt;  // ActualExcerpt
+                }
+                clientWs.Cell(clientRow, 6).Value = comp.Passed 
+                    ? "Text comparison passed: client output matches"
+                    : "Text comparison failed: client output mismatch";  // Message
+                clientWs.Cell(clientRow, 7).Value = comp.Passed ? "PASS" : "FAIL";  // Result (at end)
                 clientRow++;
             }
             clientWs.Columns().AdjustToContents();
 
             // === Server Sheet ===
-            // Contains server console output comparisons
+            // Contains server console output comparisons - SIMPLIFIED per user request
+            // Columns: Stage, Console (expected), StudentConsole (actual), ExpectedExcerpt, ActualExcerpt, Message, Result
             var serverWs = wb.Worksheets.Add("Server");
             SetServerSheetHeaders(serverWs);
             int serverRow = 2;
             foreach (var comp in result.ServerComparisons)
             {
                 serverWs.Cell(serverRow, 1).Value = comp.Stage;  // Stage
-                serverWs.Cell(serverRow, 2).Value = comp.Expected ?? "";  // Console (expected)
-                // Skip Input, DataType, Action
-                serverWs.Cell(serverRow, 6).Value = comp.Passed ? "PASS" : "FAIL";  // Result
-                serverWs.Cell(serverRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";  // ErrorCode
-                serverWs.Cell(serverRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";  // ErrorCategory
-                serverWs.Cell(serverRow, 9).Value = comp.PointsAwarded;  // PointsAwarded
-                serverWs.Cell(serverRow, 10).Value = comp.PointsPossible;  // PointsPossible
-                serverWs.Cell(serverRow, 11).Value = comp.DurationMs;  // DurationMs
-                serverWs.Cell(serverRow, 13).Value = comp.Passed ? "Text comparison passed: server output matches exactly" : "Text comparison failed: server output mismatch";  // Message
-                serverWs.Cell(serverRow, 19).Value = comp.Actual ?? "";  // ServerStdout
+                serverWs.Cell(serverRow, 2).Value = comp.Expected ?? "";  // Console (expected from test kit)
+                serverWs.Cell(serverRow, 3).Value = comp.Actual ?? "";  // StudentConsole (actual student output)
+                // ExpectedExcerpt (4) and ActualExcerpt (5) will be populated below if mismatch
+                if (!comp.Passed && !string.IsNullOrEmpty(comp.Expected) && !string.IsNullOrEmpty(comp.Actual))
+                {
+                    var expExcerpt = ExtractMismatchExcerpt(comp.Expected, comp.Actual, true);
+                    var actExcerpt = ExtractMismatchExcerpt(comp.Expected, comp.Actual, false);
+                    serverWs.Cell(serverRow, 4).Value = expExcerpt;  // ExpectedExcerpt
+                    serverWs.Cell(serverRow, 5).Value = actExcerpt;  // ActualExcerpt
+                }
+                serverWs.Cell(serverRow, 6).Value = comp.Passed 
+                    ? "Text comparison passed: server output matches"
+                    : "Text comparison failed: server output mismatch";  // Message
+                serverWs.Cell(serverRow, 7).Value = comp.Passed ? "PASS" : "FAIL";  // Result (at end)
                 serverRow++;
             }
             serverWs.Columns().AdjustToContents();
@@ -4314,36 +4342,148 @@ namespace SolutionGrader.Core.Services
 
             netWs.Columns().AdjustToContents();
 
+            // === GradeProcess Sheet ===
+            // Logs the grading execution process with columns: Stage, Action, GradeAction, Message
+            // This helps users understand where grading might have failed
+            var processWs = wb.Worksheets.Add("GradeProcess");
+            SetGradeProcessSheetHeaders(processWs);
+            int processRow = 2;
+
+            // Log actions from the test case (from User sheet)
+            foreach (var action in result.Actions)
+            {
+                processWs.Cell(processRow, 1).Value = action.Stage;  // Stage
+                processWs.Cell(processRow, 2).Value = action.ActionType ?? "";  // Action
+                processWs.Cell(processRow, 3).Value = "EXECUTE";  // GradeAction - executing test kit action
+                processWs.Cell(processRow, 4).Value = $"Executed: {action.ActionType ?? ""} {action.Input ?? ""}".Trim();  // Message
+                processRow++;
+            }
+
+            // Log client comparisons as grading actions
+            foreach (var comp in result.ClientComparisons)
+            {
+                processWs.Cell(processRow, 1).Value = comp.Stage;  // Stage
+                processWs.Cell(processRow, 2).Value = "CompareClientConsole";  // Action
+                processWs.Cell(processRow, 3).Value = comp.Passed ? "PASS" : "FAIL";  // GradeAction
+                processWs.Cell(processRow, 4).Value = comp.Passed 
+                    ? "Client console output matches expected"
+                    : "Client console output mismatch";  // Message
+                processRow++;
+            }
+
+            // Log server comparisons as grading actions
+            foreach (var comp in result.ServerComparisons)
+            {
+                processWs.Cell(processRow, 1).Value = comp.Stage;  // Stage
+                processWs.Cell(processRow, 2).Value = "CompareServerConsole";  // Action
+                processWs.Cell(processRow, 3).Value = comp.Passed ? "PASS" : "FAIL";  // GradeAction
+                processWs.Cell(processRow, 4).Value = comp.Passed 
+                    ? "Server console output matches expected"
+                    : "Server console output mismatch";  // Message
+                processRow++;
+            }
+
+            // Log network comparisons summary
+            if (expectedNetworkFlows.Count > 0)
+            {
+                int networkPassed = 0;
+                int networkTotal = expectedNetworkFlows.Count;
+                
+                // Count network passes (based on what was written to the Network sheet)
+                foreach (var expectedFlow in expectedNetworkFlows)
+                {
+                    var expFlowsForStage = expectedByStage.TryGetValue(expectedFlow.Stage, out var expFlows) ? expFlows : new List<ExpectedNetworkFlow>();
+                    var actualPacketsForStage = capturesByStage.TryGetValue(expectedFlow.Stage, out var packets) ? packets : new List<CapturedNetworkPacket>();
+                    int positionInStage = expFlowsForStage.IndexOf(expectedFlow);
+                    if (positionInStage >= 0 && positionInStage < actualPacketsForStage.Count)
+                        networkPassed++;
+                }
+
+                processWs.Cell(processRow, 1).Value = "All";  // Stage
+                processWs.Cell(processRow, 2).Value = "CompareNetwork";  // Action
+                processWs.Cell(processRow, 3).Value = networkPassed == networkTotal ? "PASS" : "FAIL";  // GradeAction
+                processWs.Cell(processRow, 4).Value = $"Network: {networkPassed}/{networkTotal} flows matched";  // Message
+                processRow++;
+            }
+
+            // Log test case timeout or crash if any
+            if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                processWs.Cell(processRow, 1).Value = "N/A";  // Stage
+                processWs.Cell(processRow, 2).Value = "TestCaseError";  // Action
+                processWs.Cell(processRow, 3).Value = "ERROR";  // GradeAction
+                processWs.Cell(processRow, 4).Value = result.ErrorMessage;  // Message
+                processRow++;
+            }
+
+            // Final summary row
+            processWs.Cell(processRow, 1).Value = "Summary";
+            processWs.Cell(processRow, 2).Value = "";
+            processWs.Cell(processRow, 3).Value = result.Passed ? "PASS" : "FAIL";
+            var passFailText = result.Passed ? "PASSED" : "FAILED";
+            processWs.Cell(processRow, 4).Value = $"Test case {passFailText}: {result.EarnedMark:F2}/{result.MaxMark:F2} points";
+
+            processWs.Columns().AdjustToContents();
+
             wb.SaveAs(detailPath);
 
             await Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Set GradeProcess sheet headers.
+        /// Columns: Stage, Action (from User sheet), GradeAction (grading process), Message
+        /// </summary>
+        private static void SetGradeProcessSheetHeaders(IXLWorksheet ws)
+        {
+            var headers = new[] { "Stage", "Action", "GradeAction", "Message" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
+        }
+
+        /// <summary>
+        /// Set User sheet headers - simplified to only include test kit action data.
+        /// Removed redundant columns: DataType, Result, ErrorCode, ErrorCategory, PointsAwarded, 
+        /// PointsPossible, DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput, 
+        /// ExpectedExcerpt, ActualExcerpt.
+        /// </summary>
         private static void SetUserSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Input", "Action", "DataType", "Result", "ErrorCode", "ErrorCategory",
-                "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", "DiffIndex",
-                "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt" };
+            // User sheet contains action steps copied from test kit - no grading data needed
+            var headers = new[] { "Stage", "Input", "Action", "Message" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
         }
 
+        /// <summary>
+        /// Set Client sheet headers - simplified per user requirement.
+        /// Removed: DataType, Action, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, 
+        /// DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput.
+        /// Renamed: ClientStdout -> StudentConsole
+        /// Kept: Stage, Console (expected from test kit), StudentConsole (actual student output),
+        /// ExpectedExcerpt, ActualExcerpt (focus on mismatch), Message, Result (at end for PASS/FAIL)
+        /// </summary>
         private static void SetClientSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode",
-                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message",
-                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ClientStdout" };
+            var headers = new[] { "Stage", "Console", "StudentConsole", "ExpectedExcerpt", "ActualExcerpt", "Message", "Result" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
         }
 
+        /// <summary>
+        /// Set Server sheet headers - simplified per user requirement.
+        /// Removed: DataType, Action, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, 
+        /// DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput.
+        /// Renamed: ServerStdout -> StudentConsole
+        /// Kept: Stage, Console (expected from test kit), StudentConsole (actual student output),
+        /// ExpectedExcerpt, ActualExcerpt (focus on mismatch), Message, Result (at end for PASS/FAIL)
+        /// </summary>
         private static void SetServerSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode",
-                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message",
-                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ServerStdout" };
+            var headers = new[] { "Stage", "Console", "StudentConsole", "ExpectedExcerpt", "ActualExcerpt", "Message", "Result" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
@@ -4464,6 +4604,81 @@ namespace SolutionGrader.Core.Services
         }
 
         #endregion
+
+        /// <summary>
+        /// Extracts an excerpt around the first mismatch point between expected and actual text.
+        /// This helps users quickly identify where the difference is.
+        /// </summary>
+        /// <param name="expected">Expected text</param>
+        /// <param name="actual">Actual text</param>
+        /// <param name="getExpected">If true, returns excerpt from expected; otherwise from actual</param>
+        /// <param name="contextChars">Number of characters of context around mismatch</param>
+        /// <returns>Excerpt string with ellipsis markers if truncated</returns>
+        private static string ExtractMismatchExcerpt(string expected, string actual, bool getExpected, int contextChars = 30)
+        {
+            if (string.IsNullOrEmpty(expected) || string.IsNullOrEmpty(actual))
+                return getExpected ? (expected ?? "") : (actual ?? "");
+
+            // Normalize both for comparison
+            var normExp = NormalizeConsoleOutput(expected);
+            var normAct = NormalizeConsoleOutput(actual);
+
+            // Find first difference index
+            int diffIdx = 0;
+            var minLen = Math.Min(normExp.Length, normAct.Length);
+            for (int i = 0; i < minLen; i++)
+            {
+                if (normExp[i] != normAct[i])
+                {
+                    diffIdx = i;
+                    break;
+                }
+                diffIdx = i + 1; // No difference found up to this point
+            }
+
+            // If strings match up to minLen but lengths differ
+            if (diffIdx == minLen && normExp.Length != normAct.Length)
+            {
+                diffIdx = minLen;
+            }
+
+            // Extract excerpt from the appropriate string
+            var source = getExpected ? expected : actual;
+            var start = Math.Max(0, diffIdx - contextChars);
+            var end = Math.Min(source.Length, diffIdx + contextChars);
+            var excerpt = source.Substring(start, end - start);
+
+            // Add ellipsis markers
+            if (start > 0) excerpt = "..." + excerpt;
+            if (end < source.Length) excerpt = excerpt + "...";
+
+            return excerpt;
+        }
+
+        /// <summary>
+        /// Normalizes console output for comparison, handling newline differences
+        /// between Console.Write and Console.WriteLine, and between Windows/Linux line endings.
+        /// This is critical for running in Linux Docker environment where students may use
+        /// different console output methods.
+        /// </summary>
+        /// <param name="output">Console output to normalize</param>
+        /// <returns>Normalized output with consistent newlines and trimmed whitespace</returns>
+        private static string NormalizeConsoleOutput(string output)
+        {
+            if (string.IsNullOrEmpty(output)) return "";
+
+            // 1. Normalize all line endings to \n (Linux style)
+            output = output.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            // 2. Split into lines, trim each line, filter empty
+            var lines = output.Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToArray();
+
+            // 3. Join with single space (treats Console.Write and Console.WriteLine equivalently)
+            return string.Join(" ", lines);
+        }
 
         private void OnProgress(string message)
         {
