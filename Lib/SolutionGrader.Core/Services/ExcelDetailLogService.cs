@@ -72,8 +72,9 @@ namespace SolutionGrader.Core.Services
             GradingKeywords.Col_Result  // Result at the very end to show FAIL/PASS
         };
         
-        // GradeProcess sheet records for logging execution details
-        private readonly List<GradeProcessRecord> _gradeProcessRecords = new();
+        // TODO: GradeProcess sheet implementation - logs grading execution details
+        // Columns: Stage, Action, GradeAction, Message
+        // This will log: mismatch details, "not found in detail.xlsx -> skipping grading", crash/timeout messages
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
         {
@@ -2033,14 +2034,6 @@ namespace SolutionGrader.Core.Services
         public void Dispose() => _wb?.Dispose();
     }
     
-    /// <summary>
-    /// Record for GradeProcess sheet - logs grading execution details.
-    /// </summary>
-    internal sealed class GradeProcessRecord
-    {
-        public int Stage { get; init; }
-        public string Action { get; init; } = string.Empty;
-        public string GradeAction { get; init; } = string.Empty;
-        public string Message { get; init; } = string.Empty;
-    }
+    // TODO: GradeProcessRecord class for GradeProcess sheet implementation
+    // Will be used to log grading execution details with columns: Stage, Action, GradeAction, Message
 }
