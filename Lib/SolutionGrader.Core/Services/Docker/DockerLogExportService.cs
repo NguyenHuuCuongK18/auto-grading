@@ -34,7 +34,14 @@ namespace SolutionGrader.Core.Services.Docker
         /// <summary>
         /// Exports stage logs for a specific test case from the unified container.
         /// Creates ProcessLogs/{TC#}/ subdirectory with stage-specific log files.
+        /// <summary>
+        /// [DEPRECATED] Exports stage logs for a specific test case from the unified container.
+        /// This method is now a no-op as logs are written directly to the GradeDetail.xlsx file
+        /// via the GradeProcess sheet and StudentConsole columns.
+        /// Per requirements: "remove redundant log file that was dumped if these information 
+        /// are properly read and write into the GradeResult excel file"
         /// </summary>
+        [Obsolete("Logs are now written to GradeDetail.xlsx via GradeProcess sheet and StudentConsole columns")]
         public async Task ExportStageLogsForTestCaseAsync(
             string unifiedContainer, 
             string studentResultPath, 
@@ -42,38 +49,11 @@ namespace SolutionGrader.Core.Services.Docker
             Dictionary<int, string>? lastTestCaseClientOutputs,
             Dictionary<int, string>? lastTestCaseServerOutputs)
         {
-            if (lastTestCaseClientOutputs == null || lastTestCaseServerOutputs == null)
-            {
-                OnProgress($"[Logs] No stage outputs captured for {testCaseName}");
-                return;
-            }
-            
-            var logsDir = Path.Combine(studentResultPath, "ProcessLogs", testCaseName);
-            Directory.CreateDirectory(logsDir);
-            
-            OnProgress($"[Logs] Exporting stage logs for {testCaseName} to {logsDir}");
-            
-            // Export client outputs by stage
-            foreach (var (stage, output) in lastTestCaseClientOutputs)
-            {
-                if (!string.IsNullOrEmpty(output))
-                {
-                    var logPath = Path.Combine(logsDir, $"client-{testCaseName}-stage-{stage}.log");
-                    await File.WriteAllTextAsync(logPath, output);
-                }
-            }
-            
-            // Export server outputs by stage
-            foreach (var (stage, output) in lastTestCaseServerOutputs)
-            {
-                if (!string.IsNullOrEmpty(output))
-                {
-                    var logPath = Path.Combine(logsDir, $"server-{testCaseName}-stage-{stage}.log");
-                    await File.WriteAllTextAsync(logPath, output);
-                }
-            }
-            
-            OnProgress($"[Logs] Exported {lastTestCaseClientOutputs.Count} client logs and {lastTestCaseServerOutputs.Count} server logs for {testCaseName}");
+            // No-op: Logs are now integrated into the GradeDetail.xlsx file
+            // - StudentConsole column contains captured output per stage
+            // - GradeProcess sheet logs the execution process
+            OnProgress($"[Logs] Stage logs are now integrated into GradeDetail.xlsx (StudentConsole column and GradeProcess sheet)");
+            await Task.CompletedTask;
         }
         
         /// <summary>

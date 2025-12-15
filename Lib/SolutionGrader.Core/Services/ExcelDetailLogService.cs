@@ -57,29 +57,23 @@ namespace SolutionGrader.Core.Services
         private readonly Dictionary<string, string> _expectedValuesCache = new();
 
         // Columns we always ensure exist
+        // Simplified base columns - removed redundant ones per requirements
         private static readonly string[] BaseColumns =
         {
-            GradingKeywords.Col_Stage,
-            SuiteKeywords.Col_IC_Input,
-            SuiteKeywords.Col_IC_DataType,
-            SuiteKeywords.Col_IC_Action
+            GradingKeywords.Col_Stage
         };
 
+        // Simplified result columns - removed DataType, Action, ErrorCode, ErrorCategory, 
+        // PointsAwarded, PointsPossible, DurationMs, DetailPath per requirements
+        // Kept ExpectedExcerpt and ActualExcerpt for mismatch focus
+        // Result is written at the end
         private static readonly string[] ResultColumns =
         {
-            GradingKeywords.Col_Result,
-            GradingKeywords.Col_ErrorCode,
-            GradingKeywords.Col_ErrorCategory,
-            GradingKeywords.Col_PointsAwarded,
-            GradingKeywords.Col_PointsPossible,
-            GradingKeywords.Col_DurationMs,
-            GradingKeywords.Col_DetailPath,
-            GradingKeywords.Col_Message,
-            GradingKeywords.Col_DiffIndex,
-            GradingKeywords.Col_ExpectedOutput,
-            GradingKeywords.Col_ActualOutput,
+            GradingKeywords.Col_StudentConsole,  // Renamed from ClientStdout/ServerStdout
             GradingKeywords.Col_ExpectedExcerpt,
-            GradingKeywords.Col_ActualExcerpt
+            GradingKeywords.Col_ActualExcerpt,
+            GradingKeywords.Col_Message,
+            GradingKeywords.Col_Result  // Moved to end
         };
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
@@ -174,44 +168,19 @@ namespace SolutionGrader.Core.Services
         {
             if (_wb == null || _outPath == null) return;
 
-            // Award all-or-nothing on each row that has points
-            var sheetsToProcess = new[]
-            {
-                (Primary: SheetInputAlt, Alternate: SheetInput, NewFormat: SuiteKeywords.Sheet_User),
-                (Primary: SheetOutClientsAlt, Alternate: SheetOutClients, NewFormat: SheetOutClientsNew),
-                (Primary: SheetOutServersAlt, Alternate: SheetOutServers, NewFormat: SheetOutServersNew)
-            };
+            // NOTE: PointsAwarded and PointsPossible columns have been removed per requirements.
+            // Awarding logic is now only tracked internally for the summary.
+            // Sheets now only contain: Stage, Console, StudentConsole, ExpectedExcerpt, ActualExcerpt, Message, Result
 
-            foreach (var (primary, alternate, newFormat) in sheetsToProcess)
-            {
-                if (!TryGetWorksheetFlexible(primary, alternate, newFormat, out var ws) || ws == null) continue;
-                var hdr = GetHeaderIndex(ws);
-                if (!hdr.TryGetValue(GradingKeywords.Col_PointsAwarded, out var awardedCol) ||
-                    !hdr.TryGetValue(GradingKeywords.Col_PointsPossible, out var possibleCol))
-                    continue;
-
-                var rng = ws.RangeUsed();
-                if (rng == null) continue;
-
-                foreach (var row in rng.RowsUsed().Skip(1))
-                {
-                    if (row.Cell(possibleCol).TryGetValue<double>(out var p) && p > 0)
-                    {
-                        row.Cell(awardedCol).Value = _allStepsPassed ? p : 0;
-                    }
-                }
-
-                // Wrap and adjust for readability
-                ws.Style.Alignment.WrapText = true;
-                ws.Columns().AdjustToContents(1, ws.LastRowUsed().RowNumber(), PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
-            }
-
-            // Add STDOUT columns to result sheets for captured output during test execution
-            // This replaces the separate TestRunData sheet with inline STDOUT columns
+            // Add StudentConsole columns to result sheets for captured output during test execution
+            // Renamed from STDOUT columns per requirements
             AddStdoutColumnsToSheets();
 
             // Create separate ErrorReport sheet with ALL errors (not just first one)
             CreateErrorReportSheet();
+            
+            // Create GradeProcess sheet to log the grading execution process
+            CreateGradeProcessSheet();
 
             // Totals for this case → feed in-memory and incremental summary
             var (casePassed, totalAwarded, totalPossible) = ComputeCaseTotals();
@@ -322,35 +291,40 @@ namespace SolutionGrader.Core.Services
             var stage = ParseStage(step.Id);
             var rowNum = FindRowByStage(ws, hdr, stage) ?? AppendStageRow(ws, hdr, stage);
 
-            // per-step possible points are equal split of the case's total mark across compare steps
-            var perStep = _totalCompareSteps > 0 ? _totalMark / _totalCompareSteps : 0;
-            var actualPossible = pointsPossible > 0 ? perStep : 0;
-
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_Result, passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail);
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ErrorCode, errorCode);
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_ErrorCategory, errorCategory);
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_PointsAwarded, 0);             // awarded later in EndCase
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_PointsPossible, actualPossible);
-            SetCell(ws, rowNum, hdr, GradingKeywords.Col_DurationMs, Math.Round(durationMs, 2));
+            // Simplified output per requirements: 
+            // Removed ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath
+            // Result column is at the end now
+            
+            // Write StudentConsole (captured output) for all steps
+            TryWriteStudentConsole(ws, hdr, rowNum, stage, step.Id, actualPath);
             
             // Only write detailed information when test fails (optimization)
             if (!passed)
             {
-                SetCell(ws, rowNum, hdr, GradingKeywords.Col_DetailPath, detailPath ?? string.Empty);
                 SetCell(ws, rowNum, hdr, GradingKeywords.Col_Message, message ?? string.Empty);
                 
-                // Write actual output for failed tests
-                TryWriteActualOutput(ws, hdr, rowNum, stage, step.Id, actualPath);
-                
-                // Write diff columns with colored excerpts
-                TryWriteDiffColumns(ws, hdr, rowNum, stage, step.Id, detailPath, message, actualPath);
+                // Write diff columns with colored excerpts for mismatch focus
+                TryWriteDiffColumns(ws, hdr, rowNum, stage, step.Id, null, message, actualPath);
             }
             else
             {
                 // For passing tests, only show brief success message
                 SetCell(ws, rowNum, hdr, GradingKeywords.Col_Message, message ?? GradingKeywords.Result_Pass);
             }
+            
+            // Result at the end (per requirements: Result should be at the very end to show FAIL/PASS)
+            SetCell(ws, rowNum, hdr, GradingKeywords.Col_Result, passed ? GradingKeywords.Result_Pass : GradingKeywords.Result_Fail);
+            
+            // Color code result cell
+            if (hdr.TryGetValue(GradingKeywords.Col_Result, out var resultCol))
+            {
+                ws.Cell(rowNum, resultCol).Style.Fill.BackgroundColor = passed ? XLColor.LightGreen : XLColor.LightPink;
+            }
 
+            // Keep internal record tracking for ErrorReport sheet and summary
+            var perStep = _totalCompareSteps > 0 ? _totalMark / _totalCompareSteps : 0;
+            var actualPossible = pointsPossible > 0 ? perStep : 0;
+            
             _records.Add(new StepGradeRecord
             {
                 QuestionCode = step.QuestionCode,
@@ -501,6 +475,63 @@ namespace SolutionGrader.Core.Services
                         actualOutput = actualOutput.Substring(0, 5000) + "... (truncated)";
                     }
                     SetCell(ws, rowNum, hdr, GradingKeywords.Col_ActualOutput, actualOutput);
+                }
+            }
+            catch { /* best effort */ }
+        }
+
+        /// <summary>
+        /// Writes the captured student console output (previously ClientStdout/ServerStdout) to the StudentConsole column.
+        /// This is written for every stage, not just failed tests, per requirements.
+        /// </summary>
+        private void TryWriteStudentConsole(IXLWorksheet ws, Dictionary<string, int> hdr, int rowNum, int stage, string stepId, string? actualPath)
+        {
+            try
+            {
+                string? consoleOutput = null;
+                
+                // Try to get from actualPath first
+                if (!string.IsNullOrEmpty(actualPath))
+                {
+                    consoleOutput = TryReadContext(actualPath, 5000);
+                }
+                
+                // If no actualPath provided, try to infer from the sheet and stage
+                if (string.IsNullOrEmpty(consoleOutput) && !string.IsNullOrEmpty(_questionCode))
+                {
+                    var sheetName = ws.Name;
+                    var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutClientsAlt, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutClientsNew, StringComparison.OrdinalIgnoreCase);
+                    var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutServersAlt, StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(sheetName, SheetOutServersNew, StringComparison.OrdinalIgnoreCase);
+                    
+                    string? captureKey = null;
+                    
+                    if (isClientSheet)
+                    {
+                        captureKey = _run.GetClientCaptureKey(_questionCode, stage.ToString());
+                    }
+                    else if (isServerSheet)
+                    {
+                        captureKey = _run.GetServerCaptureKey(_questionCode, stage.ToString());
+                    }
+                    
+                    if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
+                    {
+                        consoleOutput = captured;
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(consoleOutput))
+                {
+                    // Truncate if too long for display
+                    if (consoleOutput.Length > 5000)
+                    {
+                        consoleOutput = consoleOutput.Substring(0, 5000) + "... (truncated)";
+                    }
+                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_StudentConsole, consoleOutput);
                 }
             }
             catch { /* best effort */ }
@@ -1016,25 +1047,27 @@ namespace SolutionGrader.Core.Services
         /// 
         /// If there is captured network data but no Network sheet in the template,
         /// this method will create one with the captured data for easy analysis.
+        /// 
+        /// UPDATE: Renamed ClientStdout/ServerStdout to StudentConsole per requirements.
         /// </summary>
         private void AddStdoutColumnsToSheets()
         {
             if (_wb == null || _records.Count == 0) return;
 
-            // Add ClientStdout column to Client sheet ONLY
+            // Add StudentConsole column to Client sheet (renamed from ClientStdout)
             if (TryGetWorksheetFlexible(SheetOutClientsAlt, SheetOutClients, SheetOutClientsNew, out var clientWs) && clientWs != null)
             {
-                EnsureColumns(clientWs, new[] { GradingKeywords.Col_ClientStdout });
+                EnsureColumns(clientWs, new[] { GradingKeywords.Col_StudentConsole });
                 var hdr = GetHeaderIndex(clientWs);
-                PopulateStdoutColumns(clientWs, hdr, isClientSheet: true, isServerSheet: false);
+                PopulateStudentConsoleColumn(clientWs, hdr, isClientSheet: true);
             }
 
-            // Add ServerStdout column to Server sheet ONLY
+            // Add StudentConsole column to Server sheet (renamed from ServerStdout)
             if (TryGetWorksheetFlexible(SheetOutServersAlt, SheetOutServers, SheetOutServersNew, out var serverWs) && serverWs != null)
             {
-                EnsureColumns(serverWs, new[] { GradingKeywords.Col_ServerStdout });
+                EnsureColumns(serverWs, new[] { GradingKeywords.Col_StudentConsole });
                 var hdr = GetHeaderIndex(serverWs);
-                PopulateStdoutColumns(serverWs, hdr, isClientSheet: false, isServerSheet: true);
+                PopulateStudentConsoleColumn(serverWs, hdr, isClientSheet: false);
             }
             
             // Handle Network sheet - create it if there's captured network data
@@ -1055,7 +1088,7 @@ namespace SolutionGrader.Core.Services
                     GradingKeywords.Col_ActualData,
                     GradingKeywords.Col_ActualSourcePort,
                     GradingKeywords.Col_ActualDestPort,
-                    GradingKeywords.Col_NetworkResult
+                    GradingKeywords.Col_Result  // Changed from Col_NetworkResult to Col_Result per requirements
                 });
                 var hdr = GetHeaderIndex(networkWs);
                 
@@ -1457,12 +1490,50 @@ namespace SolutionGrader.Core.Services
         }
         
         /// <summary>
-        /// Populates STDOUT columns with captured output data for each stage in the worksheet.
-        /// Each sheet type only populates its relevant STDOUT column:
-        /// - Client sheet: ClientStdout only
-        /// - Server sheet: ServerStdout only
-        /// - Network sheet: NetworkStdout only (the actual captured network flow data)
+        /// Populates StudentConsole column with captured output data for each stage in the worksheet.
+        /// Renamed from PopulateStdoutColumns per requirements to use unified StudentConsole column.
         /// </summary>
+        private void PopulateStudentConsoleColumn(IXLWorksheet ws, Dictionary<string, int> hdr, bool isClientSheet)
+        {
+            if (!hdr.TryGetValue(GradingKeywords.Col_Stage, out var stageCol)) return;
+            
+            var rng = ws.RangeUsed();
+            if (rng == null) return;
+            
+            // Get StudentConsole column index
+            if (!hdr.TryGetValue(GradingKeywords.Col_StudentConsole, out var consoleCol) || consoleCol <= 0) return;
+            
+            foreach (var row in rng.RowsUsed().Skip(1))
+            {
+                if (!int.TryParse(row.Cell(stageCol).GetString(), out var stage)) continue;
+                
+                var stageStr = stage.ToString();
+                var questionCode = _questionCode ?? "";
+                
+                // Get capture key based on sheet type
+                var captureKey = isClientSheet 
+                    ? _run.GetClientCaptureKey(questionCode, stageStr)
+                    : _run.GetServerCaptureKey(questionCode, stageStr);
+                    
+                if (_run.TryGetCapturedOutput(captureKey, out var output) && !string.IsNullOrEmpty(output))
+                {
+                    var truncated = output.Length > PortKeywords.OUTPUT_PREVIEW_MAX_CHARS 
+                        ? output[..PortKeywords.OUTPUT_PREVIEW_MAX_CHARS] + "..." 
+                        : output;
+                    ws.Cell(row.RowNumber(), consoleCol).Value = truncated;
+                }
+            }
+            
+            // Adjust column widths and wrap text
+            ws.Style.Alignment.WrapText = true;
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
+        }
+        
+        /// <summary>
+        /// [DEPRECATED] Populates STDOUT columns with captured output data for each stage in the worksheet.
+        /// Use PopulateStudentConsoleColumn instead which uses the unified StudentConsole column name.
+        /// </summary>
+        [Obsolete("Use PopulateStudentConsoleColumn instead")]
         private void PopulateStdoutColumns(IXLWorksheet ws, Dictionary<string, int> hdr, bool isClientSheet, bool isServerSheet)
         {
             if (!hdr.TryGetValue(GradingKeywords.Col_Stage, out var stageCol)) return;
@@ -1474,9 +1545,17 @@ namespace SolutionGrader.Core.Services
             int clientStdoutCol = 0, serverStdoutCol = 0, networkStdoutCol = 0;
             
             if (isClientSheet)
+            {
+                #pragma warning disable CS0612 // Type or member is obsolete
                 hdr.TryGetValue(GradingKeywords.Col_ClientStdout, out clientStdoutCol);
+                #pragma warning restore CS0612
+            }
             else if (isServerSheet)
+            {
+                #pragma warning disable CS0612 // Type or member is obsolete
                 hdr.TryGetValue(GradingKeywords.Col_ServerStdout, out serverStdoutCol);
+                #pragma warning restore CS0612
+            }
             else
                 hdr.TryGetValue(GradingKeywords.Col_NetworkStdout, out networkStdoutCol);
             
@@ -1664,6 +1743,127 @@ namespace SolutionGrader.Core.Services
             ws.Cell(row, 1).Value = "Total Points Lost:";
             ws.Cell(row, 2).Value = Math.Round(failedRecords.Sum(r => r.PointsPossible), 2);
 
+            ws.Style.Alignment.WrapText = true;
+            ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
+        }
+        
+        /// <summary>
+        /// Creates the GradeProcess sheet that logs the grading execution process.
+        /// This provides visibility into where grading may have failed or been skipped.
+        /// Columns: Stage, Action, GradeAction, Message
+        /// Per requirements: "make another sheet called GradeProcess inside this GradeResult file, 
+        /// which log details the execution process"
+        /// </summary>
+        private void CreateGradeProcessSheet()
+        {
+            if (_wb == null) return;
+            
+            // Remove existing GradeProcess sheet if it exists
+            if (_wb.Worksheets.TryGetWorksheet(GradingKeywords.Sheet_GradeProcess, out var existingSheet))
+            {
+                existingSheet.Delete();
+            }
+            
+            var ws = _wb.AddWorksheet(GradingKeywords.Sheet_GradeProcess);
+            
+            // Create header row: Stage, Action, GradeAction, Message
+            ws.Cell(1, 1).Value = GradingKeywords.Col_Stage;
+            ws.Cell(1, 2).Value = GradingKeywords.Col_UserAction;
+            ws.Cell(1, 3).Value = GradingKeywords.Col_GradeAction;
+            ws.Cell(1, 4).Value = GradingKeywords.Col_Message;
+            
+            ws.Row(1).Style.Font.Bold = true;
+            ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            
+            int row = 2;
+            
+            // Log all steps from _records with their grading actions
+            foreach (var record in _records)
+            {
+                ws.Cell(row, 1).Value = record.Stage;
+                ws.Cell(row, 2).Value = record.Action ?? "";
+                
+                // Determine grade action based on step outcome
+                string gradeAction;
+                if (record.Passed)
+                {
+                    gradeAction = "COMPARE_PASS";
+                }
+                else if (record.ErrorCode.Contains("SKIP"))
+                {
+                    gradeAction = "SKIPPED";
+                }
+                else if (record.ErrorCode.Contains("TIMEOUT"))
+                {
+                    gradeAction = "TIMEOUT";
+                }
+                else if (record.ErrorCode.Contains("CRASH"))
+                {
+                    gradeAction = "CRASHED";
+                }
+                else
+                {
+                    gradeAction = "COMPARE_FAIL";
+                }
+                
+                ws.Cell(row, 3).Value = gradeAction;
+                
+                // Build message with context
+                string message = record.Message ?? "";
+                if (!record.Passed && string.IsNullOrEmpty(message))
+                {
+                    message = $"Grading failed for {record.StepId}";
+                }
+                else if (record.Passed && string.IsNullOrEmpty(message))
+                {
+                    message = "Comparison passed";
+                }
+                
+                ws.Cell(row, 4).Value = message;
+                
+                // Color code based on outcome
+                if (!record.Passed)
+                {
+                    ws.Cell(row, 3).Style.Font.FontColor = XLColor.Red;
+                    ws.Cell(row, 3).Style.Fill.BackgroundColor = XLColor.LightPink;
+                }
+                else
+                {
+                    ws.Cell(row, 3).Style.Font.FontColor = XLColor.DarkGreen;
+                    ws.Cell(row, 3).Style.Fill.BackgroundColor = XLColor.LightGreen;
+                }
+                
+                row++;
+            }
+            
+            // Add summary at the bottom
+            row++;
+            ws.Cell(row, 1).Value = "Summary";
+            ws.Cell(row, 1).Style.Font.Bold = true;
+            row++;
+            
+            int passedCount = _records.Count(r => r.Passed);
+            int failedCount = _records.Count(r => !r.Passed);
+            
+            ws.Cell(row, 1).Value = "Total Steps:";
+            ws.Cell(row, 2).Value = _records.Count;
+            row++;
+            ws.Cell(row, 1).Value = "Passed:";
+            ws.Cell(row, 2).Value = passedCount;
+            ws.Cell(row, 2).Style.Font.FontColor = XLColor.DarkGreen;
+            row++;
+            ws.Cell(row, 1).Value = "Failed:";
+            ws.Cell(row, 2).Value = failedCount;
+            if (failedCount > 0)
+            {
+                ws.Cell(row, 2).Style.Font.FontColor = XLColor.Red;
+            }
+            row++;
+            ws.Cell(row, 1).Value = "Overall:";
+            ws.Cell(row, 2).Value = _allStepsPassed ? "PASS" : "FAIL";
+            ws.Cell(row, 2).Style.Font.Bold = true;
+            ws.Cell(row, 2).Style.Fill.BackgroundColor = _allStepsPassed ? XLColor.LightGreen : XLColor.LightPink;
+            
             ws.Style.Alignment.WrapText = true;
             ws.Columns().AdjustToContents(1, ws.LastRowUsed()?.RowNumber() ?? 1, PortKeywords.EXCEL_COLUMN_MIN_WIDTH, PortKeywords.EXCEL_COLUMN_MAX_WIDTH);
         }

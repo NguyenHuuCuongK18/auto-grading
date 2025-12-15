@@ -179,14 +179,32 @@ public static class GradingKeywords
     public const string Col_ErrorNotes      = "ErrorNotes";
     public const string Col_FailedStages    = "FailedStages";
     
-    /// <summary>Column for client STDOUT output captured during test execution</summary>
+    /// <summary>Column for student console output captured during test execution (unified name for both client and server)</summary>
+    public const string Col_StudentConsole  = "StudentConsole";
+    
+    /// <summary>Column for client STDOUT output captured during test execution (deprecated, use StudentConsole)</summary>
+    [Obsolete("Use Col_StudentConsole instead")]
     public const string Col_ClientStdout    = "ClientStdout";
     
-    /// <summary>Column for server STDOUT output captured during test execution</summary>
+    /// <summary>Column for server STDOUT output captured during test execution (deprecated, use StudentConsole)</summary>
+    [Obsolete("Use Col_StudentConsole instead")]
     public const string Col_ServerStdout    = "ServerStdout";
     
     /// <summary>Column for network data captured during test execution</summary>
     public const string Col_NetworkStdout   = "NetworkStdout";
+    
+    #endregion
+    
+    #region GradeProcess Sheet Columns
+    
+    /// <summary>Sheet name for the grading process log</summary>
+    public const string Sheet_GradeProcess = "GradeProcess";
+    
+    /// <summary>Column for the action performed during grading</summary>
+    public const string Col_GradeAction    = "GradeAction";
+    
+    /// <summary>Column for the user action from test kit</summary>
+    public const string Col_UserAction     = "Action";
     
     // Actual captured network data columns (for Network sheet comparison)
     /// <summary>Column for actual captured TCP flags</summary>

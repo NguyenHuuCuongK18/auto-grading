@@ -2532,15 +2532,56 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Simple string contains check with basic normalization for line endings.
+        /// String contains check with newline normalization for console output comparison.
+        /// This method normalizes newlines to allow students to pass even if they use different 
+        /// newline styles (Console.Write vs Console.WriteLine, Windows \r\n vs Linux \n).
+        /// 
+        /// Normalization applied:
+        /// 1. Convert all line endings (\r\n, \r) to \n
+        /// 2. Trim whitespace from each line
+        /// 3. Remove empty lines
+        /// 4. Join lines with single space for comparison
+        /// 5. Collapse multiple whitespace to single space
+        /// 
         /// For more robust comparison, use DataComparisonService.CompareText().
         /// </summary>
         private bool NormalizeAndContains(string actual, string expected)
         {
             if (string.IsNullOrEmpty(expected)) return true;
-            var normExpected = expected.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
-            var normActual = (actual ?? "").Trim().Replace("\r\n", "\n").Replace("\r", "\n");
-            return normActual.Contains(normExpected);
+            
+            var normExpected = NormalizeConsoleOutput(expected);
+            var normActual = NormalizeConsoleOutput(actual);
+            
+            // Check if normalized actual contains normalized expected
+            return normActual.Contains(normExpected, StringComparison.OrdinalIgnoreCase);
+        }
+        
+        /// <summary>
+        /// Normalizes console output for comparison to handle newline differences.
+        /// This allows students using Console.Write to pass when expected uses Console.WriteLine
+        /// and handles Windows/Linux newline differences.
+        /// </summary>
+        private static string NormalizeConsoleOutput(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            
+            // 1. Convert all line endings to \n
+            var s = text.Replace("\r\n", "\n").Replace("\r", "\n");
+            
+            // 2. Split into lines, trim each, remove empty lines
+            var lines = s.Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToArray();
+            
+            // 3. Join with single space (treats Console.Write and Console.WriteLine the same)
+            s = string.Join(" ", lines);
+            
+            // 4. Collapse multiple whitespace to single space
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+            
+            // 5. Final trim
+            return s.Trim();
         }
 
         /// <summary>
