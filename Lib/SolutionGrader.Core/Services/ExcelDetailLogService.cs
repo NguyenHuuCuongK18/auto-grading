@@ -415,69 +415,16 @@ namespace SolutionGrader.Core.Services
 
         // ---------- helpers ----------
 
+        /// <summary>
+        /// [DEPRECATED] Writes actual output to the ActualOutput column.
+        /// This method is now deprecated as the ActualOutput column has been removed.
+        /// Use TryWriteStudentConsole instead which writes to the StudentConsole column.
+        /// </summary>
+        [Obsolete("ActualOutput column removed. Use TryWriteStudentConsole instead.")]
         private void TryWriteActualOutput(IXLWorksheet ws, Dictionary<string, int> hdr, int rowNum, int stage, string stepId, string? actualPath)
         {
-            try
-            {
-                // Try to get actual output from actualPath (memory:// or file path)
-                string? actualOutput = null;
-                
-                if (!string.IsNullOrEmpty(actualPath))
-                {
-                    actualOutput = TryReadContext(actualPath, 5000); // Read up to 5000 chars
-                }
-                
-                // If no actualPath provided, try to infer from the sheet, stage, and validation type
-                if (string.IsNullOrEmpty(actualOutput) && !string.IsNullOrEmpty(_questionCode))
-                {
-                    var sheetName = ws.Name;
-                    var isClientSheet = string.Equals(sheetName, SheetOutClients, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(sheetName, SheetOutClientsAlt, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(sheetName, SheetOutClientsNew, StringComparison.OrdinalIgnoreCase);
-                    var isServerSheet = string.Equals(sheetName, SheetOutServers, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(sheetName, SheetOutServersAlt, StringComparison.OrdinalIgnoreCase) ||
-                                       string.Equals(sheetName, SheetOutServersNew, StringComparison.OrdinalIgnoreCase);
-                    
-                    // Determine the correct capture key based on validation type
-                    var validationType = GetValidationType(stepId);
-                    string? captureKey = null;
-                    
-                    if (isClientSheet)
-                    {
-                        captureKey = validationType switch
-                        {
-                            StepValidationType.DataResponse => _run.GetServerResponseCaptureKey(_questionCode, stage.ToString()),
-                            StepValidationType.ConsoleOutput => _run.GetClientCaptureKey(_questionCode, stage.ToString()),
-                            _ => _run.GetClientCaptureKey(_questionCode, stage.ToString())
-                        };
-                    }
-                    else if (isServerSheet)
-                    {
-                        captureKey = validationType switch
-                        {
-                            StepValidationType.DataRequest => _run.GetServerRequestCaptureKey(_questionCode, stage.ToString()),
-                            StepValidationType.ConsoleOutput => _run.GetServerCaptureKey(_questionCode, stage.ToString()),
-                            _ => _run.GetServerCaptureKey(_questionCode, stage.ToString())
-                        };
-                    }
-                    
-                    if (captureKey != null && _run.TryGetCapturedOutput(captureKey, out var captured))
-                    {
-                        actualOutput = captured;
-                    }
-                }
-                
-                if (!string.IsNullOrEmpty(actualOutput))
-                {
-                    // Truncate if too long for display
-                    if (actualOutput.Length > 5000)
-                    {
-                        actualOutput = actualOutput.Substring(0, 5000) + "... (truncated)";
-                    }
-                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_ActualOutput, actualOutput);
-                }
-            }
-            catch { /* best effort */ }
+            // No-op: ActualOutput column has been removed from the simplified column structure
+            // Data is now written to StudentConsole column via TryWriteStudentConsole method
         }
 
         /// <summary>
@@ -619,11 +566,11 @@ namespace SolutionGrader.Core.Services
                     expectedOutput = TryReadContext(detailPath, 5000);
                 }
 
-                // Get actual output (already written by TryWriteActualOutput)
+                // Get actual output from StudentConsole column (or fall back to reading from memory)
                 string? actualOutput = null;
-                if (hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actualOutputCol))
+                if (hdr.TryGetValue(GradingKeywords.Col_StudentConsole, out var studentConsoleCol))
                 {
-                    actualOutput = ws.Cell(rowNum, actualOutputCol).GetString();
+                    actualOutput = ws.Cell(rowNum, studentConsoleCol).GetString();
                 }
                 
                 // If ActualOutput column doesn't have data yet, try to get it based on validation type
@@ -661,31 +608,23 @@ namespace SolutionGrader.Core.Services
                     }
                 }
 
-                // Write full expected and actual outputs with color coding
-                if (!string.IsNullOrEmpty(expectedOutput))
-                {
-                    var truncatedExp = expectedOutput.Length > 5000 ? expectedOutput.Substring(0, 5000) + "... (truncated)" : expectedOutput;
-                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_ExpectedOutput, truncatedExp);
-                    // Color expected in green
-                    if (hdr.TryGetValue(GradingKeywords.Col_ExpectedOutput, out var expCol))
-                    {
-                        ws.Cell(rowNum, expCol).Style.Font.FontColor = XLColor.DarkGreen;
-                        ws.Cell(rowNum, expCol).Style.Fill.BackgroundColor = XLColor.LightGreen;
-                    }
-                }
+                // NOTE: ExpectedOutput and ActualOutput columns have been removed from the simplified structure.
+                // Expected output is now in the "Console" column (from test kit).
+                // Actual output is now in the "StudentConsole" column.
+                // We only write color-coded excerpts for mismatch analysis.
                 
-                // Color actual output in red (it was already written by TryWriteActualOutput)
-                if (!string.IsNullOrEmpty(actualOutput) && hdr.TryGetValue(GradingKeywords.Col_ActualOutput, out var actCol))
+                // Color StudentConsole (actual output) in red for failed comparisons
+                if (!string.IsNullOrEmpty(actualOutput) && hdr.TryGetValue(GradingKeywords.Col_StudentConsole, out var scCol))
                 {
-                    ws.Cell(rowNum, actCol).Style.Font.FontColor = XLColor.DarkRed;
-                    ws.Cell(rowNum, actCol).Style.Fill.BackgroundColor = XLColor.LightPink;
+                    ws.Cell(rowNum, scCol).Style.Font.FontColor = XLColor.DarkRed;
+                    ws.Cell(rowNum, scCol).Style.Fill.BackgroundColor = XLColor.LightPink;
                 }
 
                 // Also write excerpts around the difference point for quick comparison
                 var idx = FirstDiffIndexFromMessage(message ?? string.Empty);
                 if (idx >= 0)
                 {
-                    SetCell(ws, rowNum, hdr, GradingKeywords.Col_DiffIndex, idx);
+                    // DiffIndex column removed - skip writing
                     
                     if (!string.IsNullOrEmpty(expectedOutput) && !string.IsNullOrEmpty(actualOutput))
                     {

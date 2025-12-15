@@ -221,7 +221,9 @@ public static class GradingKeywords
     public const string Col_ActualSourcePort = "ActualSourcePort";
     /// <summary>Column for actual captured destination port</summary>
     public const string Col_ActualDestPort  = "ActualDestPort";
-    /// <summary>Column for network validation result (PASS/FAIL)</summary>
+    
+    /// <summary>Column for network validation result (PASS/FAIL). Deprecated - use Col_Result instead.</summary>
+    [Obsolete("Use Col_Result instead for consistency with other sheets")]
     public const string Col_NetworkResult   = "NetworkResult";
     
     #endregion

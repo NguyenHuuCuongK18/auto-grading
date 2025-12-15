@@ -92,6 +92,10 @@ namespace SolutionGrader.Core.Services
         // Stage output tracking for per-test-case log export
         private Dictionary<int, string>? _lastTestCaseClientOutputs; // Track last test case client outputs by stage
         private Dictionary<int, string>? _lastTestCaseServerOutputs; // Track last test case server outputs by stage
+        
+        // Static compiled regex for console output normalization (performance optimization)
+        private static readonly System.Text.RegularExpressions.Regex WhitespaceNormalizer = 
+            new System.Text.RegularExpressions.Regex(@"\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         // Retry cleanup tracking for containers that failed initial cleanup
         // Key: container name, Value: timestamp when cleanup was first attempted
@@ -2577,8 +2581,8 @@ namespace SolutionGrader.Core.Services
             // 3. Join with single space (treats Console.Write and Console.WriteLine the same)
             s = string.Join(" ", lines);
             
-            // 4. Collapse multiple whitespace to single space
-            s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+            // 4. Collapse multiple whitespace to single space (using pre-compiled regex for performance)
+            s = WhitespaceNormalizer.Replace(s, " ");
             
             // 5. Final trim
             return s.Trim();
