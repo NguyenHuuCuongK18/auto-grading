@@ -224,8 +224,8 @@ namespace SolutionGrader.UI.Services
                 worksheet.Cell(1, 1).Value = "No";
                 worksheet.Cell(1, 2).Value = "StudentCode";
                 worksheet.Cell(1, 3).Value = "ExamPaper";
-                worksheet.Cell(1, 4).Value = "PossiblePoints";  // MaxMark column - FIX: was missing
-                worksheet.Cell(1, 5).Value = "EarnedPoints";     // FinalResult renamed for clarity
+                worksheet.Cell(1, 4).Value = "EarnedPoints";     // FinalResult renamed for clarity
+                worksheet.Cell(1, 5).Value = "PossiblePoints";  // MaxMark column
                 worksheet.Cell(1, 6).Value = "Status";
                 worksheet.Cell(1, 7).Value = "StartDate";
                 worksheet.Cell(1, 8).Value = "EndDate";
@@ -243,8 +243,8 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(row, 1).Value = no.ToString();
                     worksheet.Cell(row, 2).Value = student.StudentCode;
                     worksheet.Cell(row, 3).Value = student.PaperNo;
-                    worksheet.Cell(row, 4).Value = student.MaxMark.ToString("0.##");  // MaxMark (PossiblePoints) - FIX: was missing
-                    worksheet.Cell(row, 5).Value = student.Mark.ToString("0.##");      // EarnedPoints (was FinalResult at col 5)
+                    worksheet.Cell(row, 4).Value = student.Mark.ToString("0.##");      // EarnedPoints
+                    worksheet.Cell(row, 5).Value = student.MaxMark.ToString("0.##");  // MaxMark (PossiblePoints)
                     worksheet.Cell(row, 6).Value = student.StatusDisplay;               // Status (was at col 4)
                     worksheet.Cell(row, 7).Value = student.StartTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
                     worksheet.Cell(row, 8).Value = student.EndTime?.ToString("dd/MM/yyyy HH:mm:ss") ?? "";
