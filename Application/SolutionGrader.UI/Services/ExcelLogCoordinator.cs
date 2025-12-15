@@ -102,8 +102,8 @@ namespace SolutionGrader.UI.Services
                     worksheet.Cell(1, 1).Value = "No";
                     worksheet.Cell(1, 2).Value = "StudentCode";
                     worksheet.Cell(1, 3).Value = "ExamPaper";
-                    worksheet.Cell(1, 4).Value = "PossiblePoints";
-                    worksheet.Cell(1, 5).Value = "EarnedPoints";
+                    worksheet.Cell(1, 4).Value = "EarnedPoints";
+                    worksheet.Cell(1, 5).Value = "PossiblePoints";
                     worksheet.Cell(1, 6).Value = "Status";
                     worksheet.Cell(1, 7).Value = "StartTime";
                     worksheet.Cell(1, 8).Value = "EndTime";
@@ -134,8 +134,8 @@ namespace SolutionGrader.UI.Services
                         worksheet.Cell(row, 1).Value = no.ToString();
                         worksheet.Cell(row, 2).Value = student.StudentCode;
                         worksheet.Cell(row, 3).Value = student.PaperNo;
-                        worksheet.Cell(row, 4).Value = possiblePoints.ToString("0.##");
-                        worksheet.Cell(row, 5).Value = "0.00"; // Placeholder for earned points
+                        worksheet.Cell(row, 4).Value = "0.00"; // Placeholder for earned points
+                        worksheet.Cell(row, 5).Value = possiblePoints.ToString("0.##");
                         worksheet.Cell(row, 6).Value = "Not Started"; // Initial status
                         worksheet.Cell(row, 7).Value = ""; // Start time (filled when grading starts)
                         worksheet.Cell(row, 8).Value = ""; // End time (filled when grading completes)
@@ -255,7 +255,7 @@ namespace SolutionGrader.UI.Services
                 var startTimeStr = startTimeCell.GetValue<string>();
                 
                 // Update earned points and status
-                row.Cell(5).Value = earnedPoints.ToString("0.##");
+                row.Cell(4).Value = earnedPoints.ToString("0.##");
                 row.Cell(6).Value = GetStatusDisplay(status);
                 row.Cell(8).Value = endTime.ToString("yyyy-MM-dd HH:mm:ss");
 
