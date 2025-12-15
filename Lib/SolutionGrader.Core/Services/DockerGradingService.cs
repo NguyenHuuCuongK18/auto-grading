@@ -60,6 +60,55 @@ namespace SolutionGrader.Core.Services
     /// </summary>
     public sealed class DockerGradingService
     {
+        #region Timeout Constants
+        // =======================================================================
+        // TIMEOUT CONFIGURATION - Easy to find and modify
+        // These are the default timeouts used during grading.
+        // Modify these values to adjust grading behavior.
+        // =======================================================================
+        
+        /// <summary>
+        /// Default timeout per test case in seconds.
+        /// If a single test case takes longer than this, it will be marked as timed out.
+        /// Default: 120 seconds (2 minutes)
+        /// </summary>
+        public const int DefaultTestCaseTimeoutSeconds = 120;
+        
+        /// <summary>
+        /// Default total timeout per student (test kit) in seconds.
+        /// If grading a student takes longer than this, the entire grading will be cancelled.
+        /// Default: 600 seconds (10 minutes)
+        /// </summary>
+        public const int DefaultStudentTimeoutSeconds = 600;
+        
+        /// <summary>
+        /// Gets the effective test case timeout, using the longer of the default or configured value.
+        /// </summary>
+        public static int GetEffectiveTestCaseTimeout(int? configuredTimeout = null)
+        {
+            if (configuredTimeout.HasValue && configuredTimeout.Value > 0)
+            {
+                // Use the LONGER timeout (prioritize longer timeout as per requirement)
+                return Math.Max(DefaultTestCaseTimeoutSeconds, configuredTimeout.Value);
+            }
+            return DefaultTestCaseTimeoutSeconds;
+        }
+        
+        /// <summary>
+        /// Gets the effective student (test kit) timeout, using the longer of the default or configured value.
+        /// </summary>
+        public static int GetEffectiveStudentTimeout(int? configuredTimeout = null)
+        {
+            if (configuredTimeout.HasValue && configuredTimeout.Value > 0)
+            {
+                // Use the LONGER timeout (prioritize longer timeout as per requirement)
+                return Math.Max(DefaultStudentTimeoutSeconds, configuredTimeout.Value);
+            }
+            return DefaultStudentTimeoutSeconds;
+        }
+        
+        #endregion
+
         // Timing constants - optimized for faster execution
         // These are fallback values; prefer using config.TestCaseTimeoutSeconds
         private const int StartupDelayMs = 1500;  // Reduced from 3000 - wait for process to start
@@ -166,9 +215,11 @@ namespace SolutionGrader.Core.Services
         /// Also cleans up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*).
         /// </summary>
         /// <param name="config">Docker grading configuration</param>
-        public void DisposeAllContainers(DockerGradingConfig config)
+        /// <param name="forceCleanup">When true, attempts more aggressive cleanup for containers that may be stuck.
+        /// Use forceCleanup=true at end of grading session, forceCleanup=false during periodic cleanup.</param>
+        public void DisposeAllContainers(DockerGradingConfig config, bool forceCleanup = false)
         {
-            OnProgress("[Docker] Disposing all containers...");
+            OnProgress($"[Docker] Disposing all containers (forceCleanup={forceCleanup})...");
 
             var databaseContainer = config.DatabaseContainerName;
             var serverContainer = $"server-{databaseContainer}";
@@ -184,6 +235,31 @@ namespace SolutionGrader.Core.Services
             // CRITICAL: Clean up any orphaned auto-grading containers (ag-unified-*, ag-monitor-*)
             // These may remain after the final batch of students if cleanup wasn't triggered
             // This addresses the issue: "containers not being cleaned up after final batch of student grading"
+            // 
+            // When forceCleanup=true (end of session):
+            // - Log any containers that are still registered as active (indicates a bug or timeout)
+            // - Attempt to remove ALL containers, including those marked active
+            // - This is safe because at end of session, no grading should be in progress
+            if (forceCleanup)
+            {
+                var activeCount = _activeContainers.Count;
+                if (activeCount > 0)
+                {
+                    OnProgress($"[Docker Cleanup] FORCE MODE: Found {activeCount} container(s) still in active registry at end of session");
+                    OnProgress($"[Docker Cleanup] This indicates containers that didn't complete cleanup properly (timeout, crash, or bug)");
+                    
+                    // Log which containers are still marked active
+                    foreach (var containerName in _activeContainers.Keys)
+                    {
+                        OnProgress($"[Docker Cleanup] Still active at session end: {containerName}");
+                    }
+                    
+                    // Clear the registry so these containers can be removed
+                    _activeContainers.Clear();
+                    OnProgress($"[Docker Cleanup] Cleared active registry to allow final cleanup");
+                }
+            }
+            
             CleanupOrphanedContainers();
 
             OnProgress("[Docker] All containers disposed");
@@ -2532,14 +2608,47 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Simple string contains check with basic normalization for line endings.
+        /// Normalizes console output for comparison, handling:
+        /// - Line ending differences (Windows \r\n vs Linux \n vs old Mac \r)
+        /// - Console.Write vs Console.WriteLine differences (trailing newlines)
+        /// - Leading/trailing whitespace per line
+        /// - Multiple consecutive newlines/empty lines
+        /// 
+        /// This allows students to pass even if they use Console.Write instead of Console.WriteLine
+        /// or if there are minor formatting differences due to running in Linux environment.
+        /// </summary>
+        /// <param name="input">The console output to normalize</param>
+        /// <returns>Normalized console output for comparison</returns>
+        private static string NormalizeConsoleOutput(string? input)
+        {
+            if (string.IsNullOrEmpty(input)) return string.Empty;
+            
+            // Step 1: Normalize all line endings to \n
+            var normalized = input.Replace("\r\n", "\n").Replace("\r", "\n");
+            
+            // Step 2: Split into lines, trim each line, remove completely empty lines
+            var lines = normalized.Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToArray();
+            
+            // Step 3: Join with single space (makes Console.Write vs WriteLine equivalent)
+            // This means "Hello\nWorld" and "Hello World" will both become "Hello World"
+            return string.Join(" ", lines);
+        }
+
+        /// <summary>
+        /// Simple string contains check with console output normalization.
+        /// Handles line ending differences, Console.Write vs WriteLine, and whitespace.
         /// For more robust comparison, use DataComparisonService.CompareText().
         /// </summary>
         private bool NormalizeAndContains(string actual, string expected)
         {
             if (string.IsNullOrEmpty(expected)) return true;
-            var normExpected = expected.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
-            var normActual = (actual ?? "").Trim().Replace("\r\n", "\n").Replace("\r", "\n");
+            
+            var normExpected = NormalizeConsoleOutput(expected);
+            var normActual = NormalizeConsoleOutput(actual);
+            
             return normActual.Contains(normExpected);
         }
 
@@ -2901,14 +3010,22 @@ namespace SolutionGrader.Core.Services
         /// Looks for the Testcase_Property sheet and reads:
         /// - Timeout(Seconds): timeout in seconds
         /// 
+        /// The effective timeout is the LONGER of:
+        /// - The timeout from Header.xlsx (if specified)
+        /// - The default timeout (DefaultTestCaseTimeoutSeconds = 2 minutes)
+        /// 
         /// NOTE: Grade_Content is NOT read here because the container is set up ONCE at the beginning
         /// with the outer environment configuration. Grade_Content must come from the outer Header.xlsx.
         /// </summary>
         /// <param name="testCasePath">Path to the test case folder</param>
-        /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx</param>
-        /// <returns>Timeout in seconds</returns>
-        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout)
+        /// <param name="defaultTimeout">Default timeout to use if not specified in Header.xlsx (uses DefaultTestCaseTimeoutSeconds if not provided)</param>
+        /// <returns>Timeout in seconds (longer of configured or default)</returns>
+        private static int ReadTestCaseTimeout(string testCasePath, int defaultTimeout = 0)
         {
+            // Use our constant if no default provided
+            if (defaultTimeout <= 0)
+                defaultTimeout = DefaultTestCaseTimeoutSeconds;
+            
             var headerPath = Path.Combine(testCasePath, "Header.xlsx");
             if (!File.Exists(headerPath))
                 return defaultTimeout;
@@ -2918,7 +3035,7 @@ namespace SolutionGrader.Core.Services
                 using var wb = new XLWorkbook(headerPath);
                 if (wb.TryGetWorksheet("Testcase_Property", out var ws))
                 {
-                    int timeout = defaultTimeout;
+                    int configuredTimeout = 0;
 
                     foreach (var row in ws.RowsUsed())
                     {
@@ -2930,13 +3047,17 @@ namespace SolutionGrader.Core.Services
                              key.Equals("Timeout", StringComparison.OrdinalIgnoreCase)) &&
                             int.TryParse(value, out var parsedTimeout) && parsedTimeout > 0)
                         {
-                            timeout = parsedTimeout;
+                            configuredTimeout = parsedTimeout;
                             // NOTE: Cannot use OnProgress here - this is a static context
                             // Logging moved to instance method context where OnProgress is available
                         }
                     }
 
-                    return timeout;
+                    // Prioritize the LONGER timeout (per user requirement)
+                    // This ensures students get enough time even if test case specifies less
+                    return configuredTimeout > 0 
+                        ? Math.Max(configuredTimeout, defaultTimeout) 
+                        : defaultTimeout;
                 }
             }
             catch

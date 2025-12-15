@@ -967,13 +967,14 @@ namespace SolutionGrader.UI
                                         // Clean up every batch (MaxParallelStudents) to prevent container accumulation
                                         // This addresses the issue: "container won't get cleaned up for the final batches"
                                         // Skip cleanup at start (index 0) and only clean after completing each batch
+                                        // Use forceCleanup=false to protect containers still being used by parallel grading
                                         if (currentCompletedIndex > 0 && currentCompletedIndex % _configuration.MaxParallelStudents == 0)
                                         {
                                             try
                                             {
                                                 var batchNumber = currentCompletedIndex / _configuration.MaxParallelStudents;
                                                 _logger.LogInfo($"[Container Cleanup] Batch {batchNumber} completed ({currentCompletedIndex} students) - cleaning up orphaned containers");
-                                                _gradingService.DisposeAllContainers(_configuration);
+                                                _gradingService.DisposeAllContainers(_configuration, forceCleanup: false);
                                                 _logger.LogInfo($"[Container Cleanup] Orphaned container cleanup completed for batch {batchNumber}");
                                             }
                                             catch (Exception cleanupEx)
@@ -1137,9 +1138,12 @@ namespace SolutionGrader.UI
                 
                 // Dispose all Docker containers (including database) when grading session ends
                 // Only dispose if not paused (paused sessions may resume)
+                // CRITICAL FIX: Use forceCleanup=true to clear active containers registry
+                // This ensures ALL containers are removed at end of session, even if they were
+                // incorrectly left in the registry due to exceptions or race conditions
                 if (!_isPaused)
                 {
-                    _gradingService.DisposeAllContainers(_configuration);
+                    _gradingService.DisposeAllContainers(_configuration, forceCleanup: true);
                 }
                 
                 // PORT ALLOCATION REMOVED: No longer using PortAllocator

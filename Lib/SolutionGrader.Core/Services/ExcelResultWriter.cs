@@ -50,41 +50,37 @@ namespace SolutionGrader.Core.Services
             userWs.Columns().AdjustToContents();
             
             // === Client Sheet ===
+            // Simplified columns: Stage, Console (expected), StudentConsole (actual), Message, Result
             var clientWs = wb.Worksheets.Add("Client");
             SetClientSheetHeaders(clientWs);
             int clientRow = 2;
             foreach (var comp in result.ClientComparisons)
             {
-                clientWs.Cell(clientRow, 1).Value = comp.Stage;
-                clientWs.Cell(clientRow, 2).Value = comp.Expected ?? "";
-                clientWs.Cell(clientRow, 6).Value = comp.Passed ? "PASS" : "FAIL";
-                clientWs.Cell(clientRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";
-                clientWs.Cell(clientRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";
-                clientWs.Cell(clientRow, 9).Value = comp.PointsAwarded;
-                clientWs.Cell(clientRow, 10).Value = comp.PointsPossible;
-                clientWs.Cell(clientRow, 11).Value = comp.DurationMs;
-                clientWs.Cell(clientRow, 13).Value = comp.Passed ? "Text comparison passed: client output matches exactly" : "Text comparison failed: client output mismatch";
-                clientWs.Cell(clientRow, 19).Value = comp.Actual ?? "";
+                clientWs.Cell(clientRow, 1).Value = comp.Stage;                                    // Stage
+                clientWs.Cell(clientRow, 2).Value = comp.Expected ?? "";                           // Console (expected from test kit)
+                clientWs.Cell(clientRow, 3).Value = comp.Actual ?? "";                             // StudentConsole (actual student output)
+                clientWs.Cell(clientRow, 4).Value = comp.Passed 
+                    ? "Text comparison passed: client output matches" 
+                    : $"Text comparison failed: {comp.Message ?? "client output mismatch"}";       // Message
+                clientWs.Cell(clientRow, 5).Value = comp.Passed ? "PASS" : "FAIL";                 // Result (at end)
                 clientRow++;
             }
             clientWs.Columns().AdjustToContents();
             
             // === Server Sheet ===
+            // Simplified columns: Stage, Console (expected), StudentConsole (actual), Message, Result
             var serverWs = wb.Worksheets.Add("Server");
             SetServerSheetHeaders(serverWs);
             int serverRow = 2;
             foreach (var comp in result.ServerComparisons)
             {
-                serverWs.Cell(serverRow, 1).Value = comp.Stage;
-                serverWs.Cell(serverRow, 2).Value = comp.Expected ?? "";
-                serverWs.Cell(serverRow, 6).Value = comp.Passed ? "PASS" : "FAIL";
-                serverWs.Cell(serverRow, 7).Value = comp.Passed ? "NONE" : "COMPARE_FAIL";
-                serverWs.Cell(serverRow, 8).Value = comp.Passed ? "None" : "OutputMismatch";
-                serverWs.Cell(serverRow, 9).Value = comp.PointsAwarded;
-                serverWs.Cell(serverRow, 10).Value = comp.PointsPossible;
-                serverWs.Cell(serverRow, 11).Value = comp.DurationMs;
-                serverWs.Cell(serverRow, 13).Value = comp.Passed ? "Text comparison passed: server output matches exactly" : "Text comparison failed: server output mismatch";
-                serverWs.Cell(serverRow, 19).Value = comp.Actual ?? "";
+                serverWs.Cell(serverRow, 1).Value = comp.Stage;                                    // Stage
+                serverWs.Cell(serverRow, 2).Value = comp.Expected ?? "";                           // Console (expected from test kit)
+                serverWs.Cell(serverRow, 3).Value = comp.Actual ?? "";                             // StudentConsole (actual student output)
+                serverWs.Cell(serverRow, 4).Value = comp.Passed 
+                    ? "Text comparison passed: server output matches" 
+                    : $"Text comparison failed: {comp.Message ?? "server output mismatch"}";       // Message
+                serverWs.Cell(serverRow, 5).Value = comp.Passed ? "PASS" : "FAIL";                 // Result (at end)
                 serverRow++;
             }
             serverWs.Columns().AdjustToContents();
@@ -285,9 +281,8 @@ namespace SolutionGrader.Core.Services
 
         private static void SetUserSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Input", "Action", "DataType", "Result", "ErrorCode", "ErrorCategory", 
-                "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", "DiffIndex", 
-                "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt" };
+            // User sheet keeps more columns for action tracking
+            var headers = new[] { "Stage", "Input", "Action", "Message" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
@@ -295,9 +290,10 @@ namespace SolutionGrader.Core.Services
         
         private static void SetClientSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode", 
-                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", 
-                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ClientStdout" };
+            // Simplified Client sheet columns per user request:
+            // Removed: Input, DataType, Action, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt
+            // Kept: Stage, Console (from test kit), StudentConsole (actual), Message, Result (at end)
+            var headers = new[] { "Stage", "Console", "StudentConsole", "Message", "Result" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
@@ -305,9 +301,10 @@ namespace SolutionGrader.Core.Services
         
         private static void SetServerSheetHeaders(IXLWorksheet ws)
         {
-            var headers = new[] { "Stage", "Console", "Input", "DataType", "Action", "Result", "ErrorCode", 
-                "ErrorCategory", "PointsAwarded", "PointsPossible", "DurationMs", "DetailPath", "Message", 
-                "DiffIndex", "ExpectedOutput", "ActualOutput", "ExpectedExcerpt", "ActualExcerpt", "ServerStdout" };
+            // Simplified Server sheet columns per user request:
+            // Removed: Input, DataType, Action, ErrorCode, ErrorCategory, PointsAwarded, PointsPossible, DurationMs, DetailPath, DiffIndex, ExpectedOutput, ActualOutput, ExpectedExcerpt, ActualExcerpt
+            // Kept: Stage, Console (from test kit), StudentConsole (actual), Message, Result (at end)
+            var headers = new[] { "Stage", "Console", "StudentConsole", "Message", "Result" };
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
