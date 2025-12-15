@@ -42,6 +42,9 @@ namespace Domain.Models
         
         /// <summary>Captured network packets - for Network sheet (raw captures)</summary>
         public List<CapturedNetworkPacket> NetworkCaptures { get; set; } = new();
+        
+        /// <summary>Grading process records - for GradeProcess sheet (execution log)</summary>
+        public List<GradeProcessRecord> GradeProcessRecords { get; set; } = new();
     }
     
     /// <summary>

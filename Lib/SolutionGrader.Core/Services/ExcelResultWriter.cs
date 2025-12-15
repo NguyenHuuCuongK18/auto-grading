@@ -245,6 +245,26 @@ namespace SolutionGrader.Core.Services
             }
             
             netWs.Columns().AdjustToContents();
+            
+            // === GradeProcess Sheet ===
+            // Logs grading execution details: Stage, Action, GradeAction, Message
+            var gradeProcessWs = wb.Worksheets.Add("GradeProcess");
+            SetGradeProcessSheetHeaders(gradeProcessWs);
+            int gradeProcessRow = 2;
+            foreach (var record in result.GradeProcessRecords)
+            {
+                gradeProcessWs.Cell(gradeProcessRow, 1).Value = record.Stage;
+                gradeProcessWs.Cell(gradeProcessRow, 2).Value = record.Action;
+                gradeProcessWs.Cell(gradeProcessRow, 3).Value = record.GradeAction;
+                gradeProcessWs.Cell(gradeProcessRow, 4).Value = record.Message;
+                
+                // Color code based on message content
+                ApplyGradeProcessMessageColor(gradeProcessWs.Cell(gradeProcessRow, 4), record.Message);
+                
+                gradeProcessRow++;
+            }
+            gradeProcessWs.Columns().AdjustToContents();
+            
             wb.SaveAs(detailPath);
             
             await Task.CompletedTask;
@@ -322,6 +342,34 @@ namespace SolutionGrader.Core.Services
             for (int i = 0; i < headers.Length; i++)
                 ws.Cell(1, i + 1).Value = headers[i];
             ws.Row(1).Style.Font.Bold = true;
+        }
+        
+        private static void SetGradeProcessSheetHeaders(IXLWorksheet ws)
+        {
+            // GradeProcess sheet logs grading execution details
+            // Columns: Stage, Action, GradeAction, Message
+            var headers = new[] { "Stage", "Action", "GradeAction", "Message" };
+            for (int i = 0; i < headers.Length; i++)
+                ws.Cell(1, i + 1).Value = headers[i];
+            ws.Row(1).Style.Font.Bold = true;
+        }
+        
+        /// <summary>
+        /// Applies color coding to GradeProcess message cells based on message prefix.
+        /// PASS = green, FAIL = pink, SKIP = gray, ERROR = coral
+        /// </summary>
+        private static void ApplyGradeProcessMessageColor(IXLCell cell, string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            
+            if (message.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
+                cell.Style.Fill.BackgroundColor = XLColor.LightGreen;
+            else if (message.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase))
+                cell.Style.Fill.BackgroundColor = XLColor.LightPink;
+            else if (message.StartsWith("SKIP", StringComparison.OrdinalIgnoreCase))
+                cell.Style.Fill.BackgroundColor = XLColor.LightGray;
+            else if (message.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
+                cell.Style.Fill.BackgroundColor = XLColor.LightCoral;
         }
 
         private void OnProgress(string message)

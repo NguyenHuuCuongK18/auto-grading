@@ -72,9 +72,9 @@ namespace SolutionGrader.Core.Services
             GradingKeywords.Col_Result  // Result at the very end to show FAIL/PASS
         };
         
-        // TODO: GradeProcess sheet implementation - logs grading execution details
-        // Columns: Stage, Action, GradeAction, Message
-        // This will log: mismatch details, "not found in detail.xlsx -> skipping grading", crash/timeout messages
+        // GradeProcess sheet columns defined in GradingKeywords:
+        // Col_Stage, Col_Action, Col_GradeAction, Col_Message
+        // GradeProcess sheet is written by ExcelResultWriter.WriteTestCaseResultAsync using TestCaseResult.GradeProcessRecords
 
         public ExcelDetailLogService(IFileService files, IRunContext run)
         {
@@ -2033,7 +2033,5 @@ namespace SolutionGrader.Core.Services
 
         public void Dispose() => _wb?.Dispose();
     }
-    
-    // TODO: GradeProcessRecord class for GradeProcess sheet implementation
-    // Will be used to log grading execution details with columns: Stage, Action, GradeAction, Message
+    // GradeProcessRecord defined in SolutionGrader.Core/Domain/Models/GradeProcessRecord.cs
 }
