@@ -449,8 +449,8 @@ namespace SolutionGrader.Core.Services
             var normExp = NormalizeConsoleOutput(expected);
             var normAct = NormalizeConsoleOutput(actual);
 
-            int diffIdx = 0;
             var minLen = Math.Min(normExp.Length, normAct.Length);
+            int diffIdx = minLen; // Default: difference at end if strings match up to minLen
             for (int i = 0; i < minLen; i++)
             {
                 if (normExp[i] != normAct[i])
@@ -458,11 +458,7 @@ namespace SolutionGrader.Core.Services
                     diffIdx = i;
                     break;
                 }
-                diffIdx = i + 1;
             }
-
-            if (diffIdx == minLen && normExp.Length != normAct.Length)
-                diffIdx = minLen;
 
             var source = getExpected ? expected : actual;
             var start = Math.Max(0, diffIdx - contextChars);

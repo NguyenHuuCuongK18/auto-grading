@@ -4624,7 +4624,7 @@ namespace SolutionGrader.Core.Services
             var normAct = NormalizeConsoleOutput(actual);
 
             // Find first difference index
-            int diffIdx = 0;
+            int diffIdx = Math.Min(normExp.Length, normAct.Length); // Default: difference at end if strings match up to minLen
             var minLen = Math.Min(normExp.Length, normAct.Length);
             for (int i = 0; i < minLen; i++)
             {
@@ -4633,13 +4633,6 @@ namespace SolutionGrader.Core.Services
                     diffIdx = i;
                     break;
                 }
-                diffIdx = i + 1; // No difference found up to this point
-            }
-
-            // If strings match up to minLen but lengths differ
-            if (diffIdx == minLen && normExp.Length != normAct.Length)
-            {
-                diffIdx = minLen;
             }
 
             // Extract excerpt from the appropriate string
