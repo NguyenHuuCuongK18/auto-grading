@@ -4158,8 +4158,15 @@ namespace SolutionGrader.Core.Services
             var detailPath_forNetwork = Path.Combine(testCasePath, "Detail.xlsx");
             var expectedNetworkFlows = ReadExpectedNetwork(detailPath_forNetwork);
 
+            // CRITICAL FIX: Apply the same 3-way to 4-way TCP close normalization as CompareNetwork
+            // This ensures the Excel writer uses the same normalized packets that the grading logic used.
+            // Without this, the Excel shows FAIL for tests that actually PASSED during grading because:
+            // - Grading uses Normalize3WayTo4WayClose to inject synthetic ACK packets
+            // - Excel was showing raw packets without the synthetic ACKs, causing positional mismatch
+            var normalizedCaptures = Normalize3WayTo4WayClose(result.NetworkCaptures.ToList());
+            
             // Group actual captures by stage for easier lookup
-            var capturesByStage = result.NetworkCaptures
+            var capturesByStage = normalizedCaptures
                 .GroupBy(p => p.Stage)
                 .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Timestamp).ToList());
 

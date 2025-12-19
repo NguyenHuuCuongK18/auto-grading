@@ -95,6 +95,11 @@ namespace SolutionGrader.UI
         private DateTime? _sessionStartTime;
         private bool _isPaused;
         private bool _isRunning;
+        
+        // CRITICAL FIX: Track the students that were originally selected for grading
+        // This allows Resume to continue with ONLY the originally selected students,
+        // instead of starting grading for ALL students with Status != Success
+        private List<StudentSolution>? _originallySelectedStudents;
 
         public GradingWindow(GradingConfiguration configuration)
         {
@@ -580,6 +585,12 @@ namespace SolutionGrader.UI
                     ? _students.Where(s => s.IsSelected && s.Status != GradingStatus.Success).ToList()
                     : _students.Where(s => s.Status != GradingStatus.Success).ToList();
             }
+            
+            // CRITICAL FIX: Store the originally selected students for Resume functionality
+            // When user pauses and resumes, we should continue with ONLY the originally selected students
+            // NOT all students with Status != Success (which would include students that were never selected)
+            _originallySelectedStudents = studentsToGrade.ToList();
+            _logger.LogInfo($"Stored {_originallySelectedStudents.Count} students for potential resume");
             
             _logger.LogInfo($"Students to grade after filtering: {studentsToGrade.Count}");
             
@@ -1434,6 +1445,216 @@ namespace SolutionGrader.UI
             }
         }
 
+        /// <summary>
+        /// Resumes grading with a specific list of students.
+        /// This is used when resuming from a pause to continue with ONLY the originally selected students.
+        /// Unlike StartGradingAsync, this method does NOT re-determine which students to grade -
+        /// it uses the provided list directly.
+        /// </summary>
+        /// <param name="studentsToGrade">List of students to grade (already filtered)</param>
+        private async Task ResumeGradingWithStudentsAsync(List<StudentSolution> studentsToGrade)
+        {
+            if (studentsToGrade.Count == 0)
+            {
+                _logger.LogInfo("No students to resume grading");
+                return;
+            }
+            
+            _logger.LogInfo($"=== Resuming Grading Session with {studentsToGrade.Count} students ===");
+            
+            // Re-initialize services and state for the resumed session
+            _cancellationTokenSource = new CancellationTokenSource();
+            _isRunning = true;
+            _isPaused = false;
+            // Don't reset _sessionStartTime - we want to track total elapsed time including pause
+            
+            UpdateButtonStates();
+            
+            // Re-initialize shared loggers and coordinators for the resumed session
+            try
+            {
+                var resultPath = _configuration.GetEffectiveResultPath();
+                if (!string.IsNullOrEmpty(resultPath))
+                {
+                    _sharedMessageLogger = new GradingMessageLogger(resultPath);
+                    _logger.LogInfo($"[Resume] Initialized new GradingMessageLogger for resumed session");
+                    
+                    _sharedExcelCoordinator = new ExcelLogCoordinator(_logger, resultPath);
+                    
+                    // Collect max marks for each paper from test kits
+                    var testKitMaxMarks = new Dictionary<string, double>();
+                    List<StudentSolution> allStudents;
+                    lock (_studentsLock)
+                    {
+                        allStudents = _students.ToList();
+                    }
+                    
+                    foreach (var student in allStudents)
+                    {
+                        if (!testKitMaxMarks.ContainsKey(student.PaperNo))
+                        {
+                            var testKitPath = _testKitDiscovery.GetTestKitForPaper(_configuration.TestKitFolderPath, student.PaperNo);
+                            if (string.IsNullOrEmpty(testKitPath))
+                            {
+                                testKitMaxMarks[student.PaperNo] = 0.0;
+                            }
+                            else
+                            {
+                                var maxMark = _testKitDiscovery.GetTestKitMaxMark(testKitPath);
+                                testKitMaxMarks[student.PaperNo] = maxMark;
+                            }
+                        }
+                    }
+                    
+                    _sharedExcelCoordinator.InitializeExcelFile(allStudents, testKitMaxMarks);
+                    _logger.LogInfo($"[Resume] Initialized ExcelLogCoordinator with {allStudents.Count} students");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[Resume] Failed to initialize loggers: {ex.Message}. Continuing with grading.", ex);
+            }
+            
+            try
+            {
+                // Use the same batch/sequential logic as StartGradingAsync
+                if (_configuration.MaxParallelStudents <= 1)
+                {
+                    // Sequential grading
+                    foreach (var student in studentsToGrade)
+                    {
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(500);
+                        }
+                        
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                            break;
+                        
+                        await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                        
+                        List<StudentSolution> studentsSnapshot;
+                        lock (_studentsLock)
+                        {
+                            studentsSnapshot = _students.ToList();
+                        }
+                        _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
+                        
+                        UpdateStatusBar();
+                    }
+                }
+                else
+                {
+                    // Parallel batch grading - same pattern as StartGradingAsync
+                    var channelCapacity = Math.Max(_configuration.MaxParallelStudents * 2, 10);
+                    var channel = System.Threading.Channels.Channel.CreateBounded<StudentSolution>(
+                        new System.Threading.Channels.BoundedChannelOptions(channelCapacity)
+                        {
+                            FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait
+                        });
+                    
+                    var completedCount = 0;
+                    var completedLock = new object();
+                    
+                    // Producer task
+                    var producerTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            foreach (var student in studentsToGrade)
+                            {
+                                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                    break;
+                                
+                                await channel.Writer.WriteAsync(student, _cancellationTokenSource.Token);
+                            }
+                        }
+                        catch (OperationCanceledException) { }
+                        finally
+                        {
+                            channel.Writer.Complete();
+                        }
+                    }, _cancellationTokenSource.Token);
+                    
+                    // Worker tasks
+                    var workerTasks = new List<Task>();
+                    for (int workerId = 0; workerId < _configuration.MaxParallelStudents; workerId++)
+                    {
+                        var localWorkerId = workerId;
+                        var workerTask = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await foreach (var student in channel.Reader.ReadAllAsync(_cancellationTokenSource.Token))
+                                {
+                                    while (_isPaused && !_cancellationTokenSource.Token.IsCancellationRequested)
+                                    {
+                                        await Task.Delay(500, _cancellationTokenSource.Token);
+                                    }
+                                    
+                                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                                        break;
+                                    
+                                    await GradeStudentAsync(student, _cancellationTokenSource.Token);
+                                    
+                                    List<StudentSolution> studentsSnapshot;
+                                    lock (_studentsLock)
+                                    {
+                                        studentsSnapshot = _students.ToList();
+                                    }
+                                    _resultWriter.WriteStudentsSolutionSummary(studentsSnapshot);
+                                    
+                                    lock (completedLock)
+                                    {
+                                        completedCount++;
+                                    }
+                                    
+                                    await Dispatcher.InvokeAsync(() => UpdateStatusBar());
+                                }
+                            }
+                            catch (OperationCanceledException) { }
+                        }, _cancellationTokenSource.Token);
+                        workerTasks.Add(workerTask);
+                    }
+                    
+                    await producerTask;
+                    await Task.WhenAll(workerTasks);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInfo("Resumed grading cancelled");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error during resumed grading", ex);
+            }
+            finally
+            {
+                _isRunning = false;
+                UpdateButtonStates();
+                
+                _uiUpdateBatcher.Flush();
+                _resultWriter.FlushPendingWrites();
+                
+                if (!_isPaused)
+                {
+                    _gradingService.DisposeAllContainers(_configuration, forceCleanup: true);
+                }
+                
+                _sharedMessageLogger?.Dispose();
+                _sharedMessageLogger = null;
+                
+                _sharedExcelCoordinator?.Dispose();
+                _sharedExcelCoordinator = null;
+                
+                _logger.LogInfo("Resumed grading session completed");
+            }
+        }
+
         private async void Pause_Click(object sender, RoutedEventArgs e)
         {
             if (_isRunning && !_isPaused)
@@ -1478,8 +1699,43 @@ namespace SolutionGrader.UI
                 
                 _logger.LogInfo("Grading resumed");
                 
-                // Restart grading from paused students
-                await StartGradingAsync(false);
+                // CRITICAL FIX: Resume with ONLY the originally selected students that haven't succeeded yet
+                // This ensures:
+                // 1. "Start Selected" + Pause + Resume: Only the originally selected students continue
+                // 2. "Start All" + Pause + Resume: Only the originally included students continue
+                // 3. Students that completed successfully before pause are skipped
+                // 4. Students that were NOT in the original selection are NOT added
+                if (_originallySelectedStudents != null && _originallySelectedStudents.Count > 0)
+                {
+                    // Filter to get only students that still need grading (not yet successful)
+                    var studentsToResume = _originallySelectedStudents
+                        .Where(s => s.Status != GradingStatus.Success)
+                        .ToList();
+                    
+                    _logger.LogInfo($"Resuming with {studentsToResume.Count} students from original selection of {_originallySelectedStudents.Count}");
+                    
+                    if (studentsToResume.Count == 0)
+                    {
+                        _logger.LogInfo("All originally selected students have already completed successfully");
+                        System.Windows.MessageBox.Show(
+                            "All originally selected students have already completed grading successfully.",
+                            "Resume Complete",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                        return;
+                    }
+                    
+                    // Update _originallySelectedStudents to the remaining students for potential future pause/resume
+                    _originallySelectedStudents = studentsToResume;
+                    
+                    // Resume grading with the filtered list
+                    await ResumeGradingWithStudentsAsync(studentsToResume);
+                }
+                else
+                {
+                    _logger.LogWarning("No originally selected students found - falling back to Start All behavior");
+                    await StartGradingAsync(false);
+                }
             }
         }
 
