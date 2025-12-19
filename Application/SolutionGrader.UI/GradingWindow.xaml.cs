@@ -1450,8 +1450,16 @@ namespace SolutionGrader.UI
         /// This is used when resuming from a pause to continue with ONLY the originally selected students.
         /// Unlike StartGradingAsync, this method does NOT re-determine which students to grade -
         /// it uses the provided list directly.
+        /// 
+        /// BEHAVIOR NOTES:
+        /// - Students who complete successfully during this resumed session are NOT removed from the list
+        ///   dynamically; they are simply skipped because their status changes to Success.
+        /// - If the provided list is empty (e.g., all students already completed), this method returns
+        ///   immediately after logging. The caller (Resume_Click) handles this case with a message box.
+        /// - If a student was Paused and their status changed externally (e.g., reset), they will still
+        ///   be processed because they remain in the studentsToGrade list.
         /// </summary>
-        /// <param name="studentsToGrade">List of students to grade (already filtered)</param>
+        /// <param name="studentsToGrade">List of students to grade (already filtered by caller to exclude Success status)</param>
         private async Task ResumeGradingWithStudentsAsync(List<StudentSolution> studentsToGrade)
         {
             if (studentsToGrade.Count == 0)
@@ -1725,7 +1733,11 @@ namespace SolutionGrader.UI
                         return;
                     }
                     
-                    // Update _originallySelectedStudents to the remaining students for potential future pause/resume
+                    // NOTE: We update _originallySelectedStudents to the remaining students for future pause/resume cycles.
+                    // This mutation is intentional: when user pauses again and resumes, we only want to continue 
+                    // with students that haven't completed yet, not re-attempt already successful students.
+                    // The variable name "originally" refers to the students from the START of the grading session,
+                    // but filtered to exclude those that have completed between pause/resume cycles.
                     _originallySelectedStudents = studentsToResume;
                     
                     // Resume grading with the filtered list
@@ -1733,8 +1745,16 @@ namespace SolutionGrader.UI
                 }
                 else
                 {
-                    _logger.LogWarning("No originally selected students found - falling back to Start All behavior");
-                    await StartGradingAsync(false);
+                    // This should rarely happen - only if Resume is clicked without a prior Start
+                    // or if the application state was corrupted. Instead of falling back to grading
+                    // all students (which would reintroduce the bug we're fixing), show an error.
+                    _logger.LogWarning("No originally selected students found - cannot resume without prior grading session");
+                    System.Windows.MessageBox.Show(
+                        "Cannot resume: No prior grading session found.\n\n" +
+                        "Please use 'Start All' or 'Start Selected' to begin a new grading session.",
+                        "Resume Failed",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
                 }
             }
         }
