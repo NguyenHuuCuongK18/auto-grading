@@ -852,22 +852,25 @@ namespace SolutionGrader.Core.Services
                         // Clear previous test case packets from RunContext (in-memory)
                         _runContext.ClearCapturedNetworkPackets(_currentStudentCode ?? "");
 
-                        // CRITICAL FIX: Reset the PCAP file by restarting the network monitor
-                        // This ensures each test case starts with a fresh PCAP file, preventing
-                        // packets from previous test cases from being parsed.
+                        // CRITICAL: DO NOT reset _lastParsedPacketCount or restart the sidecar!
                         // 
-                        // The previous approach of just resetting _lastParsedPacketCount to 0 was buggy:
-                        // - PCAP file kept growing with packets from ALL test cases
-                        // - When counter reset to 0, it would re-parse old packets from TC1, TC2, etc.
-                        // - This caused wrong packets to be matched (e.g., TC4 matched TC1 FIN packets)
-                        await ResetNetworkMonitorForNewTestCaseAsync(
-                            _currentMonitorContainer,
-                            _currentPcapFilePath);
+                        // The correct approach is to keep the sidecar running continuously and
+                        // let the packet counter keep incrementing. This way:
+                        // - TC1 parses packets 0-10, counter becomes 10
+                        // - TC2 parses packets 10-25, counter becomes 25
+                        // - TC3 parses packets 25-40, counter becomes 40
+                        // Each test case only sees NEW packets captured during its execution.
+                        // 
+                        // PREVIOUS BUGGY APPROACHES:
+                        // 1. Reset counter to 0 -> re-parses old packets from previous TCs
+                        // 2. Delete output file -> sidecar keeps writing to orphaned file handle
+                        // 3. Restart container -> adds overhead, may cause issues over time
+                        //
+                        // The RunContext is cleared above, so even though the JSONL file contains
+                        // packets from all test cases, only the NEW packets (since last parse)
+                        // will be added to RunContext for comparison.
 
-                        // Reset packet counter after PCAP reset
-                        _lastParsedPacketCount = 0;
-
-                        OnProgress($"[NetworkMonitor] [{testCase.Name}] PCAP reset and packet counter cleared for fresh comparison");
+                        OnProgress($"[NetworkMonitor] [{testCase.Name}] RunContext cleared, packet counter at {_lastParsedPacketCount} (will only parse new packets)");
                     }
 
                     // Use per-test-case timeout from Header.xlsx (with fallback to config or default)
@@ -3999,29 +4002,21 @@ namespace SolutionGrader.Core.Services
         }
 
         /// <summary>
-        /// Resets the network monitor for a new test case by stopping and restarting tcpdump.
+        /// Resets the network monitor by restarting the sidecar container.
         /// 
-        /// CRITICAL FIX: This method ensures each test case starts with a fresh PCAP file.
+        /// NOTE: This method is NO LONGER called between test cases.
+        /// The correct approach is to keep the sidecar running continuously and
+        /// let the packet counter (_lastParsedPacketCount) keep incrementing.
+        /// This way each test case only sees NEW packets captured during its execution.
         /// 
-        /// THE PROBLEM:
-        /// The previous approach kept the same PCAP file across all test cases and used
-        /// _lastParsedPacketCount to skip already-processed packets. However, when the counter
-        /// was reset to 0 at the start of each test case, it would re-parse ALL packets
-        /// from the beginning - including packets from previous test cases (TC1, TC2, etc.).
-        /// This caused wrong packets to be matched (e.g., TC4 expecting Client→Server FIN
-        /// would match a Server→Client FIN from TC1).
+        /// This method is kept for potential future use cases where a full reset
+        /// is needed (e.g., between students, or when the sidecar crashes).
         /// 
-        /// THE FIX (SharpPcap-based sidecar):
-        /// Clear the JSON output file for each new test case. The sidecar keeps running
-        /// and will create a fresh file. This ensures:
-        /// 1. Each test case only sees its own packets
-        /// 2. No cross-contamination between test cases
-        /// 3. Packet ordering is preserved within each test case
-        /// 
-        /// IMPLEMENTATION:
-        /// 1. Delete the existing JSON lines file inside the container
-        /// 2. The sidecar's AutoFlush=true ensures new packets are written immediately
-        /// 3. No need to restart the sidecar process
+        /// HISTORY OF APPROACHES:
+        /// 1. Reset counter to 0 -> BUG: re-parses old packets from previous TCs
+        /// 2. Delete output file -> BUG: sidecar keeps writing to orphaned file handle (Linux inode behavior)
+        /// 3. Restart container -> WORKS but adds overhead, may cause issues over time
+        /// 4. Current: Don't reset at all between TCs, just clear RunContext
         /// </summary>
         /// <param name="monitorContainer">Name of the monitor container</param>
         /// <param name="outputPath">Host path where the output file is stored</param>
@@ -4029,28 +4024,13 @@ namespace SolutionGrader.Core.Services
             string monitorContainer,
             string outputPath)
         {
-            OnProgress($"[Monitor] Resetting network monitor for new test case...");
+            OnProgress($"[Monitor] Resetting network monitor (full restart)...");
 
             try
             {
-                // Get the filename from the output path
-                var outputFileName = Path.GetFileName(outputPath);
-
-                // Step 1: Delete the existing JSON file inside the container
-                // The sidecar will create a new file when it writes the next packet
-                var clearCmd = $"{monitorContainer} rm -f /data/{outputFileName}";
-                var (clearSuccess, clearOutput) = _dockerExecutor.ExecDockerCommandWithOutput(clearCmd, 3000);
-
-                if (clearSuccess)
-                {
-                    OnProgress($"[Monitor] Cleared output file in container: /data/{outputFileName}");
-                }
-                else
-                {
-                    OnProgress($"[Monitor] WARNING: Could not clear output file: {clearOutput}");
-                }
-
-                // Step 2: Also delete from host if it exists
+                // Step 1: Delete the output file on host if it exists
+                // This must be done BEFORE restarting the container, as the container
+                // will create a fresh file when it starts
                 if (File.Exists(outputPath))
                 {
                     try
@@ -4064,23 +4044,46 @@ namespace SolutionGrader.Core.Services
                     }
                 }
 
-                // Step 3: Verify the sidecar is still running
-                var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitorSidecar";
-                var (checkSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 2000);
+                // Step 2: Restart the sidecar container to get a fresh file handle
+                // CRITICAL: We must restart the container, not just delete the file inside it.
+                // The sidecar opens the output file with StreamWriter at startup and keeps
+                // the file handle open. On Linux/Unix, deleting a file while it's open just
+                // unlinks it from the directory - the process keeps writing to the orphaned
+                // file descriptor. Only by restarting do we close the old handle and open
+                // a fresh file.
+                OnProgress($"[Monitor] Restarting container {monitorContainer} to reset file handle...");
+                _commandExecutor.RunCommand($"docker restart {monitorContainer}", null, null, 10000);
+                
+                // Wait for the sidecar to restart and initialize SharpPcap
+                await Task.Delay(1500);
 
-                if (checkSuccess)
+                // Step 3: Verify the sidecar is running after restart
+                if (_dockerExecutor.IsContainerRunning(monitorContainer))
                 {
-                    OnProgress($"[Monitor] Verified NetworkMonitorSidecar is running");
+                    OnProgress($"[Monitor] Container {monitorContainer} restarted successfully");
+                    
+                    // Additional verification: check if the sidecar process is running
+                    var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitorSidecar";
+                    var (checkSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 2000);
+                    
+                    if (checkSuccess)
+                    {
+                        OnProgress($"[Monitor] Verified NetworkMonitorSidecar process is running");
+                    }
+                    else
+                    {
+                        OnProgress($"[Monitor] WARNING: NetworkMonitorSidecar process not found after restart");
+                    }
                 }
                 else
                 {
-                    // Sidecar may have crashed - try to restart the container
-                    OnProgress($"[Monitor] WARNING: NetworkMonitorSidecar not found, restarting container...");
-                    _commandExecutor.RunCommand($"docker restart {monitorContainer}", null, null, 10000);
-                    await Task.Delay(1000);
+                    OnProgress($"[Monitor] WARNING: Container {monitorContainer} may not be running after restart");
                 }
 
-                OnProgress($"[Monitor] Network monitor reset complete - ready for new test case");
+                // Step 4: Reset the packet counter since we have a fresh file
+                _lastParsedPacketCount = 0;
+
+                OnProgress($"[Monitor] Network monitor reset complete - ready for new captures");
             }
             catch (Exception ex)
             {
