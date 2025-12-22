@@ -833,6 +833,15 @@ namespace SolutionGrader.Core.Services
                     // Same container is reused across test cases, so logs must be cleaned up
                     ClearStageLogsInContainer(unifiedContainer);
 
+                    // CRITICAL FIX: Stop server and client processes before starting new test case
+                    // Each test case must start fresh - processes from previous test cases MUST be killed
+                    // This prevents issues like:
+                    // - TC2 starts server, TC3 expects no server but client connects to TC2's still-running server
+                    // - Data from previous test case leaking into current test case
+                    // - Cross-contamination of test results
+                    // NOTE: We stop only server/client, NOT the keeper process (which keeps named pipe open)
+                    await StopAllProcessesForNewTestCaseAsync(unifiedContainer);
+
                     // CRITICAL: Clear RunContext at START of each test case for proper isolation
                     // This prevents packets from previous test cases from being included in comparisons
                     if (_currentMonitorContainer != null && !string.IsNullOrEmpty(_currentPcapFilePath))
@@ -3657,6 +3666,73 @@ namespace SolutionGrader.Core.Services
             catch (Exception ex)
             {
                 OnProgress($"[Unified] WARNING: Failed to clear old logs: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// CRITICAL FIX: Stop server and client processes before starting a new test case.
+        /// 
+        /// PROBLEM:
+        /// Each test case reuses the same unified container across all test cases.
+        /// If TC2 starts a server and TC3 doesn't explicitly start one, the server from TC2
+        /// continues running. When TC3's client starts, it connects to TC2's server,
+        /// causing TC3 to receive unexpected data and fail.
+        /// 
+        /// SOLUTION:
+        /// Stop ONLY the server and client processes at the START of each new test case.
+        /// This ensures each test case starts with a clean slate - no processes from previous
+        /// test cases can interfere.
+        /// 
+        /// IMPORTANT: We use CloseServer and CloseClient separately instead of StopAll because:
+        /// 1. StopAll would also stop the 'keeper' process that holds the named pipe open
+        /// 2. The network monitor runs in a separate container and is NOT affected by supervisord
+        /// 3. Stopping only server/client ensures proper isolation without breaking infrastructure
+        /// </summary>
+        /// <param name="unifiedContainer">Name of the unified container</param>
+        private async Task StopAllProcessesForNewTestCaseAsync(string unifiedContainer)
+        {
+            OnProgress($"[TestCase Isolation] Stopping server and client from previous test case...");
+            
+            try
+            {
+                // Stop server process via supervisord (if running)
+                // Using CloseServer instead of StopAll to preserve the keeper process
+                var stopServerCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseServer 0";
+                try
+                {
+                    _commandExecutor.RunCommand(stopServerCmd, null, null, 5000);
+                    OnProgress($"[TestCase Isolation] Server process stopped");
+                }
+                catch (Exception)
+                {
+                    // Server might not have been running - this is OK
+                    OnProgress($"[TestCase Isolation] Server was not running (OK)");
+                }
+                
+                // Stop client process via supervisord (if running)
+                // Using CloseClient instead of StopAll to preserve the keeper process
+                var stopClientCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh CloseClient 0";
+                try
+                {
+                    _commandExecutor.RunCommand(stopClientCmd, null, null, 5000);
+                    OnProgress($"[TestCase Isolation] Client process stopped");
+                }
+                catch (Exception)
+                {
+                    // Client might not have been running - this is OK
+                    OnProgress($"[TestCase Isolation] Client was not running (OK)");
+                }
+                
+                // Wait briefly to ensure processes have fully terminated
+                await Task.Delay(300);
+                
+                OnProgress($"[TestCase Isolation] Server and client stopped - ready for new test case");
+            }
+            catch (Exception ex)
+            {
+                // Log warning but don't fail - processes might not have been running
+                OnProgress($"[TestCase Isolation] WARNING: Failed to stop processes: {ex.Message}");
+                OnProgress($"[TestCase Isolation] This may be expected if no processes were running");
             }
         }
 
