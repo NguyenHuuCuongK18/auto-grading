@@ -837,6 +837,8 @@ namespace SolutionGrader.Core.Services
                     // By stopping all processes, each test case starts with a clean slate.
                     try
                     {
+                        // Note: unifiedContainer name is sanitized by ContainerNameHelper.BuildUnifiedContainerName
+                        // which only allows [a-zA-Z0-9_.-] characters, making it safe from command injection
                         var stopAllCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StopAll";
                         _commandExecutor.RunCommand(stopAllCmd, null, null, 5000);
                         OnProgress($"[TestCase] [{testCase.Name}] Stopped all processes for clean test case start");
@@ -1874,8 +1876,20 @@ namespace SolutionGrader.Core.Services
                 // CRITICAL: Determine which processes the test case actually needs to START
                 // DLLs are only validated for processes that have corresponding Start actions
                 // This allows test cases that only start one process (e.g., test client behavior when server is not running)
-                bool testCaseNeedsServer = actions.Any(a => a.Action.Equals("StartServer", StringComparison.OrdinalIgnoreCase));
-                bool testCaseNeedsClient = actions.Any(a => a.Action.Equals("StartClient", StringComparison.OrdinalIgnoreCase));
+                // Optimization: Single iteration to check both conditions
+                bool testCaseNeedsServer = false;
+                bool testCaseNeedsClient = false;
+                foreach (var actionItem in actions)
+                {
+                    if (actionItem.Action.Equals("StartServer", StringComparison.OrdinalIgnoreCase))
+                        testCaseNeedsServer = true;
+                    else if (actionItem.Action.Equals("StartClient", StringComparison.OrdinalIgnoreCase))
+                        testCaseNeedsClient = true;
+                    
+                    // Early exit if both are found
+                    if (testCaseNeedsServer && testCaseNeedsClient)
+                        break;
+                }
                 
                 OnProgress($"[TestCase] {testCase.Name}: Actions analysis - NeedsServer={testCaseNeedsServer}, NeedsClient={testCaseNeedsClient}");
 
