@@ -840,8 +840,16 @@ namespace SolutionGrader.Core.Services
                         // Note: unifiedContainer name is sanitized by ContainerNameHelper.BuildUnifiedContainerName
                         // which only allows [a-zA-Z0-9_.-] characters, making it safe from command injection
                         var stopAllCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh StopAll";
-                        _commandExecutor.RunCommand(stopAllCmd, null, null, 5000);
-                        OnProgress($"[TestCase] [{testCase.Name}] Stopped all processes for clean test case start");
+                        var stopResult = _commandExecutor.RunCommand(stopAllCmd, null, null, 5000);
+                        OnProgress($"[TestCase] [{testCase.Name}] StopAll command result: {(stopResult ? "success" : "failed")}");
+                        
+                        // Wait for processes to fully terminate
+                        await Task.Delay(500);
+                        
+                        // Verify processes are actually stopped by checking supervisorctl status
+                        var statusCmd = $"docker exec {unifiedContainer} /scripts/unified-control.sh Status";
+                        var statusResult = _commandExecutor.RunCommandAndCaptureOutput(statusCmd, null, null, 5000);
+                        OnProgress($"[TestCase] [{testCase.Name}] Process status after StopAll: {string.Join(" | ", statusResult.Output)}");
                     }
                     catch (Exception ex)
                     {
