@@ -4024,7 +4024,7 @@ namespace SolutionGrader.Core.Services
             string monitorContainer,
             string outputPath)
         {
-            OnProgress($"[Monitor] Resetting network monitor (full restart)...");
+            OnProgress($"[Monitor] Resetting network monitor (full restart - used for manual reset or error recovery)...");
 
             try
             {
