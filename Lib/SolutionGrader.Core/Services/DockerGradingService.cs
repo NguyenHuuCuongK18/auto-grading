@@ -1866,36 +1866,8 @@ namespace SolutionGrader.Core.Services
 
             try
             {
-                // Read Detail.xlsx FIRST to determine which actions the test case has
-                // This is needed to validate DLLs only for processes that will be started
-                var detailPath = Path.Combine(testCase.Path, "Detail.xlsx");
-                var actions = ReadActions(detailPath);
-                var expectedOutputs = ReadExpectedOutputs(detailPath);
-                var expectedNetwork = ReadExpectedNetwork(detailPath);
-
-                // CRITICAL: Determine which processes the test case actually needs to START
-                // DLLs are only validated for processes that have corresponding Start actions
-                // This allows test cases that only start one process (e.g., test client behavior when server is not running)
-                // Optimization: Single iteration to check both conditions
-                bool testCaseNeedsServer = false;
-                bool testCaseNeedsClient = false;
-                foreach (var actionItem in actions)
-                {
-                    if (actionItem.Action.Equals("StartServer", StringComparison.OrdinalIgnoreCase))
-                        testCaseNeedsServer = true;
-                    else if (actionItem.Action.Equals("StartClient", StringComparison.OrdinalIgnoreCase))
-                        testCaseNeedsClient = true;
-                    
-                    // Early exit if both are found
-                    if (testCaseNeedsServer && testCaseNeedsClient)
-                        break;
-                }
-                
-                OnProgress($"[TestCase] {testCase.Name}: Actions analysis - NeedsServer={testCaseNeedsServer}, NeedsClient={testCaseNeedsClient}");
-
                 // IMPORTANT: Resolve actual DLLs to use based on Grade_Content
-                // Grade_Content determines what DLLs are COPIED to the container
-                // But processes are ONLY STARTED when the action explicitly says so
+                // This determines whether to use student's code or golden code for each component
                 string? actualServerDll = null;
                 string? actualClientDll = null;
 
@@ -1903,10 +1875,6 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[TestCase] {testCase.Name}: Grade_Content = '{gradeContent}'");
 
                 // Validate Grade_Content value
-                // - "Client": Student provides client, golden server is used (both DLLs copied)
-                // - "Server": Student provides server, golden client is used (both DLLs copied)
-                // - "Client/Server": Student provides both (both DLLs copied)
-                // NOTE: Processes are ONLY STARTED when actions say "StartClient" or "StartServer"
                 var validValues = new[] { "Client", "Server", "Client/Server" };
                 if (!validValues.Contains(gradeContent, StringComparer.OrdinalIgnoreCase))
                 {
@@ -1916,40 +1884,40 @@ namespace SolutionGrader.Core.Services
 
                 if (gradeContent.Equals("Client", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Grade student's CLIENT - use golden SERVER (if needed)
+                    // Grade student's CLIENT only - use golden SERVER
                     actualClientDll = clientDllPath;
                     actualServerDll = testKitConfig.GivenServerPath;
                     OnProgress($"[TestCase] Using student CLIENT + golden SERVER");
                     OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
                     OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
 
-                    // Validate DLLs exist ONLY if test case has corresponding Start action
-                    if (string.IsNullOrEmpty(actualClientDll) && testCaseNeedsClient)
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualClientDll))
                     {
-                        throw new InvalidOperationException($"Test case '{testCase.Name}' has StartClient action but no student CLIENT was found. Grade_Content='Client'");
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student CLIENT but none was found. Grade_Content='Client'");
                     }
-                    if (string.IsNullOrEmpty(actualServerDll) && testCaseNeedsServer)
+                    if (string.IsNullOrEmpty(actualServerDll))
                     {
-                        throw new InvalidOperationException($"Test case '{testCase.Name}' has StartServer action but no golden SERVER was found in Meta/Given/Server. Grade_Content='Client'");
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden SERVER but none was found in Meta/Given/Server. Grade_Content='Client'");
                     }
                 }
                 else if (gradeContent.Equals("Server", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Grade student's SERVER - use golden CLIENT (if needed)
+                    // Grade student's SERVER only - use golden CLIENT
                     actualServerDll = serverDllPath;
                     actualClientDll = testKitConfig.GivenClientPath;
                     OnProgress($"[TestCase] Using student SERVER + golden CLIENT");
                     OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
                     OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
 
-                    // Validate DLLs exist ONLY if test case has corresponding Start action
-                    if (string.IsNullOrEmpty(actualServerDll) && testCaseNeedsServer)
+                    // Validate required DLLs exist
+                    if (string.IsNullOrEmpty(actualServerDll))
                     {
-                        throw new InvalidOperationException($"Test case '{testCase.Name}' has StartServer action but no student SERVER was found. Grade_Content='Server'");
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires student SERVER but none was found. Grade_Content='Server'");
                     }
-                    if (string.IsNullOrEmpty(actualClientDll) && testCaseNeedsClient)
+                    if (string.IsNullOrEmpty(actualClientDll))
                     {
-                        throw new InvalidOperationException($"Test case '{testCase.Name}' has StartClient action but no golden CLIENT was found in Meta/Given/Client. Grade_Content='Server'");
+                        throw new InvalidOperationException($"Test case '{testCase.Name}' requires golden CLIENT but none was found in Meta/Given/Client. Grade_Content='Server'");
                     }
                 }
                 else // "Client/Server" or default
@@ -1961,15 +1929,8 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"  Client: {(actualClientDll != null ? Path.GetFileName(actualClientDll) : "NONE")}");
                     OnProgress($"  Server: {(actualServerDll != null ? Path.GetFileName(actualServerDll) : "NONE")}");
 
-                    // Validate DLLs exist ONLY if test case has corresponding Start action
-                    if (string.IsNullOrEmpty(actualClientDll) && testCaseNeedsClient)
-                    {
-                        OnProgress($"[TestCase] WARNING: Test case has StartClient action but no client DLL found");
-                    }
-                    if (string.IsNullOrEmpty(actualServerDll) && testCaseNeedsServer)
-                    {
-                        OnProgress($"[TestCase] WARNING: Test case has StartServer action but no server DLL found");
-                    }
+                    // Note: For Client/Server mode, we allow one to be missing if the test only uses one
+                    // The test will fail naturally if it tries to use a missing component
                 }
 
                 // Clear network captures for this test case
@@ -1988,6 +1949,12 @@ namespace SolutionGrader.Core.Services
                 OnProgress($"[NetworkMonitor] [{testCase.Name}] Cumulative packet count: {packetCountBefore}");
 
                 _networkMonitor?.SetCurrentContext(testCase.Name, "0");
+
+                // Read Detail.xlsx
+                var detailPath = Path.Combine(testCase.Path, "Detail.xlsx");
+                var actions = ReadActions(detailPath);
+                var expectedOutputs = ReadExpectedOutputs(detailPath);
+                var expectedNetwork = ReadExpectedNetwork(detailPath);
 
                 // Populate Actions for User sheet
                 result.Actions = actions.Select(a => new ActionRecord
