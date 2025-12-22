@@ -1,0 +1,160 @@
+Đề 12:
+TC1: Valid Input
+	abc => "Invalid input! Please enter a valid Book ID (positive integer).
+
+		Enter Book ID (or press Enter to exit):"
+	-10 => "Invalid input! Please enter a valid Book ID (positive integer).
+
+		Enter Book ID (or press Enter to exit):"
+	0 => "Invalid input! Please enter a valid Book ID (positive integer).
+
+		Enter Book ID (or press Enter to exit):"
+TC2: Send input to server
+	1001 => check network
+TC3: Server is not running(Check network + console)
+	1001 => "Book tracking server is not running. Please try again later.
+
+		Enter Book ID (or press Enter to exit):"
+TC4: Book not found(check network + console)
+	9999 => "Book with ID 9999 does not exist.
+
+		Enter Book ID (or press Enter to exit):"
+TC5: Book exists with borrower records(check network + console)
+	1001 => "=== Borrower History for Book ID: 1001 (The Great Gatsby) ===
+		Reader ID: R101
+		Full Name: John Smith
+		Email: john@email.com
+		Borrow Date: 2024-01-15
+		Return Date: 2024-02-15
+		Status: Returned
+		---
+		Reader ID: R102
+		Full Name: Jane Doe
+		Email: jane@email.com
+		Borrow Date: 2024-02-10
+		Return Date: 2024-03-15
+		Status: Overdue
+		---
+		Reader ID: R103
+		Full Name: Bob Johnson
+		Email: bob@email.com
+		Borrow Date: 2024-04-01
+		Return Date: Not returned yet
+		Status: Borrowed
+		===========================================================
+
+		Enter Book ID (or press Enter to exit):"
+TC6: Book exists with no borrower records(check network + console)
+	1005 => "No borrower records found for Book ID 1005.
+
+		Enter Book ID (or press Enter to exit):"
+TC7: double Input
+	1001 
+	1002 => "=== Borrower History for Book ID: 1002 (To Kill a Mockingbird) ===
+		Reader ID: R101
+		Full Name: John Smith
+		Email: john@email.com
+		Borrow Date: 2024-02-20
+		Return Date: Not returned yet
+		Status: Borrowed
+		---
+		Reader ID: R104
+		Full Name: Alice Brown
+		Email: alice@email.com
+		Borrow Date: 2024-03-10
+		Return Date: 2024-04-10
+		Status: Returned
+		===========================================================
+
+		Enter Book ID (or press Enter to exit):"
+
+=================================================================================================Đề 11==========================================================
+TC1: Valid Input
+	abc => "Invalid input! Please enter a valid Reader ID (positive integer).
+
+		Enter Reader ID (or press Enter to exit):"
+	-5 => "Invalid input! Please enter a valid Reader ID (positive integer).
+
+		Enter Reader ID (or press Enter to exit):"
+	0 => "Invalid input! Please enter a valid Reader ID (positive integer).
+
+		Enter Reader ID (or press Enter to exit):"
+TC2: Server is not running(check console + network(syn,rst))
+	101 => "Library server is not running. Please try again later.
+
+		Enter Reader ID (or press Enter to exit):"
+TC3: Reader not found
+	999 => "No borrow records found for Reader ID 999.
+
+		Enter Reader ID (or press Enter to exit):"
+TC4: Reader exists with borrow records
+	101 => "=== Borrow History for Reader ID: 101 ===
+		Book ID: B1001
+		Title: The Great Gatsby
+		Author: F. Scott Fitzgerald
+		Borrow Date: 2024-01-15
+		Return Date: 2024-02-15
+		Status: Returned
+		---
+		Book ID: B1002
+		Title: To Kill a Mockingbird
+		Author: Harper Lee
+		Borrow Date: 2024-02-20
+		Return Date: Not returned yet
+		Status: Borrowed
+		---
+		Book ID: B1003
+		Title: 1984
+		Author: George Orwell
+		Borrow Date: 2024-01-10
+		Return Date: 2024-02-25
+		Status: Overdue
+		===========================================
+
+		Enter Reader ID (or press Enter to exit):"
+
+TC5: Reader exists with no borrow records
+	103 => "=== Borrow History for Reader ID: 103 ===
+		Book ID: B1001
+		Title: The Great Gatsby
+		Author: F. Scott Fitzgerald
+		Borrow Date: 2024-04-01
+		Return Date: Not returned yet
+		Status: Borrowed
+		===========================================
+
+		Enter Reader ID (or press Enter to exit):"
+TC6: double input
+	101 => 
+	102 => "=== Borrow History for Reader ID: 102 ===
+		Book ID: B1004
+		Title: Pride and Prejudice
+		Author: Jane Austen
+		Borrow Date: 2024-03-01
+		Return Date: 2024-03-15
+		Status: Returned
+		---
+		Book ID: B1005
+		Title: The Catcher in the Rye
+		Author: J.D. Salinger
+		Borrow Date: 2024-03-20
+		Return Date: Not returned yet
+		Status: Borrowed
+		===========================================
+
+		Enter Reader ID (or press Enter to exit):"
+TC7: Send input to server
+	101 => check network có nhận được 101 
+
+
+
+
+
+
+
+	
+
+	
+
+
+

@@ -1,0 +1,17 @@
+=== Borrower History for Book ID: 1002 ===
+Reader ID: R101
+Full Name: John Smith
+Email: john@email.com
+Borrow Date: 2024-02-20
+Return Date: Not returned yet
+Status: Borrowed
+---
+Reader ID: R104
+Full Name: Alice Brown
+Email: alice@email.com
+Borrow Date: 2024-03-10
+Return Date: 2024-04-10
+Status: Returned
+---
+
+Enter Book ID (or press Enter to exit): 
