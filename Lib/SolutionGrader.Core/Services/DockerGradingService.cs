@@ -121,6 +121,7 @@ namespace SolutionGrader.Core.Services
         private const int ContainerRemovalVerificationDelayMs = 500;  // Delay to verify container removal
         private const int BatchRemovalTimeoutMs = 15000;  // Timeout for batch container removal
         private const int BatchRemovalSize = 20;  // Number of containers to remove in a single batch
+        private const int ProcessStopDelayMs = 300;  // Delay after stopping processes to ensure termination
 
         private readonly DockerCommandExecutor _dockerExecutor;
         private readonly CommandExecutor _commandExecutor;
@@ -3703,10 +3704,10 @@ namespace SolutionGrader.Core.Services
                     _commandExecutor.RunCommand(stopServerCmd, null, null, 5000);
                     OnProgress($"[TestCase Isolation] Server process stopped");
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     // Server might not have been running - this is OK
-                    OnProgress($"[TestCase Isolation] Server was not running (OK)");
+                    OnProgress($"[TestCase Isolation] Server was not running or already stopped: {ex.Message}");
                 }
                 
                 // Stop client process via supervisord (if running)
@@ -3717,14 +3718,14 @@ namespace SolutionGrader.Core.Services
                     _commandExecutor.RunCommand(stopClientCmd, null, null, 5000);
                     OnProgress($"[TestCase Isolation] Client process stopped");
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     // Client might not have been running - this is OK
-                    OnProgress($"[TestCase Isolation] Client was not running (OK)");
+                    OnProgress($"[TestCase Isolation] Client was not running or already stopped: {ex.Message}");
                 }
                 
                 // Wait briefly to ensure processes have fully terminated
-                await Task.Delay(300);
+                await Task.Delay(ProcessStopDelayMs);
                 
                 OnProgress($"[TestCase Isolation] Server and client stopped - ready for new test case");
             }
