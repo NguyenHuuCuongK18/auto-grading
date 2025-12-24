@@ -27,6 +27,11 @@ namespace FileMaster.FileEngine
         public void CreateFolder(string directory, string folderName) => Directory.CreateDirectory(directory + @"\" + folderName);
 
         public void CopyFile(string source, string destination) => File.Copy(source, destination);
+        /// <summary>
+        /// Copies all files and subdirectories from source to destination, including empty directories.
+        /// </summary>
+        /// <param name="sourceDir">Source directory path</param>
+        /// <param name="destinationDir">Destination directory path</param>
         public void CopyDirectory(string sourceDir, string destinationDir)
         {
             if (sourceDir == destinationDir)
@@ -35,25 +40,19 @@ namespace FileMaster.FileEngine
             }
             Directory.CreateDirectory(destinationDir);
 
-            //foreach (var filePath in Directory.GetFiles(sourceDir, "*.*", SearchOption.AllDirectories))
-            //{
-            //    var destinationPath = filePath.Replace(sourceDir, destinationDir);
-            //    Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
-            //    File.Copy(filePath, destinationPath, true);
-            //}
-            // Tạo lại tất cả thư mục con trong thư mục đích, bao gồm cả thư mục rỗng
+            // Create all subdirectories in destination, including empty ones
             foreach (var dirPath in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
             {
                 var destinationPath = dirPath.Replace(sourceDir, destinationDir);
-                Directory.CreateDirectory(destinationPath); // Tạo thư mục đích
+                Directory.CreateDirectory(destinationPath);
             }
 
-            // Sao chép tất cả các file từ thư mục gốc và thư mục con
+            // Copy all files from source and its subdirectories
             foreach (var filePath in Directory.GetFiles(sourceDir, "*.*", SearchOption.AllDirectories))
             {
                 var destinationPath = filePath.Replace(sourceDir, destinationDir);
-                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)); // Đảm bảo thư mục tồn tại
-                File.Copy(filePath, destinationPath, true); // Sao chép file, ghi đè nếu file đã tồn tại
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+                File.Copy(filePath, destinationPath, true);
             }
 
             Console.WriteLine($"Successfully copied directory from {sourceDir} to {destinationDir}");

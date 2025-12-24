@@ -151,16 +151,14 @@ namespace Common.Logging
                    $"{logEntry.Message}";
         }
 
+        /// <summary>
+        /// Writes a log line to the log file. Currently a no-op as file logging is disabled.
+        /// </summary>
+        /// <param name="line">The log line to write</param>
         private void WriteToFile(string line)
         {
-            //try
-            //{
-            //    File.AppendAllText(_logFilePath, line + Environment.NewLine);
-            //}
-            //catch (Exception ex)
-            //{
-            //    Debug.WriteLine($"[LogManager] File write error: {ex.Message}");
-            //}
+            // File logging is currently disabled. 
+            // Logs are written to Debug console and kept in memory instead.
         }
 
 #endregion

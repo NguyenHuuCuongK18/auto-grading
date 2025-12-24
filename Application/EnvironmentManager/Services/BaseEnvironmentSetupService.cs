@@ -1,6 +1,5 @@
 ﻿using Domain.Entities.Constants;
 using EnvironmentBuilder.DockerCommand;
-//using LogMaster;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,11 +8,14 @@ using System.Threading;
 
 namespace EnvironmentManager.Services
 {
+    /// <summary>
+    /// Base service class for setting up Docker-based environments for grading.
+    /// Provides common container management functionality for database and code containers.
+    /// </summary>
     public abstract class BaseEnvironmentSetupService
     {
         #region PROPS & CTOR
         public virtual string EnvironmentType { get; } = "base";
-        //protected static ILogger logger;
         protected DockerCommandExecutor dockerCommandExecutor;
         protected Domain.Entities.Main.Environment questionEnvironment { get; set; }
         protected Domain.Entities.Main.Environment testCaseEnvironment { get; set; }
@@ -22,10 +24,8 @@ namespace EnvironmentManager.Services
 
         public BaseEnvironmentSetupService()
         {
-            //logger = Log4netLogger.GetLogger(typeof(Program), "EnvironmentManager");
             dockerCommandExecutor = new DockerCommandExecutor();
 
-            //Log4netLogger.UseConsoleAppender();
             if (!IsDockerRunning())
             {
                 throw new Exception("Docker is not running. Please start Docker before proceeding.");
@@ -34,10 +34,12 @@ namespace EnvironmentManager.Services
         #endregion
 
         #region SETUP
+        /// <summary>
+        /// Sets up Docker containers for a test kit, including database and code containers.
+        /// </summary>
+        /// <param name="environment">Environment configuration for the test kit</param>
         public virtual void SetupContainerForTestKit(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up container for testkit");
-
             questionEnvironment = environment;
             questionConfigs = environment.Configs;
 
@@ -55,21 +57,15 @@ namespace EnvironmentManager.Services
 
                 if (!dockerCommandExecutor.IsContainerRunning(sqlContainerName))
                 {
-                    //logger.LogInfo("Database container is not running, try starting...");
-
                     SetupDatabaseContainer();
                 }
 
                 if (!dockerCommandExecutor.IsContainerRunning(codeContainerName))
                 {
-                    //logger.LogInfo("Code container is not running, try starting...");
-
                     SetupCodeContainer();
                 }
 
                 Thread.Sleep(3000);
-
-                //logger.LogInfo("Finished setting up essential containers.");
             }
             catch (Exception ex)
             {
@@ -82,6 +78,9 @@ namespace EnvironmentManager.Services
         #endregion
 
         #region EXEC
+        /// <summary>
+        /// Executes environment setup for a question by processing the configured steps.
+        /// </summary>
         public virtual void ExecuteSetupEnvironmentForQuestionBySteps()
         {
             List<string> steps = questionEnvironment.Steps;
@@ -92,26 +91,25 @@ namespace EnvironmentManager.Services
                 {
                     case EnvironmentQAction.CopyEssentialFilesAndFolders:
                         CopyEssentialFilesAndFolders();
-                        //logger.LogInfo("Copying essential files and folders");
                         break;
 
                     case EnvironmentQAction.GenerateDatabaseScript:
                         GenerateDbScript();
-                        //logger.LogInfo("Try generating database initialization script");
                         break;
 
                     case EnvironmentQAction.GenerateConnectionFile:
                         GenerateConnectionFile();
-                        //logger.LogInfo("Try creating connection file");
                         break;
 
                     default:
-                        //logger.LogErr($"Action named '{step}' is not defined!");
                         throw new Exception($"Action named '{step}' is not defined!");
                 }
             }
         }
 
+        /// <summary>
+        /// Executes environment setup for a test case by processing the configured steps.
+        /// </summary>
         public virtual void ExecuteSetupEnvironmentForTestCaseBySteps()
         {
             List<string> steps = testCaseEnvironment.Steps;
@@ -134,10 +132,12 @@ namespace EnvironmentManager.Services
         #endregion
 
         #region DISPOSE
+        /// <summary>
+        /// Disposes Docker containers for a test kit.
+        /// </summary>
+        /// <param name="environment">Environment configuration for the test kit</param>
         public virtual void DisposeContainerForTestKit(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up environment for testkit");
-
             questionEnvironment = environment;
             questionConfigs = environment.Configs;
 
@@ -155,19 +155,13 @@ namespace EnvironmentManager.Services
 
                 if (dockerCommandExecutor.IsContainerRunning(codeContainerName))
                 {
-                    //logger.LogInfo("Code container is running, try disposing...");
-
                     dockerCommandExecutor.RemoveContainer(codeContainerName);
                 }
 
                 if (dockerCommandExecutor.IsContainerRunning(databaseContainerName))
                 {
-                    //logger.LogInfo("Database container is running, try disposing...");
-
                     dockerCommandExecutor.RemoveContainer(databaseContainerName);
                 }
-
-                //logger.LogInfo("Finished disposing essential containers.");
             }
             catch (Exception ex)
             {
@@ -189,6 +183,9 @@ namespace EnvironmentManager.Services
         #endregion
 
         #region UTILITIES
+        /// <summary>
+        /// Gets a value from the configuration dictionary, returning default if not found.
+        /// </summary>
         protected static string TryGetValueOrDefault(
             Dictionary<string, string> configs,
             string key,
@@ -200,11 +197,17 @@ namespace EnvironmentManager.Services
             return defaultValue;
         }
 
+        /// <summary>
+        /// Checks if Docker daemon is running.
+        /// </summary>
         protected bool IsDockerRunning()
         {
             return dockerCommandExecutor.IsDockerRunning();
         }
 
+        /// <summary>
+        /// Waits for a container to be running, checking at specified intervals.
+        /// </summary>
         protected bool IsContainerRunning(string containerName, int checkIntervalMs = 1)
         {
             while (true)

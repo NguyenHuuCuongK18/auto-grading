@@ -10,11 +10,9 @@ using Newtonsoft.Json.Linq;
 
 namespace DotNetEnvironmentManagerHelper.Services
 {
-
     /// <summary>
-    /// This shit is re-written for .NET Console Networking Application
-    /// 
-    /// - Auth : NhatNM -
+    /// Environment setup service for .NET Console Networking Applications.
+    /// Handles Docker container lifecycle for server, client, and database containers.
     /// </summary>
     public class EnvironmentSetupService : BaseEnvironmentSetupService
     {
@@ -22,10 +20,11 @@ namespace DotNetEnvironmentManagerHelper.Services
 
         #region TESTKIT
         #region SETUP
+        /// <summary>
+        /// Sets up Docker containers for a .NET test kit, including database, code, and given console containers.
+        /// </summary>
         public override void SetupContainerForTestKit(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up .NET essential containers...");
-
             questionEnvironment = environment;
             questionConfigs = environment.Configs;
 
@@ -41,7 +40,6 @@ namespace DotNetEnvironmentManagerHelper.Services
                     EnvironmentConfiguration.CodeContainerName
                 );
 
-                // use as either client or server
                 string givenConsoleContainerName = TryGetValueOrDefault(
                     questionConfigs,
                     EnvironmentConfiguration.GivenConsoleContainerName
@@ -49,33 +47,20 @@ namespace DotNetEnvironmentManagerHelper.Services
 
                 if (!dockerCommandExecutor.IsContainerRunning(databaseContainerName))
                 {
-                    //logger.LogInfo("MSSQL container is not running, try starting...");
                     SetupDatabaseContainer();
                 }
 
                 if (!dockerCommandExecutor.IsContainerRunning(codeContainerName))
                 {
-                    //logger.LogInfo(".NET container is not running, try starting...");
                     SetupCodeContainer();
                 }
 
-                //if (!string.IsNullOrEmpty(questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName]))
-                //{
-                //    string givenConsoleContainerName = TryGetValueOrDefault(
-                //        questionConfigs,
-                //        EnvironmentConfiguration.GivenConsoleContainerName
-                //    );
-
                 if (!dockerCommandExecutor.IsContainerRunning(givenConsoleContainerName))
                 {
-                    //logger.LogInfo("Given API container is not running, try starting...");
                     SetupGivenConsoleContainer();
                 }
-                //}
 
                 Thread.Sleep(3000);
-
-                //logger.LogInfo("Finished setting up .NET essential containers.");
             }
             catch (Exception ex)
             {
@@ -85,10 +70,11 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region DISPOSE
+        /// <summary>
+        /// Disposes all Docker containers for the test kit.
+        /// </summary>
         public override void DisposeContainerForTestKit(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up environment for testkit");
-
             questionEnvironment = environment;
             questionConfigs = environment.Configs;
 
@@ -111,34 +97,18 @@ namespace DotNetEnvironmentManagerHelper.Services
 
                 if (dockerCommandExecutor.IsContainerRunning(codeContainerName))
                 {
-                    //logger.LogInfo("Code container is running, try disposing...");
-
                     dockerCommandExecutor.RemoveContainer(codeContainerName);
                 }
 
                 if (dockerCommandExecutor.IsContainerRunning(databaseContainerName))
                 {
-                    //logger.LogInfo("Database container is running, try disposing...");
-
                     dockerCommandExecutor.RemoveContainer(databaseContainerName);
                 }
 
-                //if (!string.IsNullOrEmpty(questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName]))
-                //{
-                //    string givenConsoleContainerName = TryGetValueOrDefault(
-                //        questionConfigs,
-                //        EnvironmentConfiguration.GivenConsoleContainerName
-                //    );
-
                 if (dockerCommandExecutor.IsContainerRunning(givenConsoleContainerName))
                 {
-                    //logger.LogInfo("Given API container is running, try disposing...");
-
                     dockerCommandExecutor.RemoveContainer(givenConsoleContainerName);
                 }
-                //}
-
-                //logger.LogInfo("Finished disposeing essential containers.");
             }
             catch (Exception ex)
             {
@@ -148,6 +118,9 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region CORE
+        /// <summary>
+        /// Sets up the main .NET code container for running student solutions.
+        /// </summary>
         public override void SetupCodeContainer()
         {
             try
@@ -191,13 +164,13 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
             catch (Exception ex)
             {
-                // log
-                //logger.LogErr("Error while setting up dotnet container");
-                // throw
                 throw new Exception($"Error while setting up dotnet container. Details: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Sets up the given console container (client or server depending on test configuration).
+        /// </summary>
         private void SetupGivenConsoleContainer()
         {
             try
@@ -227,14 +200,11 @@ namespace DotNetEnvironmentManagerHelper.Services
                     EnvironmentConfiguration.GivenConsoleContainerHostPort
                 ));
 
-                // setting up dotnet given console container
                 DockerBase dockerBase = new DockerBase
                 {
                     ImageName = imageName,
                     DockerNetwork = networkName,
                     ContainerName = containerName,
-                    //ContainerPort = containerPort,
-                    //HostPort = hostPort,
                     EnvironmentVariables = GetEnvironmentVariablesForQuestion()
                 };
 
@@ -242,13 +212,13 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
             catch (Exception ex)
             {
-                // log
-                //logger.LogErr("Error while setting up dotnet given api container");
-                // throw
                 throw new Exception($"Error while setting up dotnet given api container. Details: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Sets up the SQL Server database container.
+        /// </summary>
         public override void SetupDatabaseContainer()
         {
             try
@@ -312,9 +282,6 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
             catch (Exception ex)
             {
-                // log
-                //logger.LogInfo("Error while setting up database container");
-                // throw
                 throw new Exception($"Error while setting up database container. Details: {ex.Message}");
             }
         }
@@ -323,14 +290,18 @@ namespace DotNetEnvironmentManagerHelper.Services
 
         #region Q
         #region SETUP
+        /// <summary>
+        /// Initializes environment for a specific question.
+        /// </summary>
         public override void SetupEnvironmentForQuestion(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up .NET environment for question...");
-
             questionEnvironment = environment;
             questionConfigs = environment.Configs;
         }
 
+        /// <summary>
+        /// Executes the setup steps defined for a question.
+        /// </summary>
         public override void ExecuteSetupEnvironmentForQuestionBySteps()
         {
             List<string> steps = questionEnvironment.Steps;
@@ -341,31 +312,17 @@ namespace DotNetEnvironmentManagerHelper.Services
                 {
                     case EnvironmentQAction.CopyEssentialFilesAndFolders:
                         CopyEssentialFilesAndFolders();
-                        //logger.LogInfo("Copying essential files and folders");
                         break;
 
                     case EnvironmentQAction.GenerateDatabaseScript:
                         GenerateDbScript();
-                        //logger.LogInfo("Try generating database initialization script");
                         break;
 
                     case EnvironmentQAction.GenerateConnectionFile:
                         GenerateConnectionFile();
-                        //logger.LogInfo("Try creating connection file");
                         break;
 
-                    //case EnvironmentQAction.ModifyGivenApiUrl:
-                    //    ModifyGivenIpAndPort();
-                    //    //logger.LogInfo("Try modifying api url");
-                    //    break;
-
-                    //case EnvironmentQAction.CopyGivenConsolePublish:
-                    //    CopyGivenConsolePublishFolder();
-                    //    //logger.LogInfo("Try copying given console publish file");
-                    //    break;
-
                     default:
-                        //logger.LogErr($"Action named '{step}' is not defined!");
                         throw new Exception($"Action named '{step}' is not defined!");
                 }
             }
@@ -373,23 +330,24 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region DISPOSE
+        /// <summary>
+        /// Disposes the environment for a question by removing deployed files and dropping database.
+        /// </summary>
         public override void DisposeEnvironmentForQuestion()
         {
-            //logger.LogInfo("Disposing .NET environment for question...");
-
-            // remove publish file
+            // Remove publish file from code container
             dockerCommandExecutor.RemoveFolder(
                 questionConfigs[EnvironmentConfiguration.CodeContainerName],
                 $"/apps/{questionConfigs[EnvironmentConfiguration.StudentQuestionName]}"
             );
 
-            // remove sql file in sqlserver volume
+            // Remove SQL file from database container
             dockerCommandExecutor.RemoveFile(
                 questionConfigs[EnvironmentConfiguration.DatabaseContainerName],
                 $"/var/opt/mssql/{questionConfigs[EnvironmentConfiguration.StudentQuestionName]}.sql"
             );
 
-            // drop database
+            // Drop database
             DropSqlDatabase(
                 questionConfigs[EnvironmentConfiguration.DatabaseContainerName],
                 questionConfigs[EnvironmentConfiguration.DatabaseUsername],
@@ -400,51 +358,55 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region CORE
+        /// <summary>
+        /// Copies essential files and folders including runtimes and deploys server/client code.
+        /// </summary>
         public override void CopyEssentialFilesAndFolders()
         {
-            // must copy runtimes folder to student question first
+            // Copy runtimes folder to client and server
             CopyRuntimesToClient();
             CopyRuntimesToServer();
 
-            // deployt server
+            // Deploy server
             CopyPublishFolder();
-            // deploy client
+            // Deploy client
             CopyGivenConsolePublishFolder();
         }
 
+        /// <summary>
+        /// Generates a database initialization script and copies it to the database container.
+        /// </summary>
         public override void GenerateDbScript()
         {
             try
             {
                 string sqlFilePath = questionConfigs[EnvironmentConfiguration.DefaultDatabaseFilePath];
                 string oldDatabaseName = questionConfigs[EnvironmentConfiguration.DefaultDatabaseName];
-
-                // Change to code file path since currently the server and only server need DB
                 string studentQuestionPath = questionConfigs[EnvironmentConfiguration.CodeFilePath];
                 string newDatabaseName = questionConfigs[EnvironmentConfiguration.DatabaseName];
                 string containerName = questionConfigs[EnvironmentConfiguration.DatabaseContainerName];
 
-                // read sql script and change db name
+                // Read SQL script and replace database name
                 string sqlFileName = $"{newDatabaseName}.sql";
                 string sqlScriptContent = File.ReadAllText(sqlFilePath).Replace(oldDatabaseName, newDatabaseName);
 
-                // create a new sql script contains only new db name
+                // Create new SQL script with the new database name
                 string newSqlFilePath = Path.Combine(studentQuestionPath, sqlFileName);
                 File.WriteAllText(newSqlFilePath, sqlScriptContent);
 
-                // and copy to container
+                // Copy to container
                 dockerCommandExecutor.CopyFileToContainer(newSqlFilePath, $"{containerName}:/var/opt/mssql/{sqlFileName}");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log
-                //logger.LogErr($"Error while generating sql script. Details: {ex.Message}");
+                // Silent return on failure - database script generation is optional
                 return;
-                // throw
-                //throw new Exception($"Error while generating sql script. Details: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Generates appsettings.json connection files for server and client.
+        /// </summary>
         public override void GenerateConnectionFile()
         {
             string dbConn = $"Server={questionConfigs[EnvironmentConfiguration.DatabaseContainerName]},{questionConfigs[EnvironmentConfiguration.DatabaseContainerInternalPort]};database={questionConfigs[EnvironmentConfiguration.DatabaseName]};uid={questionConfigs[EnvironmentConfiguration.DatabaseUsername]};Password={questionConfigs[EnvironmentConfiguration.DatabasePassword]};Encrypt=false;TrustServerCertificate=true";
@@ -461,10 +423,10 @@ namespace DotNetEnvironmentManagerHelper.Services
 
                 var json = JObject.Parse(File.ReadAllText(filePath));
 
-                // Update DB
+                // Update database connection
                 if (json["ConnectionStrings"] != null) json["ConnectionStrings"]["MyCnn"] = dbConn;
 
-                // Update Networking
+                // Update networking settings
                 json["IpAddress"] = ipOverride;
                 json["Port"] = port;
 
@@ -472,21 +434,19 @@ namespace DotNetEnvironmentManagerHelper.Services
             }
 
             UpdateFile(EnvironmentConfiguration.CodeFilePath, "0.0.0.0");
-
             UpdateFile(EnvironmentConfiguration.GivenConsolePath, "host.docker.internal");
         }
 
-
-        // TODO: Configure port
+        /// <summary>
+        /// Modifies IP and port settings in the given API configuration.
+        /// </summary>
         public void ModifyGivenIpAndPort()
         {
             try
             {
-                //thay đổi api url trước khi copy file given vào
                 string appsettingsPath = Path.Combine(questionConfigs[EnvironmentConfiguration.StudentQuestionPath], "appsettings.json");
                 if (!File.Exists(appsettingsPath))
                 {
-                    //logger.LogErr("appsettings.json not found!");
                     return;
                 }
                 string appsettingsContent = File.ReadAllText(appsettingsPath);
@@ -500,27 +460,28 @@ namespace DotNetEnvironmentManagerHelper.Services
                 string updatedContent = appsettingsJson.ToString();
                 File.WriteAllText(appsettingsPath, updatedContent);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log
-                //logger.LogErr("Error in appsettings.json: " + ex.Message);
                 return;
             }
-
         }
         #endregion
         #endregion
 
         #region TC
         #region SETUP
+        /// <summary>
+        /// Initializes environment for a specific test case.
+        /// </summary>
         public override void SetupEnvironmentForTestCase(Domain.Entities.Main.Environment environment)
         {
-            //logger.LogInfo("Setting up .NET environment for test case...");
-
             testCaseEnvironment = environment;
             testCaseConfigs = environment.Configs;
         }
 
+        /// <summary>
+        /// Executes the setup steps defined for a test case.
+        /// </summary>
         public override void ExecuteSetupEnvironmentForTestCaseBySteps()
         {
             List<string> steps = testCaseEnvironment.Steps;
@@ -547,13 +508,16 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region DISPOSE
+        /// <summary>
+        /// Disposes the environment for a test case. Currently no-op.
+        /// </summary>
         public override void DisposeEnvironmentForTestCase()
         {
-            //logger.LogInfo("Disposing .NET environment for test case...");
-
-            //throw new NotImplementedException();
         }
 
+        /// <summary>
+        /// Disposes the given API container.
+        /// </summary>
         public void DisposeGivenAPI()
         {
             string givenConsoleContainerName = TryGetValueOrDefault(testCaseConfigs, EnvironmentConfiguration.CodeContainerName);
@@ -570,6 +534,9 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region CORE
+        /// <summary>
+        /// Resets the database by dropping and recreating it from the SQL script.
+        /// </summary>
         public override void ResetDatabase()
         {
             try
@@ -581,16 +548,15 @@ namespace DotNetEnvironmentManagerHelper.Services
                     TryGetValueOrDefault(testCaseConfigs, EnvironmentConfiguration.DatabaseName)
                 );
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log
-                //logger.LogErr("Error while reseting database: " + ex.Message);
                 return;
-                // throw
-                //throw new Exception($"Error while reseting database. Details: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Restarts the given console application.
+        /// </summary>
         public void RestartGivenConsole()
         {
             string givenConsoleAppName = testCaseConfigs[EnvironmentConfiguration.GivenConsoleAppName];
@@ -605,42 +571,48 @@ namespace DotNetEnvironmentManagerHelper.Services
         #endregion
 
         #region UTILITIES
+        /// <summary>
+        /// Resets the SQL database by dropping and recreating it from the SQL script.
+        /// </summary>
         private void ResetSqlDatabase(string sqlContainerName, string sqlUsername, string sqlPassword, string databaseName)
         {
             try
             {
-                // drop database
+                // Drop database
                 string dropDatabaseQuery = $@"USE master; IF EXISTS(SELECT * FROM sys.databases WHERE name = '{databaseName}') BEGIN ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}]; END;";
                 string command = $"{sqlContainerName} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U {sqlUsername} -P {sqlPassword} -Q \"{dropDatabaseQuery}\"";
                 dockerCommandExecutor.ExecDockerCommand(command);
 
-                // create new database
+                // Create new database
                 command = $"{sqlContainerName} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U {sqlUsername} -P {sqlPassword} -i /var/opt/mssql/{databaseName}.sql";
                 dockerCommandExecutor.ExecDockerCommand(command);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //logger.LogErr($"Error while reset database. Detail: {ex.Message}");
                 return;
             }
         }
 
+        /// <summary>
+        /// Drops a SQL database from the container.
+        /// </summary>
         private void DropSqlDatabase(string sqlContainerName, string sqlUsername, string sqlPassword, string databaseName)
         {
             try
             {
-                // drop database
                 string dropDatabaseQuery = $@"USE master; IF EXISTS(SELECT * FROM sys.databases WHERE name = '{databaseName}') BEGIN ALTER DATABASE [{databaseName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{databaseName}]; END;";
                 string command = $"{sqlContainerName} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U {sqlUsername} -P {sqlPassword} -Q \"{dropDatabaseQuery}\"";
                 dockerCommandExecutor.ExecDockerCommand(command);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //logger.LogErr($"Error while reset database. Detail: {ex.Message}");
                 return;
             }
         }
 
+        /// <summary>
+        /// Copies runtimes folder to the client solution folder.
+        /// </summary>
         private void CopyRuntimesToClient()
         {
             try
@@ -656,20 +628,21 @@ namespace DotNetEnvironmentManagerHelper.Services
                 );
 
                 string destinationPath = Path.Combine(clientQuestionPath, "runtimes");
-                //check if exist runtimes folder, if not copy
                 if (!Directory.Exists(destinationPath))
                 {
                     Directory.CreateDirectory(destinationPath);
                     dockerCommandExecutor.CopyFolder(runtimesFolder, destinationPath);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //logger.LogErr("Error adding runtimes folder: " + ex.Message);
                 throw;
             }
         }
 
+        /// <summary>
+        /// Copies runtimes folder to the server solution folder.
+        /// </summary>
         private void CopyRuntimesToServer()
         {
             try
@@ -685,32 +658,30 @@ namespace DotNetEnvironmentManagerHelper.Services
                 );
 
                 string destinationPath = Path.Combine(serverQuestionPath, "runtimes");
-                //check if exist runtimes folder, if not copy
                 if (!Directory.Exists(destinationPath))
                 {
                     Directory.CreateDirectory(destinationPath);
                     dockerCommandExecutor.CopyFolder(runtimesFolder, destinationPath);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //logger.LogErr("Error adding runtimes folder: " + ex.Message);
                 throw;
             }
         }
 
-        // This is server
+        /// <summary>
+        /// Copies server publish folder to the code container and waits for deployment.
+        /// </summary>
         private void CopyPublishFolder()
         {
             try
             {
-                // copy all publish files to container:/apps
                 dockerCommandExecutor.CopyFileToContainer(
                     questionConfigs[EnvironmentConfiguration.CodeFilePath],
                     questionConfigs[EnvironmentConfiguration.CodeContainerName] + ":/apps"
                 );
 
-                // wait for .net deployment
                 dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.CodeContainerName],
                     questionConfigs[EnvironmentConfiguration.StudentQuestionName],
@@ -718,28 +689,24 @@ namespace DotNetEnvironmentManagerHelper.Services
                     questionConfigs[EnvironmentConfiguration.CodeContainerInternalPort]
                 );
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log
-                //logger.LogErr("Error copying publish file");
-
-                //logger.LogErr($"Error copying publish file. Details: {ex.Message}");
                 return;
             }
         }
 
-        // This is client
+        /// <summary>
+        /// Copies client publish folder to the given console container and waits for deployment.
+        /// </summary>
         private void CopyGivenConsolePublishFolder()
         {
             try
             {
-                // copy all publish files to container:/apps
                 dockerCommandExecutor.CopyFileToContainer(
                     questionConfigs[EnvironmentConfiguration.GivenConsolePath],
                     questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName] + ":/apps"
                 );
 
-                // wait for .net deployment
                 dockerCommandExecutor.WaitForPublishConsoleFileDeployment(
                     questionConfigs[EnvironmentConfiguration.GivenConsoleContainerName],
                     questionConfigs[EnvironmentConfiguration.GivenConsoleAppName],
@@ -747,15 +714,15 @@ namespace DotNetEnvironmentManagerHelper.Services
                     "-1"
                 );
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log
-                //logger.LogErr($"Error copying publish file. Details: {ex.Message}");
                 return;
             }
         }
 
-
+        /// <summary>
+        /// Gets environment variables for the question container.
+        /// </summary>
         private Dictionary<string, string> GetEnvironmentVariablesForQuestion()
         {
             string appType = TryGetValueOrDefault(
