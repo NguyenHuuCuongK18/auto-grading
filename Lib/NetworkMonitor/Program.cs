@@ -18,7 +18,7 @@
 /// 5. Payload extraction for PSH packets
 /// 
 /// USAGE:
-///   NetworkMonitor &lt;port&gt; &lt;outputPath&gt;
+///   NetworkMonitor <port> <outputPath>
 ///   
 /// SIGNALS:
 ///   SIGTERM/SIGINT - Graceful shutdown, flush remaining packets
@@ -290,7 +290,7 @@ class Program
             _packetCount++;
             
             // Log to console for debugging
-            var dataPreview = string.IsNullOrEmpty(record.Data) ? "" : $" Data={record.Data.Substring(0, Math.Min(50, record.Data.Length))}...";
+            var dataPreview = string.IsNullOrEmpty(record.Data) ? string.Empty : $" Data={record.Data.Substring(0, Math.Min(50, record.Data.Length))}...";
             Console.WriteLine($"[Packet #{_packetCount}] {srcRole}:{srcPort} -> {dstRole}:{dstPort} [{flags}] {state}{dataPreview}");
         }
         catch (Exception ex)
@@ -347,7 +347,7 @@ class Program
         if (tcp.Acknowledgment && !tcp.Synchronize && !tcp.Finished && !tcp.Reset && !tcp.Push)
             return "Connection established";
         
-        return "";
+        return string.Empty;
     }
     
     /// <summary>
