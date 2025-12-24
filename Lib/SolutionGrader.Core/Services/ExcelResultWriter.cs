@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using ClosedXML.Excel;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using Domain.Models;
+using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
 
 namespace SolutionGrader.Core.Services
