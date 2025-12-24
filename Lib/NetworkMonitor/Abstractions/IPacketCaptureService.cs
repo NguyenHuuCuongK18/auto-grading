@@ -40,31 +40,13 @@ namespace NetworkMonitor.Abstractions
         /// Stops packet capture.
         /// </summary>
         void StopCapture();
-
-        /// <summary>
-        /// Gets all captured packets as formatted strings.
-        /// </summary>
-        /// <param name="format">The format to use: "summary", "detailed", or "json". Default is "summary".</param>
-        /// <returns>List of formatted packet strings.</returns>
-        List<string> GetCapturedPacketsAsStrings(string format = "summary");
-
-        /// <summary>
-        /// Gets the most recent captured packets as formatted strings.
-        /// </summary>
-        /// <param name="count">Number of recent packets to retrieve.</param>
-        /// <param name="format">The format to use: "summary", "detailed", or "json". Default is "summary".</param>
-        /// <returns>List of formatted packet strings.</returns>
-        List<string> GetRecentPacketsAsStrings(int count, string format = "summary");
-
-        /// <summary>
-        /// Clears all stored captured packets.
-        /// </summary>
-        void ClearCapturedPackets();
-
-        /// <summary>
-        /// Gets the count of captured packets currently stored.
-        /// </summary>
-        int GetCapturedPacketCount();
+        
+        // NOTE: The following methods were removed as they were never used:
+        // - GetCapturedPacketsAsStrings()
+        // - GetRecentPacketsAsStrings()
+        // - ClearCapturedPackets()
+        // - GetCapturedPacketCount()
+        // The sidecar pattern (NetworkMonitorSidecar) handles packet capture and output.
     }
 
     /// <summary>
