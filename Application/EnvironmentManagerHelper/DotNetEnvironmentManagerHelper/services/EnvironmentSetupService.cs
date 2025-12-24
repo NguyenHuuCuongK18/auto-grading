@@ -11,7 +11,7 @@ using Newtonsoft.Json.Linq;
 namespace DotNetEnvironmentManagerHelper.Services
 {
     /// <summary>
-    /// Environment setup service for .NET Console Networking Applications.
+    /// Environment setup service for .NET-based grading environments.
     /// Handles Docker container lifecycle for server, client, and database containers.
     /// </summary>
     public class EnvironmentSetupService : BaseEnvironmentSetupService

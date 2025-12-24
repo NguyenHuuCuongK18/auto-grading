@@ -211,6 +211,7 @@ Configuration:
         /// <summary>
         /// Decodes a Base64-encoded environment JSON string and deserializes it.
         /// </summary>
+        /// <exception cref="Exception">Thrown when deserialization fails or returns null</exception>
         private static Domain.Entities.Main.Environment GetEnvironmentByBase64(string base64)
         {
             try
@@ -218,6 +219,11 @@ Configuration:
                 string jsonData = Encoding.UTF8.GetString(Convert.FromBase64String(base64));
 
                 var environmentData = JsonConvert.DeserializeObject<Domain.Entities.Main.Environment>(jsonData);
+
+                if (environmentData == null)
+                {
+                    throw new Exception("Deserialization of environment JSON returned null.");
+                }
 
                 return environmentData;
             }
