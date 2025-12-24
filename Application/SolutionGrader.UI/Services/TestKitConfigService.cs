@@ -365,17 +365,8 @@ namespace SolutionGrader.UI.Services
 
             return actions;
         }
-
-        /// <summary>
-        /// Represents expected outputs for a specific stage from Detail.xlsx
-        /// </summary>
-        public class ExpectedOutput
-        {
-            public int Stage { get; set; }
-            public string? ClientConsole { get; set; }
-            public string? ServerConsole { get; set; }
-        }
         
+        // ExpectedOutput class has been extracted to SolutionGrader.Core.Domain.Models.ExpectedOutput
         // ExpectedNetworkFlow class removed - now using shared version from SolutionGrader.Core.Domain.Models
 
         /// <summary>
