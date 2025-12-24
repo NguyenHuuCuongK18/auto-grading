@@ -26,13 +26,13 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy project files from Lib/NetworkMonitorSidecar
-COPY Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj Lib/NetworkMonitorSidecar/
-RUN dotnet restore Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj -r linux-x64
+# Copy project files from Lib/NetworkMonitor
+COPY Lib/NetworkMonitor/NetworkMonitor.csproj Lib/NetworkMonitor/
+RUN dotnet restore Lib/NetworkMonitor/NetworkMonitor.csproj -r linux-x64
 
 # Copy source and publish
-COPY Lib/NetworkMonitorSidecar/ Lib/NetworkMonitorSidecar/
-RUN dotnet publish Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj \
+COPY Lib/NetworkMonitor/ Lib/NetworkMonitor/
+RUN dotnet publish Lib/NetworkMonitor/NetworkMonitor.csproj \
     -c Release -r linux-x64 --self-contained -o /app/publish
 
 # Stage 2: Runtime image
@@ -53,7 +53,7 @@ RUN mkdir -p /data
 VOLUME ["/data"]
 
 # Set entrypoint to the network monitor application
-ENTRYPOINT ["/app/NetworkMonitorSidecar"]
+ENTRYPOINT ["/app/NetworkMonitor"]
 
 # Default arguments:
 # - Port 4000 (can be overridden)

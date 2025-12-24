@@ -1,5 +1,5 @@
 /// <summary>
-/// Network Monitor Sidecar - Real-time packet capture using SharpPcap/PacketDotNet
+/// Network Monitor - Real-time packet capture using SharpPcap/PacketDotNet
 /// 
 /// This application implements the EXACT same packet capture approach as MiddlewareSniffPort
 /// to ensure consistent behavior between testkit generation and grading.
@@ -18,7 +18,7 @@
 /// 5. Payload extraction for PSH packets
 /// 
 /// USAGE:
-///   NetworkMonitorSidecar &lt;port&gt; &lt;outputPath&gt;
+///   NetworkMonitor &lt;port&gt; &lt;outputPath&gt;
 ///   
 /// SIGNALS:
 ///   SIGTERM/SIGINT - Graceful shutdown, flush remaining packets
@@ -30,7 +30,7 @@ using System.Text.Json;
 using SharpPcap;
 using PacketDotNet;
 
-namespace NetworkMonitorSidecar;
+namespace NetworkMonitor;
 
 class Program
 {

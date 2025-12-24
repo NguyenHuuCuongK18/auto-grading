@@ -1,10 +1,10 @@
-# Network Monitor Sidecar - SharpPcap-based packet capture
+# Network Monitor - SharpPcap-based packet capture
 #
 # This container runs a .NET application using SharpPcap/PacketDotNet for real-time
 # packet capture, matching the exact behavior of MiddlewareSniffPort.
 #
 # BUILD COMMAND (from repository root):
-#   docker build -t fptuxaes/network-monitor:latest -f Lib/NetworkMonitorSidecar/Dockerfile .
+#   docker build -t fptuxaes/network-monitor:latest -f Lib/NetworkMonitor/Dockerfile .
 #
 # OR use the main Dockerfile in DockerImage folder:
 #   docker build -t fptuxaes/network-monitor:latest -f DockerImage/NetworkMonitor.Dockerfile .
@@ -26,12 +26,12 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy project file and restore dependencies
-COPY Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj Lib/NetworkMonitorSidecar/
-RUN dotnet restore Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj -r linux-x64
+COPY Lib/NetworkMonitor/NetworkMonitor.csproj Lib/NetworkMonitor/
+RUN dotnet restore Lib/NetworkMonitor/NetworkMonitor.csproj -r linux-x64
 
 # Copy source code and publish
-COPY Lib/NetworkMonitorSidecar/ Lib/NetworkMonitorSidecar/
-RUN dotnet publish Lib/NetworkMonitorSidecar/NetworkMonitorSidecar.csproj \
+COPY Lib/NetworkMonitor/ Lib/NetworkMonitor/
+RUN dotnet publish Lib/NetworkMonitor/NetworkMonitor.csproj \
     -c Release -r linux-x64 --self-contained -o /app/publish
 
 # Stage 2: Runtime
@@ -52,7 +52,7 @@ RUN mkdir -p /data
 VOLUME ["/data"]
 
 # Set the entrypoint to our network monitor
-ENTRYPOINT ["/app/NetworkMonitorSidecar"]
+ENTRYPOINT ["/app/NetworkMonitor"]
 
 # Default arguments: port 4000, output to /data/packets.jsonl
 CMD ["4000", "/data/packets.jsonl"]

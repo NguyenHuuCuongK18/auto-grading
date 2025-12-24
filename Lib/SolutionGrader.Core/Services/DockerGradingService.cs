@@ -3874,7 +3874,7 @@ namespace SolutionGrader.Core.Services
             //
             // The new network-monitor image uses SharpPcap/PacketDotNet for real-time capture
             // matching MiddlewareSniffPort's behavior exactly.
-            // ENTRYPOINT is the NetworkMonitorSidecar app, CMD is [port, outputPath]
+            // ENTRYPOINT is the NetworkMonitor app, CMD is [port, outputPath]
 
             // CRITICAL: --net=container:{unifiedContainer} attaches to the unified container's
             // network namespace, allowing the sidecar to see localhost (127.0.0.1) traffic
@@ -4063,16 +4063,16 @@ namespace SolutionGrader.Core.Services
                     OnProgress($"[Monitor] Container {monitorContainer} restarted successfully");
                     
                     // Additional verification: check if the sidecar process is running
-                    var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitorSidecar";
+                    var checkCmd = $"{monitorContainer} pgrep -f NetworkMonitor";
                     var (checkSuccess, _) = _dockerExecutor.ExecDockerCommandWithOutput(checkCmd, 2000);
                     
                     if (checkSuccess)
                     {
-                        OnProgress($"[Monitor] Verified NetworkMonitorSidecar process is running");
+                        OnProgress($"[Monitor] Verified NetworkMonitor process is running");
                     }
                     else
                     {
-                        OnProgress($"[Monitor] WARNING: NetworkMonitorSidecar process not found after restart");
+                        OnProgress($"[Monitor] WARNING: NetworkMonitor process not found after restart");
                     }
                 }
                 else

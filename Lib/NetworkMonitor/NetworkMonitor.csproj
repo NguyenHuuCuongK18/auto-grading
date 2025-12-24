@@ -1,24 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- 
-      Nullable annotations only - allows ? annotations but doesn't enforce null checks.
-      This is a network monitoring utility where packet data is validated at runtime.
-    -->
-    <Nullable>annotations</Nullable>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Nullable>enable</Nullable>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <PublishTrimmed>false</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="EPPlus" Version="8.3.1" />
-    <PackageReference Include="PacketDotNet" Version="1.4.8" />
-    <PackageReference Include="SharpPcap" Version="6.3.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Common\Common.csproj" />
+    <!-- SharpPcap for packet capture - same version as MiddlewareSniffPort -->
+    <PackageReference Include="SharpPcap" Version="6.3.0" />
+    <!-- PacketDotNet for packet parsing - same version as MiddlewareSniffPort -->
+    <PackageReference Include="PacketDotNet" Version="1.4.7" />
   </ItemGroup>
 
 </Project>
