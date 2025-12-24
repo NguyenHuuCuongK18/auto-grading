@@ -11,6 +11,10 @@ using System.Threading.Channels;
 
 namespace EnvironmentManager
 {
+    /// <summary>
+    /// Entry point for the Environment Manager CLI tool.
+    /// Handles Docker container setup and disposal for grading environments.
+    /// </summary>
     internal class Program
     {
         static int Main(string[] args)
@@ -28,13 +32,15 @@ namespace EnvironmentManager
                     _ => PrintUsage()
                 };
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //Console.Error.WriteLine(ex.Message);
                 return -1;
             }
         }
 
+        /// <summary>
+        /// Sets up Docker containers for a test kit based on the provided environment configuration.
+        /// </summary>
         private static int SetUpContainer(string env)
         {
             try
@@ -43,26 +49,25 @@ namespace EnvironmentManager
 
                 string envType = environmentJson.Configs[EnvironmentConfiguration.EnvironmentType];
 
-                // get suitable environment executor
                 BaseEnvironmentSetupService environmentExecutor = GetEnvironmentSetupService(envType);
 
                 environmentExecutor.SetupContainerForTestKit(environmentJson);
 
-                //_logger.LogInfo("Setup container for testkit successfully.");
                 return 1;
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
-                //_logger.LogErr($"Failed to deserialize XML for environmentForQ. Error: {ex.Message}");
                 return -1;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //_logger.LogErr($"Failed to setup container for testkit. Error: {ex.Message}");
                 return -1;
             }
         }
 
+        /// <summary>
+        /// Disposes Docker containers for a test kit based on the provided environment configuration.
+        /// </summary>
         public static int DisposeContainer(string environment)
         {
             try
@@ -71,26 +76,25 @@ namespace EnvironmentManager
 
                 string envType = environmentJson.Configs[EnvironmentConfiguration.EnvironmentType];
 
-                // get suitable environment executor
                 BaseEnvironmentSetupService environmentExecutor = GetEnvironmentSetupService(envType);
 
                 environmentExecutor.DisposeContainerForTestKit(environmentJson);
 
-                //_logger.LogInfo("Setup container for testkit successfully.");
                 return 1;
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
-                //_logger.LogErr($"Failed to deserialize XML for environmentForQ. Error: {ex.Message}");
                 return -1;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //_logger.LogErr($"Failed to setup container for testkit. Error: {ex.Message}");
                 return -1;
             }
         }
 
+        /// <summary>
+        /// Sets up the environment for a specific question, including file copying and database setup.
+        /// </summary>
         public static int SetupEnvironmentQ(string environmentForQ)
         {
             try
@@ -99,27 +103,26 @@ namespace EnvironmentManager
 
                 string envType = environment.Configs[EnvironmentConfiguration.EnvironmentType];
 
-                // get suitable environment executor
                 BaseEnvironmentSetupService environmentExecutor = GetEnvironmentSetupService(envType);
 
                 environmentExecutor.SetupEnvironmentForQuestion(environment);
                 environmentExecutor.ExecuteSetupEnvironmentForQuestionBySteps();
 
-                //_logger.LogInfo("Environment for question has been set up successfully.");
                 return 1;
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
-                //_logger.LogErr($"Failed to deserialize XML for environmentForQ. Error: {ex.Message}");
                 return -1;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                //_logger.LogErr($"Failed to set up environment for Q. Error: {ex.Message}");
                 return -1;
             }
         }
 
+        /// <summary>
+        /// Parses command-line arguments into a dictionary.
+        /// </summary>
         private static Dictionary<string, string> ParseArgs(string[] args)
         {
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -170,17 +173,16 @@ Configuration:
 
         private static int Stud() { return -1; }
 
+        /// <summary>
+        /// Gets the appropriate environment setup service based on the environment type.
+        /// </summary>
         private static BaseEnvironmentSetupService GetEnvironmentSetupService(string envType)
         {
             try
             {
                 string[] services = new string[]
                 {
-                    ProcessName.DotNetEnvironmentManagerHelperPath,
-                    //ProcessName.JavaJspEnvironmentManagerHelperPath,
-                    //ProcessName.JavaSpringEnvironmentManagerHelperPath,
-                    //ProcessName.PythonDjangoEnvironmentManagerHelperPath,
-                    //ProcessName.NodeJsEnvironmentManagerHelperPath
+                    ProcessName.DotNetEnvironmentManagerHelperPath
                 };
 
                 foreach (string service in services)
@@ -205,6 +207,10 @@ Configuration:
                 throw new Exception($"Can not find suitable environment setup service. Details: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Decodes a Base64-encoded environment JSON string and deserializes it.
+        /// </summary>
         private static Domain.Entities.Main.Environment GetEnvironmentByBase64(string base64)
         {
             try
@@ -212,11 +218,6 @@ Configuration:
                 string jsonData = Encoding.UTF8.GetString(Convert.FromBase64String(base64));
 
                 var environmentData = JsonConvert.DeserializeObject<Domain.Entities.Main.Environment>(jsonData);
-
-                if (environmentData == null)
-                {
-                    //_logger.LogErr("Deserialization of environment JSON returned null.");
-                }
 
                 return environmentData;
             }

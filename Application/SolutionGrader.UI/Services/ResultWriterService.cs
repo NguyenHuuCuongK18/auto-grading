@@ -115,12 +115,9 @@ namespace SolutionGrader.UI.Services
             // Synchronous write for flush scenario
             try
             {
-                // FIX: Do NOT write global StudentsSolution.xlsx here!
-                // ExcelLogCoordinator in GradingOrchestrationService handles the main file.
-                // Writing here would overwrite correct grades with potentially stale data,
-                // causing the bug where "outer StudentSolution.xlsx does not match inner file and UI".
-                // var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-                // WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
+                // Note: Global StudentsSolution.xlsx is written by ExcelLogCoordinator
+                // to prevent race conditions during parallel grading.
+                // This service only writes per-paper summary files.
 
                 // Write per-paper summaries (these are separate files, no conflict)
                 var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
@@ -170,12 +167,9 @@ namespace SolutionGrader.UI.Services
             {
                 try
                 {
-                    // FIX: Do NOT write global StudentsSolution.xlsx here!
-                    // ExcelLogCoordinator in GradingOrchestrationService handles the main file.
-                    // Writing here would overwrite correct grades with potentially stale data,
-                    // causing the bug where "outer StudentSolution.xlsx does not match inner file and UI".
-                    // var filePath = Path.Combine(_baseResultPath, "StudentsSolution.xlsx");
-                    // WriteStudentsSolutionSummaryToFile(filePath, studentsToWrite);
+                    // Note: Global StudentsSolution.xlsx is written by ExcelLogCoordinator
+                    // to prevent race conditions during parallel grading.
+                    // This service only writes per-paper summary files.
 
                     // Write per-paper summaries (these are separate files, no conflict)
                     var paperGroups = studentsToWrite.GroupBy(s => s.PaperNo);
