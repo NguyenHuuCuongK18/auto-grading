@@ -10,6 +10,12 @@ public class ExpectedNetworkFlow
 {
     public int Stage { get; set; }
 
+    // Metadata fields
+    public string? Time { get; set; }
+    public string? Info { get; set; }
+    public string? Source { get; set; }
+    public string? Destination { get; set; }
+
     // Common fields (TCP and HTTP)
     public string? Flags { get; set; }
     public string? State { get; set; }

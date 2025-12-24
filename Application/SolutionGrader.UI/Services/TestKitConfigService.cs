@@ -376,23 +376,7 @@ namespace SolutionGrader.UI.Services
             public string? ServerConsole { get; set; }
         }
         
-        /// <summary>
-        /// Represents expected network traffic for a specific stage from Detail.xlsx Network sheet.
-        /// The Network sheet defines the expected TCP handshake and data flow patterns.
-        /// </summary>
-        public class ExpectedNetworkFlow
-        {
-            public int Stage { get; set; }
-            public string? Time { get; set; }
-            public string? Info { get; set; }
-            public string? Source { get; set; }
-            public string? Destination { get; set; }
-            public string? Flags { get; set; }
-            public string? State { get; set; }
-            public string? Data { get; set; }
-            public string? SourceRole { get; set; }
-            public string? DestinationRole { get; set; }
-        }
+        // ExpectedNetworkFlow class removed - now using shared version from SolutionGrader.Core.Domain.Models
 
         /// <summary>
         /// Reads the expected outputs from Detail.xlsx Client and Server sheets.
