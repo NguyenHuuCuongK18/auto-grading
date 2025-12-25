@@ -245,15 +245,14 @@ namespace SolutionGrader.UI.Models
         }
 
         /// <summary>
-         /// Legacy timeout setting - kept for backward compatibility.
-         /// Actual timeouts are now defined in DockerGradingService.TimeoutConstants.
-         /// </summary>
-         [Obsolete("Timeouts are now defined in DockerGradingService.TimeoutConstants")]
-         public int GradingTimeoutSeconds
-         {
-             get => _gradingTimeoutSeconds;
-             set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
-         }
+        /// Overall grading timeout in seconds for all test cases combined.
+        /// Default: 300 seconds (5 minutes).
+        /// </summary>
+        public int GradingTimeoutSeconds
+        {
+            get => _gradingTimeoutSeconds;
+            set { _gradingTimeoutSeconds = value; OnPropertyChanged(); }
+        }
 
          public string DatabaseImageName
          {

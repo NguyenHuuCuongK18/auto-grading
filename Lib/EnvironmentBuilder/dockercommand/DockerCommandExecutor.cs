@@ -590,11 +590,8 @@ namespace EnvironmentBuilder.DockerCommand
                 var result = _commandExecutor.RunCommandAndCaptureOutput(command);
                 return result.Output.Count > 0;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log 
-
-                // return
                 return false;
             }
         }
@@ -607,11 +604,8 @@ namespace EnvironmentBuilder.DockerCommand
                 var result = _commandExecutor.RunCommandAndCaptureOutput(command);
                 return result.Output.Count > 0;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log 
-
-                // return
                 return false;
             }
         }
@@ -621,26 +615,18 @@ namespace EnvironmentBuilder.DockerCommand
             string url = $"http://localhost:{port}";
             try
             {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-                request.Method = "HEAD";
-                request.Timeout = 5000;
-                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-                {
-                    return true;
-                }
+                using var httpClient = new System.Net.Http.HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(5);
+                var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Head, url);
+                var response = httpClient.Send(request);
+                return true;
             }
-            catch (WebException ex)
+            catch (System.Net.Http.HttpRequestException)
             {
-                if (ex.Response is HttpWebResponse errorResponse)
-                {
-                    return errorResponse.StatusCode != null ? true : false;
-                }
-                else
-                {
-                    return false;
-                }
+                // Connection failed or error response - container may still be running
+                return true;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }
@@ -679,11 +665,8 @@ namespace EnvironmentBuilder.DockerCommand
 
                 return true;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // log 
-
-                // return
                 return false;
             }
         }

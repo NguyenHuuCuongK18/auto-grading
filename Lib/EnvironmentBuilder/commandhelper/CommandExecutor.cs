@@ -59,22 +59,14 @@ namespace EnvironmentBuilder.CommandSupporter
                     }
                 };
 
-                try
-                {
-                    process.Start();
-                    process.BeginOutputReadLine();
-                    process.BeginErrorReadLine();
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
 
-                    if (!process.WaitForExit(timeoutInMilliseconds))
-                    {
-                        process.Kill();
-                        throw new TimeoutException("Process execution timed out.");
-                    }
-
-                }
-                catch (Exception ex)
+                if (!process.WaitForExit(timeoutInMilliseconds))
                 {
-                    throw ex;
+                    process.Kill();
+                    throw new TimeoutException("Process execution timed out.");
                 }
             }
         }
@@ -170,29 +162,22 @@ namespace EnvironmentBuilder.CommandSupporter
                     }
                 };
 
-                try
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                if (!process.WaitForExit(timeoutInMilliseconds))
                 {
-                    process.Start();
-                    process.BeginOutputReadLine();
-                    process.BeginErrorReadLine();
-
-                    if (!process.WaitForExit(timeoutInMilliseconds))
-                    {
-                        process.Kill();
-                        return false;
-                    }
-
-                    if (process.ExitCode != 0)
-                    {
-                        return false;
-                    }
-
-                    return true;
+                    process.Kill();
+                    return false;
                 }
-                catch (Exception ex)
+
+                if (process.ExitCode != 0)
                 {
-                    throw ex;
+                    return false;
                 }
+
+                return true;
             }
         }
 

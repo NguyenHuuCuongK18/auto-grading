@@ -67,28 +67,21 @@ namespace FileMaster.FileEngine
         public void WriteToFile(string filePath, string rawData) => File.WriteAllText(filePath, rawData);
         public void ClearSubdirectories(string folderPath)
         {
-            try
+            if (Directory.Exists(folderPath))
             {
-                if (Directory.Exists(folderPath))
+                foreach (string file in Directory.GetFiles(folderPath))
                 {
-                    foreach (string file in Directory.GetFiles(folderPath))
-                    {
-                        File.Delete(file);
-                    }
-
-                    foreach (string directory in Directory.GetDirectories(folderPath))
-                    {
-                        Directory.Delete(directory, true);
-                    }
+                    File.Delete(file);
                 }
-                else
+
+                foreach (string directory in Directory.GetDirectories(folderPath))
                 {
-                    throw new Exception("File not found!");
+                    Directory.Delete(directory, true);
                 }
             }
-            catch (Exception ex)
+            else
             {
-                throw ex;
+                throw new DirectoryNotFoundException($"Directory not found: {folderPath}");
             }
         }
 
