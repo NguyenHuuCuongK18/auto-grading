@@ -32,5 +32,7 @@
     <ProjectReference Include="..\FileMaster\FileMaster.csproj" />
     <ProjectReference Include="..\ProcessLauncher\ProcessLauncher.csproj" />
     <ProjectReference Include="..\DllMod\DllMod.csproj" />
+    <ProjectReference Include="..\..\Application\EnvironmentManager\EnvironmentManager.csproj" />
+    <ProjectReference Include="..\..\Application\EnvironmentManagerHelper\DotNetEnvironmentManagerHelper\DotNetEnvironmentManagerHelper.csproj" />
   </ItemGroup>
 </Project>

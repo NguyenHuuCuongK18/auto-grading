@@ -348,7 +348,7 @@ namespace SolutionGrader.UI.Services
                     _logger.LogInfo($"[ExcelLogCoordinator] Processing batch update for {updates.Length} student(s)");
                     
                     // Open existing workbook (with retry for file locks)
-                    XLWorkbook workbook = null;
+                    XLWorkbook? workbook = null;
                     int retries = 3;
                     while (retries > 0)
                     {
@@ -369,6 +369,12 @@ namespace SolutionGrader.UI.Services
                                 throw;
                             }
                         }
+                    }
+
+                    if (workbook == null)
+                    {
+                        _logger.LogError("[ExcelLogCoordinator] Failed to open workbook after retries");
+                        return;
                     }
 
                     using (workbook)

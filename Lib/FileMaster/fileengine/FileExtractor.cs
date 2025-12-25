@@ -1,17 +1,12 @@
-﻿using EnvironmentBuilder.CommandSupporter;
-using Ionic.Zip;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+﻿using System;
 using System.IO;
-using System.Linq;
-using System.Text;
+using System.IO.Compression;
 
 namespace FileMaster.FileEngine
 {
     /// <summary>
     /// Provides file extraction utilities for zip files.
-    /// Uses DotNetZip (Ionic.Zip) for cross-platform compatibility.
+    /// Uses System.IO.Compression.ZipFile for secure cross-platform compatibility.
     /// </summary>
     public class FileExtractor
     {
@@ -29,11 +24,11 @@ namespace FileMaster.FileEngine
             if (string.IsNullOrEmpty(destination))
                 destination = Path.GetDirectoryName(sourceFile) ?? ".";
 
-            // Use DotNetZip for extraction (cross-platform compatible)
-            using (ZipFile zips = new ZipFile(sourceFile))
-            {
-                zips.ExtractAll(destination, ExtractExistingFileAction.OverwriteSilently);
-            }
+            // Ensure destination directory exists
+            Directory.CreateDirectory(destination);
+            
+            // Use System.IO.Compression for extraction (built-in, no vulnerability)
+            ZipFile.ExtractToDirectory(sourceFile, destination, overwriteFiles: true);
             
             Console.WriteLine($"Extracted {sourceFile} to {destination}");
         }
@@ -50,12 +45,13 @@ namespace FileMaster.FileEngine
                 destinationPath = Path.GetDirectoryName(zipPath) ?? ".";
             }
 
-            using (ZipFile zips = new ZipFile(zipPath))
-            {
-                zips.ExtractAll(destinationPath, ExtractExistingFileAction.OverwriteSilently);
-            }
+            // Ensure destination directory exists
+            Directory.CreateDirectory(destinationPath);
+            
+            // Use System.IO.Compression for extraction (built-in, no vulnerability)
+            ZipFile.ExtractToDirectory(zipPath, destinationPath, overwriteFiles: true);
+            
             Console.WriteLine($"Extracted {zipPath} to {destinationPath}");
         }
-
     }
 }
