@@ -118,31 +118,21 @@ namespace SolutionGrader.Core.Services
         /// </summary>
         private List<int> ParseDotnetPidsFromPsOutput(string psOutput)
         {
-            var pids = new List<int>();
             var lines = psOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var line in lines)
-            {
+            var pids = lines
                 // Skip header line
-                if (line.Contains("PID") && line.Contains("COMMAND"))
-                    continue;
-
-                // Check if this line contains 'dotnet'
-                if (!line.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
+                .Where(line => !(line.Contains("PID") && line.Contains("COMMAND")))
+                // Filter lines containing 'dotnet'
+                .Where(line => line.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
                 // Parse PID from the line (format: USER PID %CPU %MEM ...)
-                // PID is typically the second column
-                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2 && int.TryParse(parts[1], out int pid))
-                {
-                    // Skip PID 1 (main container process - killing it would stop the container)
-                    if (pid != 1)
-                    {
-                        pids.Add(pid);
-                    }
-                }
-            }
+                .Select(line => line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+                .Where(parts => parts.Length >= 2)
+                .Select(parts => int.TryParse(parts[1], out int pid) ? (int?)pid : null)
+                .OfType<int>()
+                // Skip PID 1 (main container process - killing it would stop the container)
+                .Where(pid => pid != 1)
+                .ToList();
 
             return pids;
         }
