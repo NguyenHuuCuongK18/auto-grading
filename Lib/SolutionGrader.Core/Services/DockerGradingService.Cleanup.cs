@@ -127,8 +127,10 @@ namespace SolutionGrader.Core.Services
                 .Where(line => line.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
                 // Parse PID from the line (format: USER PID %CPU %MEM ...)
                 .Select(line => line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
-                .Where(parts => parts.Length >= 2 && int.TryParse(parts[1], out _))
-                .Select(parts => int.Parse(parts[1]))
+                .Where(parts => parts.Length >= 2)
+                .Select(parts => (success: int.TryParse(parts[1], out int pid), pid))
+                .Where(result => result.success)
+                .Select(result => result.pid)
                 // Skip PID 1 (main container process - killing it would stop the container)
                 .Where(pid => pid != 1)
                 .ToList();
