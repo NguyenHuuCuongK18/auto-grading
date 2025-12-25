@@ -11,6 +11,9 @@ using System.Threading.Tasks;
 using EnvironmentBuilder.DockerCommand;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using Domain.Models;
+using Domain.Models.Grading;
+using Domain.Models.Configuration;
+using Domain.Models.Network;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
 

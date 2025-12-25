@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 using EnvironmentBuilder.DockerCommand;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using Domain.Models;
+using Domain.Models.Configuration;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Helpers;
 

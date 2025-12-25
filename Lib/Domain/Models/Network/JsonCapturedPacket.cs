@@ -1,4 +1,4 @@
-namespace Domain.Models
+namespace Domain.Models.Network
 {
     /// <summary>
     /// JSON structure matching the sidecar's CapturedPacket output.

@@ -1,4 +1,4 @@
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Record for GradeProcess sheet - logs grading execution details.

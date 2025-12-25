@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Models
+namespace Domain.Models.Network
 {
     /// <summary>
     /// Represents a captured network packet with TCP/HTTP flow information.

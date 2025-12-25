@@ -1,5 +1,5 @@
 #nullable enable
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Action record for User sheet (StartClient, StartServer, Input, etc.)

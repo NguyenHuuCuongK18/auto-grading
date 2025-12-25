@@ -7,6 +7,8 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Domain.Models;
+using Domain.Models.Grading;
+using Domain.Models.Network;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
 

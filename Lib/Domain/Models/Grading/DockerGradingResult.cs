@@ -1,7 +1,7 @@
 #nullable enable
 using System.Collections.Generic;
 
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Complete grading result for a student containing all test case results.

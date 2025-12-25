@@ -1,7 +1,8 @@
 #nullable enable
 using System.Collections.Generic;
+using Domain.Models.Network;
 
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Result of a single test case - matches SampleLogging format.

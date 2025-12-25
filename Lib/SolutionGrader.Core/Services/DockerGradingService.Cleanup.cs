@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading.Tasks;
 using EnvironmentBuilder.DockerCommand;
 using Domain.Models;
+using Domain.Models.Configuration;
 
 namespace SolutionGrader.Core.Services
 {

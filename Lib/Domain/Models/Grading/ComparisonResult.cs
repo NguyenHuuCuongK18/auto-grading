@@ -1,5 +1,5 @@
 #nullable enable
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Comparison result for console output or network - extended with SampleLogging fields.

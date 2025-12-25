@@ -7,6 +7,8 @@ using System.IO;
 using System.Linq;
 using ClosedXML.Excel;
 using Domain.Models;
+using Domain.Models.Grading;
+using Domain.Models.Network;
 using SolutionGrader.Core.Domain.Models;
 using SolutionGrader.Core.Keywords;
 

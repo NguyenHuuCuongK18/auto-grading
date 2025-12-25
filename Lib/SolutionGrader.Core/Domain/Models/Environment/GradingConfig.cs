@@ -1,6 +1,6 @@
 using SolutionGrader.Core.Keywords;
 
-namespace SolutionGrader.Core.Domain.Models
+namespace SolutionGrader.Core.Domain.Models.Environment
 {
     /// <summary>
     /// Configuration for controlling which aspects of the test kit to validate during grading.

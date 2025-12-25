@@ -1,4 +1,5 @@
 using System;
+using Domain.Models.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -279,7 +280,7 @@ namespace SolutionGrader.UI.Services
         /// Creates {PaperNo}/student/{StudentCode}/OverallSummary.xlsx
         /// Format matches SampleLogging/student/student-code-here/OverallSummary.xlsx
         /// </summary>
-        public void WriteStudentSummary(StudentSolution student, List<Domain.Models.TestCaseResult> testCases)
+        public void WriteStudentSummary(StudentSolution student, List<Domain.Models.Grading.TestCaseResult> testCases)
         {
             var studentDir = GetStudentResultFolder(student.StudentCode, student.PaperNo);
 

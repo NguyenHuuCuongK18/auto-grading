@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Domain.Models;
+using Domain.Models.Network;
 
 namespace SolutionGrader.Core.Services
 {

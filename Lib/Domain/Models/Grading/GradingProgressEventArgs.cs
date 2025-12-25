@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Models
+namespace Domain.Models.Grading
 {
     /// <summary>
     /// Event arguments for grading progress updates.

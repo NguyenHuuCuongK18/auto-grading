@@ -1,4 +1,4 @@
-namespace Domain.Models
+namespace Domain.Models.Configuration
 {
     /// <summary>
     /// Configuration for Docker-based grading containing all settings for
