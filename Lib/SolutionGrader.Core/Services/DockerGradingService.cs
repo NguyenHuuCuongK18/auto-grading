@@ -828,7 +828,7 @@ namespace SolutionGrader.Core.Services
                     unifiedContainer,
                     config.CodeContainerInternalPort,
                     pcapFilePath,
-                    testKitConfig.Protocol);
+                    testKitConfig.Protocol ?? "TCP");
 
                 // Notify that containers are ready (for staggered startup optimization)
                 OnProgress($"Docker containers ready for {studentCode}");

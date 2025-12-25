@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace Domain.Models.Configuration
 {
     /// <summary>

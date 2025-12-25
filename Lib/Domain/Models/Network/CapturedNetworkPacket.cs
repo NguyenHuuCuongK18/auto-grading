@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace Domain.Models.Network
