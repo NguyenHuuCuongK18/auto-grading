@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\..\Lib\Domain\Domain.csproj" />
     <ProjectReference Include="..\..\..\Lib\EnvironmentBuilder\EnvironmentBuilder.csproj" />
     <ProjectReference Include="..\..\EnvironmentManager\EnvironmentManager.csproj" />
