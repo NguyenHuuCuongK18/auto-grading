@@ -118,16 +118,6 @@ namespace SolutionGrader.Core.Services
             // because packets may be stored with various questionCode values or empty string
             var allCapturedPackets = _runContext.GetAllCapturedNetworkPackets();
 
-            // DIRECT FILE LOGGING - Bypass OnProgress to ensure messages are written
-            var debugPath = Path.Combine(Path.GetTempPath(), "DEBUG_CompareNetwork.txt");
-            try
-            {
-                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] CompareNetwork called\n");
-                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Expected flows: {expected.Count}\n");
-                File.AppendAllText(debugPath, $"[{DateTime.Now:HH:mm:ss}] Captured packets: {allCapturedPackets.Count}\n");
-            }
-            catch { }
-
             // DIAGNOSTIC LOGGING - Written to GradingLogs for debugging
             OnProgress($"[CompareNetwork] Expected network flows from Detail.xlsx: {expected.Count}");
             OnProgress($"[CompareNetwork] Total captured packets in RunContext: {allCapturedPackets.Count}");
