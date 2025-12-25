@@ -129,8 +129,7 @@ namespace SolutionGrader.Core.Services
                 .Select(line => line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
                 .Where(parts => parts.Length >= 2)
                 .Select(parts => int.TryParse(parts[1], out int pid) ? (int?)pid : null)
-                .Where(pid => pid.HasValue)
-                .Select(pid => pid!.Value)
+                .OfType<int>()
                 // Skip PID 1 (main container process - killing it would stop the container)
                 .Where(pid => pid != 1)
                 .ToList();
