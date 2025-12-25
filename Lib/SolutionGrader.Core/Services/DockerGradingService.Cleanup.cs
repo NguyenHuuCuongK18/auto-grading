@@ -128,7 +128,9 @@ namespace SolutionGrader.Core.Services
                 // Parse PID from the line (format: USER PID %CPU %MEM ...)
                 .Select(line => line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
                 .Where(parts => parts.Length >= 2)
-                .SelectMany(parts => int.TryParse(parts[1], out int pid) ? new[] { pid } : Array.Empty<int>())
+                .Select(parts => int.TryParse(parts[1], out int pid) ? (int?)pid : null)
+                .Where(pid => pid.HasValue)
+                .Select(pid => pid!.Value)
                 // Skip PID 1 (main container process - killing it would stop the container)
                 .Where(pid => pid != 1)
                 .ToList();
