@@ -1,5 +1,10 @@
 // This file contains the Container Setup region of DockerGradingService
 // Split from the main file for better maintainability
+//
+// NOTE: This file delegates to EnvironmentManager services where possible:
+// - DotNetEnvironmentSetupService for .NET-specific container setup
+// - BaseEnvironmentSetupService for common container lifecycle operations
+// Methods here contain grading-specific logic that needs to stay in DockerGradingService.
 
 using System;
 using System.Collections.Generic;

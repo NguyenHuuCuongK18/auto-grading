@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Domain.Entities.Docker.DockerSupporter.Entity;
 using EnvironmentBuilder.DockerCommand;
 using EnvironmentBuilder.CommandSupporter;
+using EnvironmentManager.Models;
 using EnvironmentManager.Services;
 
 namespace DotNetEnvironmentManagerHelper.Services
