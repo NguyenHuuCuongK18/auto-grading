@@ -58,7 +58,17 @@ namespace SolutionGrader.Core.Services
     /// - Application output is captured via log files, not docker logs (avoids buffering)
     /// - TTY flag (-t) ensures immediate console output flushing
     /// </summary>
-    public sealed class DockerGradingService
+    /// <summary>
+    /// DockerGradingService is split into partial classes for maintainability:
+    /// - DockerGradingService.cs (this file) - Core service, constructor, public API
+    /// - DockerGradingService.ContainerSetup.cs - Container setup methods
+    /// - DockerGradingService.TestExecution.cs - Test case execution methods
+    /// - DockerGradingService.OutputComparison.cs - Output comparison methods
+    /// - DockerGradingService.TestKitLoading.cs - Test kit loading methods
+    /// - DockerGradingService.Cleanup.cs - Cleanup and resource management methods
+    /// - DockerGradingService.ResultWriting.cs - Excel result writing methods
+    /// </summary>
+    public sealed partial class DockerGradingService
     {
         #region Timeout Constants
         // =======================================================================
