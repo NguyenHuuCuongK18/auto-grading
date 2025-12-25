@@ -47,16 +47,8 @@ namespace FileMaster.FileEngine
 
         private void SaveJsonToFile(string filePath, string jsonData)
         {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(filePath) ?? throw new InvalidOperationException("Đường dẫn không hợp lệ."));
-
-                File.WriteAllText(filePath, jsonData);
-            }
-            catch (Exception ex)
-            {
-                throw ex;
-            }
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath) ?? throw new InvalidOperationException("Invalid file path."));
+            File.WriteAllText(filePath, jsonData);
         }
 
     }

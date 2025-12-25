@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using ClosedXML.Excel;
+using SolutionGrader.UI.Models;
 using static SolutionGrader.UI.Services.GradingMessageCatalog;
 
 namespace SolutionGrader.UI.Services

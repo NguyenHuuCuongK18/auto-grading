@@ -52,28 +52,6 @@ namespace SolutionGrader.UI.Services
     }
 
     /// <summary>
-    /// Event arguments for log entries.
-    /// </summary>
-    public class LogEventArgs : EventArgs
-    {
-        public LogLevel Level { get; set; }
-        public string Message { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; }
-        public string? StudentCode { get; set; }
-    }
-
-    /// <summary>
-    /// Log severity levels.
-    /// </summary>
-    public enum LogLevel
-    {
-        Debug,
-        Info,
-        Warning,
-        Error
-    }
-
-    /// <summary>
     /// Logging service implementation that writes to both console and file.
     /// 
     /// All logs are now consolidated into a single "Logs" folder for easy management.

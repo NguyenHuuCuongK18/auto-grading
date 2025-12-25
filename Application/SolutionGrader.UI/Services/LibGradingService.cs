@@ -3,6 +3,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Domain.Models;
+using Domain.Models.Grading;
+using Domain.Models.Configuration;
 using SolutionGrader.Core.Abstractions;
 using SolutionGrader.Core.Services;
 

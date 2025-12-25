@@ -10,26 +10,18 @@ namespace FileMaster.FileEngine
     public class ConfigurationHandler
     {
         private string FilePath;
-        private string Content;
         private readonly JObject _config;
 
         public ConfigurationHandler(string path)
         {
-            try
+            FilePath = path;
+            if (!File.Exists(FilePath))
             {
-                FilePath = path;
-                if (!File.Exists(FilePath))
-                {
-                    throw new FileNotFoundException($"Configuration file {FilePath} not found.");
-                }
+                throw new FileNotFoundException($"Configuration file {FilePath} not found.");
+            }
 
-                string jsonContent = File.ReadAllText(FilePath);
-                _config = JObject.Parse(jsonContent);
-            }
-            catch (Exception ex)
-            {
-                throw ex;
-            }
+            string jsonContent = File.ReadAllText(FilePath);
+            _config = JObject.Parse(jsonContent);
         }
 
 

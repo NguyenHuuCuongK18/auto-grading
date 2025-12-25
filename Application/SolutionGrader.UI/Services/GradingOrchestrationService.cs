@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Domain.Models;
+using Domain.Models.Grading;
+using Domain.Models.Configuration;
 using SolutionGrader.UI.Models;
 using SolutionGrader.Core.Services;
 

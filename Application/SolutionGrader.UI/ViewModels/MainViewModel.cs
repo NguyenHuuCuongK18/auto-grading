@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using SolutionGrader.UI.Commands;
 using SolutionGrader.UI.Models;
 using SolutionGrader.UI.Services;
 
@@ -350,27 +351,5 @@ namespace SolutionGrader.UI.ViewModels
         }
     }
 
-    /// <summary>
-    /// Simple relay command implementation.
-    /// </summary>
-    public class RelayCommand : ICommand
-    {
-        private readonly Action _execute;
-        private readonly Func<bool>? _canExecute;
-
-        public RelayCommand(Action execute, Func<bool>? canExecute = null)
-        {
-            _execute = execute;
-            _canExecute = canExecute;
-        }
-
-        public event EventHandler? CanExecuteChanged
-        {
-            add => CommandManager.RequerySuggested += value;
-            remove => CommandManager.RequerySuggested -= value;
-        }
-
-        public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
-        public void Execute(object? parameter) => _execute();
-    }
+    // RelayCommand class has been extracted to SolutionGrader.UI.Commands.RelayCommand
 }
