@@ -1,8 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
+using LogMaster.Models;
 
 namespace LogMaster.Services
 {
@@ -173,68 +173,5 @@ namespace LogMaster.Services
                 ws.Cell(1, i + 1).Style.Font.Bold = true;
             }
         }
-    }
-
-    /// <summary>
-    /// Data structure for test case results to be written to Excel.
-    /// </summary>
-    public class TestCaseResultData
-    {
-        /// <summary>Actions performed in the test case</summary>
-        public List<ActionData> Actions { get; set; } = new();
-        
-        /// <summary>Client console output comparisons</summary>
-        public List<ComparisonResult> ClientComparisons { get; set; } = new();
-        
-        /// <summary>Server console output comparisons</summary>
-        public List<ComparisonResult> ServerComparisons { get; set; } = new();
-        
-        /// <summary>Network traffic comparisons</summary>
-        public List<ComparisonResult> NetworkComparisons { get; set; } = new();
-    }
-
-    /// <summary>
-    /// Data structure for an action in a test case.
-    /// </summary>
-    public class ActionData
-    {
-        /// <summary>Stage number</summary>
-        public int Stage { get; set; }
-        
-        /// <summary>Input value if any</summary>
-        public string? Input { get; set; }
-        
-        /// <summary>Type of action (StartClient, StartServer, Input, etc.)</summary>
-        public string? ActionType { get; set; }
-    }
-
-    /// <summary>
-    /// Represents the result of comparing an expected output with an actual output.
-    /// </summary>
-    public class ComparisonResult
-    {
-        /// <summary>Source of the output (Client, Server, Network)</summary>
-        public string Source { get; set; } = "";
-        
-        /// <summary>Stage number in the test case</summary>
-        public int Stage { get; set; }
-        
-        /// <summary>Expected output value</summary>
-        public string? Expected { get; set; }
-        
-        /// <summary>Actual output value</summary>
-        public string? Actual { get; set; }
-        
-        /// <summary>Whether the comparison passed</summary>
-        public bool Passed { get; set; }
-        
-        /// <summary>Points awarded for this comparison</summary>
-        public double PointsAwarded { get; set; }
-        
-        /// <summary>Maximum points possible for this comparison</summary>
-        public double PointsPossible { get; set; }
-        
-        /// <summary>Duration of the comparison in milliseconds</summary>
-        public long DurationMs { get; set; }
     }
 }
