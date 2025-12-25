@@ -57,9 +57,8 @@ namespace SolutionGrader.Core.Services
     /// - NetworkMonitor runs on HOST and sniffs localhost:8000 (requires sudo/admin)
     /// - Application output is captured via log files, not docker logs (avoids buffering)
     /// - TTY flag (-t) ensures immediate console output flushing
-    /// </summary>
-    /// <summary>
-    /// DockerGradingService is split into partial classes for maintainability:
+    /// 
+    /// This service is split into partial classes for maintainability:
     /// - DockerGradingService.cs (this file) - Core service, constructor, public API
     /// - DockerGradingService.ContainerSetup.cs - Container setup methods
     /// - DockerGradingService.TestExecution.cs - Test case execution methods
